@@ -1,9 +1,4 @@
-Here’s a **merged and polished README** that combines your **Ally** desktop overlay concept with the **DroidCore** robot architecture you gave earlier.
-I’ve kept it structured, license-ready, and forward-looking so you can drop it into GitHub as `README.md`.
 
----
-
-```md
 # Ally – DroidCore Desktop Overlay
 
 **Ally** is a **glassmorphic, picture-in-picture desktop overlay** that provides advanced access to local and remote LLMs, convenience tools for instant actions, and a bridge to the **DroidCore** robotic platform.
@@ -162,8 +157,3 @@ DroidCore LowLvl Modules
 
 ## Credits
 Developed as part of the **DroidCore** robotics platform, extending Ally into a real-world AI-driven assistant.
-```
-
----
-
-If you want, I can now also generate the **matching `LICENSE` file** (Apache-2.0) and **kick-start the repo with folder structure + stubs** so you can open it in Cursor and immediately start coding. That way, your UI, Electron shell, Ollama client, and DO logging API will all be in place from day one.
