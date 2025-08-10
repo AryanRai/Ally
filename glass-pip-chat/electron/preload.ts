@@ -8,6 +8,10 @@ const pipAPI = {
   minimize: () => ipcRenderer.send('pip:minimize'),
   close: () => ipcRenderer.send('pip:close'),
   
+  // Window resizing
+  resizeWindow: (width: number, height: number) => ipcRenderer.send('window:resize', { width, height }),
+  getWindowSize: () => ipcRenderer.invoke('window:get-size'),
+  
   // Listen for focus input event
   onFocusInput: (callback: () => void) => {
     ipcRenderer.on('focus-input', callback);
@@ -20,9 +24,3 @@ contextBridge.exposeInMainWorld('pip', pipAPI);
 
 // Add type declarations for TypeScript
 export type PipAPI = typeof pipAPI;
-
-declare global {
-  interface Window {
-    pip: PipAPI;
-  }
-}

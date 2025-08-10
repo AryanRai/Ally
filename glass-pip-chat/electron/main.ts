@@ -102,6 +102,27 @@ ipcMain.on('pip:close', () => {
   if (win) win.close();
 });
 
+// Window resizing handlers
+ipcMain.on('window:resize', (event, { width, height }) => {
+  if (!win) return;
+  
+  // Get current position to maintain it during resize
+  const [x, y] = win.getPosition();
+  
+  // Set new size
+  win.setSize(width, height);
+  
+  // Maintain position
+  win.setPosition(x, y);
+});
+
+ipcMain.handle('window:get-size', () => {
+  if (!win) return { width: 400, height: 560 };
+  
+  const [width, height] = win.getSize();
+  return { width, height };
+});
+
 // App event handlers
 app.whenReady().then(async () => {
   await createWindow();
