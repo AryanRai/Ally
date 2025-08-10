@@ -26,6 +26,7 @@ export interface OllamaServiceConfig {
   baseUrl: string;
   defaultModel: string;
   timeout: number;
+  streamTimeout: number;
 }
 
 export class OllamaService {
@@ -35,7 +36,8 @@ export class OllamaService {
     this.config = {
       baseUrl: config.baseUrl || 'http://localhost:11434',
       defaultModel: config.defaultModel || 'llama3.2',
-      timeout: config.timeout || 30000,
+      timeout: config.timeout || 60000, // Increased to 60 seconds
+      streamTimeout: config.streamTimeout || 120000, // 2 minutes for streaming
     };
   }
 
@@ -83,34 +85,9 @@ export class OllamaService {
       console.log(`Sending chat request to Ollama with model: ${modelName}`);
       console.log('Messages:', messages);
       
-      // Check if we want streaming
-      if (onProgress) {
-        return this.streamChat(messages, modelName, onProgress);
-      }
-
-      // Non-streaming response
-      const requestBody = {
-        model: modelName,
-        messages,
-        stream: false,
-      };
+      // Always use streaming for better UX
+      return this.streamChat(messages, modelName, onProgress);
       
-      console.log('Request body:', requestBody);
-      
-      const response = await axios.post(
-        `${this.config.baseUrl}/api/chat`,
-        requestBody,
-        {
-          timeout: this.config.timeout,
-          headers: {
-            'Content-Type': 'application/json',
-          },
-        }
-      );
-
-      console.log('Ollama response:', response.data);
-      const chatResponse: ChatResponse = response.data;
-      return chatResponse.message.content;
     } catch (error: any) {
       console.error('Chat request failed:', {
         message: error.message,
@@ -135,6 +112,9 @@ export class OllamaService {
         if (error.code === 'ENOTFOUND') {
           throw new Error('Ollama server not found. Check if Ollama is installed and running.');
         }
+        if (error.code === 'ECONNABORTED' || error.message.includes('timeout')) {
+          throw new Error(`Request timeout after ${this.config.streamTimeout / 1000}s. Try increasing timeout in settings or using a smaller model.`);
+        }
       }
       throw new Error(`Failed to get response from Ollama: ${error.message}`);
     }
@@ -144,9 +124,17 @@ export class OllamaService {
   private async streamChat(
     messages: ChatMessage[],
     model: string,
-    onProgress: (chunk: string) => void
+    onProgress?: (chunk: string) => void
   ): Promise<string> {
     try {
+      console.log('Starting streaming request...');
+      
+      // Create abort controller for timeout handling
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => {
+        controller.abort();
+      }, this.config.streamTimeout);
+
       const response = await fetch(`${this.config.baseUrl}/api/chat`, {
         method: 'POST',
         headers: {
@@ -157,10 +145,16 @@ export class OllamaService {
           messages,
           stream: true,
         }),
+        signal: controller.signal,
       });
 
+      clearTimeout(timeoutId);
+
       if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+        if (response.status === 404) {
+          throw new Error(`Model "${model}" not found. Please check if the model is installed using: ollama list`);
+        }
+        throw new Error(`HTTP error! status: ${response.status} - ${response.statusText}`);
       }
 
       const reader = response.body?.getReader();
@@ -169,34 +163,71 @@ export class OllamaService {
       }
 
       let fullResponse = '';
+      let thinkingMode = false;
 
-      while (true) {
-        const { done, value } = await reader.read();
-        
-        if (done) {
-          break;
-        }
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          
+          if (done) {
+            console.log('Stream completed');
+            break;
+          }
 
-        const chunk = new TextDecoder().decode(value);
-        const lines = chunk.split('\n').filter(line => line.trim());
+          const chunk = new TextDecoder().decode(value);
+          const lines = chunk.split('\n').filter(line => line.trim());
 
-        for (const line of lines) {
-          try {
-            const data: ChatResponse = JSON.parse(line);
-            if (data.message?.content) {
-              fullResponse += data.message.content;
-              onProgress(data.message.content);
+          for (const line of lines) {
+            try {
+              const data: ChatResponse = JSON.parse(line);
+              
+              if (data.message?.content) {
+                const content = data.message.content;
+                
+                // Check for thinking patterns
+                if (content.includes('<thinking>') || content.includes('thinking:') || content.includes('Let me think')) {
+                  thinkingMode = true;
+                  onProgress?.(`💭 *${content}*`);
+                } else if (thinkingMode && (content.includes('</thinking>') || content.includes('Now,') || content.includes('So,'))) {
+                  thinkingMode = false;
+                  onProgress?.(content);
+                } else {
+                  // Regular content - display immediately
+                  onProgress?.(content);
+                }
+                
+                fullResponse += content;
+              }
+              
+              // Handle done status
+              if (data.done) {
+                console.log('Stream marked as done');
+                break;
+              }
+            } catch (parseError) {
+              // Ignore parsing errors for incomplete chunks
+              console.warn('Failed to parse streaming chunk:', parseError, 'Line:', line);
             }
-          } catch (parseError) {
-            // Ignore parsing errors for incomplete chunks
-            console.warn('Failed to parse streaming chunk:', parseError);
           }
         }
+      } finally {
+        reader.releaseLock();
       }
 
+      console.log('Final response length:', fullResponse.length);
       return fullResponse;
-    } catch (error) {
+      
+    } catch (error: any) {
       console.error('Streaming chat failed:', error);
+      
+      if (error.name === 'AbortError') {
+        throw new Error(`Request timeout after ${this.config.streamTimeout / 1000}s. Try using a smaller model or increase timeout in settings.`);
+      }
+      
+      if (error.message.includes('fetch')) {
+        throw new Error('Cannot connect to Ollama. Make sure Ollama is running on http://localhost:11434');
+      }
+      
       throw error;
     }
   }

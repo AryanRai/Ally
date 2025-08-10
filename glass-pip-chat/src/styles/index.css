@@ -124,6 +124,45 @@
   opacity: 1;
 }
 
+/* Custom slider styles */
+.slider::-webkit-slider-thumb {
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #3b82f6, #1d4ed8);
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(59, 130, 246, 0.4);
+  transition: all 0.2s ease;
+}
+
+.slider::-webkit-slider-thumb:hover {
+  transform: scale(1.1);
+  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.6);
+}
+
+.slider::-webkit-slider-thumb:active {
+  transform: scale(0.95);
+}
+
+.slider::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #3b82f6, #1d4ed8);
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(59, 130, 246, 0.4);
+  transition: all 0.2s ease;
+}
+
+.slider::-moz-range-track {
+  height: 8px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+}
+
 /* Custom scrollbar styles */
 @layer utilities {
   .scrollbar-thin {
@@ -200,4 +239,90 @@
   .hairline {
     border-width: 0.5px;
   }
+}
+
+/* YouTube-like scrollbars for settings */
+.scrollbar-youtube {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.4) rgba(255, 255, 255, 0.1);
+}
+
+.scrollbar-youtube::-webkit-scrollbar {
+  width: 14px;
+  height: 14px;
+}
+
+.scrollbar-youtube::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  margin: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.scrollbar-youtube::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.4);
+  border-radius: 8px;
+  border: 2px solid rgba(255, 255, 255, 0.08);
+  background-clip: content-box;
+  transition: all 0.2s ease;
+  min-height: 20px;
+}
+
+.scrollbar-youtube::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.6);
+  border-color: rgba(255, 255, 255, 0.1);
+  transform: scaleX(1.05);
+}
+
+.scrollbar-youtube::-webkit-scrollbar-thumb:active {
+  background: rgba(255, 255, 255, 0.8);
+  border-color: rgba(255, 255, 255, 0.15);
+}
+
+.scrollbar-youtube::-webkit-scrollbar-corner {
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 8px;
+}
+
+/* Light theme YouTube scrollbars */
+.scrollbar-youtube-light {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0, 0, 0, 0.4) rgba(0, 0, 0, 0.1);
+}
+
+.scrollbar-youtube-light::-webkit-scrollbar {
+  width: 14px;
+  height: 14px;
+}
+
+.scrollbar-youtube-light::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.08);
+  border-radius: 8px;
+  margin: 4px;
+  border: 1px solid rgba(0, 0, 0, 0.05);
+}
+
+.scrollbar-youtube-light::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.4);
+  border-radius: 8px;
+  border: 2px solid rgba(0, 0, 0, 0.08);
+  background-clip: content-box;
+  transition: all 0.2s ease;
+  min-height: 20px;
+}
+
+.scrollbar-youtube-light::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.6);
+  border-color: rgba(0, 0, 0, 0.1);
+  transform: scaleX(1.05);
+}
+
+.scrollbar-youtube-light::-webkit-scrollbar-thumb:active {
+  background: rgba(0, 0, 0, 0.8);
+  border-color: rgba(0, 0, 0, 0.15);
+}
+
+.scrollbar-youtube-light::-webkit-scrollbar-corner {
+  background: rgba(0, 0, 0, 0.05);
+  border-radius: 8px;
 }

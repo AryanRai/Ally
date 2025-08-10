@@ -13,7 +13,9 @@ import {
   Eye,
   EyeOff,
   Server,
-  Monitor
+  Monitor,
+  ChevronDown,
+  ChevronUp
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import SettingsModal from './SettingsModal';
@@ -61,7 +63,7 @@ export default function GlassChatPiP() {
     {
       id: '1',
       role: 'assistant',
-      content: "Hello! I'm your glass PiP chat assistant. How can I help you today?\n\n💡 **Available commands:**\n• `/run <command>` - Execute local commands\n• `/run@target <command>` - Execute remote commands\n• `/cmd <command>` - Alternative command syntax\n• `/exec <command>` - Another command syntax\n\n🎯 **Local examples:**\n• `/run cursor .` - Open current directory in Cursor\n• `/run git status` - Check git status\n• `/run npm install` - Install npm packages\n\n🌐 **Remote examples:**\n• `/run@droplet ls -la` - Run on your Digital Ocean droplet\n• `/run@wsl pwd` - Run in Windows Subsystem for Linux\n• `/run@docker ps` - Run in Docker container\n• `/run@myserver uptime` - Run on custom server",
+      content: "Hello! I'm your glass PiP chat assistant. How can I help you today?\n\n💡 **Available commands:**\n• `/run <command>` - Execute local commands\n• `/run@target <command>` - Execute remote commands\n• `/cmd <command>` - Alternative command syntax\n• `/exec <command>` - Another command syntax\n\n🎯 **Local examples:**\n• `/run git status` - Check git status\n• `/run npm install` - Install npm packages\n• `/run code .` - Open current directory in VS Code\n\n🌐 **Remote examples:**\n• `/run@docker ps` - Run in Docker container\n• `/run@myserver uptime` - Run on custom server\n• `/run@ssh-host ls -la` - Run on SSH server",
       timestamp: Date.now()
     }
   ]);
@@ -69,6 +71,7 @@ export default function GlassChatPiP() {
   const [input, setInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const [isResizing, setIsResizing] = useState(false);
+  const [streamingResponse, setStreamingResponse] = useState('');
   
   // Context monitoring state
   const [contextData, setContextData] = useState<ContextData>({
@@ -500,8 +503,6 @@ export default function GlassChatPiP() {
     setIsTyping(true);
     
     try {
-      let response = '';
-      
       if (ollamaAvailable && window.pip?.ollama && currentModel) {
         console.log('Sending message to Ollama with model:', currentModel);
         
@@ -518,8 +519,50 @@ export default function GlassChatPiP() {
         });
         
         console.log('Chat history:', chatHistory);
-        response = await window.pip.ollama.chat(chatHistory, currentModel);
-        console.log('Ollama response:', response);
+        
+        // Create a temporary message for streaming
+        const tempMessageId = (Date.now() + 1).toString();
+        const streamingMessage: Message = {
+          id: tempMessageId,
+          role: 'assistant',
+          content: '',
+          timestamp: Date.now()
+        };
+        
+        setMessages(prev => [...prev, streamingMessage]);
+        setStreamingResponse('');
+        
+        // Handle streaming response
+        let fullResponse = '';
+        
+        const response = await window.pip.ollama.chat(chatHistory, currentModel);
+        
+        // Since we can't easily access the streaming callback from the IPC,
+        // we'll simulate streaming by updating the message progressively
+        const words = response.split(' ');
+        for (let i = 0; i < words.length; i++) {
+          const partialResponse = words.slice(0, i + 1).join(' ');
+          
+          setMessages(prev => prev.map(msg => 
+            msg.id === tempMessageId 
+              ? { ...msg, content: partialResponse }
+              : msg
+          ));
+          
+          // Add delay to simulate real-time typing
+          await new Promise(resolve => setTimeout(resolve, 50));
+        }
+        
+        fullResponse = response;
+        console.log('Ollama response:', fullResponse);
+        
+        // Final update with complete response
+        setMessages(prev => prev.map(msg => 
+          msg.id === tempMessageId 
+            ? { ...msg, content: fullResponse }
+            : msg
+        ));
+        
       } else {
         // Fallback response when Ollama is not available
         const reason = !ollamaAvailable 
@@ -528,17 +571,18 @@ export default function GlassChatPiP() {
             ? "No model selected" 
             : "Ollama API not available";
             
-        response = `⚠️ **Ollama Unavailable**\n\nReason: ${reason}\n\nPlease:\n1. Make sure Ollama is installed and running\n2. Check that you have models installed (\`ollama list\`)\n3. Try refreshing the connection in Settings`;
+        const response = `⚠️ **Ollama Unavailable**\n\nReason: ${reason}\n\nPlease:\n1. Make sure Ollama is installed and running\n2. Check that you have models installed (\`ollama list\`)\n3. Try refreshing the connection in Settings`;
+        
+        const assistantMessage: Message = {
+          id: (Date.now() + 1).toString(),
+          role: 'assistant',
+          content: response,
+          timestamp: Date.now()
+        };
+        
+        setMessages(prev => [...prev, assistantMessage]);
       }
       
-      const assistantMessage: Message = {
-        id: (Date.now() + 1).toString(),
-        role: 'assistant',
-        content: response,
-        timestamp: Date.now()
-      };
-      
-      setMessages(prev => [...prev, assistantMessage]);
     } catch (error) {
       console.error('Error getting Ollama response:', error);
       
@@ -552,7 +596,37 @@ export default function GlassChatPiP() {
       setMessages(prev => [...prev, errorMessage]);
     } finally {
       setIsTyping(false);
+      setStreamingResponse('');
     }
+  };
+
+  // Render message content with context icons
+  const renderMessageContent = (content: string) => {
+    // Check if the message contains context information
+    const contextRegex = /\[Context: ([^\]]+)\]/;
+    const contextMatch = content.match(contextRegex);
+    
+    if (contextMatch) {
+      // Split the content into parts
+      const beforeContext = content.substring(0, contextMatch.index);
+      const afterContext = content.substring(contextMatch.index! + contextMatch[0].length);
+      const contextText = contextMatch[1];
+      
+      return (
+        <>
+          {beforeContext}
+          {contextText && (
+            <div className="flex items-center gap-1 mt-2 mb-1 opacity-80">
+              <Clipboard className="w-3 h-3" />
+              <span className="text-xs italic">Context attached</span>
+            </div>
+          )}
+          {afterContext}
+        </>
+      );
+    }
+    
+    return content;
   };
 
   const dims = sizePx[state.size];
@@ -735,7 +809,11 @@ export default function GlassChatPiP() {
                         )}
                         title={`Current model: ${currentModel}`}
                       >
-                        <Settings className="w-3.5 h-3.5" />
+                        {showModelSelector ? (
+                          <ChevronUp className="w-3.5 h-3.5" />
+                        ) : (
+                          <ChevronDown className="w-3.5 h-3.5" />
+                        )}
                       </button>
                       
                       {/* Model dropdown */}
@@ -987,7 +1065,7 @@ export default function GlassChatPiP() {
                             : "bg-black/10 backdrop-blur-md"
                     )}
                   >
-                    {message.content}
+                    {renderMessageContent(message.content)}
                   </motion.div>
                 ))}
                 {isTyping && (
@@ -1081,49 +1159,7 @@ export default function GlassChatPiP() {
                     Run
                   </button>
                   
-                  <button
-                    onClick={() => setInput('/run cursor .')}
-                    className={cn(
-                      "px-2 py-1 text-xs rounded-lg",
-                      "bg-orange-500/20 hover:bg-orange-500/30",
-                      "border border-orange-500/30",
-                      "transition-colors"
-                    )}
-                    title="Open current directory in Cursor"
-                  >
-                    <Settings className="w-3 h-3 inline mr-1" />
-                    Cursor
-                  </button>
-                  
-                  {serverStatus?.ip && (
-                    <button
-                      onClick={() => setInput(`/run@droplet `)}
-                      className={cn(
-                        "px-2 py-1 text-xs rounded-lg",
-                        "bg-blue-500/20 hover:bg-blue-500/30",
-                        "border border-blue-500/30",
-                        "transition-colors"
-                      )}
-                      title={`Run command on droplet (${serverStatus.ip})`}
-                    >
-                      <Server className="w-3 h-3 inline mr-1" />
-                      Droplet
-                    </button>
-                  )}
-                  
-                  <button
-                    onClick={() => setInput('/run@wsl ')}
-                    className={cn(
-                      "px-2 py-1 text-xs rounded-lg",
-                      "bg-purple-500/20 hover:bg-purple-500/30",
-                      "border border-purple-500/30",
-                      "transition-colors"
-                    )}
-                    title="Run command in Windows Subsystem for Linux"
-                  >
-                    <Monitor className="w-3 h-3 inline mr-1" />
-                    WSL
-                  </button>
+
                 </div>
                 
                 <form 
