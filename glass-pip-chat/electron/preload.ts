@@ -48,6 +48,27 @@ const pipAPI = {
     const handler = (_: any, theme: 'light' | 'dark') => callback(theme);
     ipcRenderer.on('theme:changed', handler);
     return () => ipcRenderer.removeListener('theme:changed', handler);
+  },
+
+  // Ollama API
+  ollama: {
+    isAvailable: () => ipcRenderer.invoke('ollama:isAvailable'),
+    getModels: () => ipcRenderer.invoke('ollama:getModels'),
+    chat: (messages: any[], model?: string) => ipcRenderer.invoke('ollama:chat', messages, model),
+    getConfig: () => ipcRenderer.invoke('ollama:getConfig'),
+    updateConfig: (config: any) => ipcRenderer.send('ollama:updateConfig', config)
+  },
+
+  // Server status
+  server: {
+    getStatus: () => ipcRenderer.invoke('server:getStatus'),
+    checkStatus: () => ipcRenderer.invoke('server:checkStatus'),
+    updateConfig: (config: any) => ipcRenderer.send('server:updateConfig', config)
+  },
+
+  // System commands
+  system: {
+    executeCommand: (command: string) => ipcRenderer.invoke('system:executeCommand', command)
   }
 };
 
