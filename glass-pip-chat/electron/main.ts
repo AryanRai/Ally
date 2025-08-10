@@ -6,10 +6,12 @@ import { OllamaService, ChatMessage } from '../src/services/ollamaService.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-// Declare isQuitting property on app
-declare module 'electron' {
-  interface App {
-    isQuitting?: boolean;
+// Extend the global app object to include isQuitting property
+declare global {
+  namespace Electron {
+    interface App {
+      isQuitting?: boolean;
+    }
   }
 }
 

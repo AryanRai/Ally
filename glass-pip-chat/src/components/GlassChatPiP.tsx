@@ -563,7 +563,7 @@ export default function GlassChatPiP() {
     
     // Auto-maximize if sending from minimized mode
     if (fromQuickInput && state.collapsed) {
-      handleToggleCollapse();
+      handleCollapseToggle();
       // Scroll to bottom after maximize animation
       setTimeout(() => {
         scrollToBottom();
@@ -695,10 +695,10 @@ export default function GlassChatPiP() {
       
       return (
         <>
-          <ReactMarkdown 
-            remarkPlugins={[remarkGfm]}
-            className="prose prose-sm max-w-none prose-invert"
-            components={{
+          <div className="prose prose-sm max-w-none prose-invert">
+            <ReactMarkdown 
+              remarkPlugins={[remarkGfm]}
+              components={{
               p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
               code: ({ inline, className, children, ...props }) => {
                 const match = /language-(\w+)/.exec(className || '');
@@ -734,6 +734,7 @@ export default function GlassChatPiP() {
           >
             {beforeContext.trim()}
           </ReactMarkdown>
+          </div>
           {contextText && (
             <div className="mt-2 mb-1">
               {/* Collapsible context header */}
@@ -779,10 +780,10 @@ export default function GlassChatPiP() {
             </div>
           )}
           {afterContext && (
-            <ReactMarkdown 
-              remarkPlugins={[remarkGfm]}
-              className="prose prose-sm max-w-none prose-invert mt-2"
-              components={{
+            <div className="prose prose-sm max-w-none prose-invert mt-2">
+              <ReactMarkdown 
+                remarkPlugins={[remarkGfm]}
+                components={{
                 p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
                 code: ({ inline, className, children, ...props }) => {
                   const match = /language-(\w+)/.exec(className || '');
@@ -818,16 +819,17 @@ export default function GlassChatPiP() {
             >
               {afterContext.trim()}
             </ReactMarkdown>
+            </div>
           )}
         </>
       );
     }
     
     return (
-      <ReactMarkdown 
-        remarkPlugins={[remarkGfm]}
-        className="prose prose-sm max-w-none prose-invert"
-        components={{
+      <div className="prose prose-sm max-w-none prose-invert">
+        <ReactMarkdown 
+          remarkPlugins={[remarkGfm]}
+          components={{
           p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
           code: ({ inline, className, children, ...props }) => {
             const match = /language-(\w+)/.exec(className || '');
@@ -860,9 +862,10 @@ export default function GlassChatPiP() {
             </a>
           ),
         }}
-      >
-        {content}
-      </ReactMarkdown>
+              >
+          {content}
+        </ReactMarkdown>
+      </div>
     );
   };
 
@@ -987,7 +990,14 @@ export default function GlassChatPiP() {
                 <AnimatedOrb />
                 
                 {/* Response preview or thinking indicator */}
-                <div className="flex-1 min-w-0">
+                <div 
+                  className="flex-1 min-w-0 cursor-pointer hover:bg-white/5 rounded-lg p-1 transition-colors"
+                  onClick={handleCollapseToggle}
+                  title="Click to expand chat"
+                  style={{ 
+                    WebkitAppRegion: 'no-drag'
+                  } as React.CSSProperties}
+                >
                   {isTyping ? (
                     <div className="flex items-center gap-1">
                       <span className="text-xs opacity-70">Thinking</span>
@@ -1000,10 +1010,13 @@ export default function GlassChatPiP() {
                       </motion.span>
                     </div>
                   ) : (
-                    <div className="text-xs opacity-70 truncate">
-                      {lastAssistantMessage ? 
-                        lastAssistantMessage.slice(0, 50) + (lastAssistantMessage.length > 50 ? '...' : '') 
-                        : 'Ready to chat'}
+                    <div className="flex items-center gap-2">
+                      <div className="text-xs opacity-70 truncate flex-1">
+                        {lastAssistantMessage ? 
+                          lastAssistantMessage.slice(0, 50) + (lastAssistantMessage.length > 50 ? '...' : '') 
+                          : 'Ready to chat'}
+                      </div>
+                      <Maximize2 className="w-3 h-3 opacity-40" />
                     </div>
                   )}
                 </div>
@@ -1117,13 +1130,15 @@ export default function GlassChatPiP() {
                   <button
                     onClick={handleCollapseToggle}
                     className={cn(
-                      "p-1.5 rounded-lg hover:bg-white/10 transition-all duration-200",
+                      "p-2 rounded-lg transition-all duration-200 border border-white/20",
+                      "hover:bg-blue-500/20 hover:border-blue-500/40 hover:scale-105",
+                      "bg-white/5 backdrop-blur-sm",
                       isResizing && "opacity-50"
                     )}
-                    title="Expand"
+                    title="Expand Chat"
                     disabled={isResizing}
                   >
-                    <Maximize2 className="w-3.5 h-3.5" />
+                    <Maximize2 className="w-4 h-4" />
                   </button>
                   <button
                     onClick={() => window.pip?.hide()}
@@ -1331,6 +1346,8 @@ export default function GlassChatPiP() {
               <X className="w-3.5 h-3.5" />
             </button>
           </div>
+            </>
+          )}
         </div>
 
         {/* Content */}
