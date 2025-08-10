@@ -12,13 +12,13 @@ console.log('Building Electron files...');
 mkdirSync(join(rootDir, 'dist', 'electron'), { recursive: true });
 
 // Compile main process (ESNext modules)
-execSync('tsc electron/main.ts --outDir dist --module esnext --target es2022 --moduleResolution node --esModuleInterop true', {
+execSync('npx tsc electron/main.ts --outDir dist --module esnext --target es2022 --moduleResolution node --esModuleInterop true', {
   cwd: rootDir,
   stdio: 'inherit'
 });
 
 // Compile preload script (CommonJS for Electron compatibility)  
-execSync('tsc electron/preload.ts --outDir dist --module commonjs --target es2022 --moduleResolution node --esModuleInterop true', {
+execSync('npx tsc electron/preload.ts --outDir dist --module commonjs --target es2022 --moduleResolution node --esModuleInterop true', {
   cwd: rootDir,
   stdio: 'inherit'
 });
