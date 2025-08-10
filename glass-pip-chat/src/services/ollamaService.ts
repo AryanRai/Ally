@@ -22,6 +22,12 @@ export interface ChatResponse {
   eval_duration?: number;
 }
 
+export interface StreamingChunk {
+  type: 'thinking' | 'content' | 'done';
+  content: string;
+  timestamp: number;
+}
+
 export interface OllamaServiceConfig {
   baseUrl: string;
   defaultModel: string;
@@ -73,11 +79,11 @@ export class OllamaService {
     }
   }
 
-  // Send a chat message and get response
+  // Send a chat message and get response with real-time streaming
   async chat(
     messages: ChatMessage[],
     model?: string,
-    onProgress?: (chunk: string) => void
+    onProgress?: (chunk: StreamingChunk) => void
   ): Promise<string> {
     const modelName = model || this.config.defaultModel;
     
@@ -99,164 +105,217 @@ export class OllamaService {
         model: modelName
       });
       
-      if (axios.isAxiosError(error)) {
-        if (error.response?.status === 404) {
-          throw new Error(`Model "${modelName}" not found. Please check if the model is installed using: ollama list`);
-        }
-        if (error.code === 'ECONNREFUSED') {
-          throw new Error('Cannot connect to Ollama. Make sure Ollama is running on http://localhost:11434');
-        }
-        if (error.response?.status === 400) {
-          throw new Error(`Bad request to Ollama: ${error.response.data?.error || 'Invalid request format'}`);
-        }
-        if (error.code === 'ENOTFOUND') {
-          throw new Error('Ollama server not found. Check if Ollama is installed and running.');
-        }
-        if (error.code === 'ECONNABORTED' || error.message.includes('timeout')) {
-          throw new Error(`Request timeout after ${this.config.streamTimeout / 1000}s. Try increasing timeout in settings or using a smaller model.`);
-        }
-      }
-      throw new Error(`Failed to get response from Ollama: ${error.message}`);
+      throw new Error(`Chat request failed: ${error.message}`);
     }
   }
 
-  // Stream chat response for real-time typing effect
+  // Enhanced streaming chat with thinking indicators
   private async streamChat(
     messages: ChatMessage[],
     model: string,
-    onProgress?: (chunk: string) => void
+    onProgress?: (chunk: StreamingChunk) => void
   ): Promise<string> {
-    try {
-      console.log('Starting streaming request...');
-      
-      // Create abort controller for timeout handling
+    return new Promise((resolve, reject) => {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => {
         controller.abort();
+        reject(new Error('Stream timeout'));
       }, this.config.streamTimeout);
 
-      const response = await fetch(`${this.config.baseUrl}/api/chat`, {
+      // Send thinking indicator
+      onProgress?.({
+        type: 'thinking',
+        content: '🤔 Thinking...',
+        timestamp: Date.now()
+      });
+
+      const requestData = {
+        model: model,
+        messages: messages,
+        stream: true,
+        options: {
+          temperature: 0.7,
+          top_p: 0.9,
+          num_predict: 2048,
+        }
+      };
+
+      fetch(`${this.config.baseUrl}/api/chat`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(requestData),
+        signal: controller.signal,
+      })
+        .then(response => {
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+          }
+          return response.body;
+        })
+        .then(body => {
+          if (!body) {
+            throw new Error('No response body');
+          }
+
+          const reader = body.getReader();
+          const decoder = new TextDecoder();
+          let fullResponse = '';
+          let isFirstChunk = true;
+
+          const readChunk = async () => {
+            try {
+              const { done, value } = await reader.read();
+              
+              if (done) {
+                clearTimeout(timeoutId);
+                onProgress?.({
+                  type: 'done',
+                  content: fullResponse,
+                  timestamp: Date.now()
+                });
+                resolve(fullResponse);
+                return;
+              }
+
+              const chunk = decoder.decode(value, { stream: true });
+              const lines = chunk.split('\n').filter(line => line.trim());
+
+              for (const line of lines) {
+                if (line.startsWith('data: ')) {
+                  const data = line.slice(6);
+                  
+                  if (data === '[DONE]') {
+                    clearTimeout(timeoutId);
+                    onProgress?.({
+                      type: 'done',
+                      content: fullResponse,
+                      timestamp: Date.now()
+                    });
+                    resolve(fullResponse);
+                    return;
+                  }
+
+                  try {
+                    const parsed = JSON.parse(data);
+                    
+                    if (parsed.message?.content) {
+                      const content = parsed.message.content;
+                      fullResponse += content;
+                      
+                      // Clear thinking indicator on first content chunk
+                      if (isFirstChunk) {
+                        isFirstChunk = false;
+                        onProgress?.({
+                          type: 'content',
+                          content: content,
+                          timestamp: Date.now()
+                        });
+                      } else {
+                        onProgress?.({
+                          type: 'content',
+                          content: content,
+                          timestamp: Date.now()
+                        });
+                      }
+                    }
+                  } catch (parseError) {
+                    console.warn('Failed to parse chunk:', data, parseError);
+                  }
+                }
+              }
+
+              // Continue reading
+              readChunk();
+            } catch (error) {
+              clearTimeout(timeoutId);
+              reject(error);
+            }
+          };
+
+          readChunk();
+        })
+        .catch(error => {
+          clearTimeout(timeoutId);
+          reject(error);
+        });
+    });
+  }
+
+  // Generate text with streaming support
+  async generate(
+    prompt: string,
+    model?: string,
+    onProgress?: (chunk: StreamingChunk) => void
+  ): Promise<string> {
+    const modelName = model || this.config.defaultModel;
+    
+    try {
+      const response = await fetch(`${this.config.baseUrl}/api/generate`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          model,
-          messages,
+          model: modelName,
+          prompt: prompt,
           stream: true,
+          options: {
+            temperature: 0.7,
+            top_p: 0.9,
+            num_predict: 2048,
+          }
         }),
-        signal: controller.signal,
       });
 
-      clearTimeout(timeoutId);
-
       if (!response.ok) {
-        if (response.status === 404) {
-          throw new Error(`Model "${model}" not found. Please check if the model is installed using: ollama list`);
-        }
-        throw new Error(`HTTP error! status: ${response.status} - ${response.statusText}`);
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
 
       const reader = response.body?.getReader();
-      if (!reader) {
-        throw new Error('Failed to get response reader');
-      }
-
+      const decoder = new TextDecoder();
       let fullResponse = '';
-      let thinkingMode = false;
 
-      try {
+      if (reader) {
         while (true) {
           const { done, value } = await reader.read();
           
-          if (done) {
-            console.log('Stream completed');
-            break;
-          }
+          if (done) break;
 
-          const chunk = new TextDecoder().decode(value);
+          const chunk = decoder.decode(value, { stream: true });
           const lines = chunk.split('\n').filter(line => line.trim());
 
           for (const line of lines) {
-            try {
-              const data: ChatResponse = JSON.parse(line);
+            if (line.startsWith('data: ')) {
+              const data = line.slice(6);
               
-              if (data.message?.content) {
-                const content = data.message.content;
-                
-                // Check for thinking patterns
-                if (content.includes('<thinking>') || content.includes('thinking:') || content.includes('Let me think')) {
-                  thinkingMode = true;
-                  onProgress?.(`💭 *${content}*`);
-                } else if (thinkingMode && (content.includes('</thinking>') || content.includes('Now,') || content.includes('So,'))) {
-                  thinkingMode = false;
-                  onProgress?.(content);
-                } else {
-                  // Regular content - display immediately
-                  onProgress?.(content);
+              if (data === '[DONE]') {
+                return fullResponse;
+              }
+
+              try {
+                const parsed = JSON.parse(data);
+                if (parsed.response) {
+                  fullResponse += parsed.response;
+                  onProgress?.({
+                    type: 'content',
+                    content: parsed.response,
+                    timestamp: Date.now()
+                  });
                 }
-                
-                fullResponse += content;
+              } catch (parseError) {
+                console.warn('Failed to parse chunk:', data, parseError);
               }
-              
-              // Handle done status
-              if (data.done) {
-                console.log('Stream marked as done');
-                break;
-              }
-            } catch (parseError) {
-              // Ignore parsing errors for incomplete chunks
-              console.warn('Failed to parse streaming chunk:', parseError, 'Line:', line);
             }
           }
         }
-      } finally {
-        reader.releaseLock();
       }
 
-      console.log('Final response length:', fullResponse.length);
       return fullResponse;
-      
     } catch (error: any) {
-      console.error('Streaming chat failed:', error);
-      
-      if (error.name === 'AbortError') {
-        throw new Error(`Request timeout after ${this.config.streamTimeout / 1000}s. Try using a smaller model or increase timeout in settings.`);
-      }
-      
-      if (error.message.includes('fetch')) {
-        throw new Error('Cannot connect to Ollama. Make sure Ollama is running on http://localhost:11434');
-      }
-      
-      throw error;
-    }
-  }
-
-  // Generate a simple completion (non-chat)
-  async generate(
-    prompt: string,
-    model?: string,
-    onProgress?: (chunk: string) => void
-  ): Promise<string> {
-    const modelName = model || this.config.defaultModel;
-    
-    try {
-      const response = await axios.post(
-        `${this.config.baseUrl}/api/generate`,
-        {
-          model: modelName,
-          prompt,
-          stream: false,
-        },
-        {
-          timeout: this.config.timeout,
-        }
-      );
-
-      return response.data.response;
-    } catch (error) {
       console.error('Generate request failed:', error);
-      throw new Error('Failed to generate response from Ollama');
+      throw new Error(`Generate request failed: ${error.message}`);
     }
   }
 

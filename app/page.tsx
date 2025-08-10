@@ -12,13 +12,21 @@ export default function Home() {
       {/* Demo content */}
       <div className="container mx-auto px-4 py-16 relative z-10">
         <div className="max-w-4xl mx-auto">
-          <div className="text-center mb-16">
-            <h1 className="text-5xl font-bold bg-gradient-to-r from-retro-green via-retro-cyan to-retro-blue bg-clip-text text-transparent mb-6 font-mono">
-              ALLY // AI ASSISTANT
-            </h1>
-            <p className="text-xl text-purple-200/80 mb-8 font-medium">
-              A technical, minimal AI interface designed for developers and power users.
-            </p>
+                      <div className="text-center mb-16">
+              <h1 className="text-5xl font-bold bg-gradient-to-r from-retro-green via-retro-cyan to-retro-blue bg-clip-text text-transparent mb-6 font-mono">
+                ALLY // AI ASSISTANT
+              </h1>
+              <p className="text-xl text-purple-200/80 mb-8 font-medium">
+                A technical, minimal AI interface designed for developers and power users.
+              </p>
+              <div className="flex justify-center gap-4 mb-8">
+                <a
+                  href="/ally"
+                  className="px-6 py-3 bg-gradient-to-r from-retro-green/20 to-retro-cyan/20 border border-retro-green/30 rounded-lg hover:from-retro-green/30 hover:to-retro-cyan/30 transition-all duration-300 text-retro-green font-mono"
+                >
+                  Remote Monitor
+                </a>
+              </div>
             <div className="flex flex-wrap gap-6 justify-center text-sm text-purple-300/70">
               <span className="flex items-center gap-2">
                 <div className="w-2 h-2 bg-retro-green rounded-full animate-pulse" />

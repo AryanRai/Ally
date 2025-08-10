@@ -379,9 +379,12 @@ ipcMain.handle('ollama:getModels', async () => {
   }
 });
 
-ipcMain.handle('ollama:chat', async (_, messages: ChatMessage[], model?: string) => {
+ipcMain.handle('ollama:chat', async (event, messages: ChatMessage[], model?: string) => {
   try {
-    return await ollamaService.chat(messages, model);
+    return await ollamaService.chat(messages, model, (chunk) => {
+      // Send streaming chunk to renderer
+      event.sender.send('ollama:streaming-chunk', chunk);
+    });
   } catch (error) {
     console.error('Error in Ollama chat:', error);
     throw error;

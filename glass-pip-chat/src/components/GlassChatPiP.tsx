@@ -20,10 +20,13 @@ import {
   ChevronUp,
   Square,
   Copy,
-  Check
+  Check,
+  Edit,
+  Play
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import SettingsModal from './SettingsModal';
+import { RemoteMonitoringService } from '../services/remoteMonitoringService';
 
 type Size = 'S' | 'M' | 'L';
 const sizePx: Record<Size, { w: number; h: number }> = {
@@ -48,6 +51,15 @@ interface Message {
   timestamp: number;
 }
 
+interface Chat {
+  id: string;
+  name: string;
+  messages: Message[];
+  createdAt: number;
+  updatedAt: number;
+  isActive: boolean;
+}
+
 interface ContextData {
   clipboard: string;
   selectedText: string;
@@ -64,19 +76,36 @@ export default function GlassChatPiP() {
   
   const [platform, setPlatform] = useState<string>('');
   
-  const [messages, setMessages] = useState<Message[]>([
+  const [chats, setChats] = useState<Chat[]>([
     {
       id: '1',
-      role: 'assistant',
-      content: "Hello! I'm your glass PiP chat assistant. How can I help you today?\n\n💡 **Available commands:**\n• `/run <command>` - Execute local commands\n• `/run@target <command>` - Execute remote commands\n• `/cmd <command>` - Alternative command syntax\n• `/exec <command>` - Another command syntax\n\n🎯 **Local examples:**\n• `/run git status` - Check git status\n• `/run npm install` - Install npm packages\n• `/run code .` - Open current directory in VS Code\n\n🌐 **Remote examples:**\n• `/run@docker ps` - Run in Docker container\n• `/run@myserver uptime` - Run on custom server\n• `/run@ssh-host ls -la` - Run on SSH server",
-      timestamp: Date.now()
+      name: 'Main Chat',
+      messages: [
+        {
+          id: '1',
+          role: 'assistant',
+          content: "Hello! I'm your glass PiP chat assistant. How can I help you today?\n\n💡 **Available commands:**\n• `/run <command>` - Execute local commands\n• `/run@target <command>` - Execute remote commands\n• `/cmd <command>` - Alternative command syntax\n• `/exec <command>` - Another command syntax\n\n🎯 **Local examples:**\n• `/run git status` - Check git status\n• `/run npm install` - Install npm packages\n• `/run code .` - Open current directory in VS Code\n\n🌐 **Remote examples:**\n• `/run@docker ps` - Run in Docker container\n• `/run@myserver uptime` - Run on custom server\n• `/run@ssh-host ls -la` - Run on SSH server",
+          timestamp: Date.now()
+        }
+      ],
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      isActive: true
     }
   ]);
+  
+  const [activeChatId, setActiveChatId] = useState<string>('1');
+  
+  // Get current active chat
+  const activeChat = chats.find(chat => chat.id === activeChatId) || chats[0];
+  const messages = activeChat?.messages || [];
   
   const [input, setInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const [isResizing, setIsResizing] = useState(false);
   const [streamingResponse, setStreamingResponse] = useState('');
+  const [isThinking, setIsThinking] = useState(false);
+  const [thinkingText, setThinkingText] = useState('');
   
   // Add new state for collapsed chat improvements
   const [lastAssistantMessage, setLastAssistantMessage] = useState<string>('');
@@ -105,6 +134,13 @@ export default function GlassChatPiP() {
   const [currentModel, setCurrentModel] = useState<string>('');
   const [availableModels, setAvailableModels] = useState<any[]>([]);
   const [showModelSelector, setShowModelSelector] = useState(false);
+  const [showChatSelector, setShowChatSelector] = useState(false);
+  const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
+  const [editingContent, setEditingContent] = useState('');
+  
+  // Remote monitoring
+  const [remoteMonitoring] = useState(() => new RemoteMonitoringService());
+  const [isRemoteRegistered, setIsRemoteRegistered] = useState(false);
   
   // Server status state
   const [serverStatus, setServerStatus] = useState<any>(null);
@@ -166,13 +202,21 @@ export default function GlassChatPiP() {
     };
   }, [state.size, state.collapsed]);
 
-  // Track last assistant message for preview
+  // Track last assistant message for preview and update remote monitoring
   useEffect(() => {
     const lastAssistant = messages.filter(m => m.role === 'assistant').slice(-1)[0];
     if (lastAssistant) {
       setLastAssistantMessage(lastAssistant.content);
     }
-  }, [messages]);
+
+    // Update remote monitoring with current messages
+    if (isRemoteRegistered) {
+      remoteMonitoring.updateStatus({
+        messages: messages.slice(-10), // Send last 10 messages
+        currentModel: currentModel
+      });
+    }
+  }, [messages, currentModel, isRemoteRegistered, remoteMonitoring]);
 
   // Auto-scroll to bottom
   useEffect(() => {
@@ -215,13 +259,16 @@ export default function GlassChatPiP() {
       if (showModelSelector && containerRef.current && !containerRef.current.contains(event.target as Node)) {
         setShowModelSelector(false);
       }
+      if (showChatSelector && containerRef.current && !containerRef.current.contains(event.target as Node)) {
+        setShowChatSelector(false);
+      }
     };
 
-    if (showModelSelector) {
+    if (showModelSelector || showChatSelector) {
       document.addEventListener('mousedown', handleClickOutside);
       return () => document.removeEventListener('mousedown', handleClickOutside);
     }
-  }, [showModelSelector]);
+  }, [showModelSelector, showChatSelector]);
 
   // Test window.pip API availability and listen for resize completion
   useEffect(() => {
@@ -364,6 +411,28 @@ export default function GlassChatPiP() {
 
     initOllama();
   }, []);
+
+  // Initialize remote monitoring
+  useEffect(() => {
+    const initRemoteMonitoring = async () => {
+      try {
+        const result = await remoteMonitoring.register();
+        if (result) {
+          setIsRemoteRegistered(true);
+          console.log('Remote monitoring enabled');
+        }
+      } catch (error) {
+        console.error('Failed to initialize remote monitoring:', error);
+      }
+    };
+
+    initRemoteMonitoring();
+
+    // Cleanup on unmount
+    return () => {
+      remoteMonitoring.unregister();
+    };
+  }, [remoteMonitoring]);
 
   // Server status monitoring
   useEffect(() => {
@@ -512,7 +581,15 @@ export default function GlassChatPiP() {
       timestamp: Date.now()
     };
     
-    setMessages(prev => [...prev, userMessage]);
+    setChats(prev => prev.map(chat => 
+      chat.id === activeChatId 
+        ? { 
+            ...chat, 
+            messages: [...chat.messages, userMessage],
+            updatedAt: Date.now()
+          }
+        : chat
+    ));
     
     // Clear input
     if (fromQuickInput) {
@@ -522,6 +599,11 @@ export default function GlassChatPiP() {
     }
     
     setIsTyping(true);
+    
+    // Update remote monitoring typing status
+    if (isRemoteRegistered) {
+      remoteMonitoring.updateStatus({ isTyping: true });
+    }
     
     try {
       if (!window.pip?.system) {
@@ -590,7 +672,15 @@ export default function GlassChatPiP() {
         timestamp: Date.now()
       };
       
-      setMessages(prev => [...prev, assistantMessage]);
+      setChats(prev => prev.map(chat => 
+        chat.id === activeChatId 
+          ? { 
+              ...chat, 
+              messages: [...chat.messages, assistantMessage],
+              updatedAt: Date.now()
+            }
+          : chat
+      ));
     } catch (error) {
       console.error('Error executing command:', error);
       
@@ -601,7 +691,15 @@ export default function GlassChatPiP() {
         timestamp: Date.now()
       };
       
-      setMessages(prev => [...prev, errorMessage]);
+      setChats(prev => prev.map(chat => 
+        chat.id === activeChatId 
+          ? { 
+              ...chat, 
+              messages: [...chat.messages, errorMessage],
+              updatedAt: Date.now()
+            }
+          : chat
+      ));
     } finally {
       setIsTyping(false);
     }
@@ -650,7 +748,15 @@ export default function GlassChatPiP() {
       timestamp: Date.now()
     };
     
-    setMessages(prev => [...prev, userMessage]);
+    setChats(prev => prev.map(chat => 
+      chat.id === activeChatId 
+        ? { 
+            ...chat, 
+            messages: [...chat.messages, userMessage],
+            updatedAt: Date.now()
+          }
+        : chat
+    ));
     
     // Clear context flags if context was included
     if (shouldIncludeContext) {
@@ -675,6 +781,11 @@ export default function GlassChatPiP() {
     }
     
     setIsTyping(true);
+    
+    // Update remote monitoring typing status
+    if (isRemoteRegistered) {
+      remoteMonitoring.updateStatus({ isTyping: true });
+    }
     
     try {
       if (ollamaAvailable && window.pip?.ollama && currentModel) {
@@ -703,39 +814,80 @@ export default function GlassChatPiP() {
           timestamp: Date.now()
         };
         
-        setMessages(prev => [...prev, streamingMessage]);
+        setChats(prev => prev.map(chat => 
+          chat.id === activeChatId 
+            ? { 
+                ...chat, 
+                messages: [...chat.messages, streamingMessage],
+                updatedAt: Date.now()
+              }
+            : chat
+        ));
         setStreamingResponse('');
         
-        // Handle streaming response
+        // Handle real-time streaming response
         let fullResponse = '';
         
-        const response = await window.pip.ollama.chat(chatHistory, currentModel);
+        const response = await window.pip.ollama.chat(chatHistory, currentModel, (chunk) => {
+          if (chunk.type === 'thinking') {
+            setIsThinking(true);
+            setThinkingText(chunk.content);
+            // Update the streaming message with thinking indicator
+            setChats(prev => prev.map(chat => 
+              chat.id === activeChatId 
+                ? { 
+                    ...chat, 
+                    messages: chat.messages.map(msg => 
+                      msg.id === tempMessageId 
+                        ? { ...msg, content: chunk.content }
+                        : msg
+                    ),
+                    updatedAt: Date.now()
+                  }
+                : chat
+            ));
+          } else if (chunk.type === 'content') {
+            setIsThinking(false);
+            setThinkingText('');
+            fullResponse += chunk.content;
+            
+            // Update the streaming message with new content
+            setChats(prev => prev.map(chat => 
+              chat.id === activeChatId 
+                ? { 
+                    ...chat, 
+                    messages: chat.messages.map(msg => 
+                      msg.id === tempMessageId 
+                        ? { ...msg, content: fullResponse }
+                        : msg
+                    ),
+                    updatedAt: Date.now()
+                  }
+                : chat
+            ));
+          } else if (chunk.type === 'done') {
+            setIsThinking(false);
+            setThinkingText('');
+            fullResponse = chunk.content;
+            
+            // Final update with complete response
+            setChats(prev => prev.map(chat => 
+              chat.id === activeChatId 
+                ? { 
+                    ...chat, 
+                    messages: chat.messages.map(msg => 
+                      msg.id === tempMessageId 
+                        ? { ...msg, content: fullResponse }
+                        : msg
+                    ),
+                    updatedAt: Date.now()
+                  }
+                : chat
+            ));
+          }
+        });
         
-        // Since we can't easily access the streaming callback from the IPC,
-        // we'll simulate streaming by updating the message progressively
-        const words = response.split(' ');
-        for (let i = 0; i < words.length; i++) {
-          const partialResponse = words.slice(0, i + 1).join(' ');
-          
-          setMessages(prev => prev.map(msg => 
-            msg.id === tempMessageId 
-              ? { ...msg, content: partialResponse }
-              : msg
-          ));
-          
-          // Add delay to simulate real-time typing
-          await new Promise(resolve => setTimeout(resolve, 50));
-        }
-        
-        fullResponse = response;
         console.log('Ollama response:', fullResponse);
-        
-        // Final update with complete response
-        setMessages(prev => prev.map(msg => 
-          msg.id === tempMessageId 
-            ? { ...msg, content: fullResponse }
-            : msg
-        ));
         
       } else {
         // Fallback response when Ollama is not available
@@ -754,7 +906,15 @@ export default function GlassChatPiP() {
           timestamp: Date.now()
         };
         
-        setMessages(prev => [...prev, assistantMessage]);
+        setChats(prev => prev.map(chat => 
+          chat.id === activeChatId 
+            ? { 
+                ...chat, 
+                messages: [...chat.messages, assistantMessage],
+                updatedAt: Date.now()
+              }
+            : chat
+        ));
       }
       
     } catch (error) {
@@ -767,10 +927,23 @@ export default function GlassChatPiP() {
         timestamp: Date.now()
       };
       
-      setMessages(prev => [...prev, errorMessage]);
+      setChats(prev => prev.map(chat => 
+        chat.id === activeChatId 
+          ? { 
+              ...chat, 
+              messages: [...chat.messages, errorMessage],
+              updatedAt: Date.now()
+            }
+          : chat
+      ));
     } finally {
       setIsTyping(false);
       setStreamingResponse('');
+      
+      // Update remote monitoring typing status
+      if (isRemoteRegistered) {
+        remoteMonitoring.updateStatus({ isTyping: false });
+      }
     }
   };
 
@@ -779,6 +952,125 @@ export default function GlassChatPiP() {
   
   // State for copy functionality
   const [copiedCode, setCopiedCode] = useState<Set<string>>(new Set());
+
+  // Chat management functions
+  const createNewChat = () => {
+    const newChat: Chat = {
+      id: Date.now().toString(),
+      name: `Chat ${chats.length + 1}`,
+      messages: [],
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      isActive: false
+    };
+    
+    setChats(prev => prev.map(chat => ({ ...chat, isActive: false })).concat(newChat));
+    setActiveChatId(newChat.id);
+  };
+
+  const switchChat = (chatId: string) => {
+    setChats(prev => prev.map(chat => ({ 
+      ...chat, 
+      isActive: chat.id === chatId 
+    })));
+    setActiveChatId(chatId);
+  };
+
+  const deleteChat = (chatId: string) => {
+    if (chats.length <= 1) return; // Don't delete the last chat
+    
+    const newChats = chats.filter(chat => chat.id !== chatId);
+    const newActiveChatId = activeChatId === chatId ? newChats[0].id : activeChatId;
+    
+    setChats(newChats.map(chat => ({ 
+      ...chat, 
+      isActive: chat.id === newActiveChatId 
+    })));
+    setActiveChatId(newActiveChatId);
+  };
+
+  const renameChat = (chatId: string, newName: string) => {
+    setChats(prev => prev.map(chat => 
+      chat.id === chatId ? { ...chat, name: newName } : chat
+    ));
+  };
+
+  // Message editing functions
+  const startEditingMessage = (messageId: string, content: string) => {
+    setEditingMessageId(messageId);
+    setEditingContent(content);
+  };
+
+  const cancelEditingMessage = () => {
+    setEditingMessageId(null);
+    setEditingContent('');
+  };
+
+  const saveEditedMessage = async () => {
+    if (!editingMessageId || !editingContent.trim()) return;
+
+    // Find the message to edit
+    const chat = chats.find(c => c.id === activeChatId);
+    if (!chat) return;
+
+    const messageIndex = chat.messages.findIndex(m => m.id === editingMessageId);
+    if (messageIndex === -1) return;
+
+    const message = chat.messages[messageIndex];
+    if (message.role !== 'user') return; // Only edit user messages
+
+    // Update the message content
+    setChats(prev => prev.map(chat => 
+      chat.id === activeChatId 
+        ? {
+            ...chat,
+            messages: chat.messages.map(msg => 
+              msg.id === editingMessageId 
+                ? { ...msg, content: editingContent.trim() }
+                : msg
+            ),
+            updatedAt: Date.now()
+          }
+        : chat
+    ));
+
+    // If this was the last user message, regenerate the assistant response
+    const updatedChat = chats.find(c => c.id === activeChatId);
+    if (updatedChat && messageIndex === updatedChat.messages.length - 2) {
+      // This was the last user message, regenerate the assistant response
+      const messagesBeforeEdit = updatedChat.messages.slice(0, messageIndex);
+      const newUserMessage = { ...message, content: editingContent.trim() };
+      
+      // Remove the old assistant response and add the new user message
+      setChats(prev => prev.map(chat => 
+        chat.id === activeChatId 
+          ? {
+              ...chat,
+              messages: [...messagesBeforeEdit, newUserMessage],
+              updatedAt: Date.now()
+            }
+          : chat
+      ));
+
+      // Generate new response
+      await handleSend(editingContent.trim(), false);
+    }
+
+    setEditingMessageId(null);
+    setEditingContent('');
+  };
+
+  // Thinking indicator component
+  const ThinkingIndicator = () => (
+    <div className="flex items-center gap-2 text-purple-300/70 text-sm animate-pulse">
+      <div className="flex space-x-1">
+        <div className="w-2 h-2 bg-purple-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+        <div className="w-2 h-2 bg-purple-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+        <div className="w-2 h-2 bg-purple-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+      </div>
+      <span>{thinkingText || 'Thinking...'}</span>
+    </div>
+  );
 
   // Copy to clipboard function
   const copyToClipboard = async (text: string, codeId: string) => {
@@ -796,6 +1088,14 @@ export default function GlassChatPiP() {
       }, 2000);
     } catch (err) {
       console.error('Failed to copy text: ', err);
+    }
+  };
+
+  const runCommand = async (command: string) => {
+    try {
+      await handleCommandExecution(`/run ${command}`, false);
+    } catch (err) {
+      console.error('Failed to run command: ', err);
     }
   };
 
@@ -836,19 +1136,30 @@ export default function GlassChatPiP() {
                         {children}
                       </code>
                     </pre>
-                    <button
-                      onClick={() => copyToClipboard(codeText, codeId)}
-                      className={cn(
-                        "absolute top-2 right-2 p-1.5 rounded-md transition-all duration-200",
-                        "opacity-0 group-hover:opacity-100 focus:opacity-100",
-                        isCopied 
-                          ? "bg-green-500/20 text-green-300" 
-                          : "bg-white/10 hover:bg-white/20 text-white/70 hover:text-white"
-                      )}
-                      title={isCopied ? "Copied!" : "Copy code"}
-                    >
-                      {isCopied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
-                    </button>
+                    <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 focus:opacity-100 transition-all duration-200">
+                      <button
+                        onClick={() => runCommand(codeText)}
+                        className={cn(
+                          "p-1.5 rounded-md transition-all duration-200",
+                          "bg-green-500/20 hover:bg-green-500/30 text-green-300"
+                        )}
+                        title="Run command"
+                      >
+                        <Play className="w-3 h-3" />
+                      </button>
+                      <button
+                        onClick={() => copyToClipboard(codeText, codeId)}
+                        className={cn(
+                          "p-1.5 rounded-md transition-all duration-200",
+                          isCopied 
+                            ? "bg-green-500/20 text-green-300" 
+                            : "bg-white/10 hover:bg-white/20 text-white/70 hover:text-white"
+                        )}
+                        title={isCopied ? "Copied!" : "Copy code"}
+                      >
+                        {isCopied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+                      </button>
+                    </div>
                   </div>
                 );
               },
@@ -1005,19 +1316,30 @@ export default function GlassChatPiP() {
                     {children}
                   </code>
                 </pre>
-                <button
-                  onClick={() => copyToClipboard(codeText, codeId)}
-                  className={cn(
-                    "absolute top-2 right-2 p-1.5 rounded-md transition-all duration-200",
-                    "opacity-0 group-hover:opacity-100 focus:opacity-100",
-                    isCopied 
-                      ? "bg-green-500/20 text-green-300" 
-                      : "bg-white/10 hover:bg-white/20 text-white/70 hover:text-white"
-                  )}
-                  title={isCopied ? "Copied!" : "Copy code"}
-                >
-                  {isCopied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
-                </button>
+                <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 focus:opacity-100 transition-all duration-200">
+                  <button
+                    onClick={() => runCommand(codeText)}
+                    className={cn(
+                      "p-1.5 rounded-md transition-all duration-200",
+                      "bg-green-500/20 hover:bg-green-500/30 text-green-300"
+                    )}
+                    title="Run command"
+                  >
+                    <Play className="w-3 h-3" />
+                  </button>
+                  <button
+                    onClick={() => copyToClipboard(codeText, codeId)}
+                    className={cn(
+                      "p-1.5 rounded-md transition-all duration-200",
+                      isCopied 
+                        ? "bg-green-500/20 text-green-300" 
+                        : "bg-white/10 hover:bg-white/20 text-white/70 hover:text-white"
+                    )}
+                    title={isCopied ? "Copied!" : "Copy code"}
+                  >
+                    {isCopied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+                  </button>
+                </div>
               </div>
             );
           },
@@ -1175,16 +1497,7 @@ export default function GlassChatPiP() {
                   } as React.CSSProperties}
                 >
                   {isTyping ? (
-                    <div className="flex items-center gap-1">
-                      <span className="text-xs opacity-70">Thinking</span>
-                      <motion.span
-                        className="text-xs opacity-70"
-                        animate={{ opacity: [0.3, 1, 0.3] }}
-                        transition={{ duration: 1.5, repeat: Infinity }}
-                      >
-                        ...
-                      </motion.span>
-                    </div>
+                    <ThinkingIndicator />
                   ) : (
                     <div className="flex items-center gap-2">
                       <div className="text-xs opacity-70 truncate flex-1">
@@ -1219,6 +1532,15 @@ export default function GlassChatPiP() {
                       title={`Server ${serverStatus.status}: ${serverStatus.domain || serverStatus.ip}`}
                     />
                   )}
+                  
+                  {/* Remote monitoring status */}
+                  <div 
+                    className={cn(
+                      "w-2 h-2 rounded-full",
+                      isRemoteRegistered ? "bg-blue-400" : "bg-gray-400"
+                    )}
+                    title={isRemoteRegistered ? "Remote monitoring active" : "Remote monitoring offline"}
+                  />
                 </div>
 
                 {/* Context indicator */}
@@ -1345,7 +1667,95 @@ export default function GlassChatPiP() {
               <div className="flex items-center gap-2 flex-1 min-w-0">
                 <Grip className="w-3 h-3 opacity-50 flex-shrink-0" />
                 <MessageSquare className="w-4 h-4 flex-shrink-0" />
-                <span className="text-sm font-medium truncate">Chat</span>
+                
+                {/* Chat Selector */}
+                <div className="relative flex-1 min-w-0">
+                  <button
+                    onClick={() => setShowChatSelector(!showChatSelector)}
+                    className={cn(
+                      "flex items-center gap-2 w-full text-left hover:bg-white/5 rounded px-2 py-1 transition-colors",
+                      showChatSelector && "bg-white/10"
+                    )}
+                    title="Switch chat"
+                  >
+                    <span className="text-sm font-medium truncate">
+                      {activeChat?.name || 'Chat'}
+                    </span>
+                    <ChevronDown className={cn(
+                      "w-3 h-3 opacity-60 transition-transform",
+                      showChatSelector && "rotate-180"
+                    )} />
+                  </button>
+                  
+                  {/* Chat dropdown */}
+                  {showChatSelector && (
+                    <motion.div
+                      initial={{ opacity: 0, scale: 0.9, y: -10 }}
+                      animate={{ opacity: 1, scale: 1, y: 0 }}
+                      exit={{ opacity: 0, scale: 0.9, y: -10 }}
+                      className={cn(
+                        "absolute top-full left-0 mt-2 w-64 z-50",
+                        "rounded-lg border shadow-lg overflow-hidden",
+                        platform === 'win32'
+                          ? "bg-black/90 border-white/20"
+                          : theme === 'dark' 
+                            ? "bg-gray-900/95 border-white/20 backdrop-blur-lg"
+                            : "bg-gray-100/95 border-black/20 backdrop-blur-lg"
+                      )}
+                    >
+                      <div className="p-2 space-y-1">
+                        {chats.map((chat) => (
+                          <div
+                            key={chat.id}
+                            className={cn(
+                              "flex items-center justify-between p-2 rounded cursor-pointer transition-colors",
+                              chat.id === activeChatId
+                                ? "bg-blue-500/20 text-blue-200"
+                                : "hover:bg-white/10"
+                            )}
+                            onClick={() => {
+                              switchChat(chat.id);
+                              setShowChatSelector(false);
+                            }}
+                          >
+                            <div className="flex items-center gap-2 flex-1 min-w-0">
+                              <span className="text-sm truncate">{chat.name}</span>
+                              <span className="text-xs opacity-60">
+                                ({chat.messages.length} messages)
+                              </span>
+                            </div>
+                            {chat.id === activeChatId && (
+                              <div className="w-2 h-2 bg-blue-400 rounded-full flex-shrink-0" />
+                            )}
+                            {chats.length > 1 && (
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  deleteChat(chat.id);
+                                }}
+                                className="p-1 hover:bg-red-500/20 rounded transition-colors"
+                                title="Delete chat"
+                              >
+                                <X className="w-3 h-3 opacity-60 hover:opacity-100" />
+                              </button>
+                            )}
+                          </div>
+                        ))}
+                        
+                        {/* New chat button */}
+                        <button
+                          onClick={() => {
+                            createNewChat();
+                            setShowChatSelector(false);
+                          }}
+                          className="w-full p-2 text-sm text-center hover:bg-green-500/20 rounded transition-colors border border-dashed border-white/20"
+                        >
+                          + New Chat
+                        </button>
+                      </div>
+                    </motion.div>
+                  )}
+                </div>
             
             {/* Status indicators */}
             <div className="flex items-center gap-1 flex-shrink-0">
@@ -1711,7 +2121,7 @@ export default function GlassChatPiP() {
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
                     className={cn(
-                      "max-w-[85%] rounded-2xl px-3 py-2 text-sm select-text",
+                      "max-w-[85%] rounded-2xl px-3 py-2 text-sm select-text relative group",
                       message.role === 'user' 
                         ? "ml-auto bg-blue-500/20" + (platform !== 'win32' ? " backdrop-blur-md" : "")
                         : platform === 'win32'
@@ -1721,7 +2131,53 @@ export default function GlassChatPiP() {
                             : "bg-black/10 backdrop-blur-md"
                     )}
                   >
-                    {renderMessageContent(message.content, message.id)}
+                    {/* Edit button for user messages */}
+                    {message.role === 'user' && (
+                      <div className="absolute -top-2 -right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button
+                          onClick={() => startEditingMessage(message.id, message.content)}
+                          className={cn(
+                            "p-1 rounded-full transition-colors",
+                            theme === 'dark' ? "hover:bg-white/20" : "hover:bg-black/20"
+                          )}
+                          title="Edit message"
+                        >
+                          <Edit className="w-3 h-3" />
+                        </button>
+                      </div>
+                    )}
+                    
+                    {editingMessageId === message.id ? (
+                      <div className="space-y-2">
+                        <textarea
+                          value={editingContent}
+                          onChange={(e) => setEditingContent(e.target.value)}
+                          className={cn(
+                            "w-full p-2 rounded border resize-none",
+                            "bg-transparent border-white/20 focus:border-blue-400",
+                            "focus:outline-none focus:ring-1 focus:ring-blue-400"
+                          )}
+                          rows={Math.max(2, editingContent.split('\n').length)}
+                          autoFocus
+                        />
+                        <div className="flex gap-2">
+                          <button
+                            onClick={saveEditedMessage}
+                            className="px-2 py-1 text-xs bg-green-500/20 hover:bg-green-500/30 rounded transition-colors"
+                          >
+                            Save
+                          </button>
+                          <button
+                            onClick={cancelEditingMessage}
+                            className="px-2 py-1 text-xs bg-gray-500/20 hover:bg-gray-500/30 rounded transition-colors"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      renderMessageContent(message.content, message.id)
+                    )}
                   </motion.div>
                 ))}
                 {isTyping && (
