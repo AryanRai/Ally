@@ -60,6 +60,8 @@ async function createWindow(): Promise<void> {
     } : {}),
     ...(process.platform === 'win32' ? {
       backgroundMaterial: 'acrylic' as const,
+      // Additional Windows-specific options for better rounded corners
+      titleBarStyle: 'hidden' as const,
     } : {})
   });
 
