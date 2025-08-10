@@ -456,7 +456,7 @@ app.whenReady().then(async () => {
   await createWindow();
   createTray(); // Create tray after window is ready
 
-  // Register global shortcut
+  // Register global shortcut for show/hide
   const shortcut = 'CommandOrControl+Shift+C';
   const registered = globalShortcut.register(shortcut, () => {
     if (!win) return;
@@ -472,6 +472,25 @@ app.whenReady().then(async () => {
 
   if (!registered) {
     console.error('Failed to register global shortcut');
+  }
+
+  // Register quick access shortcut for collapsed mode
+  const quickShortcut = 'CommandOrControl+Shift+Q';
+  const quickRegistered = globalShortcut.register(quickShortcut, () => {
+    if (!win) return;
+    if (win.isVisible()) {
+      // If visible, just focus quick input
+      win.webContents.send('focus-quick-input');
+    } else {
+      // If hidden, show in collapsed mode and focus quick input
+      win.show();
+      win.focus();
+      win.webContents.send('show-collapsed-and-focus-quick');
+    }
+  });
+
+  if (!quickRegistered) {
+    console.error('Failed to register quick access shortcut');
   }
 });
 

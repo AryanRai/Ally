@@ -195,6 +195,20 @@ export default function GlassChatPiP() {
     return () => window.removeEventListener('focus-chat-input', handleFocusInput);
   }, []);
 
+  // Handle escape key to hide window instead of destroying it
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        event.stopPropagation();
+        window.pip?.hide();
+      }
+    };
+    
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
   // Close model selector when clicking outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -237,6 +251,38 @@ export default function GlassChatPiP() {
         cleanupTheme?.();
       };
     }
+  }, []);
+
+  // Listen for quick input focus events from global shortcuts
+  useEffect(() => {
+    const handleFocusQuickInput = () => {
+      // Focus the quick input in collapsed mode
+      const quickInputElement = document.querySelector('input[placeholder="Type your message..."]') as HTMLInputElement;
+      if (quickInputElement) {
+        quickInputElement.focus();
+      }
+    };
+
+    const handleShowCollapsedAndFocusQuick = () => {
+      // First, ensure we're in collapsed mode
+      setState(prev => ({ ...prev, collapsed: true }));
+      
+      // Then focus the quick input after a brief delay to ensure UI has updated
+      setTimeout(() => {
+        const quickInputElement = document.querySelector('input[placeholder="Type your message..."]') as HTMLInputElement;
+        if (quickInputElement) {
+          quickInputElement.focus();
+        }
+      }, 100);
+    };
+
+    window.addEventListener('focus-quick-input', handleFocusQuickInput);
+    window.addEventListener('show-collapsed-and-focus-quick', handleShowCollapsedAndFocusQuick);
+    
+    return () => {
+      window.removeEventListener('focus-quick-input', handleFocusQuickInput);
+      window.removeEventListener('show-collapsed-and-focus-quick', handleShowCollapsedAndFocusQuick);
+    };
   }, []);
 
   // Context monitoring setup
