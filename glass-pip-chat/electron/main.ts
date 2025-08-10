@@ -37,6 +37,10 @@ async function createWindow(): Promise<void> {
     height: savedBounds?.height ?? 560,
     x: savedBounds?.x,
     y: savedBounds?.y,
+    minWidth: 320,
+    minHeight: 64,
+    maxWidth: 800,
+    maxHeight: 1000,
     frame: false,
     transparent: true,
     resizable: true,
@@ -104,16 +108,32 @@ ipcMain.on('pip:close', () => {
 
 // Window resizing handlers
 ipcMain.on('window:resize', (event, { width, height }) => {
+  console.log('Received resize request:', width, 'x', height);
   if (!win) return;
   
-  // Get current position to maintain it during resize
+  // Get current position and size
   const [x, y] = win.getPosition();
+  const [currentWidth, currentHeight] = win.getSize();
   
-  // Set new size
-  win.setSize(width, height);
+  console.log('Current window size:', currentWidth, 'x', currentHeight);
+  
+  // Ensure dimensions are within bounds
+  const constrainedWidth = Math.max(320, Math.min(800, width));
+  const constrainedHeight = Math.max(64, Math.min(1000, height));
+  
+  // Set new size with animation
+  win.setSize(constrainedWidth, constrainedHeight, true);
   
   // Maintain position
   win.setPosition(x, y);
+  
+  console.log('Window resized to:', constrainedWidth, 'x', constrainedHeight);
+  
+  // Verify the resize worked
+  setTimeout(() => {
+    const [newWidth, newHeight] = win!.getSize();
+    console.log('Actual window size after resize:', newWidth, 'x', newHeight);
+  }, 100);
 });
 
 ipcMain.handle('window:get-size', () => {

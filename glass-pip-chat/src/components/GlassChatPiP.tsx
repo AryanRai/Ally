@@ -80,12 +80,16 @@ export default function GlassChatPiP() {
 
   // Sync window size when size state changes
   useEffect(() => {
-    if (!window.pip) return;
+    if (!window.pip) {
+      console.warn('window.pip not available');
+      return;
+    }
     
     setIsResizing(true);
     const dims = sizePx[state.size];
     const height = state.collapsed ? 64 : dims.h;
     
+    console.log('Resizing window to:', dims.w, 'x', height, 'collapsed:', state.collapsed);
     window.pip.resizeWindow(dims.w, height);
     
     // Reset resizing state after animation
@@ -105,6 +109,14 @@ export default function GlassChatPiP() {
     };
     window.addEventListener('focus-chat-input', handleFocusInput);
     return () => window.removeEventListener('focus-chat-input', handleFocusInput);
+  }, []);
+
+  // Test window.pip API availability
+  useEffect(() => {
+    console.log('window.pip available:', !!window.pip);
+    if (window.pip) {
+      console.log('window.pip methods:', Object.keys(window.pip));
+    }
   }, []);
 
   // Handle drag visual feedback
@@ -150,6 +162,26 @@ export default function GlassChatPiP() {
   const handleSizeChange = () => {
     const nextSize: Size = state.size === 'S' ? 'M' : state.size === 'M' ? 'L' : 'S';
     setState(prev => ({ ...prev, size: nextSize }));
+  };
+
+  const handleCollapseToggle = () => {
+    const newCollapsed = !state.collapsed;
+    console.log('Toggling collapse from', state.collapsed, 'to', newCollapsed);
+    
+    // Update state
+    setState(prev => ({ ...prev, collapsed: newCollapsed }));
+    
+    // Immediately resize window
+    if (window.pip) {
+      setIsResizing(true);
+      const dims = sizePx[state.size];
+      const height = newCollapsed ? 64 : dims.h;
+      
+      console.log('Immediately resizing to:', dims.w, 'x', height);
+      window.pip.resizeWindow(dims.w, height);
+      
+      setTimeout(() => setIsResizing(false), 300);
+    }
   };
 
   const handleSend = () => {
@@ -281,7 +313,7 @@ export default function GlassChatPiP() {
               </>
             )}
             <button
-              onClick={() => setState(prev => ({ ...prev, collapsed: !prev.collapsed }))}
+              onClick={handleCollapseToggle}
               className={cn(
                 "p-1.5 rounded-lg hover:bg-white/10 transition-all duration-200",
                 isResizing && "opacity-50"
