@@ -106,6 +106,7 @@ export default function GlassChatPiP() {
   
   const containerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const messagesRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // Load saved state
@@ -161,6 +162,13 @@ export default function GlassChatPiP() {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+
+  // Manual scroll to bottom function
+  const scrollToBottom = () => {
+    setTimeout(() => {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }, 100);
+  };
 
   // Focus input on custom event
   useEffect(() => {
@@ -499,9 +507,9 @@ export default function GlassChatPiP() {
     
     // Only include context if:
     // 1. Context toggle is enabled AND
-    // 2. User explicitly wants to include context OR recently selected something
+    // 2. User explicitly wants to include context OR recently selected something OR sending from minimized mode
     const shouldIncludeContext = contextToggleEnabled && 
-      (includeContextInMessage || recentlySelected) &&
+      (includeContextInMessage || recentlySelected || (fromQuickInput && state.collapsed)) &&
       (contextData.clipboard || contextData.selectedText);
     
     if (shouldIncludeContext) {
@@ -531,6 +539,15 @@ export default function GlassChatPiP() {
     if (shouldIncludeContext) {
       setRecentlySelected(false);
       setIncludeContextInMessage(false);
+    }
+    
+    // Auto-maximize if sending from minimized mode
+    if (fromQuickInput && state.collapsed) {
+      handleToggleCollapse();
+      // Scroll to bottom after maximize animation
+      setTimeout(() => {
+        scrollToBottom();
+      }, 300);
     }
     
     // Clear input
@@ -640,8 +657,11 @@ export default function GlassChatPiP() {
     }
   };
 
-  // Render message content with context icons
-  const renderMessageContent = (content: string) => {
+  // State for expandable context in messages
+  const [expandedContexts, setExpandedContexts] = useState<Set<string>>(new Set());
+
+  // Render message content with expandable context
+  const renderMessageContent = (content: string, messageId: string) => {
     // Check if the message contains context information
     const contextRegex = /\[Context: ([^\]]+)\]/;
     const contextMatch = content.match(contextRegex);
@@ -651,17 +671,59 @@ export default function GlassChatPiP() {
       const beforeContext = content.substring(0, contextMatch.index);
       const afterContext = content.substring(contextMatch.index! + contextMatch[0].length);
       const contextText = contextMatch[1];
+      const isExpanded = expandedContexts.has(messageId);
       
       return (
         <>
-          {beforeContext}
+          {beforeContext.trim()}
           {contextText && (
-            <div className="flex items-center gap-1 mt-2 mb-1 opacity-80">
-              <Clipboard className="w-3 h-3" />
-              <span className="text-xs italic">Context attached</span>
+            <div className="mt-2 mb-1">
+              {/* Collapsible context header */}
+              <button
+                onClick={() => {
+                  const newExpanded = new Set(expandedContexts);
+                  if (isExpanded) {
+                    newExpanded.delete(messageId);
+                  } else {
+                    newExpanded.add(messageId);
+                  }
+                  setExpandedContexts(newExpanded);
+                }}
+                className={cn(
+                  "flex items-center gap-1 px-2 py-1 rounded-lg transition-all",
+                  "hover:bg-white/10 border border-white/20",
+                  isExpanded && "bg-blue-500/20 border-blue-500/30"
+                )}
+              >
+                <Clipboard className="w-3 h-3" />
+                <span className="text-xs italic">Context attached</span>
+                <ChevronDown className={cn(
+                  "w-3 h-3 transition-transform",
+                  isExpanded && "rotate-180"
+                )} />
+              </button>
+              
+              {/* Expandable context content */}
+              <AnimatePresence>
+                {isExpanded && (
+                  <motion.div
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: 'auto' }}
+                    exit={{ opacity: 0, height: 0 }}
+                    className={cn(
+                      "mt-2 p-2 rounded-lg border text-xs",
+                      "bg-white/5 border-white/10 max-h-32 overflow-y-auto scrollbar-thin"
+                    )}
+                  >
+                    <div className="opacity-80 font-mono whitespace-pre-wrap">
+                      {contextText}
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </div>
           )}
-          {afterContext}
+          {afterContext.trim()}
         </>
       );
     }
@@ -765,6 +827,21 @@ export default function GlassChatPiP() {
                         : "bg-black/10 border-black/10 placeholder:text-black/40 focus:ring-black/20"
                   )}
                 />
+                
+                {/* Context indicator for minimized mode */}
+                {(contextData.clipboard || contextData.selectedText) && contextToggleEnabled && (
+                  <div 
+                    className={cn(
+                      "flex items-center gap-1 px-1.5 py-0.5 rounded text-xs flex-shrink-0",
+                      "bg-blue-500/20 border border-blue-500/30 text-blue-300"
+                    )}
+                    title="Context will be auto-attached"
+                  >
+                    <Clipboard className="w-2.5 h-2.5" />
+                    <span>Auto</span>
+                  </div>
+                )}
+                
                 <button
                   type="submit"
                   disabled={!quickInput.trim()}
@@ -1142,7 +1219,7 @@ export default function GlassChatPiP() {
                             : "bg-black/10 backdrop-blur-md"
                     )}
                   >
-                    {renderMessageContent(message.content)}
+                    {renderMessageContent(message.content, message.id)}
                   </motion.div>
                 ))}
                 {isTyping && (
