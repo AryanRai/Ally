@@ -42,6 +42,8 @@ export default function GlassChatPiP() {
     collapsed: false
   });
   
+  const [platform, setPlatform] = useState<string>('');
+  
   const [messages, setMessages] = useState<Message[]>([
     {
       id: '1',
@@ -89,11 +91,23 @@ export default function GlassChatPiP() {
     const height = state.collapsed ? 64 : dims.h;
     
     console.log('Resizing window to:', dims.w, 'x', height, 'collapsed:', state.collapsed);
-    window.pip.resizeWindow(dims.w, height);
+    
+    // Use a small delay to ensure state has settled
+    const resizeTimeout = setTimeout(() => {
+      try {
+        window.pip.resizeWindow(dims.w, height);
+      } catch (error) {
+        console.error('Failed to resize window:', error);
+      }
+    }, 50);
     
     // Reset resizing state after animation
-    const timeout = setTimeout(() => setIsResizing(false), 300);
-    return () => clearTimeout(timeout);
+    const resetTimeout = setTimeout(() => setIsResizing(false), 400);
+    
+    return () => {
+      clearTimeout(resizeTimeout);
+      clearTimeout(resetTimeout);
+    };
   }, [state.size, state.collapsed]);
 
   // Auto-scroll to bottom
@@ -110,46 +124,28 @@ export default function GlassChatPiP() {
     return () => window.removeEventListener('focus-chat-input', handleFocusInput);
   }, []);
 
-  // Test window.pip API availability
+  // Test window.pip API availability and listen for resize completion
   useEffect(() => {
     console.log('window.pip available:', !!window.pip);
     if (window.pip) {
       console.log('window.pip methods:', Object.keys(window.pip));
+      
+      // Get platform info
+      window.pip.getPlatform().then(setPlatform).catch(console.error);
+      
+      // Listen for resize completion
+      const cleanup = window.pip.onResizeComplete?.((size) => {
+        console.log('Window resize completed:', size);
+        setIsResizing(false);
+      });
+      
+      return cleanup;
     }
   }, []);
 
   // Native Electron dragging handles everything via -webkit-app-region CSS
 
-  // Calculate snap position
-  const snapToCorner = (x: number, y: number) => {
-    const gutter = 20;
-    const vw = window.innerWidth;
-    const vh = window.innerHeight;
-    const w = sizePx[state.size].w;
-    const h = state.collapsed ? 64 : sizePx[state.size].h;
-    
-    const corners = [
-      { x: gutter, y: gutter }, // Top-left
-      { x: vw - w - gutter, y: gutter }, // Top-right
-      { x: gutter, y: vh - h - gutter }, // Bottom-left
-      { x: vw - w - gutter, y: vh - h - gutter }, // Bottom-right
-      { x: (vw - w) / 2, y: gutter }, // Top-center
-      { x: (vw - w) / 2, y: vh - h - gutter }, // Bottom-center
-    ];
-    
-    let closest = corners[0];
-    let minDistance = Infinity;
-    
-    corners.forEach(corner => {
-      const distance = Math.hypot(corner.x - x, corner.y - y);
-      if (distance < minDistance) {
-        minDistance = distance;
-        closest = corner;
-      }
-    });
-    
-    return closest;
-  };
+
 
   const handleSizeChange = () => {
     const nextSize: Size = state.size === 'S' ? 'M' : state.size === 'M' ? 'L' : 'S';
@@ -160,20 +156,8 @@ export default function GlassChatPiP() {
     const newCollapsed = !state.collapsed;
     console.log('Toggling collapse from', state.collapsed, 'to', newCollapsed);
     
-    // Update state
+    // Update state - the useEffect will handle the window resize
     setState(prev => ({ ...prev, collapsed: newCollapsed }));
-    
-    // Immediately resize window
-    if (window.pip) {
-      setIsResizing(true);
-      const dims = sizePx[state.size];
-      const height = newCollapsed ? 64 : dims.h;
-      
-      console.log('Immediately resizing to:', dims.w, 'x', height);
-      window.pip.resizeWindow(dims.w, height);
-      
-      setTimeout(() => setIsResizing(false), 300);
-    }
   };
 
   const handleSend = () => {
@@ -213,8 +197,6 @@ export default function GlassChatPiP() {
         isResizing && "shadow-lg"
       )}
       style={{ 
-        left: 0, 
-        top: 0, 
         width: dims.w, 
         height: state.collapsed ? 64 : dims.h,
         zIndex: 50
@@ -232,8 +214,10 @@ export default function GlassChatPiP() {
           "h-full w-full rounded-2xl overflow-hidden relative",
           "border border-white/20",
           "shadow-[0_8px_40px_rgba(0,0,0,0.4)]",
-          "bg-gradient-to-b from-white/[0.08] to-white/[0.02]",
-          "backdrop-blur-2xl backdrop-saturate-150",
+          // Different background styles for Windows vs other platforms
+          platform === 'win32' 
+            ? "bg-gradient-to-b from-white/[0.03] to-white/[0.01]" 
+            : "bg-gradient-to-b from-white/[0.08] to-white/[0.02] backdrop-blur-2xl backdrop-saturate-150",
           "[background-image:radial-gradient(ellipse_at_top,rgba(255,255,255,0.1),transparent)]",
           "text-white/90"
         )}
@@ -345,8 +329,8 @@ export default function GlassChatPiP() {
                     className={cn(
                       "max-w-[85%] rounded-2xl px-3 py-2 text-sm",
                       message.role === 'user' 
-                        ? "ml-auto bg-blue-500/20 backdrop-blur-md" 
-                        : "bg-white/10 backdrop-blur-md"
+                        ? "ml-auto bg-blue-500/20" + (platform !== 'win32' ? " backdrop-blur-md" : "")
+                        : "bg-white/10" + (platform !== 'win32' ? " backdrop-blur-md" : "")
                     )}
                   >
                     {message.content}
@@ -383,7 +367,8 @@ export default function GlassChatPiP() {
                     placeholder="Type a message..."
                     className={cn(
                       "flex-1 px-3 py-2 rounded-xl text-sm",
-                      "bg-white/10 backdrop-blur-md",
+                      "bg-white/10",
+                      platform !== 'win32' && "backdrop-blur-md",
                       "border border-white/10",
                       "placeholder:text-white/40",
                       "focus:outline-none focus:ring-2 focus:ring-white/20",
@@ -395,7 +380,8 @@ export default function GlassChatPiP() {
                     disabled={!input.trim()}
                     className={cn(
                       "p-2 rounded-xl",
-                      "bg-white/10 backdrop-blur-md",
+                      "bg-white/10",
+                      platform !== 'win32' && "backdrop-blur-md",
                       "hover:bg-white/20",
                       "disabled:opacity-50 disabled:cursor-not-allowed",
                       "transition-all"

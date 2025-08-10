@@ -11,6 +11,12 @@ export interface PipAPI {
   
   // Listen for focus input event
   onFocusInput: (callback: () => void) => () => void;
+  
+  // Listen for resize completion
+  onResizeComplete?: (callback: (size: { width: number; height: number }) => void) => () => void;
+  
+  // Get platform info
+  getPlatform: () => Promise<string>;
 }
 
 declare global {
