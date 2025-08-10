@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { motion, useDragControls, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import { 
   CornerDownLeft, 
   Minus, 
@@ -53,8 +53,9 @@ export default function GlassChatPiP() {
   
   const [input, setInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
+  const [isResizing, setIsResizing] = useState(false);
   
-  const dragControls = useDragControls();
   const containerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -77,6 +78,21 @@ export default function GlassChatPiP() {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
   }, [state]);
 
+  // Sync window size when size state changes
+  useEffect(() => {
+    if (!window.pip) return;
+    
+    setIsResizing(true);
+    const dims = sizePx[state.size];
+    const height = state.collapsed ? 64 : dims.h;
+    
+    window.pip.resizeWindow(dims.w, height);
+    
+    // Reset resizing state after animation
+    const timeout = setTimeout(() => setIsResizing(false), 300);
+    return () => clearTimeout(timeout);
+  }, [state.size, state.collapsed]);
+
   // Auto-scroll to bottom
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -90,6 +106,15 @@ export default function GlassChatPiP() {
     window.addEventListener('focus-chat-input', handleFocusInput);
     return () => window.removeEventListener('focus-chat-input', handleFocusInput);
   }, []);
+
+  // Handle drag visual feedback
+  const handleDragStart = () => {
+    setIsDragging(true);
+  };
+
+  const handleDragEnd = () => {
+    setIsDragging(false);
+  };
 
   // Calculate snap position
   const snapToCorner = (x: number, y: number) => {
@@ -120,6 +145,11 @@ export default function GlassChatPiP() {
     });
     
     return closest;
+  };
+
+  const handleSizeChange = () => {
+    const nextSize: Size = state.size === 'S' ? 'M' : state.size === 'M' ? 'L' : 'S';
+    setState(prev => ({ ...prev, size: nextSize }));
   };
 
   const handleSend = () => {
@@ -154,23 +184,23 @@ export default function GlassChatPiP() {
   return (
     <motion.div
       ref={containerRef}
-      className="fixed select-none"
+      className={cn(
+        "fixed transition-all duration-300",
+        isDragging ? "select-none scale-105 shadow-2xl cursor-grabbing" : "select-none",
+        isResizing && "shadow-lg"
+      )}
       style={{ 
-        left: state.x, 
-        top: state.y, 
+        left: 0, 
+        top: 0, 
         width: dims.w, 
         height: state.collapsed ? 64 : dims.h,
         zIndex: 50
       }}
-      drag
-      dragControls={dragControls}
-      dragMomentum={false}
-      dragElastic={0.1}
-      onDragEnd={(_, info) => {
-        const newPos = snapToCorner(info.point.x, info.point.y);
-        setState(prev => ({ ...prev, ...newPos }));
+      initial={{ opacity: 0, scale: 0.9 }}
+      animate={{ 
+        opacity: 1, 
+        scale: isDragging ? 1.05 : isResizing ? 1.02 : 1 
       }}
-      animate={{ x: state.x, y: state.y }}
       transition={{ type: 'spring', stiffness: 400, damping: 35 }}
     >
       <motion.div
@@ -190,25 +220,57 @@ export default function GlassChatPiP() {
       >
         {/* Header */}
         <div 
-          className="flex items-center gap-2 px-3 py-2 border-b border-white/10 cursor-grab active:cursor-grabbing"
-          onPointerDown={(e) => dragControls.start(e)}
+          className={cn(
+            "flex items-center gap-2 px-3 py-2 border-b border-white/10 transition-all duration-200",
+            "cursor-grab active:cursor-grabbing",
+            "hover:bg-white/5",
+            isDragging && "bg-white/10"
+          )}
+          style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
+          onMouseDown={handleDragStart}
+          onMouseUp={handleDragEnd}
         >
-          <Grip className="w-3 h-3 opacity-50" />
+          <Grip className={cn(
+            "w-3 h-3 transition-opacity duration-200",
+            isDragging ? "opacity-100" : "opacity-50"
+          )} />
           <MessageSquare className="w-4 h-4" />
           <span className="text-sm font-medium">Chat</span>
+          {isDragging && (
+            <motion.div
+              initial={{ opacity: 0, scale: 0.8 }}
+              animate={{ opacity: 1, scale: 1 }}
+              className="ml-2 px-2 py-0.5 bg-blue-500/20 rounded-full text-xs"
+            >
+              Moving...
+            </motion.div>
+          )}
+          {isResizing && (
+            <motion.div
+              initial={{ opacity: 0, scale: 0.8 }}
+              animate={{ opacity: 1, scale: 1 }}
+              className="ml-2 px-2 py-0.5 bg-green-500/20 rounded-full text-xs"
+            >
+              Resizing to {state.size}
+            </motion.div>
+          )}
           
-          <div className="ml-auto flex items-center gap-1">
+          <div className="ml-auto flex items-center gap-1" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
             {!state.collapsed && (
               <>
                 <button
-                  onClick={() => setState(prev => ({ 
-                    ...prev, 
-                    size: prev.size === 'S' ? 'M' : prev.size === 'M' ? 'L' : 'S' 
-                  }))}
-                  className="p-1.5 rounded-lg hover:bg-white/10 transition-colors"
-                  title="Change size"
+                  onClick={handleSizeChange}
+                  className={cn(
+                    "p-1.5 rounded-lg hover:bg-white/10 transition-all duration-200",
+                    isResizing && "bg-blue-500/20 scale-110"
+                  )}
+                  title={`Change size (${state.size} → ${state.size === 'S' ? 'M' : state.size === 'M' ? 'L' : 'S'})`}
+                  disabled={isResizing}
                 >
-                  <Maximize2 className="w-3.5 h-3.5" />
+                  <Maximize2 className={cn(
+                    "w-3.5 h-3.5 transition-all duration-200",
+                    isResizing && "animate-pulse"
+                  )} />
                 </button>
                 <button
                   className="p-1.5 rounded-lg hover:bg-white/10 transition-colors"
@@ -220,8 +282,12 @@ export default function GlassChatPiP() {
             )}
             <button
               onClick={() => setState(prev => ({ ...prev, collapsed: !prev.collapsed }))}
-              className="p-1.5 rounded-lg hover:bg-white/10 transition-colors"
+              className={cn(
+                "p-1.5 rounded-lg hover:bg-white/10 transition-all duration-200",
+                isResizing && "opacity-50"
+              )}
               title={state.collapsed ? "Expand" : "Collapse"}
+              disabled={isResizing}
             >
               {state.collapsed ? <Maximize2 className="w-3.5 h-3.5" /> : <Minus className="w-3.5 h-3.5" />}
             </button>
