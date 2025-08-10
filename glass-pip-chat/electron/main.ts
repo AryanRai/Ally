@@ -2,6 +2,7 @@ import { app, BrowserWindow, globalShortcut, ipcMain, clipboard, screen } from '
 import path from 'node:path';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { OllamaService, ChatMessage } from '../src/services/ollamaService.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -15,6 +16,26 @@ let clipboardMonitorInterval: NodeJS.Timeout | null = null;
 // Theme management
 let currentTheme: 'light' | 'dark' = 'dark';
 const THEME_FILE = path.join(app.getPath('userData'), 'theme.json');
+
+// Ollama service
+const ollamaService = new OllamaService();
+
+// Server status (Digital Ocean droplet)
+interface ServerStatus {
+  ip: string;
+  domain: string;
+  status: 'online' | 'offline' | 'unknown';
+  lastCheck: number;
+  uptime?: number;
+  load?: number;
+}
+
+let serverStatus: ServerStatus = {
+  ip: '192.168.1.100', // Placeholder IP
+  domain: 'your-droplet.com', // Placeholder domain
+  status: 'unknown',
+  lastCheck: Date.now()
+};
 
 interface WindowBounds {
   x?: number;
@@ -263,6 +284,97 @@ ipcMain.on('theme:set', (_, theme: 'light' | 'dark') => {
   if (win && process.platform === 'darwin') {
     win.setVibrancy(theme === 'dark' ? 'under-window' : 'under-page');
     win.webContents.send('theme:changed', theme);
+  }
+});
+
+// Ollama API handlers
+ipcMain.handle('ollama:isAvailable', async () => {
+  try {
+    return await ollamaService.isAvailable();
+  } catch (error) {
+    console.error('Error checking Ollama availability:', error);
+    return false;
+  }
+});
+
+ipcMain.handle('ollama:getModels', async () => {
+  try {
+    return await ollamaService.getModels();
+  } catch (error) {
+    console.error('Error getting Ollama models:', error);
+    return [];
+  }
+});
+
+ipcMain.handle('ollama:chat', async (_, messages: ChatMessage[], model?: string) => {
+  try {
+    return await ollamaService.chat(messages, model);
+  } catch (error) {
+    console.error('Error in Ollama chat:', error);
+    throw error;
+  }
+});
+
+ipcMain.handle('ollama:getConfig', () => {
+  return ollamaService.getConfig();
+});
+
+ipcMain.on('ollama:updateConfig', (_, config) => {
+  ollamaService.updateConfig(config);
+});
+
+// Server status handlers
+ipcMain.handle('server:getStatus', () => {
+  return serverStatus;
+});
+
+ipcMain.handle('server:checkStatus', async () => {
+  try {
+    // Simulate server status check - replace with actual implementation
+    const isOnline = Math.random() > 0.1; // 90% uptime simulation
+    
+    serverStatus = {
+      ...serverStatus,
+      status: isOnline ? 'online' : 'offline',
+      lastCheck: Date.now(),
+      uptime: isOnline ? Math.floor(Math.random() * 86400) : undefined,
+      load: isOnline ? Math.random() * 100 : undefined
+    };
+    
+    return serverStatus;
+  } catch (error) {
+    console.error('Error checking server status:', error);
+    serverStatus.status = 'unknown';
+    serverStatus.lastCheck = Date.now();
+    return serverStatus;
+  }
+});
+
+ipcMain.on('server:updateConfig', (_, config: Partial<ServerStatus>) => {
+  serverStatus = { ...serverStatus, ...config };
+});
+
+// Command execution handler
+ipcMain.handle('system:executeCommand', async (_, command: string) => {
+  try {
+    const { exec } = require('child_process');
+    const { promisify } = require('util');
+    const execAsync = promisify(exec);
+    
+    const result = await execAsync(command);
+    return {
+      success: true,
+      stdout: result.stdout,
+      stderr: result.stderr
+    };
+  } catch (error: any) {
+    console.error('Command execution failed:', error);
+    return {
+      success: false,
+      error: error.message,
+      stdout: error.stdout || '',
+      stderr: error.stderr || ''
+    };
   }
 });
 

@@ -1,3 +1,31 @@
+export interface OllamaModel {
+  name: string;
+  modified_at: string;
+  size: number;
+  digest: string;
+}
+
+export interface ChatMessage {
+  role: 'user' | 'assistant' | 'system';
+  content: string;
+}
+
+export interface ServerStatus {
+  ip: string;
+  domain: string;
+  status: 'online' | 'offline' | 'unknown';
+  lastCheck: number;
+  uptime?: number;
+  load?: number;
+}
+
+export interface CommandResult {
+  success: boolean;
+  stdout?: string;
+  stderr?: string;
+  error?: string;
+}
+
 export interface PipAPI {
   show: () => void;
   hide: () => void;
@@ -29,6 +57,27 @@ export interface PipAPI {
   getTheme: () => Promise<'light' | 'dark'>;
   setTheme: (theme: 'light' | 'dark') => void;
   onThemeChanged: (callback: (theme: 'light' | 'dark') => void) => () => void;
+
+  // Ollama API
+  ollama: {
+    isAvailable: () => Promise<boolean>;
+    getModels: () => Promise<OllamaModel[]>;
+    chat: (messages: ChatMessage[], model?: string) => Promise<string>;
+    getConfig: () => Promise<any>;
+    updateConfig: (config: any) => void;
+  };
+
+  // Server status
+  server: {
+    getStatus: () => Promise<ServerStatus>;
+    checkStatus: () => Promise<ServerStatus>;
+    updateConfig: (config: Partial<ServerStatus>) => void;
+  };
+
+  // System commands
+  system: {
+    executeCommand: (command: string) => Promise<CommandResult>;
+  };
 }
 
 declare global {

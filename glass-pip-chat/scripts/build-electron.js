@@ -1,5 +1,5 @@
 import { execSync } from 'child_process';
-import { copyFileSync, mkdirSync } from 'fs';
+import { copyFileSync, mkdirSync, existsSync, renameSync } from 'fs';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 
@@ -12,15 +12,23 @@ console.log('Building Electron files...');
 mkdirSync(join(rootDir, 'dist', 'electron'), { recursive: true });
 
 // Compile main process (ESNext modules)
-execSync('tsc electron/main.ts --outDir dist/electron --module esnext --target es2022 --moduleResolution node --esModuleInterop true', {
+execSync('tsc electron/main.ts --outDir dist --module esnext --target es2022 --moduleResolution node --esModuleInterop true', {
   cwd: rootDir,
   stdio: 'inherit'
 });
 
-// Compile preload script (CommonJS for Electron compatibility)
-execSync('tsc electron/preload.ts --outDir dist/electron --module commonjs --target es2022 --moduleResolution node --esModuleInterop true', {
+// Compile preload script (CommonJS for Electron compatibility)  
+execSync('tsc electron/preload.ts --outDir dist --module commonjs --target es2022 --moduleResolution node --esModuleInterop true', {
   cwd: rootDir,
   stdio: 'inherit'
 });
+
+// Move preload.js to the correct location (in the same directory as main.js)
+const preloadSource = join(rootDir, 'dist', 'preload.js');
+const preloadDest = join(rootDir, 'dist', 'electron', 'preload.js');
+
+if (existsSync(preloadSource)) {
+  renameSync(preloadSource, preloadDest);
+}
 
 console.log('Electron build completed!');
