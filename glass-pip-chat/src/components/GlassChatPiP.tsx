@@ -200,7 +200,7 @@ export default function GlassChatPiP() {
         width: dims.w, 
         height: state.collapsed ? 64 : dims.h,
         zIndex: 50
-      }}
+      } as React.CSSProperties}
       initial={{ opacity: 0, scale: 0.9 }}
       animate={{ 
         opacity: 1, 
@@ -211,7 +211,9 @@ export default function GlassChatPiP() {
       <motion.div
         layout
         className={cn(
-          "h-full w-full rounded-2xl overflow-hidden relative",
+          "h-full w-full overflow-hidden relative",
+          // Enhanced rounded corners for Windows
+          platform === 'win32' ? "rounded-3xl" : "rounded-2xl",
           "border border-white/20",
           "shadow-[0_8px_40px_rgba(0,0,0,0.4)]",
           // Different background styles for Windows vs other platforms
