@@ -17,6 +17,18 @@ export interface PipAPI {
   
   // Get platform info
   getPlatform: () => Promise<string>;
+  
+  // Context monitoring
+  getClipboard: () => Promise<string>;
+  getSelectedText: () => Promise<string>;
+  startContextMonitoring: () => void;
+  stopContextMonitoring: () => void;
+  onClipboardChanged: (callback: (data: { text: string; timestamp: number }) => void) => () => void;
+  
+  // Theme management
+  getTheme: () => Promise<'light' | 'dark'>;
+  setTheme: (theme: 'light' | 'dark') => void;
+  onThemeChanged: (callback: (theme: 'light' | 'dark') => void) => () => void;
 }
 
 declare global {
