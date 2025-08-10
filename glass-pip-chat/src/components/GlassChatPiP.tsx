@@ -229,7 +229,7 @@ export default function GlassChatPiP() {
       <motion.div
         layout
         className={cn(
-          "h-full w-full rounded-2xl overflow-hidden",
+          "h-full w-full rounded-2xl overflow-hidden relative",
           "border border-white/20",
           "shadow-[0_8px_40px_rgba(0,0,0,0.4)]",
           "bg-gradient-to-b from-white/[0.08] to-white/[0.02]",
@@ -241,29 +241,44 @@ export default function GlassChatPiP() {
         animate={{ opacity: 1, scale: 1 }}
         transition={{ duration: 0.3 }}
       >
-        {/* Header */}
+        {/* Header - Draggable Area */}
         <div 
           className={cn(
             "flex items-center gap-2 px-3 py-2 border-b border-white/10 transition-all duration-200",
             "cursor-grab active:cursor-grabbing",
-            "hover:bg-white/5"
+            "hover:bg-white/5 hover:border-blue-500/30",
+            "relative z-10 min-h-[44px]"
           )}
-          style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
+          style={{ 
+            WebkitAppRegion: 'drag',
+            WebkitUserSelect: 'none',
+            userSelect: 'none'
+          } as React.CSSProperties}
+          title="Drag to move window"
         >
-          <Grip className="w-3 h-3 opacity-50" />
-          <MessageSquare className="w-4 h-4" />
-          <span className="text-sm font-medium">Chat</span>
+          <div className="flex items-center gap-2 flex-1 min-w-0">
+            <Grip className="w-3 h-3 opacity-50 flex-shrink-0" />
+            <MessageSquare className="w-4 h-4 flex-shrink-0" />
+            <span className="text-sm font-medium truncate">Chat</span>
+          </div>
           {isResizing && (
             <motion.div
               initial={{ opacity: 0, scale: 0.8 }}
               animate={{ opacity: 1, scale: 1 }}
-              className="ml-2 px-2 py-0.5 bg-green-500/20 rounded-full text-xs"
+              className="px-2 py-0.5 bg-green-500/20 rounded-full text-xs flex-shrink-0"
             >
               Resizing to {state.size}
             </motion.div>
           )}
           
-          <div className="ml-auto flex items-center gap-1" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
+          <div 
+            className="flex items-center gap-1 flex-shrink-0" 
+            style={{ 
+              WebkitAppRegion: 'no-drag',
+              WebkitUserSelect: 'none',
+              userSelect: 'none'
+            } as React.CSSProperties}
+          >
             {!state.collapsed && (
               <>
                 <button
