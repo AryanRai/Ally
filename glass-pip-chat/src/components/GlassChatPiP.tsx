@@ -53,7 +53,6 @@ export default function GlassChatPiP() {
   
   const [input, setInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
-  const [isDragging, setIsDragging] = useState(false);
   const [isResizing, setIsResizing] = useState(false);
   
   const containerRef = useRef<HTMLDivElement>(null);
@@ -119,14 +118,7 @@ export default function GlassChatPiP() {
     }
   }, []);
 
-  // Handle drag visual feedback
-  const handleDragStart = () => {
-    setIsDragging(true);
-  };
-
-  const handleDragEnd = () => {
-    setIsDragging(false);
-  };
+  // Native Electron dragging handles everything via -webkit-app-region CSS
 
   // Calculate snap position
   const snapToCorner = (x: number, y: number) => {
@@ -217,8 +209,7 @@ export default function GlassChatPiP() {
     <motion.div
       ref={containerRef}
       className={cn(
-        "fixed transition-all duration-300",
-        isDragging ? "select-none scale-105 shadow-2xl cursor-grabbing" : "select-none",
+        "fixed transition-all duration-300 select-none",
         isResizing && "shadow-lg"
       )}
       style={{ 
@@ -231,7 +222,7 @@ export default function GlassChatPiP() {
       initial={{ opacity: 0, scale: 0.9 }}
       animate={{ 
         opacity: 1, 
-        scale: isDragging ? 1.05 : isResizing ? 1.02 : 1 
+        scale: isResizing ? 1.02 : 1 
       }}
       transition={{ type: 'spring', stiffness: 400, damping: 35 }}
     >
@@ -255,28 +246,13 @@ export default function GlassChatPiP() {
           className={cn(
             "flex items-center gap-2 px-3 py-2 border-b border-white/10 transition-all duration-200",
             "cursor-grab active:cursor-grabbing",
-            "hover:bg-white/5",
-            isDragging && "bg-white/10"
+            "hover:bg-white/5"
           )}
           style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
-          onMouseDown={handleDragStart}
-          onMouseUp={handleDragEnd}
         >
-          <Grip className={cn(
-            "w-3 h-3 transition-opacity duration-200",
-            isDragging ? "opacity-100" : "opacity-50"
-          )} />
+          <Grip className="w-3 h-3 opacity-50" />
           <MessageSquare className="w-4 h-4" />
           <span className="text-sm font-medium">Chat</span>
-          {isDragging && (
-            <motion.div
-              initial={{ opacity: 0, scale: 0.8 }}
-              animate={{ opacity: 1, scale: 1 }}
-              className="ml-2 px-2 py-0.5 bg-blue-500/20 rounded-full text-xs"
-            >
-              Moving...
-            </motion.div>
-          )}
           {isResizing && (
             <motion.div
               initial={{ opacity: 0, scale: 0.8 }}
