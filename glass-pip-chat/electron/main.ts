@@ -1,4 +1,4 @@
-import { app, BrowserWindow, globalShortcut, ipcMain, nativeTheme } from 'electron';
+import { app, BrowserWindow, globalShortcut, ipcMain } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -31,7 +31,7 @@ function saveBounds(): void {
 
 async function createWindow(): Promise<void> {
   const savedBounds = loadBounds();
-  
+
   win = new BrowserWindow({
     width: savedBounds?.width ?? 400,
     height: savedBounds?.height ?? 560,
@@ -57,6 +57,9 @@ async function createWindow(): Promise<void> {
     ...(process.platform === 'darwin' ? {
       vibrancy: 'under-window' as const,
       visualEffectState: 'active' as const,
+    } : {}),
+    ...(process.platform === 'win32' ? {
+      backgroundMaterial: 'acrylic' as const,
     } : {})
   });
 
@@ -107,46 +110,59 @@ ipcMain.on('pip:close', () => {
 });
 
 // Window resizing handlers
-ipcMain.on('window:resize', (event, { width, height }) => {
+ipcMain.on('window:resize', (_, { width, height }) => {
   console.log('Received resize request:', width, 'x', height);
   if (!win) return;
-  
-  // Get current position and size
+
+  // Get current position
   const [x, y] = win.getPosition();
   const [currentWidth, currentHeight] = win.getSize();
-  
+
   console.log('Current window size:', currentWidth, 'x', currentHeight);
-  
+
   // Ensure dimensions are within bounds
   const constrainedWidth = Math.max(320, Math.min(800, width));
   const constrainedHeight = Math.max(64, Math.min(1000, height));
-  
-  // Set new size with animation
-  win.setSize(constrainedWidth, constrainedHeight, true);
-  
-  // Maintain position
-  win.setPosition(x, y);
-  
-  console.log('Window resized to:', constrainedWidth, 'x', constrainedHeight);
-  
-  // Verify the resize worked
-  setTimeout(() => {
-    const [newWidth, newHeight] = win!.getSize();
-    console.log('Actual window size after resize:', newWidth, 'x', newHeight);
-  }, 100);
+
+  // Only resize if dimensions actually changed
+  if (currentWidth !== constrainedWidth || currentHeight !== constrainedHeight) {
+    // Set new size with animation
+    win.setSize(constrainedWidth, constrainedHeight, true);
+
+    // Maintain position (important for PiP behavior)
+    win.setPosition(x, y);
+
+    console.log('Window resized to:', constrainedWidth, 'x', constrainedHeight);
+
+    // Verify the resize worked and save bounds
+    setTimeout(() => {
+      const [newWidth, newHeight] = win!.getSize();
+      console.log('Actual window size after resize:', newWidth, 'x', newHeight);
+      saveBounds();
+
+      // Notify renderer that resize is complete
+      win!.webContents.send('window:resize-complete', { width: newWidth, height: newHeight });
+    }, 100);
+  } else {
+    console.log('No resize needed - dimensions unchanged');
+  }
 });
 
 ipcMain.handle('window:get-size', () => {
   if (!win) return { width: 400, height: 560 };
-  
+
   const [width, height] = win.getSize();
   return { width, height };
+});
+
+ipcMain.handle('system:get-platform', () => {
+  return process.platform;
 });
 
 // App event handlers
 app.whenReady().then(async () => {
   await createWindow();
-  
+
   // Register global shortcut
   const shortcut = 'CommandOrControl+Shift+C';
   const registered = globalShortcut.register(shortcut, () => {
