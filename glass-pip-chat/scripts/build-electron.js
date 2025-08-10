@@ -1,5 +1,5 @@
 import { execSync } from 'child_process';
-import { copyFileSync, mkdirSync, existsSync, renameSync } from 'fs';
+import { copyFileSync, mkdirSync, existsSync, renameSync, cpSync } from 'fs';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 
@@ -29,6 +29,15 @@ const preloadDest = join(rootDir, 'dist', 'electron', 'preload.js');
 
 if (existsSync(preloadSource)) {
   renameSync(preloadSource, preloadDest);
+}
+
+// Copy assets folder to dist
+const assetsSource = join(rootDir, 'assets');
+const assetsDest = join(rootDir, 'dist', 'assets');
+
+if (existsSync(assetsSource)) {
+  mkdirSync(assetsDest, { recursive: true });
+  cpSync(assetsSource, assetsDest, { recursive: true });
 }
 
 console.log('Electron build completed!');

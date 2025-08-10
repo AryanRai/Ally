@@ -102,6 +102,7 @@ async function createWindow(): Promise<void> {
     hasShadow: true,
     alwaysOnTop: true,
     backgroundColor: '#00000000',
+    icon: path.join(__dirname, '../assets/allay.png'),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -146,16 +147,15 @@ async function createWindow(): Promise<void> {
 }
 
 function createTray() {
-  // Create a default tray icon
+  // Use the allay.png icon for the tray
+  const iconPath = path.join(__dirname, '../assets/allay.png');
+  let trayIcon = nativeImage.createFromPath(iconPath);
+  
+  // Resize icon for tray
   const size = process.platform === 'darwin' ? 16 : 32;
-  const trayIcon = nativeImage.createEmpty();
+  trayIcon = trayIcon.resize({ width: size, height: size });
   
-  // Create a simple colored icon
-  const canvas = trayIcon.resize({ width: size, height: size });
-  
-  // For now, use the native image API to create a simple icon
-  // In production, you would use a proper icon file
-  tray = new Tray(canvas);
+  tray = new Tray(trayIcon);
   
   const contextMenu = Menu.buildFromTemplate([
     {
