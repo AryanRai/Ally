@@ -62,9 +62,7 @@ export default function SettingsModal({ isOpen, onClose, platform, theme: initia
                   : "border-black/20 text-black/90",
                 // Platform-specific backgrounds
                 platform === 'win32' 
-                  ? theme === 'dark'
-                    ? "bg-gradient-to-b from-gray-900/95 to-gray-800/95" 
-                    : "bg-gradient-to-b from-gray-100/95 to-gray-200/95"
+                  ? "bg-black/20" // Let Windows acrylic handle the background
                   : theme === 'dark'
                     ? "bg-gradient-to-b from-gray-900/90 to-gray-800/90 backdrop-blur-2xl backdrop-saturate-150"
                     : "bg-gradient-to-b from-gray-100/90 to-gray-200/90 backdrop-blur-2xl backdrop-saturate-150"
@@ -73,14 +71,18 @@ export default function SettingsModal({ isOpen, onClose, platform, theme: initia
             {/* Header */}
             <div className={cn(
               "flex items-center justify-between p-4 border-b",
-              theme === 'dark' ? "border-white/10" : "border-black/10"
+              platform === 'win32'
+                ? "border-white/10"
+                : theme === 'dark' ? "border-white/10" : "border-black/10"
             )}>
               <h2 className="text-lg font-semibold">Settings</h2>
               <button
                 onClick={onClose}
                 className={cn(
                   "p-1.5 rounded-lg transition-colors",
-                  theme === 'dark' ? "hover:bg-white/10" : "hover:bg-black/10"
+                  platform === 'win32' 
+                    ? "hover:bg-white/10"
+                    : theme === 'dark' ? "hover:bg-white/10" : "hover:bg-black/10"
                 )}
               >
                 <X className="w-4 h-4" />
@@ -93,26 +95,34 @@ export default function SettingsModal({ isOpen, onClose, platform, theme: initia
               <div className="space-y-3">
                 <h3 className={cn(
                   "text-sm font-medium",
-                  theme === 'dark' ? "text-white/80" : "text-black/80"
+                  platform === 'win32'
+                    ? "text-white/80"
+                    : theme === 'dark' ? "text-white/80" : "text-black/80"
                 )}>Appearance</h3>
                 
                 <div className="space-y-2">
                   <label className={cn(
                     "text-xs",
-                    theme === 'dark' ? "text-white/60" : "text-black/60"
+                    platform === 'win32'
+                      ? "text-white/60"
+                      : theme === 'dark' ? "text-white/60" : "text-black/60"
                   )}>Theme</label>
                   <div className="grid grid-cols-2 gap-2">
                     <button
                       onClick={() => handleThemeChange('light')}
                       className={cn(
                         "flex items-center gap-2 p-3 rounded-xl transition-all border",
-                        theme === 'light' 
-                          ? theme === 'dark'
-                            ? "bg-white/20 border-white/30" 
-                            : "bg-black/20 border-black/30"
-                          : theme === 'dark'
-                            ? "border-white/10 bg-white/5 hover:bg-white/10"
-                            : "border-black/10 bg-black/5 hover:bg-black/10"
+                        platform === 'win32'
+                          ? theme === 'light'
+                            ? "bg-white/20 border-white/30"
+                            : "border-white/10 bg-white/5 hover:bg-white/10"
+                          : theme === 'light' 
+                            ? theme === 'dark'
+                              ? "bg-white/20 border-white/30" 
+                              : "bg-black/20 border-black/30"
+                            : theme === 'dark'
+                              ? "border-white/10 bg-white/5 hover:bg-white/10"
+                              : "border-black/10 bg-black/5 hover:bg-black/10"
                       )}
                     >
                       <Sun className="w-4 h-4" />
@@ -123,13 +133,17 @@ export default function SettingsModal({ isOpen, onClose, platform, theme: initia
                       onClick={() => handleThemeChange('dark')}
                       className={cn(
                         "flex items-center gap-2 p-3 rounded-xl transition-all border",
-                        theme === 'dark' 
+                        platform === 'win32'
                           ? theme === 'dark'
-                            ? "bg-white/20 border-white/30" 
-                            : "bg-black/20 border-black/30"
-                          : theme === 'dark'
-                            ? "border-white/10 bg-white/5 hover:bg-white/10"
-                            : "border-black/10 bg-black/5 hover:bg-black/10"
+                            ? "bg-white/20 border-white/30"
+                            : "border-white/10 bg-white/5 hover:bg-white/10"
+                          : theme === 'dark' 
+                            ? theme === 'dark'
+                              ? "bg-white/20 border-white/30" 
+                              : "bg-black/20 border-black/30"
+                            : theme === 'dark'
+                              ? "border-white/10 bg-white/5 hover:bg-white/10"
+                              : "border-black/10 bg-black/5 hover:bg-black/10"
                       )}
                     >
                       <Moon className="w-4 h-4" />
@@ -144,10 +158,7 @@ export default function SettingsModal({ isOpen, onClose, platform, theme: initia
                       <Monitor className="w-3 h-3" />
                       <span className="text-xs font-medium">Windows Acrylic</span>
                     </div>
-                    <p className={cn(
-                      "text-xs",
-                      theme === 'dark' ? "text-white/60" : "text-black/60"
-                    )}>
+                    <p className="text-xs text-white/60">
                       Theme changes will affect the acrylic background material for better system integration.
                     </p>
                   </div>
@@ -158,7 +169,9 @@ export default function SettingsModal({ isOpen, onClose, platform, theme: initia
               <div className="space-y-3">
                 <h3 className={cn(
                   "text-sm font-medium",
-                  theme === 'dark' ? "text-white/80" : "text-black/80"
+                  platform === 'win32'
+                    ? "text-white/80"
+                    : theme === 'dark' ? "text-white/80" : "text-black/80"
                 )}>Context Monitoring</h3>
                 
                 <div className="p-3 rounded-lg bg-green-500/10 border border-green-500/20">
@@ -168,7 +181,9 @@ export default function SettingsModal({ isOpen, onClose, platform, theme: initia
                   </div>
                   <p className={cn(
                     "text-xs",
-                    theme === 'dark' ? "text-white/60" : "text-black/60"
+                    platform === 'win32'
+                      ? "text-white/60"
+                      : theme === 'dark' ? "text-white/60" : "text-black/60"
                   )}>
                     Clipboard and selection monitoring is enabled. Context will appear automatically when available.
                   </p>
@@ -179,11 +194,15 @@ export default function SettingsModal({ isOpen, onClose, platform, theme: initia
               <div className="space-y-2">
                 <h3 className={cn(
                   "text-sm font-medium",
-                  theme === 'dark' ? "text-white/80" : "text-black/80"
+                  platform === 'win32'
+                    ? "text-white/80"
+                    : theme === 'dark' ? "text-white/80" : "text-black/80"
                 )}>About</h3>
                 <div className={cn(
                   "text-xs space-y-1",
-                  theme === 'dark' ? "text-white/60" : "text-black/60"
+                  platform === 'win32'
+                    ? "text-white/60"
+                    : theme === 'dark' ? "text-white/60" : "text-black/60"
                 )}>
                   <p>Glass PiP Chat v1.0.0</p>
                   <p>Platform: {platform}</p>

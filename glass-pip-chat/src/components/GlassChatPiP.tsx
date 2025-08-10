@@ -311,20 +311,16 @@ export default function GlassChatPiP() {
           "h-full w-full overflow-hidden relative",
           // Enhanced rounded corners for Windows
           platform === 'win32' ? "rounded-3xl" : "rounded-2xl",
-          "border",
-          theme === 'dark' ? "border-white/20" : "border-black/20",
+          "border border-white/20",
           "shadow-[0_8px_40px_rgba(0,0,0,0.4)]",
-          // Theme-aware background styles
+          // Platform-specific background handling
           platform === 'win32' 
-            ? theme === 'dark'
-              ? "bg-gradient-to-b from-white/[0.03] to-white/[0.01]" 
-              : "bg-gradient-to-b from-black/[0.03] to-black/[0.01]"
+            ? "bg-transparent" // Let Windows acrylic handle the background
             : theme === 'dark'
               ? "bg-gradient-to-b from-white/[0.08] to-white/[0.02] backdrop-blur-2xl backdrop-saturate-150"
               : "bg-gradient-to-b from-black/[0.08] to-black/[0.02] backdrop-blur-2xl backdrop-saturate-150",
-          theme === 'dark' 
-            ? "[background-image:radial-gradient(ellipse_at_top,rgba(255,255,255,0.1),transparent)] text-white/90"
-            : "[background-image:radial-gradient(ellipse_at_top,rgba(0,0,0,0.1),transparent)] text-black/90"
+          // Text color based on theme
+          theme === 'dark' ? "text-white/90" : "text-black/90"
         )}
         initial={{ opacity: 0, scale: 0.9 }}
         animate={{ opacity: 1, scale: 1 }}
@@ -336,9 +332,12 @@ export default function GlassChatPiP() {
             "flex items-center gap-2 px-3 py-2 border-b transition-all duration-200",
             "cursor-grab active:cursor-grabbing",
             "relative z-10 min-h-[44px]",
-            theme === 'dark' 
+            // Windows: minimal styling to let acrylic show through
+            platform === 'win32'
               ? "border-white/10 hover:bg-white/5 hover:border-blue-500/30"
-              : "border-black/10 hover:bg-black/5 hover:border-blue-500/30"
+              : theme === 'dark' 
+                ? "border-white/10 hover:bg-white/5 hover:border-blue-500/30"
+                : "border-black/10 hover:bg-black/5 hover:border-blue-500/30"
           )}
           style={{ 
             WebkitAppRegion: 'drag',
@@ -455,9 +454,10 @@ export default function GlassChatPiP() {
                     exit={{ opacity: 0, height: 0 }}
                     className={cn(
                       "border-b p-3 space-y-2",
-                      "bg-gradient-to-r from-blue-500/10 to-purple-500/10",
-                      platform !== 'win32' && "backdrop-blur-sm",
-                      theme === 'dark' ? "border-white/10" : "border-black/10"
+                      platform === 'win32'
+                        ? "bg-blue-500/5 border-white/10" // Minimal overlay on Windows
+                        : "bg-gradient-to-r from-blue-500/10 to-purple-500/10 backdrop-blur-sm",
+                      platform !== 'win32' && (theme === 'dark' ? "border-white/10" : "border-black/10")
                     )}
                   >
                     <div className="flex items-center justify-between">
@@ -489,9 +489,11 @@ export default function GlassChatPiP() {
                         <div className={cn(
                           "text-xs p-2 rounded-lg max-h-16 overflow-y-auto",
                           "border scrollbar-thin",
-                          theme === 'dark' 
+                          platform === 'win32'
                             ? "bg-white/5 border-white/10 scrollbar-thumb-white/10"
-                            : "bg-black/5 border-black/10 scrollbar-thumb-black/10"
+                            : theme === 'dark' 
+                              ? "bg-white/5 border-white/10 scrollbar-thumb-white/10"
+                              : "bg-black/5 border-black/10 scrollbar-thumb-black/10"
                         )}>
                           {contextData.clipboard.length > 100 
                             ? `${contextData.clipboard.substring(0, 100)}...` 
@@ -509,9 +511,11 @@ export default function GlassChatPiP() {
                         <div className={cn(
                           "text-xs p-2 rounded-lg max-h-16 overflow-y-auto",
                           "border scrollbar-thin",
-                          theme === 'dark' 
+                          platform === 'win32'
                             ? "bg-white/5 border-white/10 scrollbar-thumb-white/10"
-                            : "bg-black/5 border-black/10 scrollbar-thumb-black/10"
+                            : theme === 'dark' 
+                              ? "bg-white/5 border-white/10 scrollbar-thumb-white/10"
+                              : "bg-black/5 border-black/10 scrollbar-thumb-black/10"
                         )}>
                           {contextData.selectedText.length > 100 
                             ? `${contextData.selectedText.substring(0, 100)}...` 
@@ -526,7 +530,9 @@ export default function GlassChatPiP() {
               {/* Messages */}
               <div className={cn(
                 "flex-1 overflow-y-auto p-3 space-y-3 scrollbar-thin",
-                theme === 'dark' ? "scrollbar-thumb-white/10" : "scrollbar-thumb-black/10"
+                platform === 'win32'
+                  ? "scrollbar-thumb-white/10"
+                  : theme === 'dark' ? "scrollbar-thumb-white/10" : "scrollbar-thumb-black/10"
               )}>
                 {messages.map((message) => (
                   <motion.div
@@ -537,9 +543,11 @@ export default function GlassChatPiP() {
                       "max-w-[85%] rounded-2xl px-3 py-2 text-sm",
                       message.role === 'user' 
                         ? "ml-auto bg-blue-500/20" + (platform !== 'win32' ? " backdrop-blur-md" : "")
-                        : theme === 'dark' 
-                          ? "bg-white/10" + (platform !== 'win32' ? " backdrop-blur-md" : "")
-                          : "bg-black/10" + (platform !== 'win32' ? " backdrop-blur-md" : "")
+                        : platform === 'win32'
+                          ? "bg-white/10" // Consistent on Windows
+                          : theme === 'dark' 
+                            ? "bg-white/10 backdrop-blur-md"
+                            : "bg-black/10 backdrop-blur-md"
                     )}
                   >
                     {message.content}
@@ -553,15 +561,21 @@ export default function GlassChatPiP() {
                   >
                     <div className={cn(
                       "w-2 h-2 rounded-full animate-bounce",
-                      theme === 'dark' ? "bg-white/40" : "bg-black/40"
+                      platform === 'win32' 
+                        ? "bg-white/40"
+                        : theme === 'dark' ? "bg-white/40" : "bg-black/40"
                     )} style={{ animationDelay: '0ms' }} />
                     <div className={cn(
                       "w-2 h-2 rounded-full animate-bounce",
-                      theme === 'dark' ? "bg-white/40" : "bg-black/40"
+                      platform === 'win32' 
+                        ? "bg-white/40"
+                        : theme === 'dark' ? "bg-white/40" : "bg-black/40"
                     )} style={{ animationDelay: '150ms' }} />
                     <div className={cn(
                       "w-2 h-2 rounded-full animate-bounce",
-                      theme === 'dark' ? "bg-white/40" : "bg-black/40"
+                      platform === 'win32' 
+                        ? "bg-white/40"
+                        : theme === 'dark' ? "bg-white/40" : "bg-black/40"
                     )} style={{ animationDelay: '300ms' }} />
                   </motion.div>
                 )}
@@ -571,7 +585,9 @@ export default function GlassChatPiP() {
               {/* Input */}
               <div className={cn(
                 "border-t p-3",
-                theme === 'dark' ? "border-white/10" : "border-black/10"
+                platform === 'win32'
+                  ? "border-white/10"
+                  : theme === 'dark' ? "border-white/10" : "border-black/10"
               )}>
                 {/* Quick context actions */}
                 {(contextData.clipboard || contextData.selectedText) && (
@@ -626,9 +642,11 @@ export default function GlassChatPiP() {
                       "flex-1 px-3 py-2 rounded-xl text-sm border transition-all",
                       "focus:outline-none focus:ring-2",
                       platform !== 'win32' && "backdrop-blur-md",
-                      theme === 'dark' 
+                      platform === 'win32'
                         ? "bg-white/10 border-white/10 placeholder:text-white/40 focus:ring-white/20"
-                        : "bg-black/10 border-black/10 placeholder:text-black/40 focus:ring-black/20"
+                        : theme === 'dark' 
+                          ? "bg-white/10 border-white/10 placeholder:text-white/40 focus:ring-white/20"
+                          : "bg-black/10 border-black/10 placeholder:text-black/40 focus:ring-black/20"
                     )}
                   />
                   <button
@@ -638,9 +656,11 @@ export default function GlassChatPiP() {
                       "p-2 rounded-xl transition-all",
                       "disabled:opacity-50 disabled:cursor-not-allowed",
                       platform !== 'win32' && "backdrop-blur-md",
-                      theme === 'dark' 
+                      platform === 'win32'
                         ? "bg-white/10 hover:bg-white/20"
-                        : "bg-black/10 hover:bg-black/20"
+                        : theme === 'dark' 
+                          ? "bg-white/10 hover:bg-white/20"
+                          : "bg-black/10 hover:bg-black/20"
                     )}
                   >
                     <CornerDownLeft className="w-4 h-4" />
