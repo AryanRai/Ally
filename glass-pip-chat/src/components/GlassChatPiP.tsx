@@ -142,7 +142,7 @@ export default function GlassChatPiP() {
     
     setIsResizing(true);
     const dims = sizePx[state.size];
-    const height = state.collapsed ? 64 : dims.h;
+    const height = state.collapsed ? 120 : dims.h; // Match the UI height for collapsed state
     
     console.log('Resizing window to:', dims.w, 'x', height, 'collapsed:', state.collapsed);
     
@@ -1127,6 +1127,20 @@ export default function GlassChatPiP() {
 
                 {/* Control buttons */}
                 <div className="flex items-center gap-1 flex-shrink-0">
+                  <button
+                    onClick={handleSizeChange}
+                    className={cn(
+                      "p-1.5 rounded-lg hover:bg-white/10 transition-all duration-200",
+                      isResizing && "bg-blue-500/20 scale-110"
+                    )}
+                    title={`Resize (${state.size} → ${state.size === 'S' ? 'M' : state.size === 'M' ? 'L' : 'S'})`}
+                    disabled={isResizing}
+                  >
+                    <div className="relative">
+                      <div className="w-3.5 h-3.5 border border-current rounded-sm" />
+                      <div className="absolute -top-0.5 -right-0.5 w-2 h-2 border border-current rounded-sm bg-current/20" />
+                    </div>
+                  </button>
                   <button
                     onClick={handleCollapseToggle}
                     className={cn(
