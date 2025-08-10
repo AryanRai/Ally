@@ -1,4 +1,4 @@
-import { app, BrowserWindow, globalShortcut, ipcMain } from 'electron';
+import { app, BrowserWindow, globalShortcut, ipcMain, clipboard, screen } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -7,6 +7,14 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 let win: BrowserWindow | null = null;
 const BOUNDS_FILE = path.join(app.getPath('userData'), 'window-bounds.json');
+
+// Context monitoring
+let lastClipboardText = '';
+let clipboardMonitorInterval: NodeJS.Timeout | null = null;
+
+// Theme management
+let currentTheme: 'light' | 'dark' = 'dark';
+const THEME_FILE = path.join(app.getPath('userData'), 'theme.json');
 
 interface WindowBounds {
   x?: number;
@@ -29,8 +37,22 @@ function saveBounds(): void {
   fs.writeFileSync(BOUNDS_FILE, JSON.stringify(bounds));
 }
 
+function loadTheme(): 'light' | 'dark' {
+  try {
+    const themeData = JSON.parse(fs.readFileSync(THEME_FILE, 'utf8'));
+    return themeData.theme || 'dark';
+  } catch {
+    return 'dark';
+  }
+}
+
+function saveTheme(theme: 'light' | 'dark'): void {
+  fs.writeFileSync(THEME_FILE, JSON.stringify({ theme }));
+}
+
 async function createWindow(): Promise<void> {
   const savedBounds = loadBounds();
+  currentTheme = loadTheme();
 
   win = new BrowserWindow({
     width: savedBounds?.width ?? 400,
@@ -60,7 +82,6 @@ async function createWindow(): Promise<void> {
     } : {}),
     ...(process.platform === 'win32' ? {
       backgroundMaterial: 'acrylic' as const,
-      // Additional Windows-specific options for better rounded corners
       titleBarStyle: 'hidden' as const,
     } : {})
   });
@@ -161,6 +182,90 @@ ipcMain.handle('system:get-platform', () => {
   return process.platform;
 });
 
+// Context monitoring functions
+function startClipboardMonitoring() {
+  if (clipboardMonitorInterval) return;
+  
+  lastClipboardText = clipboard.readText();
+  
+  clipboardMonitorInterval = setInterval(() => {
+    const currentText = clipboard.readText();
+    if (currentText !== lastClipboardText && currentText.trim()) {
+      lastClipboardText = currentText;
+      
+      // Send clipboard update to renderer
+      if (win && !win.isDestroyed()) {
+        win.webContents.send('context:clipboard-changed', {
+          text: currentText,
+          timestamp: Date.now()
+        });
+      }
+    }
+  }, 500); // Check every 500ms
+}
+
+function stopClipboardMonitoring() {
+  if (clipboardMonitorInterval) {
+    clearInterval(clipboardMonitorInterval);
+    clipboardMonitorInterval = null;
+  }
+}
+
+// Context API handlers
+ipcMain.handle('context:get-clipboard', () => {
+  return clipboard.readText();
+});
+
+ipcMain.handle('context:get-selected-text', async () => {
+  // This is a simplified approach - in a real implementation you might need
+  // platform-specific solutions for getting selected text from other apps
+  try {
+    // Store current clipboard
+    const originalClipboard = clipboard.readText();
+    
+    // Simulate Ctrl+C to copy selected text (if any)
+    // Note: This is a basic approach and might not work in all scenarios
+    const { globalShortcut } = require('electron');
+    
+    // For now, return the current clipboard as selected text
+    // In a production app, you'd want more sophisticated selection detection
+    return clipboard.readText();
+  } catch (error) {
+    console.error('Error getting selected text:', error);
+    return '';
+  }
+});
+
+ipcMain.on('context:start-monitoring', () => {
+  startClipboardMonitoring();
+});
+
+ipcMain.on('context:stop-monitoring', () => {
+  stopClipboardMonitoring();
+});
+
+// Theme handlers
+ipcMain.handle('theme:get', () => {
+  return currentTheme;
+});
+
+ipcMain.on('theme:set', (_, theme: 'light' | 'dark') => {
+  currentTheme = theme;
+  saveTheme(theme);
+  
+  // Apply theme to window
+  if (win && process.platform === 'win32') {
+    // For Windows, we can change the theme by updating the window's appearance
+    win.webContents.send('theme:changed', theme);
+  }
+  
+  // On macOS, update vibrancy
+  if (win && process.platform === 'darwin') {
+    win.setVibrancy(theme === 'dark' ? 'under-window' : 'under-page');
+    win.webContents.send('theme:changed', theme);
+  }
+});
+
 // App event handlers
 app.whenReady().then(async () => {
   await createWindow();
@@ -197,6 +302,7 @@ app.on('activate', () => {
 });
 
 app.on('will-quit', () => {
-  // Unregister all shortcuts
+  // Cleanup
+  stopClipboardMonitoring();
   globalShortcut.unregisterAll();
 });
