@@ -253,37 +253,7 @@ export default function GlassChatPiP() {
     }
   }, []);
 
-  // Listen for quick input focus events from global shortcuts
-  useEffect(() => {
-    const handleFocusQuickInput = () => {
-      // Focus the quick input in collapsed mode
-      const quickInputElement = document.querySelector('input[placeholder="Type your message..."]') as HTMLInputElement;
-      if (quickInputElement) {
-        quickInputElement.focus();
-      }
-    };
 
-    const handleShowCollapsedAndFocusQuick = () => {
-      // First, ensure we're in collapsed mode
-      setState(prev => ({ ...prev, collapsed: true }));
-      
-      // Then focus the quick input after a brief delay to ensure UI has updated
-      setTimeout(() => {
-        const quickInputElement = document.querySelector('input[placeholder="Type your message..."]') as HTMLInputElement;
-        if (quickInputElement) {
-          quickInputElement.focus();
-        }
-      }, 100);
-    };
-
-    window.addEventListener('focus-quick-input', handleFocusQuickInput);
-    window.addEventListener('show-collapsed-and-focus-quick', handleShowCollapsedAndFocusQuick);
-    
-    return () => {
-      window.removeEventListener('focus-quick-input', handleFocusQuickInput);
-      window.removeEventListener('show-collapsed-and-focus-quick', handleShowCollapsedAndFocusQuick);
-    };
-  }, []);
 
   // Context monitoring setup
   useEffect(() => {
@@ -416,10 +386,7 @@ export default function GlassChatPiP() {
     return () => clearInterval(interval);
   }, []);
 
-  // Native Electron dragging handles everything via -webkit-app-region CSS
-
-
-
+  // Function definitions (moved before useEffects to avoid reference errors)
   const handleSizeChange = () => {
     const nextSize: Size = state.size === 'S' ? 'M' : state.size === 'M' ? 'L' : 'S';
     setState(prev => ({ ...prev, size: nextSize }));
@@ -438,6 +405,88 @@ export default function GlassChatPiP() {
     setStreamingResponse('');
     // TODO: Add actual API cancellation logic here when implemented
   };
+
+  // Listen for focus and shortcut events from global shortcuts (moved after function definitions)
+  useEffect(() => {
+    const handleFocusMainInput = () => {
+      // Focus the main input in expanded mode
+      if (inputRef.current) {
+        inputRef.current.focus();
+      }
+    };
+
+    const handleFocusQuickInput = () => {
+      // Focus the quick input in collapsed mode
+      const quickInputElement = document.querySelector('input[placeholder="Type your message..."]') as HTMLInputElement;
+      if (quickInputElement) {
+        quickInputElement.focus();
+      }
+    };
+
+    const handleShowCollapsedAndFocusQuick = () => {
+      // First, ensure we're in collapsed mode
+      setState(prev => ({ ...prev, collapsed: true }));
+      
+      // Then focus the quick input after a brief delay to ensure UI has updated
+      setTimeout(() => {
+        const quickInputElement = document.querySelector('input[placeholder="Type your message..."]') as HTMLInputElement;
+        if (quickInputElement) {
+          quickInputElement.focus();
+        }
+      }, 100);
+    };
+
+    const handleToggleCollapse = () => {
+      // Toggle between collapsed and expanded
+      setState(prev => ({ ...prev, collapsed: !prev.collapsed }));
+      
+      // Focus appropriate input after state change
+      setTimeout(() => {
+        if (state.collapsed) {
+          // If expanding, focus main input
+          if (inputRef.current) {
+            inputRef.current.focus();
+          }
+        } else {
+          // If collapsing, focus quick input
+          const quickInputElement = document.querySelector('input[placeholder="Type your message..."]') as HTMLInputElement;
+          if (quickInputElement) {
+            quickInputElement.focus();
+          }
+        }
+      }, 100);
+    };
+
+    const handleCycleSize = () => {
+      // Cycle through sizes S -> M -> L -> S
+      handleSizeChange();
+    };
+
+    const handleToggleContext = () => {
+      // Toggle context monitoring
+      setContextToggleEnabled(prev => !prev);
+      
+      // Visual feedback - could add a toast notification here
+      console.log('Context monitoring:', !contextToggleEnabled ? 'enabled' : 'disabled');
+    };
+
+    // Register all event listeners
+    window.addEventListener('focus-main-input', handleFocusMainInput);
+    window.addEventListener('focus-quick-input', handleFocusQuickInput);
+    window.addEventListener('show-collapsed-and-focus-quick', handleShowCollapsedAndFocusQuick);
+    window.addEventListener('toggle-collapse', handleToggleCollapse);
+    window.addEventListener('cycle-size', handleCycleSize);
+    window.addEventListener('toggle-context', handleToggleContext);
+    
+    return () => {
+      window.removeEventListener('focus-main-input', handleFocusMainInput);
+      window.removeEventListener('focus-quick-input', handleFocusQuickInput);
+      window.removeEventListener('show-collapsed-and-focus-quick', handleShowCollapsedAndFocusQuick);
+      window.removeEventListener('toggle-collapse', handleToggleCollapse);
+      window.removeEventListener('cycle-size', handleCycleSize);
+      window.removeEventListener('toggle-context', handleToggleContext);
+    };
+  }, [state.collapsed, contextToggleEnabled, handleSizeChange]);
 
   const handleCommandExecution = async (commandText: string, fromQuickInput?: boolean) => {
     // Parse command with potential remote execution syntax
@@ -1442,13 +1491,29 @@ export default function GlassChatPiP() {
                       <div className="absolute -top-1 -right-1 w-2 h-2 bg-blue-400 rounded-full animate-pulse" />
                     )}
                   </button>
+                  <button
+                    onClick={() => setContextToggleEnabled(!contextToggleEnabled)}
+                    className={cn(
+                      "p-1.5 rounded-lg transition-colors relative",
+                      contextToggleEnabled 
+                        ? "bg-green-500/20 hover:bg-green-500/30 text-green-300"
+                        : "bg-red-500/20 hover:bg-red-500/30 text-red-300"
+                    )}
+                    title={`Context monitoring: ${contextToggleEnabled ? 'ON' : 'OFF'} (Ctrl+Shift+T)`}
+                  >
+                    <Clipboard className="w-3.5 h-3.5" />
+                    <div className={cn(
+                      "absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full",
+                      contextToggleEnabled ? "bg-green-400" : "bg-red-400"
+                    )} />
+                  </button>
                 <button
                   onClick={handleSizeChange}
                   className={cn(
                     "p-1.5 rounded-lg hover:bg-white/10 transition-all duration-200",
                     isResizing && "bg-blue-500/20 scale-110"
                   )}
-                  title={`Change size (${state.size} → ${state.size === 'S' ? 'M' : state.size === 'M' ? 'L' : 'S'})`}
+                                      title={`Change size (${state.size} → ${state.size === 'S' ? 'M' : state.size === 'M' ? 'L' : 'S'}) - Ctrl+Shift+S`}
                   disabled={isResizing}
                 >
                   <Maximize2 className={cn(
@@ -1474,7 +1539,7 @@ export default function GlassChatPiP() {
                 "p-1.5 rounded-lg hover:bg-white/10 transition-all duration-200",
                 isResizing && "opacity-50"
               )}
-              title={state.collapsed ? "Expand" : "Collapse"}
+              title={`${state.collapsed ? "Expand" : "Collapse"} - Ctrl+Shift+M`}
               disabled={isResizing}
             >
               {state.collapsed ? <Maximize2 className="w-3.5 h-3.5" /> : <Minus className="w-3.5 h-3.5" />}

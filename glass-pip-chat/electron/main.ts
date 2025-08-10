@@ -465,8 +465,8 @@ app.whenReady().then(async () => {
     } else {
       win.show();
       win.focus();
-      // Notify renderer to focus input
-      win.webContents.send('focus-input');
+      // Auto focus on main input when showing
+      win.webContents.send('focus-main-input');
     }
   });
 
@@ -491,6 +491,54 @@ app.whenReady().then(async () => {
 
   if (!quickRegistered) {
     console.error('Failed to register quick access shortcut');
+  }
+
+  // Register maximize/minimize (collapse/expand) shortcut
+  const maximizeShortcut = 'CommandOrControl+Shift+M';
+  const maximizeRegistered = globalShortcut.register(maximizeShortcut, () => {
+    if (!win) return;
+    if (!win.isVisible()) {
+      win.show();
+      win.focus();
+    }
+    // Toggle collapse state
+    win.webContents.send('toggle-collapse');
+  });
+
+  if (!maximizeRegistered) {
+    console.error('Failed to register maximize/minimize shortcut');
+  }
+
+  // Register size change shortcut
+  const sizeShortcut = 'CommandOrControl+Shift+S';
+  const sizeRegistered = globalShortcut.register(sizeShortcut, () => {
+    if (!win) return;
+    if (!win.isVisible()) {
+      win.show();
+      win.focus();
+    }
+    // Cycle through sizes
+    win.webContents.send('cycle-size');
+  });
+
+  if (!sizeRegistered) {
+    console.error('Failed to register size change shortcut');
+  }
+
+  // Register context toggle shortcut
+  const contextShortcut = 'CommandOrControl+Shift+T';
+  const contextRegistered = globalShortcut.register(contextShortcut, () => {
+    if (!win) return;
+    if (!win.isVisible()) {
+      win.show();
+      win.focus();
+    }
+    // Toggle context monitoring
+    win.webContents.send('toggle-context');
+  });
+
+  if (!contextRegistered) {
+    console.error('Failed to register context toggle shortcut');
   }
 });
 
