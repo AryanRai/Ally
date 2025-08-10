@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { 
   CornerDownLeft, 
   Minus, 
@@ -15,7 +17,8 @@ import {
   Server,
   Monitor,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  Square
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import SettingsModal from './SettingsModal';
@@ -72,6 +75,9 @@ export default function GlassChatPiP() {
   const [isTyping, setIsTyping] = useState(false);
   const [isResizing, setIsResizing] = useState(false);
   const [streamingResponse, setStreamingResponse] = useState('');
+  
+  // Add new state for collapsed chat improvements
+  const [lastAssistantMessage, setLastAssistantMessage] = useState<string>('');
   
   // Context monitoring state
   const [contextData, setContextData] = useState<ContextData>({
@@ -157,6 +163,14 @@ export default function GlassChatPiP() {
       clearTimeout(resetTimeout);
     };
   }, [state.size, state.collapsed]);
+
+  // Track last assistant message for preview
+  useEffect(() => {
+    const lastAssistant = messages.filter(m => m.role === 'assistant').slice(-1)[0];
+    if (lastAssistant) {
+      setLastAssistantMessage(lastAssistant.content);
+    }
+  }, [messages]);
 
   // Auto-scroll to bottom
   useEffect(() => {
@@ -369,6 +383,12 @@ export default function GlassChatPiP() {
     
     // Update state - the useEffect will handle the window resize
     setState(prev => ({ ...prev, collapsed: newCollapsed }));
+  };
+
+  const handleStop = () => {
+    setIsTyping(false);
+    setStreamingResponse('');
+    // TODO: Add actual API cancellation logic here when implemented
   };
 
   const handleCommandExecution = async (commandText: string, fromQuickInput?: boolean) => {
@@ -675,7 +695,45 @@ export default function GlassChatPiP() {
       
       return (
         <>
-          {beforeContext.trim()}
+          <ReactMarkdown 
+            remarkPlugins={[remarkGfm]}
+            className="prose prose-sm max-w-none prose-invert"
+            components={{
+              p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
+              code: ({ inline, className, children, ...props }) => {
+                const match = /language-(\w+)/.exec(className || '');
+                return inline ? (
+                  <code className="px-1 py-0.5 bg-white/10 rounded text-xs" {...props}>
+                    {children}
+                  </code>
+                ) : (
+                  <pre className="bg-black/20 rounded-lg p-3 overflow-x-auto my-2">
+                    <code className={cn("text-xs", className)} {...props}>
+                      {children}
+                    </code>
+                  </pre>
+                );
+              },
+              ul: ({ children }) => <ul className="list-disc list-inside mb-2">{children}</ul>,
+              ol: ({ children }) => <ol className="list-decimal list-inside mb-2">{children}</ol>,
+              li: ({ children }) => <li className="mb-1">{children}</li>,
+              h1: ({ children }) => <h1 className="text-lg font-bold mb-2">{children}</h1>,
+              h2: ({ children }) => <h2 className="text-base font-bold mb-2">{children}</h2>,
+              h3: ({ children }) => <h3 className="text-sm font-bold mb-1">{children}</h3>,
+              blockquote: ({ children }) => (
+                <blockquote className="border-l-2 border-white/20 pl-3 my-2 italic opacity-80">
+                  {children}
+                </blockquote>
+              ),
+              a: ({ children, href }) => (
+                <a href={href} className="text-blue-400 hover:underline" target="_blank" rel="noopener noreferrer">
+                  {children}
+                </a>
+              ),
+            }}
+          >
+            {beforeContext.trim()}
+          </ReactMarkdown>
           {contextText && (
             <div className="mt-2 mb-1">
               {/* Collapsible context header */}
@@ -692,57 +750,177 @@ export default function GlassChatPiP() {
                 className={cn(
                   "flex items-center gap-1 px-2 py-1 rounded-lg transition-all",
                   "hover:bg-white/10 border border-white/20",
-                  isExpanded && "bg-blue-500/20 border-blue-500/30"
+                  "text-xs opacity-70"
                 )}
               >
-                <Clipboard className="w-3 h-3" />
-                <span className="text-xs italic">Context attached</span>
-                <ChevronDown className={cn(
-                  "w-3 h-3 transition-transform",
-                  isExpanded && "rotate-180"
-                )} />
+                {isExpanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                <span>Context</span>
               </button>
               
-              {/* Expandable context content */}
+              {/* Context content */}
               <AnimatePresence>
                 {isExpanded && (
                   <motion.div
-                    initial={{ opacity: 0, height: 0 }}
-                    animate={{ opacity: 1, height: 'auto' }}
-                    exit={{ opacity: 0, height: 0 }}
-                    className={cn(
-                      "mt-2 p-2 rounded-lg border text-xs",
-                      "bg-white/5 border-white/10 max-h-32 overflow-y-auto scrollbar-thin"
-                    )}
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: "auto", opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    transition={{ duration: 0.2 }}
+                    className="overflow-hidden"
                   >
-                    <div className="opacity-80 font-mono whitespace-pre-wrap">
-                      {contextText}
+                    <div className={cn(
+                      "mt-2 p-3 rounded-lg text-xs font-mono overflow-x-auto",
+                      "bg-black/20 border border-white/10"
+                    )}>
+                      <pre className="whitespace-pre-wrap break-words">{contextText}</pre>
                     </div>
                   </motion.div>
                 )}
               </AnimatePresence>
             </div>
           )}
-          {afterContext.trim()}
+          {afterContext && (
+            <ReactMarkdown 
+              remarkPlugins={[remarkGfm]}
+              className="prose prose-sm max-w-none prose-invert mt-2"
+              components={{
+                p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
+                code: ({ inline, className, children, ...props }) => {
+                  const match = /language-(\w+)/.exec(className || '');
+                  return inline ? (
+                    <code className="px-1 py-0.5 bg-white/10 rounded text-xs" {...props}>
+                      {children}
+                    </code>
+                  ) : (
+                    <pre className="bg-black/20 rounded-lg p-3 overflow-x-auto my-2">
+                      <code className={cn("text-xs", className)} {...props}>
+                        {children}
+                      </code>
+                    </pre>
+                  );
+                },
+                ul: ({ children }) => <ul className="list-disc list-inside mb-2">{children}</ul>,
+                ol: ({ children }) => <ol className="list-decimal list-inside mb-2">{children}</ol>,
+                li: ({ children }) => <li className="mb-1">{children}</li>,
+                h1: ({ children }) => <h1 className="text-lg font-bold mb-2">{children}</h1>,
+                h2: ({ children }) => <h2 className="text-base font-bold mb-2">{children}</h2>,
+                h3: ({ children }) => <h3 className="text-sm font-bold mb-1">{children}</h3>,
+                blockquote: ({ children }) => (
+                  <blockquote className="border-l-2 border-white/20 pl-3 my-2 italic opacity-80">
+                    {children}
+                  </blockquote>
+                ),
+                a: ({ children, href }) => (
+                  <a href={href} className="text-blue-400 hover:underline" target="_blank" rel="noopener noreferrer">
+                    {children}
+                  </a>
+                ),
+              }}
+            >
+              {afterContext.trim()}
+            </ReactMarkdown>
+          )}
         </>
       );
     }
     
-    return content;
+    return (
+      <ReactMarkdown 
+        remarkPlugins={[remarkGfm]}
+        className="prose prose-sm max-w-none prose-invert"
+        components={{
+          p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
+          code: ({ inline, className, children, ...props }) => {
+            const match = /language-(\w+)/.exec(className || '');
+            return inline ? (
+              <code className="px-1 py-0.5 bg-white/10 rounded text-xs" {...props}>
+                {children}
+              </code>
+            ) : (
+              <pre className="bg-black/20 rounded-lg p-3 overflow-x-auto my-2">
+                <code className={cn("text-xs", className)} {...props}>
+                  {children}
+                </code>
+              </pre>
+            );
+          },
+          ul: ({ children }) => <ul className="list-disc list-inside mb-2">{children}</ul>,
+          ol: ({ children }) => <ol className="list-decimal list-inside mb-2">{children}</ol>,
+          li: ({ children }) => <li className="mb-1">{children}</li>,
+          h1: ({ children }) => <h1 className="text-lg font-bold mb-2">{children}</h1>,
+          h2: ({ children }) => <h2 className="text-base font-bold mb-2">{children}</h2>,
+          h3: ({ children }) => <h3 className="text-sm font-bold mb-1">{children}</h3>,
+          blockquote: ({ children }) => (
+            <blockquote className="border-l-2 border-white/20 pl-3 my-2 italic opacity-80">
+              {children}
+            </blockquote>
+          ),
+          a: ({ children, href }) => (
+            <a href={href} className="text-blue-400 hover:underline" target="_blank" rel="noopener noreferrer">
+              {children}
+            </a>
+          ),
+        }}
+      >
+        {content}
+      </ReactMarkdown>
+    );
   };
 
   const dims = sizePx[state.size];
+
+  // Animated Siri-like orb component
+  const AnimatedOrb = () => (
+    <div className="relative w-6 h-6 flex items-center justify-center">
+      <motion.div
+        className="absolute inset-0 rounded-full bg-gradient-to-br from-blue-400 to-purple-600"
+        animate={{
+          scale: isTyping ? [1, 1.2, 1] : 1,
+          opacity: isTyping ? [0.7, 1, 0.7] : 0.8,
+        }}
+        transition={{
+          duration: 2,
+          repeat: Infinity,
+          ease: "easeInOut"
+        }}
+      />
+      <motion.div
+        className="absolute inset-1 rounded-full bg-gradient-to-br from-blue-300 to-purple-500"
+        animate={{
+          scale: isTyping ? [1.2, 1, 1.2] : 1,
+          opacity: isTyping ? [0.5, 0.8, 0.5] : 0.6,
+        }}
+        transition={{
+          duration: 2,
+          repeat: Infinity,
+          ease: "easeInOut",
+          delay: 0.3
+        }}
+      />
+      <motion.div
+        className="absolute inset-2 rounded-full bg-white/30"
+        animate={{
+          scale: isTyping ? [1, 1.3, 1] : 1,
+        }}
+        transition={{
+          duration: 2,
+          repeat: Infinity,
+          ease: "easeInOut",
+          delay: 0.6
+        }}
+      />
+    </div>
+  );
 
   return (
     <motion.div
       ref={containerRef}
       className={cn(
-        "fixed transition-all duration-300 select-none",
+        "fixed transition-all duration-300",
         isResizing && "shadow-lg"
       )}
       style={{ 
         width: dims.w, 
-        height: state.collapsed ? 64 : dims.h,
+        height: state.collapsed ? 120 : dims.h,
         zIndex: 50
       } as React.CSSProperties}
       initial={{ opacity: 0, scale: 0.9 }}
@@ -779,6 +957,7 @@ export default function GlassChatPiP() {
             "flex items-center gap-2 px-3 py-2 border-b transition-all duration-200",
             "cursor-grab active:cursor-grabbing",
             "relative z-10 min-h-[44px]",
+            state.collapsed && "flex-col items-stretch gap-2 pb-3 border-b-0",
             // Windows: minimal styling to let acrylic show through
             platform === 'win32'
               ? "border-white/10 hover:bg-white/5 hover:border-blue-500/30"
@@ -787,81 +966,181 @@ export default function GlassChatPiP() {
                 : "border-black/10 hover:bg-black/5 hover:border-blue-500/30"
           )}
           style={{ 
-            WebkitAppRegion: 'drag',
+            WebkitAppRegion: state.collapsed ? 'no-drag' : 'drag',
             WebkitUserSelect: 'none',
             userSelect: 'none'
           } as React.CSSProperties}
-          title="Drag to move window"
+          title={state.collapsed ? "" : "Drag to move window"}
         >
-          <div className="flex items-center gap-2 flex-1 min-w-0">
-            <Grip className="w-3 h-3 opacity-50 flex-shrink-0" />
-            <MessageSquare className="w-4 h-4 flex-shrink-0" />
-            
-            {state.collapsed ? (
-              /* Quick input for minimized mode */
-              <form 
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  handleSend(quickInput, true);
-                }}
-                className="flex items-center gap-2 flex-1 min-w-0"
+          {state.collapsed ? (
+            <>
+              {/* Top row - Orb, thinking indicator, and response preview */}
+              <div 
+                className="flex items-center gap-2"
                 style={{ 
-                  WebkitAppRegion: 'no-drag',
+                  WebkitAppRegion: 'drag',
                   WebkitUserSelect: 'none',
                   userSelect: 'none'
                 } as React.CSSProperties}
               >
-                <input
-                  type="text"
-                  value={quickInput}
-                  onChange={(e) => setQuickInput(e.target.value)}
-                  placeholder="Quick message..."
-                  className={cn(
-                    "flex-1 px-2 py-1 text-xs rounded border transition-all min-w-0",
-                    "focus:outline-none focus:ring-1",
-                    platform !== 'win32' && "backdrop-blur-md",
-                    platform === 'win32'
-                      ? "bg-white/10 border-white/10 placeholder:text-white/40 focus:ring-white/20"
-                      : theme === 'dark' 
-                        ? "bg-white/10 border-white/10 placeholder:text-white/40 focus:ring-white/20"
-                        : "bg-black/10 border-black/10 placeholder:text-black/40 focus:ring-black/20"
-                  )}
-                />
+                <Grip className="w-3 h-3 opacity-50 flex-shrink-0" />
+                <AnimatedOrb />
                 
-                {/* Context indicator for minimized mode */}
-                {(contextData.clipboard || contextData.selectedText) && contextToggleEnabled && (
+                {/* Response preview or thinking indicator */}
+                <div className="flex-1 min-w-0">
+                  {isTyping ? (
+                    <div className="flex items-center gap-1">
+                      <span className="text-xs opacity-70">Thinking</span>
+                      <motion.span
+                        className="text-xs opacity-70"
+                        animate={{ opacity: [0.3, 1, 0.3] }}
+                        transition={{ duration: 1.5, repeat: Infinity }}
+                      >
+                        ...
+                      </motion.span>
+                    </div>
+                  ) : (
+                    <div className="text-xs opacity-70 truncate">
+                      {lastAssistantMessage ? 
+                        lastAssistantMessage.slice(0, 50) + (lastAssistantMessage.length > 50 ? '...' : '') 
+                        : 'Ready to chat'}
+                    </div>
+                  )}
+                </div>
+
+                {/* Status indicators */}
+                <div className="flex items-center gap-1 flex-shrink-0">
+                  {/* Ollama status */}
                   <div 
                     className={cn(
-                      "flex items-center gap-1 px-1.5 py-0.5 rounded text-xs flex-shrink-0",
-                      "bg-blue-500/20 border border-blue-500/30 text-blue-300"
+                      "w-2 h-2 rounded-full",
+                      ollamaAvailable ? "bg-green-400" : "bg-red-400"
                     )}
-                    title="Context will be auto-attached"
-                  >
+                    title={ollamaAvailable ? "Ollama connected" : "Ollama offline"}
+                  />
+                  
+                  {/* Server status */}
+                  {serverStatus && (
+                    <div 
+                      className={cn(
+                        "w-2 h-2 rounded-full",
+                        serverStatus.status === 'online' ? "bg-green-400" : 
+                        serverStatus.status === 'offline' ? "bg-red-400" : "bg-yellow-400"
+                      )}
+                      title={`Server ${serverStatus.status}: ${serverStatus.domain || serverStatus.ip}`}
+                    />
+                  )}
+                </div>
+
+                {/* Context indicator */}
+                {hasNewContext && (contextData.clipboard || contextData.selectedText) && (
+                  <div className="flex items-center gap-1 px-2 py-0.5 bg-blue-500/20 rounded-full flex-shrink-0">
                     <Clipboard className="w-2.5 h-2.5" />
-                    <span>Auto</span>
+                    <span className="text-xs">New</span>
+                    <div className="w-1.5 h-1.5 bg-blue-400 rounded-full animate-pulse" />
                   </div>
                 )}
-                
-                <button
-                  type="submit"
-                  disabled={!quickInput.trim()}
-                  className={cn(
-                    "p-1 rounded transition-all flex-shrink-0",
-                    "disabled:opacity-50 disabled:cursor-not-allowed",
-                    platform !== 'win32' && "backdrop-blur-md",
-                    platform === 'win32'
-                      ? "bg-white/10 hover:bg-white/20"
-                      : theme === 'dark' 
-                        ? "bg-white/10 hover:bg-white/20"
-                        : "bg-black/10 hover:bg-black/20"
-                  )}
+              </div>
+
+              {/* Bottom row - Input and controls */}
+              <div className="flex items-center gap-2">
+                <form 
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    handleSend(quickInput, true);
+                  }}
+                  className="flex items-center gap-2 flex-1"
+                  style={{ 
+                    WebkitAppRegion: 'no-drag'
+                  } as React.CSSProperties}
                 >
-                  <CornerDownLeft className="w-3 h-3" />
-                </button>
-              </form>
-            ) : (
-              <span className="text-sm font-medium truncate">Chat</span>
-            )}
+                  <input
+                    type="text"
+                    value={quickInput}
+                    onChange={(e) => setQuickInput(e.target.value)}
+                    placeholder="Type your message..."
+                    className={cn(
+                      "flex-1 px-3 py-1.5 text-sm rounded-lg border transition-all",
+                      "focus:outline-none focus:ring-2",
+                      platform !== 'win32' && "backdrop-blur-md",
+                      platform === 'win32'
+                        ? "bg-white/10 border-white/10 placeholder:text-white/40 focus:ring-white/20"
+                        : theme === 'dark' 
+                          ? "bg-white/10 border-white/10 placeholder:text-white/40 focus:ring-white/20"
+                          : "bg-black/10 border-black/10 placeholder:text-black/40 focus:ring-black/20"
+                    )}
+                  />
+                  
+                  {/* Context indicator */}
+                  {(contextData.clipboard || contextData.selectedText) && contextToggleEnabled && (
+                    <div 
+                      className={cn(
+                        "flex items-center gap-1 px-2 py-1 rounded-md text-xs flex-shrink-0",
+                        "bg-blue-500/20 border border-blue-500/30 text-blue-300"
+                      )}
+                      title="Context will be auto-attached"
+                    >
+                      <Clipboard className="w-3 h-3" />
+                      <span>Context</span>
+                    </div>
+                  )}
+                  
+                  <button
+                    type="submit"
+                    disabled={!quickInput.trim() && !isTyping}
+                    onClick={(e) => {
+                      if (isTyping) {
+                        e.preventDefault();
+                        handleStop();
+                      }
+                    }}
+                    className={cn(
+                      "p-1.5 rounded-lg transition-all flex-shrink-0",
+                      "disabled:opacity-50 disabled:cursor-not-allowed",
+                      platform !== 'win32' && "backdrop-blur-md",
+                      isTyping 
+                        ? "bg-red-500/20 hover:bg-red-500/30 text-red-300"
+                        : platform === 'win32'
+                          ? "bg-white/10 hover:bg-white/20"
+                          : theme === 'dark' 
+                            ? "bg-white/10 hover:bg-white/20"
+                            : "bg-black/10 hover:bg-black/20"
+                    )}
+                    title={isTyping ? "Stop" : "Send"}
+                  >
+                    {isTyping ? <Square className="w-3.5 h-3.5" /> : <CornerDownLeft className="w-3.5 h-3.5" />}
+                  </button>
+                </form>
+
+                {/* Control buttons */}
+                <div className="flex items-center gap-1 flex-shrink-0">
+                  <button
+                    onClick={handleCollapseToggle}
+                    className={cn(
+                      "p-1.5 rounded-lg hover:bg-white/10 transition-all duration-200",
+                      isResizing && "opacity-50"
+                    )}
+                    title="Expand"
+                    disabled={isResizing}
+                  >
+                    <Maximize2 className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    onClick={() => window.pip?.hide()}
+                    className="p-1.5 rounded-lg hover:bg-white/10 transition-colors"
+                    title="Close"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="flex items-center gap-2 flex-1 min-w-0">
+                <Grip className="w-3 h-3 opacity-50 flex-shrink-0" />
+                <MessageSquare className="w-4 h-4 flex-shrink-0" />
+                <span className="text-sm font-medium truncate">Chat</span>
             
             {/* Status indicators */}
             <div className="flex items-center gap-1 flex-shrink-0">
@@ -1198,7 +1477,7 @@ export default function GlassChatPiP() {
 
               {/* Messages */}
               <div className={cn(
-                "flex-1 overflow-y-auto p-3 space-y-3 scrollbar-thin",
+                "flex-1 overflow-y-auto p-3 space-y-3 scrollbar-thin select-text",
                 platform === 'win32'
                   ? "scrollbar-thumb-white/10"
                   : theme === 'dark' ? "scrollbar-thumb-white/10" : "scrollbar-thumb-black/10"
@@ -1209,7 +1488,7 @@ export default function GlassChatPiP() {
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
                     className={cn(
-                      "max-w-[85%] rounded-2xl px-3 py-2 text-sm",
+                      "max-w-[85%] rounded-2xl px-3 py-2 text-sm select-text",
                       message.role === 'user' 
                         ? "ml-auto bg-blue-500/20" + (platform !== 'win32' ? " backdrop-blur-md" : "")
                         : platform === 'win32'
@@ -1344,19 +1623,28 @@ export default function GlassChatPiP() {
                   />
                   <button
                     type="submit"
-                    disabled={!input.trim()}
+                    disabled={!input.trim() && !isTyping}
+                    onClick={(e) => {
+                      if (isTyping) {
+                        e.preventDefault();
+                        handleStop();
+                      }
+                    }}
                     className={cn(
                       "p-2 rounded-xl transition-all",
                       "disabled:opacity-50 disabled:cursor-not-allowed",
                       platform !== 'win32' && "backdrop-blur-md",
-                      platform === 'win32'
-                        ? "bg-white/10 hover:bg-white/20"
-                        : theme === 'dark' 
+                      isTyping 
+                        ? "bg-red-500/20 hover:bg-red-500/30 text-red-300"
+                        : platform === 'win32'
                           ? "bg-white/10 hover:bg-white/20"
-                          : "bg-black/10 hover:bg-black/20"
+                          : theme === 'dark' 
+                            ? "bg-white/10 hover:bg-white/20"
+                            : "bg-black/10 hover:bg-black/20"
                     )}
+                    title={isTyping ? "Stop" : "Send"}
                   >
-                    <CornerDownLeft className="w-4 h-4" />
+                    {isTyping ? <Square className="w-4 h-4" /> : <CornerDownLeft className="w-4 h-4" />}
                   </button>
                 </form>
               </div>

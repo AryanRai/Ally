@@ -1,4 +1,4 @@
-import { app, BrowserWindow, globalShortcut, ipcMain, clipboard, screen } from 'electron';
+import { app, BrowserWindow, globalShortcut, ipcMain, clipboard, screen, Tray, Menu, nativeImage } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -6,7 +6,15 @@ import { OllamaService, ChatMessage } from '../src/services/ollamaService.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+// Declare isQuitting property on app
+declare module 'electron' {
+  interface App {
+    isQuitting?: boolean;
+  }
+}
+
 let win: BrowserWindow | null = null;
+let tray: Tray | null = null;
 const BOUNDS_FILE = path.join(app.getPath('userData'), 'window-bounds.json');
 
 // Context monitoring
@@ -116,7 +124,15 @@ async function createWindow(): Promise<void> {
   // Save window bounds on move and resize
   win.on('resize', saveBounds);
   win.on('move', saveBounds);
-  win.on('close', saveBounds);
+  
+  // Prevent actual window close, minimize to tray instead
+  win.on('close', (event) => {
+    if (!app.isQuitting) {
+      event.preventDefault();
+      win?.hide();
+      saveBounds();
+    }
+  });
 
   // Load the app
   if (process.env.VITE_DEV_SERVER_URL) {
@@ -125,6 +141,61 @@ async function createWindow(): Promise<void> {
   } else {
     await win.loadFile(path.join(__dirname, '../renderer/index.html'));
   }
+}
+
+function createTray() {
+  // Create a default tray icon
+  const size = process.platform === 'darwin' ? 16 : 32;
+  const trayIcon = nativeImage.createEmpty();
+  
+  // Create a simple colored icon
+  const canvas = trayIcon.resize({ width: size, height: size });
+  
+  // For now, use the native image API to create a simple icon
+  // In production, you would use a proper icon file
+  tray = new Tray(canvas);
+  
+  const contextMenu = Menu.buildFromTemplate([
+    {
+      label: 'Show Chat',
+      click: () => {
+        win?.show();
+        win?.focus();
+      }
+    },
+    {
+      label: 'Toggle',
+      click: () => {
+        if (win?.isVisible()) {
+          win.hide();
+        } else {
+          win?.show();
+          win?.focus();
+        }
+      }
+    },
+    { type: 'separator' },
+    {
+      label: 'Quit',
+      click: () => {
+        app.isQuitting = true;
+        app.quit();
+      }
+    }
+  ]);
+  
+  tray.setToolTip('Glass PiP Chat');
+  tray.setContextMenu(contextMenu);
+  
+  // Click on tray icon toggles window
+  tray.on('click', () => {
+    if (win?.isVisible()) {
+      win.hide();
+    } else {
+      win?.show();
+      win?.focus();
+    }
+  });
 }
 
 // IPC handlers
@@ -381,6 +452,7 @@ ipcMain.handle('system:executeCommand', async (_, command: string) => {
 // App event handlers
 app.whenReady().then(async () => {
   await createWindow();
+  createTray(); // Create tray after window is ready
 
   // Register global shortcut
   const shortcut = 'CommandOrControl+Shift+C';
