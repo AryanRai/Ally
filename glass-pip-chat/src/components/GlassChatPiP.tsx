@@ -18,7 +18,9 @@ import {
   Monitor,
   ChevronDown,
   ChevronUp,
-  Square
+  Square,
+  Copy,
+  Check
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import SettingsModal from './SettingsModal';
@@ -679,6 +681,28 @@ export default function GlassChatPiP() {
 
   // State for expandable context in messages
   const [expandedContexts, setExpandedContexts] = useState<Set<string>>(new Set());
+  
+  // State for copy functionality
+  const [copiedCode, setCopiedCode] = useState<Set<string>>(new Set());
+
+  // Copy to clipboard function
+  const copyToClipboard = async (text: string, codeId: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedCode(prev => new Set([...prev, codeId]));
+      
+      // Reset copied state after 2 seconds
+      setTimeout(() => {
+        setCopiedCode(prev => {
+          const newSet = new Set(prev);
+          newSet.delete(codeId);
+          return newSet;
+        });
+      }, 2000);
+    } catch (err) {
+      console.error('Failed to copy text: ', err);
+    }
+  };
 
   // Render message content with expandable context
   const renderMessageContent = (content: string, messageId: string) => {
@@ -702,16 +726,35 @@ export default function GlassChatPiP() {
               p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
               code: ({ inline, className, children, ...props }) => {
                 const match = /language-(\w+)/.exec(className || '');
+                const codeText = String(children);
+                const codeId = `${messageId}-${Math.random().toString(36).substr(2, 9)}`;
+                const isCopied = copiedCode.has(codeId);
+                
                 return inline ? (
                   <code className="px-1 py-0.5 bg-white/10 rounded text-xs" {...props}>
                     {children}
                   </code>
                 ) : (
-                  <pre className="bg-black/20 rounded-lg p-3 overflow-x-auto my-2">
-                    <code className={cn("text-xs", className)} {...props}>
-                      {children}
-                    </code>
-                  </pre>
+                  <div className="relative group my-2">
+                    <pre className="bg-black/20 rounded-lg p-3 pr-12 overflow-x-auto">
+                      <code className={cn("text-xs", className)} {...props}>
+                        {children}
+                      </code>
+                    </pre>
+                    <button
+                      onClick={() => copyToClipboard(codeText, codeId)}
+                      className={cn(
+                        "absolute top-2 right-2 p-1.5 rounded-md transition-all duration-200",
+                        "opacity-0 group-hover:opacity-100 focus:opacity-100",
+                        isCopied 
+                          ? "bg-green-500/20 text-green-300" 
+                          : "bg-white/10 hover:bg-white/20 text-white/70 hover:text-white"
+                      )}
+                      title={isCopied ? "Copied!" : "Copy code"}
+                    >
+                      {isCopied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+                    </button>
+                  </div>
                 );
               },
               ul: ({ children }) => <ul className="list-disc list-inside mb-2">{children}</ul>,
@@ -787,16 +830,35 @@ export default function GlassChatPiP() {
                 p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
                 code: ({ inline, className, children, ...props }) => {
                   const match = /language-(\w+)/.exec(className || '');
+                  const codeText = String(children);
+                  const codeId = `${messageId}-after-${Math.random().toString(36).substr(2, 9)}`;
+                  const isCopied = copiedCode.has(codeId);
+                  
                   return inline ? (
                     <code className="px-1 py-0.5 bg-white/10 rounded text-xs" {...props}>
                       {children}
                     </code>
                   ) : (
-                    <pre className="bg-black/20 rounded-lg p-3 overflow-x-auto my-2">
-                      <code className={cn("text-xs", className)} {...props}>
-                        {children}
-                      </code>
-                    </pre>
+                    <div className="relative group my-2">
+                      <pre className="bg-black/20 rounded-lg p-3 pr-12 overflow-x-auto">
+                        <code className={cn("text-xs", className)} {...props}>
+                          {children}
+                        </code>
+                      </pre>
+                      <button
+                        onClick={() => copyToClipboard(codeText, codeId)}
+                        className={cn(
+                          "absolute top-2 right-2 p-1.5 rounded-md transition-all duration-200",
+                          "opacity-0 group-hover:opacity-100 focus:opacity-100",
+                          isCopied 
+                            ? "bg-green-500/20 text-green-300" 
+                            : "bg-white/10 hover:bg-white/20 text-white/70 hover:text-white"
+                        )}
+                        title={isCopied ? "Copied!" : "Copy code"}
+                      >
+                        {isCopied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+                      </button>
+                    </div>
                   );
                 },
                 ul: ({ children }) => <ul className="list-disc list-inside mb-2">{children}</ul>,
@@ -833,16 +895,35 @@ export default function GlassChatPiP() {
           p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
           code: ({ inline, className, children, ...props }) => {
             const match = /language-(\w+)/.exec(className || '');
+            const codeText = String(children);
+            const codeId = `${messageId}-main-${Math.random().toString(36).substr(2, 9)}`;
+            const isCopied = copiedCode.has(codeId);
+            
             return inline ? (
               <code className="px-1 py-0.5 bg-white/10 rounded text-xs" {...props}>
                 {children}
               </code>
             ) : (
-              <pre className="bg-black/20 rounded-lg p-3 overflow-x-auto my-2">
-                <code className={cn("text-xs", className)} {...props}>
-                  {children}
-                </code>
-              </pre>
+              <div className="relative group my-2">
+                <pre className="bg-black/20 rounded-lg p-3 pr-12 overflow-x-auto">
+                  <code className={cn("text-xs", className)} {...props}>
+                    {children}
+                  </code>
+                </pre>
+                <button
+                  onClick={() => copyToClipboard(codeText, codeId)}
+                  className={cn(
+                    "absolute top-2 right-2 p-1.5 rounded-md transition-all duration-200",
+                    "opacity-0 group-hover:opacity-100 focus:opacity-100",
+                    isCopied 
+                      ? "bg-green-500/20 text-green-300" 
+                      : "bg-white/10 hover:bg-white/20 text-white/70 hover:text-white"
+                  )}
+                  title={isCopied ? "Copied!" : "Copy code"}
+                >
+                  {isCopied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+                </button>
+              </div>
             );
           },
           ul: ({ children }) => <ul className="list-disc list-inside mb-2">{children}</ul>,
