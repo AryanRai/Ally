@@ -79,7 +79,7 @@ export class OllamaService {
     }
   }
 
-  // Send a chat message and get response with real-time streaming
+  // Send a chat message and get response
   async chat(
     messages: ChatMessage[],
     model?: string,
@@ -91,8 +91,25 @@ export class OllamaService {
       console.log(`Sending chat request to Ollama with model: ${modelName}`);
       console.log('Messages:', messages);
       
-      // Always use streaming for better UX
-      return this.streamChat(messages, modelName, onProgress);
+      // Use simple non-streaming approach for now
+      const response = await fetch(`${this.config.baseUrl}/api/chat`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: modelName,
+          messages: messages,
+          stream: false,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      const data = await response.json();
+      return data.message?.content || 'No response received';
       
     } catch (error: any) {
       console.error('Chat request failed:', {

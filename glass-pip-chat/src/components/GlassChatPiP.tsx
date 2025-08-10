@@ -209,14 +209,14 @@ export default function GlassChatPiP() {
       setLastAssistantMessage(lastAssistant.content);
     }
 
-    // Update remote monitoring with current messages
-    if (isRemoteRegistered) {
-      remoteMonitoring.updateStatus({
-        messages: messages.slice(-10), // Send last 10 messages
-        currentModel: currentModel
-      });
-    }
-  }, [messages, currentModel, isRemoteRegistered, remoteMonitoring]);
+    // Update remote monitoring with current messages (disabled for now)
+    // if (isRemoteRegistered) {
+    //   remoteMonitoring.updateStatus({
+    //     messages: messages.slice(-10), // Send last 10 messages
+    //     currentModel: currentModel
+    //   });
+    // }
+  }, [messages, currentModel]);
 
   // Auto-scroll to bottom
   useEffect(() => {
@@ -412,27 +412,27 @@ export default function GlassChatPiP() {
     initOllama();
   }, []);
 
-  // Initialize remote monitoring
-  useEffect(() => {
-    const initRemoteMonitoring = async () => {
-      try {
-        const result = await remoteMonitoring.register();
-        if (result) {
-          setIsRemoteRegistered(true);
-          console.log('Remote monitoring enabled');
-        }
-      } catch (error) {
-        console.error('Failed to initialize remote monitoring:', error);
-      }
-    };
+  // Initialize remote monitoring (disabled for now)
+  // useEffect(() => {
+  //   const initRemoteMonitoring = async () => {
+  //     try {
+  //       const result = await remoteMonitoring.register();
+  //       if (result) {
+  //         setIsRemoteRegistered(true);
+  //         console.log('Remote monitoring enabled');
+  //       }
+  //     } catch (error) {
+  //       console.error('Failed to initialize remote monitoring:', error);
+  //     }
+  //   };
 
-    initRemoteMonitoring();
+  //   initRemoteMonitoring();
 
-    // Cleanup on unmount
-    return () => {
-      remoteMonitoring.unregister();
-    };
-  }, [remoteMonitoring]);
+  //   // Cleanup on unmount
+  //   return () => {
+  //     remoteMonitoring.unregister();
+  //   };
+  // }, [remoteMonitoring]);
 
   // Server status monitoring
   useEffect(() => {
@@ -600,10 +600,10 @@ export default function GlassChatPiP() {
     
     setIsTyping(true);
     
-    // Update remote monitoring typing status
-    if (isRemoteRegistered) {
-      remoteMonitoring.updateStatus({ isTyping: true });
-    }
+    // Update remote monitoring typing status (disabled for now)
+    // if (isRemoteRegistered) {
+    //   remoteMonitoring.updateStatus({ isTyping: true });
+    // }
     
     try {
       if (!window.pip?.system) {
@@ -782,10 +782,10 @@ export default function GlassChatPiP() {
     
     setIsTyping(true);
     
-    // Update remote monitoring typing status
-    if (isRemoteRegistered) {
-      remoteMonitoring.updateStatus({ isTyping: true });
-    }
+    // Update remote monitoring typing status (disabled for now)
+    // if (isRemoteRegistered) {
+    //   remoteMonitoring.updateStatus({ isTyping: true });
+    // }
     
     try {
       if (ollamaAvailable && window.pip?.ollama && currentModel) {
@@ -825,69 +825,25 @@ export default function GlassChatPiP() {
         ));
         setStreamingResponse('');
         
-        // Handle real-time streaming response
-        let fullResponse = '';
+        // Handle response
+        const response = await window.pip.ollama.chat(chatHistory, currentModel);
         
-        const response = await window.pip.ollama.chat(chatHistory, currentModel, (chunk) => {
-          if (chunk.type === 'thinking') {
-            setIsThinking(true);
-            setThinkingText(chunk.content);
-            // Update the streaming message with thinking indicator
-            setChats(prev => prev.map(chat => 
-              chat.id === activeChatId 
-                ? { 
-                    ...chat, 
-                    messages: chat.messages.map(msg => 
-                      msg.id === tempMessageId 
-                        ? { ...msg, content: chunk.content }
-                        : msg
-                    ),
-                    updatedAt: Date.now()
-                  }
-                : chat
-            ));
-          } else if (chunk.type === 'content') {
-            setIsThinking(false);
-            setThinkingText('');
-            fullResponse += chunk.content;
-            
-            // Update the streaming message with new content
-            setChats(prev => prev.map(chat => 
-              chat.id === activeChatId 
-                ? { 
-                    ...chat, 
-                    messages: chat.messages.map(msg => 
-                      msg.id === tempMessageId 
-                        ? { ...msg, content: fullResponse }
-                        : msg
-                    ),
-                    updatedAt: Date.now()
-                  }
-                : chat
-            ));
-          } else if (chunk.type === 'done') {
-            setIsThinking(false);
-            setThinkingText('');
-            fullResponse = chunk.content;
-            
-            // Final update with complete response
-            setChats(prev => prev.map(chat => 
-              chat.id === activeChatId 
-                ? { 
-                    ...chat, 
-                    messages: chat.messages.map(msg => 
-                      msg.id === tempMessageId 
-                        ? { ...msg, content: fullResponse }
-                        : msg
-                    ),
-                    updatedAt: Date.now()
-                  }
-                : chat
-            ));
-          }
-        });
+        console.log('Ollama response:', response);
         
-        console.log('Ollama response:', fullResponse);
+        // Update the streaming message with the complete response
+        setChats(prev => prev.map(chat => 
+          chat.id === activeChatId 
+            ? { 
+                ...chat, 
+                messages: chat.messages.map(msg => 
+                  msg.id === tempMessageId 
+                    ? { ...msg, content: response }
+                    : msg
+                ),
+                updatedAt: Date.now()
+              }
+            : chat
+        ));
         
       } else {
         // Fallback response when Ollama is not available
@@ -940,10 +896,10 @@ export default function GlassChatPiP() {
       setIsTyping(false);
       setStreamingResponse('');
       
-      // Update remote monitoring typing status
-      if (isRemoteRegistered) {
-        remoteMonitoring.updateStatus({ isTyping: false });
-      }
+      // Update remote monitoring typing status (disabled for now)
+      // if (isRemoteRegistered) {
+      //   remoteMonitoring.updateStatus({ isTyping: false });
+      // }
     }
   };
 
@@ -1533,14 +1489,14 @@ export default function GlassChatPiP() {
                     />
                   )}
                   
-                  {/* Remote monitoring status */}
-                  <div 
+                  {/* Remote monitoring status (disabled for now) */}
+                  {/* <div 
                     className={cn(
                       "w-2 h-2 rounded-full",
                       isRemoteRegistered ? "bg-blue-400" : "bg-gray-400"
                     )}
                     title={isRemoteRegistered ? "Remote monitoring active" : "Remote monitoring offline"}
-                  />
+                  /> */}
                 </div>
 
                 {/* Context indicator */}
@@ -1756,6 +1712,7 @@ export default function GlassChatPiP() {
                     </motion.div>
                   )}
                 </div>
+              </div>
             
             {/* Status indicators */}
             <div className="flex items-center gap-1 flex-shrink-0">

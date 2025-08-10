@@ -317,10 +317,6 @@ ipcMain.handle('context:get-selected-text', async () => {
     // Store current clipboard
     const originalClipboard = clipboard.readText();
     
-    // Simulate Ctrl+C to copy selected text (if any)
-    // Note: This is a basic approach and might not work in all scenarios
-    const { globalShortcut } = require('electron');
-    
     // For now, return the current clipboard as selected text
     // In a production app, you'd want more sophisticated selection detection
     return clipboard.readText();
