@@ -11,6 +11,7 @@ interface CollapsedChatPreviewProps {
   messages: Message[];
   isTyping: boolean;
   onCopyMessage: (content: string) => void;
+  onPreviewToggle?: (isExpanded: boolean) => void;
 }
 
 export default function CollapsedChatPreview({
@@ -18,7 +19,8 @@ export default function CollapsedChatPreview({
   theme,
   messages,
   isTyping,
-  onCopyMessage
+  onCopyMessage,
+  onPreviewToggle
 }: CollapsedChatPreviewProps) {
   const [isExpanded, setIsExpanded] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -68,7 +70,11 @@ export default function CollapsedChatPreview({
     )}>
       {/* Toggle Button */}
       <button
-        onClick={() => setIsExpanded(!isExpanded)}
+        onClick={() => {
+          const newExpanded = !isExpanded;
+          setIsExpanded(newExpanded);
+          onPreviewToggle?.(newExpanded);
+        }}
         className={cn(
           "w-full flex items-center justify-between px-3 py-2",
           "hover:bg-white/5 transition-colors"

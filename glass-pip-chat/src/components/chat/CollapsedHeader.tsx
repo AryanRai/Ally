@@ -26,6 +26,7 @@ interface CollapsedHeaderProps {
   onSizeChange: () => void;
   onHide: () => void;
   onCopyMessage: (content: string) => void;
+  onPreviewToggle?: (isExpanded: boolean) => void;
   isResizing: boolean;
   size: string;
   ollamaAvailable: boolean;
@@ -48,6 +49,7 @@ export default function CollapsedHeader({
   onSizeChange,
   onHide,
   onCopyMessage,
+  onPreviewToggle,
   isResizing,
   size,
   ollamaAvailable,
@@ -212,6 +214,7 @@ export default function CollapsedHeader({
         messages={messages}
         isTyping={isTyping}
         onCopyMessage={onCopyMessage}
+        onPreviewToggle={onPreviewToggle}
       />
     </div>
   );
