@@ -30,6 +30,7 @@ interface EditableMessageProps {
   theme: 'light' | 'dark';
   platform: string;
   uiSettings: UISettings;
+  isCollapsed?: boolean;
 }
 
 export default function EditableMessage({
@@ -43,7 +44,8 @@ export default function EditableMessage({
   onRunCode,
   theme,
   platform,
-  uiSettings
+  uiSettings,
+  isCollapsed = false
 }: EditableMessageProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [editContent, setEditContent] = useState(message.content);
@@ -72,7 +74,14 @@ export default function EditableMessage({
       normal: 'p-4',
       spacious: 'p-6'
     };
-    return paddingMap[uiSettings.messagePadding];
+    const basePadding = paddingMap[uiSettings.messagePadding];
+    
+    // Reduce padding in collapsed mode for better space efficiency
+    if (isCollapsed) {
+      return basePadding.replace('p-2', 'p-1.5').replace('p-4', 'p-2').replace('p-6', 'p-3');
+    }
+    
+    return basePadding;
   };
 
   const getTextareaPaddingClass = () => {
@@ -382,7 +391,9 @@ export default function EditableMessage({
     <motion.div
       className={cn(
         "group relative",
-        message.role === 'user' ? "ml-8" : "mr-8"
+        isCollapsed 
+          ? message.role === 'user' ? "ml-2" : "mr-2"
+          : message.role === 'user' ? "ml-8" : "mr-8"
       )}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
@@ -391,20 +402,25 @@ export default function EditableMessage({
       transition={{ duration: 0.2 }}
     >
       <div className={cn(
-        "relative rounded-2xl transition-all duration-200",
+        "relative transition-all duration-200",
+        isCollapsed ? "rounded-lg" : "rounded-2xl",
         getPaddingClass(),
         getFontSizeClass(),
         message.role === 'user'
           ? platform === 'win32'
-            ? "bg-blue-500/20 ml-auto max-w-[85%]"
+            ? "bg-blue-500/20 ml-auto"
             : theme === 'dark'
-              ? "bg-blue-500/20 ml-auto max-w-[85%]"
-              : "bg-blue-500/20 ml-auto max-w-[85%]"
+              ? "bg-blue-500/20 ml-auto"
+              : "bg-blue-500/20 ml-auto"
           : platform === 'win32'
-            ? "bg-white/5 max-w-[90%]"
+            ? "bg-white/5"
             : theme === 'dark'
-              ? "bg-white/5 max-w-[90%]"
-              : "bg-black/5 max-w-[90%]",
+              ? "bg-white/5"
+              : "bg-black/5",
+        // Use more horizontal space in collapsed mode
+        isCollapsed 
+          ? message.role === 'user' ? "max-w-[95%]" : "max-w-[98%]"
+          : message.role === 'user' ? "max-w-[85%]" : "max-w-[90%]",
         isHovered && "ring-1 ring-white/20"
       )}>
         {/* Message Content */}
