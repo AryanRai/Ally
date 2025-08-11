@@ -226,7 +226,7 @@ export default function GlassChatPiP() {
       clearTimeout(resizeTimeout);
       clearTimeout(resetTimeout);
     };
-  }, [state.size, state.collapsed, sidebarCollapsed, appSettings.ui.windowPadding, isPreviewExpanded]);
+  }, [state.size, state.collapsed, sidebarCollapsed, appSettings.ui.windowPadding, isPreviewExpanded, contextMonitoring.hasNewContext, contextMonitoring.contextData]);
 
 
   // Auto-scroll to bottom
@@ -291,13 +291,7 @@ export default function GlassChatPiP() {
       contextMonitoring.clearNewContextFlag();
     }
 
-    // Auto-maximize if sending from minimized mode
-    if (fromQuickInput && state.collapsed) {
-      handleCollapseToggle();
-      setTimeout(() => {
-        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-      }, 300);
-    }
+    // Don't auto-expand when sending from collapsed mode - user can expand manually if needed
 
     // Clear input
     if (fromQuickInput) {
@@ -378,11 +372,19 @@ export default function GlassChatPiP() {
   const collapsedDims = {
     width: 360, // Optimal width for input + buttons
     baseHeight: 140, // Compact height for header + input
-    expandedHeight: 340 // Height when preview is expanded
+    expandedHeight: 340, // Height when preview is expanded
+    contextHeight: 80 // Additional height when context is shown and expanded
   };
   
-  // Dynamic collapsed height based on preview expansion
-  const collapsedHeight = isPreviewExpanded ? collapsedDims.expandedHeight : collapsedDims.baseHeight;
+  // Dynamic collapsed height based on preview expansion and context
+  let collapsedHeight = collapsedDims.baseHeight;
+  if (isPreviewExpanded) {
+    collapsedHeight = collapsedDims.expandedHeight;
+  }
+  // Add extra space if context is present (whether expanded or not, it takes some space)
+  if (contextMonitoring.hasNewContext && (contextMonitoring.contextData.clipboard || contextMonitoring.contextData.selectedText)) {
+    collapsedHeight += collapsedDims.contextHeight;
+  }
 
   return (
     <motion.div

@@ -1,17 +1,21 @@
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import { 
   Grip, 
   Maximize2, 
   Square, 
   CornerDownLeft,
   X,
-  Clipboard
+  Clipboard,
+  ChevronDown,
+  ChevronUp,
+  FileText
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { ThemeUtils } from '../../utils/themeUtils';
 import { Message } from '../../types/chat';
 import AnimatedOrb from '../AnimatedOrb';
 import CollapsedChatPreview from './CollapsedChatPreview';
+import { useState } from 'react';
 
 interface CollapsedHeaderProps {
   platform: string;
@@ -58,6 +62,8 @@ export default function CollapsedHeader({
   contextData,
   contextToggleEnabled
 }: CollapsedHeaderProps) {
+  const [isContextExpanded, setIsContextExpanded] = useState(false);
+
   return (
     <div className="flex flex-col">
       {/* Header with controls */}
@@ -206,6 +212,64 @@ export default function CollapsedHeader({
           </button>
         </form>
       </div>
+
+      {/* Context Dropdown */}
+      {hasNewContext && (contextData.clipboard || contextData.selectedText) && (
+        <div className="px-3 pb-2">
+          <div className={cn(
+            "border rounded-lg overflow-hidden",
+            ThemeUtils.getBorderClass(platform, theme)
+          )}>
+            {/* Context Header - Collapsible */}
+            <button
+              onClick={() => setIsContextExpanded(!isContextExpanded)}
+              className={cn(
+                "w-full flex items-center justify-between px-3 py-2",
+                "bg-blue-500/10 hover:bg-blue-500/15 transition-colors",
+                "text-blue-300"
+              )}
+              style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+            >
+              <div className="flex items-center gap-2">
+                <FileText className="w-3 h-3" />
+                <span className="text-xs font-medium">
+                  {contextData.clipboard ? 'Clipboard' : 'Selected Text'}
+                </span>
+                <div className="w-1.5 h-1.5 bg-blue-400 rounded-full animate-pulse" />
+              </div>
+              {isContextExpanded ? (
+                <ChevronUp className="w-3 h-3" />
+              ) : (
+                <ChevronDown className="w-3 h-3" />
+              )}
+            </button>
+
+            {/* Context Content - Expandable */}
+            <AnimatePresence>
+              {isContextExpanded && (
+                <motion.div
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: 'auto', opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  transition={{ duration: 0.2, ease: 'easeInOut' }}
+                  className="overflow-hidden"
+                >
+                  <div className={cn(
+                    "p-3 max-h-24 overflow-y-auto text-xs",
+                    ThemeUtils.getTextClass(platform, theme, 'secondary'),
+                    ThemeUtils.getScrollbarClass(platform, theme)
+                  )}>
+                    <pre className="whitespace-pre-wrap font-mono">
+                      {(contextData.clipboard || contextData.selectedText || '').substring(0, 200)}
+                      {(contextData.clipboard || contextData.selectedText || '').length > 200 && '...'}
+                    </pre>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+        </div>
+      )}
 
       {/* Chat Preview */}
       <CollapsedChatPreview
