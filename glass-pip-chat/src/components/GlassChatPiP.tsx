@@ -20,10 +20,15 @@ import {
   ChevronUp,
   Square,
   Copy,
-  Check
+  Check,
+  Menu
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import SettingsModal from './SettingsModal';
+import ChatSidebar from './ChatSidebar';
+import AnimatedOrb from './AnimatedOrb';
+import { ChatManager } from '../utils/chatManager';
+import { Chat, Message } from '../types/chat';
 
 type Size = 'S' | 'M' | 'L';
 const sizePx: Record<Size, { w: number; h: number }> = {
@@ -41,12 +46,7 @@ interface PiPState {
   collapsed: boolean;
 }
 
-interface Message {
-  id: string;
-  role: 'user' | 'assistant';
-  content: string;
-  timestamp: number;
-}
+// Message interface moved to types/chat.ts
 
 interface ContextData {
   clipboard: string;
@@ -64,14 +64,14 @@ export default function GlassChatPiP() {
   
   const [platform, setPlatform] = useState<string>('');
   
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      id: '1',
-      role: 'assistant',
-      content: "Hello! I'm your glass PiP chat assistant. How can I help you today?\n\n💡 **Available commands:**\n• `/run <command>` - Execute local commands\n• `/run@target <command>` - Execute remote commands\n• `/cmd <command>` - Alternative command syntax\n• `/exec <command>` - Another command syntax\n\n🎯 **Local examples:**\n• `/run git status` - Check git status\n• `/run npm install` - Install npm packages\n• `/run code .` - Open current directory in VS Code\n\n🌐 **Remote examples:**\n• `/run@docker ps` - Run in Docker container\n• `/run@myserver uptime` - Run on custom server\n• `/run@ssh-host ls -la` - Run on SSH server",
-      timestamp: Date.now()
-    }
-  ]);
+  // Chat management
+  const [chatManager] = useState(() => ChatManager.getInstance());
+  const [chats, setChats] = useState<Chat[]>([]);
+  const [activeChat, setActiveChat] = useState<Chat | null>(null);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  
+  // Current chat messages (derived from active chat)
+  const messages = activeChat?.messages || [];
   
   const [input, setInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
@@ -117,6 +117,39 @@ export default function GlassChatPiP() {
   const messagesRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
+  // Chat management functions
+  const handleChatSelect = (chatId: string) => {
+    chatManager.switchToChat(chatId);
+    setActiveChat(chatManager.getActiveChat());
+  };
+
+  const handleChatCreate = () => {
+    const newChat = chatManager.createNewChat();
+    setChats(chatManager.getAllChats());
+    setActiveChat(newChat);
+  };
+
+  const handleChatDelete = (chatId: string) => {
+    if (chatManager.deleteChat(chatId)) {
+      setChats(chatManager.getAllChats());
+      setActiveChat(chatManager.getActiveChat());
+    }
+  };
+
+  const handleChatRename = (chatId: string, newTitle: string) => {
+    if (chatManager.updateChatTitle(chatId, newTitle)) {
+      setChats(chatManager.getAllChats());
+      setActiveChat(chatManager.getActiveChat());
+    }
+  };
+
+  const addMessageToActiveChat = (message: Message) => {
+    if (activeChat && chatManager.addMessage(activeChat.id, message)) {
+      setChats(chatManager.getAllChats());
+      setActiveChat(chatManager.getActiveChat());
+    }
+  };
+
   // Load saved state
   useEffect(() => {
     const saved = localStorage.getItem(STORAGE_KEY);
@@ -129,6 +162,17 @@ export default function GlassChatPiP() {
       }
     }
   }, []);
+
+  // Initialize chat management
+  useEffect(() => {
+    const loadChats = () => {
+      const allChats = chatManager.getAllChats();
+      setChats(allChats);
+      setActiveChat(chatManager.getActiveChat());
+    };
+
+    loadChats();
+  }, [chatManager]);
 
   // Save state
   useEffect(() => {
@@ -144,14 +188,16 @@ export default function GlassChatPiP() {
     
     setIsResizing(true);
     const dims = sizePx[state.size];
-    const height = state.collapsed ? 120 : dims.h; // Match the UI height for collapsed state
+    const sidebarWidth = state.collapsed ? 0 : (sidebarCollapsed ? 48 : 280);
+    const width = dims.w + sidebarWidth;
+    const height = state.collapsed ? 120 : dims.h;
     
-    console.log('Resizing window to:', dims.w, 'x', height, 'collapsed:', state.collapsed);
+    console.log('Resizing window to:', width, 'x', height, 'collapsed:', state.collapsed, 'sidebar:', sidebarWidth);
     
     // Use a small delay to ensure state has settled
     const resizeTimeout = setTimeout(() => {
       try {
-        window.pip.resizeWindow(dims.w, height);
+        window.pip.resizeWindow(width, height);
       } catch (error) {
         console.error('Failed to resize window:', error);
       }
@@ -164,7 +210,7 @@ export default function GlassChatPiP() {
       clearTimeout(resizeTimeout);
       clearTimeout(resetTimeout);
     };
-  }, [state.size, state.collapsed]);
+  }, [state.size, state.collapsed, sidebarCollapsed]);
 
   // Track last assistant message for preview
   useEffect(() => {
@@ -512,7 +558,7 @@ export default function GlassChatPiP() {
       timestamp: Date.now()
     };
     
-    setMessages(prev => [...prev, userMessage]);
+    addMessageToActiveChat(userMessage);
     
     // Clear input
     if (fromQuickInput) {
@@ -590,7 +636,7 @@ export default function GlassChatPiP() {
         timestamp: Date.now()
       };
       
-      setMessages(prev => [...prev, assistantMessage]);
+      addMessageToActiveChat(assistantMessage);
     } catch (error) {
       console.error('Error executing command:', error);
       
@@ -601,7 +647,7 @@ export default function GlassChatPiP() {
         timestamp: Date.now()
       };
       
-      setMessages(prev => [...prev, errorMessage]);
+      addMessageToActiveChat(errorMessage);
     } finally {
       setIsTyping(false);
     }
@@ -651,7 +697,7 @@ export default function GlassChatPiP() {
       timestamp: Date.now()
     };
     
-    setMessages(prev => [...prev, userMessage]);
+    addMessageToActiveChat(userMessage);
     
     // Clear context flags if context was included
     if (shouldIncludeContext) {
@@ -704,7 +750,7 @@ export default function GlassChatPiP() {
           timestamp: Date.now()
         };
         
-        setMessages(prev => [...prev, streamingMessage]);
+        addMessageToActiveChat(streamingMessage);
         
         // Enhanced streaming with thinking process
         let fullResponse = '';
@@ -717,40 +763,54 @@ export default function GlassChatPiP() {
             thinkingContent += chunk.content;
             
             // Update the message with thinking content
-            setMessages(prev => prev.map(msg => 
-              msg.id === tempMessageId 
-                ? { 
-                    ...msg, 
-                    content: `💭 **Thinking...**\n\n${thinkingContent}\n\n---\n\n${responseContent}`
-                  }
-                : msg
-            ));
+            if (activeChat) {
+              const updatedMessages = activeChat.messages.map(msg => 
+                msg.id === tempMessageId 
+                  ? { 
+                      ...msg, 
+                      content: `💭 **Thinking...**\n\n${thinkingContent}\n\n---\n\n${responseContent}`
+                    }
+                  : msg
+              );
+              activeChat.messages = updatedMessages;
+              setActiveChat({ ...activeChat });
+            }
           } else if (chunk.type === 'response') {
             responseContent += chunk.content;
             
             // Update the message with response content
-            setMessages(prev => prev.map(msg => 
-              msg.id === tempMessageId 
-                ? { 
-                    ...msg, 
-                    content: thinkingContent 
-                      ? `💭 **Thinking Process:**\n\n${thinkingContent}\n\n---\n\n**Response:**\n\n${responseContent}`
-                      : responseContent
-                  }
-                : msg
-            ));
+            if (activeChat) {
+              const updatedMessages = activeChat.messages.map(msg => 
+                msg.id === tempMessageId 
+                  ? { 
+                      ...msg, 
+                      content: thinkingContent 
+                        ? `💭 **Thinking Process:**\n\n${thinkingContent}\n\n---\n\n**Response:**\n\n${responseContent}`
+                        : responseContent
+                    }
+                  : msg
+              );
+              activeChat.messages = updatedMessages;
+              setActiveChat({ ...activeChat });
+            }
           } else if (chunk.type === 'done') {
             // Final update
-            setMessages(prev => prev.map(msg => 
-              msg.id === tempMessageId 
-                ? { 
-                    ...msg, 
-                    content: thinkingContent 
-                      ? `💭 **Thinking Process:**\n\n${thinkingContent}\n\n---\n\n**Final Response:**\n\n${responseContent}`
-                      : responseContent
-                  }
-                : msg
-            ));
+            if (activeChat) {
+              const updatedMessages = activeChat.messages.map(msg => 
+                msg.id === tempMessageId 
+                  ? { 
+                      ...msg, 
+                      content: thinkingContent 
+                        ? `💭 **Thinking Process:**\n\n${thinkingContent}\n\n---\n\n**Final Response:**\n\n${responseContent}`
+                        : responseContent
+                    }
+                  : msg
+              );
+              activeChat.messages = updatedMessages;
+              setActiveChat({ ...activeChat });
+              // Update the chat manager
+              chatManager.getChatById(activeChat.id)!.messages = updatedMessages;
+            }
           }
         });
         
@@ -774,7 +834,7 @@ export default function GlassChatPiP() {
           timestamp: Date.now()
         };
         
-        setMessages(prev => [...prev, assistantMessage]);
+        addMessageToActiveChat(assistantMessage);
       }
       
     } catch (error) {
@@ -787,7 +847,7 @@ export default function GlassChatPiP() {
         timestamp: Date.now()
       };
       
-      setMessages(prev => [...prev, errorMessage]);
+      addMessageToActiveChat(errorMessage);
     } finally {
       setIsTyping(false);
       setStreamingResponse('');
@@ -1118,7 +1178,7 @@ export default function GlassChatPiP() {
         isResizing && "shadow-lg"
       )}
       style={{ 
-        width: dims.w, 
+        width: sidebarCollapsed ? dims.w : dims.w + 280, 
         height: state.collapsed ? 120 : dims.h,
         zIndex: 50
       } as React.CSSProperties}
@@ -1132,7 +1192,7 @@ export default function GlassChatPiP() {
       <motion.div
         layout
         className={cn(
-          "h-full w-full overflow-hidden relative",
+          "h-full w-full overflow-hidden relative flex",
           // Enhanced rounded corners for Windows
           platform === 'win32' ? "rounded-3xl" : "rounded-2xl",
           "border border-white/20",
@@ -1150,6 +1210,24 @@ export default function GlassChatPiP() {
         animate={{ opacity: 1, scale: 1 }}
         transition={{ duration: 0.3 }}
       >
+        {/* Chat Sidebar */}
+        {!state.collapsed && (
+          <ChatSidebar
+            chats={chats}
+            activeChat={activeChat?.id || null}
+            onChatSelect={handleChatSelect}
+            onChatCreate={handleChatCreate}
+            onChatDelete={handleChatDelete}
+            onChatRename={handleChatRename}
+            isCollapsed={sidebarCollapsed}
+            onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
+            theme={theme}
+            platform={platform}
+          />
+        )}
+
+        {/* Main Chat Area */}
+        <div className="flex-1 flex flex-col min-w-0">
         {/* Header - Draggable Area */}
         <div 
           className={cn(
@@ -1183,7 +1261,7 @@ export default function GlassChatPiP() {
                 } as React.CSSProperties}
               >
                 <Grip className="w-3 h-3 opacity-50 flex-shrink-0" />
-                <AnimatedOrb />
+                <AnimatedOrb isActive={isTyping} size="sm" />
                 
                 {/* Response preview or thinking indicator */}
                 <div 
@@ -1364,8 +1442,22 @@ export default function GlassChatPiP() {
             <>
               <div className="flex items-center gap-2 flex-1 min-w-0">
                 <Grip className="w-3 h-3 opacity-50 flex-shrink-0" />
+                <button
+                  onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+                  className={cn(
+                    "p-1 rounded transition-colors",
+                    platform === 'win32' 
+                      ? "hover:bg-white/10"
+                      : theme === 'dark' ? "hover:bg-white/10" : "hover:bg-black/10"
+                  )}
+                  title={sidebarCollapsed ? "Show chats" : "Hide chats"}
+                >
+                  <Menu className="w-3.5 h-3.5" />
+                </button>
                 <MessageSquare className="w-4 h-4 flex-shrink-0" />
-                <span className="text-sm font-medium truncate">Chat</span>
+                <span className="text-sm font-medium truncate">
+                  {activeChat?.title || 'Chat'}
+                </span>
             
             {/* Status indicators */}
             <div className="flex items-center gap-1 flex-shrink-0">
@@ -1894,6 +1986,7 @@ export default function GlassChatPiP() {
             </motion.div>
           )}
         </AnimatePresence>
+        </div>
       </motion.div>
       
       {/* Settings Modal */}
