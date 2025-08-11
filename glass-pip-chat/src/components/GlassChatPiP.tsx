@@ -7,28 +7,28 @@ import {
   Minus,
   X,
   Maximize2,
-  MessageSquare,
   Settings,
   Grip,
   Clipboard,
   MousePointer,
   Eye,
   EyeOff,
-  Server,
-  Monitor,
   ChevronDown,
   ChevronUp,
   Square,
   Copy,
   Check,
-  Menu,
   Terminal
 } from 'lucide-react';
 import { cn } from '../lib/utils';
+import { ThemeUtils } from '../utils/themeUtils';
+import { useEditState } from '../hooks/useEditState';
 import SettingsModal from './SettingsModal';
 import ChatSidebar from './ChatSidebar';
 import AnimatedOrb from './AnimatedOrb';
 import EditableMessage from './EditableMessage';
+import MarkdownRenderer from './MarkdownRenderer';
+import ClickAwayHandler from './ClickAwayHandler';
 import { ChatManager } from '../utils/chatManager';
 import { SettingsManager } from '../utils/settingsManager';
 import { Chat, Message } from '../types/chat';
@@ -49,8 +49,6 @@ interface PiPState {
   size: Size;
   collapsed: boolean;
 }
-
-// Message interface moved to types/chat.ts
 
 interface ContextData {
   clipboard: string;
@@ -84,7 +82,6 @@ export default function GlassChatPiP() {
   const [input, setInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const [isResizing, setIsResizing] = useState(false);
-  const [streamingResponse, setStreamingResponse] = useState('');
 
   // Add new state for collapsed chat improvements
   const [lastAssistantMessage, setLastAssistantMessage] = useState<string>('');
@@ -102,7 +99,6 @@ export default function GlassChatPiP() {
   const [includeContextInMessage, setIncludeContextInMessage] = useState(false);
   const [recentlySelected, setRecentlySelected] = useState(false);
   const [contextCollapsed, setContextCollapsed] = useState(true);
-  const [showContextPreview, setShowContextPreview] = useState(false);
 
   // Theme and settings state
   const [theme, setTheme] = useState<'light' | 'dark'>('dark');
@@ -120,94 +116,71 @@ export default function GlassChatPiP() {
   // Quick input for minimized mode
   const [quickInput, setQuickInput] = useState('');
 
-  // Header title editing state
-  const [isEditingHeaderTitle, setIsEditingHeaderTitle] = useState(false);
-  const [headerTitleEdit, setHeaderTitleEdit] = useState('');
-
   const containerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const messagesRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const headerTitleInputRef = useRef<HTMLInputElement>(null);
+
+  // Header title editing
+  const headerTitleEdit = useEditState({
+    initialValue: activeChat?.title || 'Chat',
+    onSave: (newTitle) => {
+      if (activeChat && chatManager.updateChatTitle(activeChat.id, newTitle)) {
+        refreshChatState();
+      }
+    }
+  });
 
   // Chat management functions
-  const handleChatSelect = (chatId: string) => {
-    chatManager.switchToChat(chatId);
+  const refreshChatState = () => {
+    setChats(chatManager.getAllChats());
     setActiveChat(chatManager.getActiveChat());
   };
 
+  const handleChatSelect = (chatId: string) => {
+    chatManager.switchToChat(chatId);
+    refreshChatState();
+  };
+
   const handleChatCreate = () => {
-    const newChat = chatManager.createNewChat();
-    setChats(chatManager.getAllChats());
-    setActiveChat(newChat);
+    chatManager.createNewChat();
+    refreshChatState();
   };
 
   const handleChatDelete = (chatId: string) => {
     if (chatManager.deleteChat(chatId)) {
-      setChats(chatManager.getAllChats());
-      setActiveChat(chatManager.getActiveChat());
+      refreshChatState();
     }
   };
 
   const handleChatRename = (chatId: string, newTitle: string) => {
     if (chatManager.updateChatTitle(chatId, newTitle)) {
-      setChats(chatManager.getAllChats());
-      setActiveChat(chatManager.getActiveChat());
+      refreshChatState();
     }
   };
 
-  // Header title editing functions
-  const handleStartHeaderTitleEdit = () => {
-    if (!activeChat) return;
-    setHeaderTitleEdit(activeChat.title);
-    setIsEditingHeaderTitle(true);
-  };
-
-  const handleSaveHeaderTitleEdit = () => {
-    if (!activeChat || !headerTitleEdit.trim()) {
-      handleCancelHeaderTitleEdit();
-      return;
-    }
-
-    if (chatManager.updateChatTitle(activeChat.id, headerTitleEdit.trim())) {
-      setChats(chatManager.getAllChats());
-      setActiveChat(chatManager.getActiveChat());
-    }
-
-    setIsEditingHeaderTitle(false);
-    setHeaderTitleEdit('');
-  };
-
-  const handleCancelHeaderTitleEdit = () => {
-    setIsEditingHeaderTitle(false);
-    setHeaderTitleEdit('');
-  };
 
   const addMessageToActiveChat = (message: Message) => {
     if (activeChat && chatManager.addMessage(activeChat.id, message)) {
-      setChats(chatManager.getAllChats());
-      setActiveChat(chatManager.getActiveChat());
+      refreshChatState();
     }
   };
 
   const handleMessageEdit = (messageId: string, newContent: string) => {
     if (activeChat && chatManager.updateMessage(activeChat.id, messageId, newContent)) {
-      setChats(chatManager.getAllChats());
-      setActiveChat(chatManager.getActiveChat());
+      refreshChatState();
     }
   };
 
   const handleMessageFork = (messageId: string, newContent: string) => {
     if (activeChat && chatManager.editMessage(activeChat.id, messageId, newContent)) {
-      setChats(chatManager.getAllChats());
-      setActiveChat(chatManager.getActiveChat());
+      refreshChatState();
     }
   };
 
   const handleMessageDelete = (messageId: string) => {
     if (activeChat && chatManager.deleteMessage(activeChat.id, messageId)) {
-      setChats(chatManager.getAllChats());
-      setActiveChat(chatManager.getActiveChat());
+      refreshChatState();
     }
   };
 
@@ -320,13 +293,6 @@ export default function GlassChatPiP() {
     return () => window.removeEventListener('focus-chat-input', handleFocusInput);
   }, []);
 
-  // Auto-focus header title input when editing starts
-  useEffect(() => {
-    if (isEditingHeaderTitle && headerTitleInputRef.current) {
-      headerTitleInputRef.current.focus();
-      headerTitleInputRef.current.select();
-    }
-  }, [isEditingHeaderTitle]);
 
   // Handle escape key to hide window instead of destroying it
   useEffect(() => {
@@ -342,19 +308,6 @@ export default function GlassChatPiP() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
-  // Close model selector when clicking outside
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (showModelSelector && containerRef.current && !containerRef.current.contains(event.target as Node)) {
-        setShowModelSelector(false);
-      }
-    };
-
-    if (showModelSelector) {
-      document.addEventListener('mousedown', handleClickOutside);
-      return () => document.removeEventListener('mousedown', handleClickOutside);
-    }
-  }, [showModelSelector]);
 
   // Test window.pip API availability and listen for resize completion
   useEffect(() => {
@@ -937,7 +890,6 @@ export default function GlassChatPiP() {
       addMessageToActiveChat(errorMessage);
     } finally {
       setIsTyping(false);
-      setStreamingResponse('');
     }
   };
 
@@ -1059,12 +1011,10 @@ export default function GlassChatPiP() {
 
   // Render message content with expandable context
   const renderMessageContent = (content: string, messageId: string) => {
-    // Check if the message contains context information
     const contextRegex = /\[Context: ([^\]]+)\]/;
     const contextMatch = content.match(contextRegex);
 
     if (contextMatch) {
-      // Split the content into parts
       const beforeContext = content.substring(0, contextMatch.index);
       const afterContext = content.substring(contextMatch.index! + contextMatch[0].length);
       const contextText = contextMatch[1];
@@ -1072,84 +1022,19 @@ export default function GlassChatPiP() {
 
       return (
         <>
-          <div className="prose prose-sm max-w-none prose-invert">
-            <ReactMarkdown
-              remarkPlugins={[remarkGfm]}
-              components={{
-                p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
-                code: ({ inline, className, children, ...props }) => {
-                  const match = /language-(\w+)/.exec(className || '');
-                  const codeText = String(children);
-                  const codeId = `${messageId}-${Math.random().toString(36).substr(2, 9)}`;
-                  const isCopied = copiedCode.has(codeId);
-
-                  return inline ? (
-                    <code className="px-1 py-0.5 bg-white/10 rounded text-xs" {...props}>
-                      {children}
-                    </code>
-                  ) : (
-                    <div className="relative group my-2">
-                      <pre className="bg-black/20 rounded-lg p-3 pr-20 overflow-x-auto">
-                        <code className={cn("text-xs", className)} {...props}>
-                          {children}
-                        </code>
-                      </pre>
-                      <div className="absolute top-2 right-2 flex gap-1">
-                        <button
-                          onClick={() => runInTerminal(codeText, codeId)}
-                          className={cn(
-                            "p-1.5 rounded-md transition-all duration-200",
-                            "opacity-0 group-hover:opacity-100 focus:opacity-100",
-                            runningCommands.has(codeId)
-                              ? "bg-blue-500/20 text-blue-300"
-                              : "bg-white/10 hover:bg-white/20 text-white/70 hover:text-white"
-                          )}
-                          title={runningCommands.has(codeId) ? "Running..." : "Run in terminal"}
-                          disabled={runningCommands.has(codeId)}
-                        >
-                          <Terminal className="w-3 h-3" />
-                        </button>
-                        <button
-                          onClick={() => copyToClipboard(codeText, codeId)}
-                          className={cn(
-                            "p-1.5 rounded-md transition-all duration-200",
-                            "opacity-0 group-hover:opacity-100 focus:opacity-100",
-                            isCopied
-                              ? "bg-green-500/20 text-green-300"
-                              : "bg-white/10 hover:bg-white/20 text-white/70 hover:text-white"
-                          )}
-                          title={isCopied ? "Copied!" : "Copy code"}
-                        >
-                          {isCopied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
-                        </button>
-                      </div>
-                    </div>
-                  );
-                },
-                ul: ({ children }) => <ul className="list-disc list-inside mb-2">{children}</ul>,
-                ol: ({ children }) => <ol className="list-decimal list-inside mb-2">{children}</ol>,
-                li: ({ children }) => <li className="mb-1">{children}</li>,
-                h1: ({ children }) => <h1 className="text-lg font-bold mb-2">{children}</h1>,
-                h2: ({ children }) => <h2 className="text-base font-bold mb-2">{children}</h2>,
-                h3: ({ children }) => <h3 className="text-sm font-bold mb-1">{children}</h3>,
-                blockquote: ({ children }) => (
-                  <blockquote className="border-l-2 border-white/20 pl-3 my-2 italic opacity-80">
-                    {children}
-                  </blockquote>
-                ),
-                a: ({ children, href }) => (
-                  <a href={href} className="text-blue-400 hover:underline" target="_blank" rel="noopener noreferrer">
-                    {children}
-                  </a>
-                ),
-              }}
-            >
-              {beforeContext.trim()}
-            </ReactMarkdown>
-          </div>
+          {beforeContext.trim() && (
+            <MarkdownRenderer
+              content={beforeContext.trim()}
+              messageId={`${messageId}-before`}
+              copiedCode={copiedCode}
+              runningCommands={runningCommands}
+              onCopyCode={copyToClipboard}
+              onRunCommand={runInTerminal}
+            />
+          )}
+          
           {contextText && (
             <div className="mt-2 mb-1">
-              {/* Collapsible context header */}
               <button
                 onClick={() => {
                   const newExpanded = new Set(expandedContexts);
@@ -1170,7 +1055,6 @@ export default function GlassChatPiP() {
                 <span>Context</span>
               </button>
 
-              {/* Context content */}
               <AnimatePresence>
                 {isExpanded && (
                   <motion.div
@@ -1191,81 +1075,17 @@ export default function GlassChatPiP() {
               </AnimatePresence>
             </div>
           )}
-          {afterContext && (
-            <div className="prose prose-sm max-w-none prose-invert mt-2">
-              <ReactMarkdown
-                remarkPlugins={[remarkGfm]}
-                components={{
-                  p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
-                  code: ({ inline, className, children, ...props }) => {
-                    const match = /language-(\w+)/.exec(className || '');
-                    const codeText = String(children);
-                    const codeId = `${messageId}-after-${Math.random().toString(36).substr(2, 9)}`;
-                    const isCopied = copiedCode.has(codeId);
-
-                    return inline ? (
-                      <code className="px-1 py-0.5 bg-white/10 rounded text-xs" {...props}>
-                        {children}
-                      </code>
-                    ) : (
-                      <div className="relative group my-2">
-                        <pre className="bg-black/20 rounded-lg p-3 pr-20 overflow-x-auto">
-                          <code className={cn("text-xs", className)} {...props}>
-                            {children}
-                          </code>
-                        </pre>
-                        <div className="absolute top-2 right-2 flex gap-1">
-                          <button
-                            onClick={() => runInTerminal(codeText, codeId)}
-                            className={cn(
-                              "p-1.5 rounded-md transition-all duration-200",
-                              "opacity-0 group-hover:opacity-100 focus:opacity-100",
-                              runningCommands.has(codeId)
-                                ? "bg-blue-500/20 text-blue-300"
-                                : "bg-white/10 hover:bg-white/20 text-white/70 hover:text-white"
-                            )}
-                            title={runningCommands.has(codeId) ? "Running..." : "Run in terminal"}
-                            disabled={runningCommands.has(codeId)}
-                          >
-                            <Terminal className="w-3 h-3" />
-                          </button>
-                          <button
-                            onClick={() => copyToClipboard(codeText, codeId)}
-                            className={cn(
-                              "p-1.5 rounded-md transition-all duration-200",
-                              "opacity-0 group-hover:opacity-100 focus:opacity-100",
-                              isCopied
-                                ? "bg-green-500/20 text-green-300"
-                                : "bg-white/10 hover:bg-white/20 text-white/70 hover:text-white"
-                            )}
-                            title={isCopied ? "Copied!" : "Copy code"}
-                          >
-                            {isCopied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
-                          </button>
-                        </div>
-                      </div>
-                    );
-                  },
-                  ul: ({ children }) => <ul className="list-disc list-inside mb-2">{children}</ul>,
-                  ol: ({ children }) => <ol className="list-decimal list-inside mb-2">{children}</ol>,
-                  li: ({ children }) => <li className="mb-1">{children}</li>,
-                  h1: ({ children }) => <h1 className="text-lg font-bold mb-2">{children}</h1>,
-                  h2: ({ children }) => <h2 className="text-base font-bold mb-2">{children}</h2>,
-                  h3: ({ children }) => <h3 className="text-sm font-bold mb-1">{children}</h3>,
-                  blockquote: ({ children }) => (
-                    <blockquote className="border-l-2 border-white/20 pl-3 my-2 italic opacity-80">
-                      {children}
-                    </blockquote>
-                  ),
-                  a: ({ children, href }) => (
-                    <a href={href} className="text-blue-400 hover:underline" target="_blank" rel="noopener noreferrer">
-                      {children}
-                    </a>
-                  ),
-                }}
-              >
-                {afterContext.trim()}
-              </ReactMarkdown>
+          
+          {afterContext.trim() && (
+            <div className="mt-2">
+              <MarkdownRenderer
+                content={afterContext.trim()}
+                messageId={`${messageId}-after`}
+                copiedCode={copiedCode}
+                runningCommands={runningCommands}
+                onCopyCode={copyToClipboard}
+                onRunCommand={runInTerminal}
+              />
             </div>
           )}
         </>
@@ -1273,128 +1093,19 @@ export default function GlassChatPiP() {
     }
 
     return (
-      <div className="prose prose-sm max-w-none prose-invert">
-        <ReactMarkdown
-          remarkPlugins={[remarkGfm]}
-          components={{
-            p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
-            code: ({ inline, className, children, ...props }) => {
-              const match = /language-(\w+)/.exec(className || '');
-              const codeText = String(children);
-              const codeId = `${messageId}-main-${Math.random().toString(36).substr(2, 9)}`;
-              const isCopied = copiedCode.has(codeId);
-
-              return inline ? (
-                <code className="px-1 py-0.5 bg-white/10 rounded text-xs" {...props}>
-                  {children}
-                </code>
-              ) : (
-                <div className="relative group my-2">
-                  <pre className="bg-black/20 rounded-lg p-3 pr-20 overflow-x-auto">
-                    <code className={cn("text-xs", className)} {...props}>
-                      {children}
-                    </code>
-                  </pre>
-                  <div className="absolute top-2 right-2 flex gap-1">
-                    <button
-                      onClick={() => runInTerminal(codeText, codeId)}
-                      className={cn(
-                        "p-1.5 rounded-md transition-all duration-200",
-                        "opacity-0 group-hover:opacity-100 focus:opacity-100",
-                        runningCommands.has(codeId)
-                          ? "bg-blue-500/20 text-blue-300"
-                          : "bg-white/10 hover:bg-white/20 text-white/70 hover:text-white"
-                      )}
-                      title={runningCommands.has(codeId) ? "Running..." : "Run in terminal"}
-                      disabled={runningCommands.has(codeId)}
-                    >
-                      <Terminal className="w-3 h-3" />
-                    </button>
-                    <button
-                      onClick={() => copyToClipboard(codeText, codeId)}
-                      className={cn(
-                        "p-1.5 rounded-md transition-all duration-200",
-                        "opacity-0 group-hover:opacity-100 focus:opacity-100",
-                        isCopied
-                          ? "bg-green-500/20 text-green-300"
-                          : "bg-white/10 hover:bg-white/20 text-white/70 hover:text-white"
-                      )}
-                      title={isCopied ? "Copied!" : "Copy code"}
-                    >
-                      {isCopied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
-                    </button>
-                  </div>
-                </div>
-              );
-            },
-            ul: ({ children }) => <ul className="list-disc list-inside mb-2">{children}</ul>,
-            ol: ({ children }) => <ol className="list-decimal list-inside mb-2">{children}</ol>,
-            li: ({ children }) => <li className="mb-1">{children}</li>,
-            h1: ({ children }) => <h1 className="text-lg font-bold mb-2">{children}</h1>,
-            h2: ({ children }) => <h2 className="text-base font-bold mb-2">{children}</h2>,
-            h3: ({ children }) => <h3 className="text-sm font-bold mb-1">{children}</h3>,
-            blockquote: ({ children }) => (
-              <blockquote className="border-l-2 border-white/20 pl-3 my-2 italic opacity-80">
-                {children}
-              </blockquote>
-            ),
-            a: ({ children, href }) => (
-              <a href={href} className="text-blue-400 hover:underline" target="_blank" rel="noopener noreferrer">
-                {children}
-              </a>
-            ),
-          }}
-        >
-          {content}
-        </ReactMarkdown>
-      </div>
+      <MarkdownRenderer
+        content={content}
+        messageId={messageId}
+        copiedCode={copiedCode}
+        runningCommands={runningCommands}
+        onCopyCode={copyToClipboard}
+        onRunCommand={runInTerminal}
+      />
     );
   };
 
   const dims = sizePx[state.size];
 
-  // Animated Siri-like orb component
-  const AnimatedOrb = () => (
-    <div className="relative w-6 h-6 flex items-center justify-center">
-      <motion.div
-        className="absolute inset-0 rounded-full bg-gradient-to-br from-blue-400 to-purple-600"
-        animate={{
-          scale: isTyping ? [1, 1.2, 1] : 1,
-          opacity: isTyping ? [0.7, 1, 0.7] : 0.8,
-        }}
-        transition={{
-          duration: 2,
-          repeat: Infinity,
-          ease: "easeInOut"
-        }}
-      />
-      <motion.div
-        className="absolute inset-1 rounded-full bg-gradient-to-br from-blue-300 to-purple-500"
-        animate={{
-          scale: isTyping ? [1.2, 1, 1.2] : 1,
-          opacity: isTyping ? [0.5, 0.8, 0.5] : 0.6,
-        }}
-        transition={{
-          duration: 2,
-          repeat: Infinity,
-          ease: "easeInOut",
-          delay: 0.3
-        }}
-      />
-      <motion.div
-        className="absolute inset-2 rounded-full bg-white/30"
-        animate={{
-          scale: isTyping ? [1, 1.3, 1] : 1,
-        }}
-        transition={{
-          duration: 2,
-          repeat: Infinity,
-          ease: "easeInOut",
-          delay: 0.6
-        }}
-      />
-    </div>
-  );
 
   return (
     <motion.div
@@ -1487,7 +1198,7 @@ export default function GlassChatPiP() {
                   } as React.CSSProperties}
                 >
                   <Grip className="w-3 h-3 opacity-50 flex-shrink-0" />
-                  <AnimatedOrb isActive={isTyping} size="sm" />
+                  <AnimatedOrb isActive={isTyping} size="md" />
 
                   {/* Response preview or thinking indicator */}
                   <div
@@ -1576,11 +1287,7 @@ export default function GlassChatPiP() {
                         "flex-1 px-3 py-1.5 text-sm rounded-lg border transition-all",
                         "focus:outline-none focus:ring-2",
                         platform !== 'win32' && "backdrop-blur-md",
-                        platform === 'win32'
-                          ? "bg-white/10 border-white/10 placeholder:text-white/40 focus:ring-white/20"
-                          : theme === 'dark'
-                            ? "bg-white/10 border-white/10 placeholder:text-white/40 focus:ring-white/20"
-                            : "bg-black/10 border-black/10 placeholder:text-black/40 focus:ring-black/20"
+                        ThemeUtils.getInputClass(platform, theme)
                       )}
                     />
 
@@ -1686,54 +1393,33 @@ export default function GlassChatPiP() {
                   </button>
 
                   {/* Editable chat title */}
-                  {isEditingHeaderTitle ? (
+                  {headerTitleEdit.isEditing ? (
                     <div
                       className="flex items-center gap-1 flex-1 min-w-0"
-                      style={{
-                        WebkitAppRegion: 'no-drag'
-                      } as React.CSSProperties}
+                      style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
                     >
                       <input
-                        ref={headerTitleInputRef}
-                        value={headerTitleEdit}
-                        onChange={(e) => setHeaderTitleEdit(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') {
-                            e.preventDefault();
-                            handleSaveHeaderTitleEdit();
-                          }
-                          if (e.key === 'Escape') {
-                            e.preventDefault();
-                            handleCancelHeaderTitleEdit();
-                          }
-                        }}
-                        onBlur={handleSaveHeaderTitleEdit}
+                        ref={headerTitleEdit.inputRef as React.RefObject<HTMLInputElement>}
+                        value={headerTitleEdit.editValue}
+                        onChange={(e) => headerTitleEdit.setEditValue(e.target.value)}
+                        onKeyDown={headerTitleEdit.handleKeyDown}
+                        onBlur={headerTitleEdit.saveEdit}
                         className={cn(
-                          "flex-1 bg-transparent border rounded px-2 py-1 text-sm font-medium min-w-0",
-                          platform === 'win32'
-                            ? "border-white/30 text-white placeholder-white/50"
-                            : theme === 'dark'
-                              ? "border-white/30 text-white placeholder-white/50"
-                              : "border-black/30 text-black placeholder-black/50"
+                          "flex-1 text-sm font-medium min-w-0",
+                          ThemeUtils.getInputClass(platform, theme)
                         )}
                         placeholder="Chat title..."
                       />
                       <button
-                        onClick={handleSaveHeaderTitleEdit}
-                        className={cn(
-                          "p-1 rounded transition-colors flex-shrink-0",
-                          "hover:bg-green-500/20"
-                        )}
+                        onClick={headerTitleEdit.saveEdit}
+                        className={cn(ThemeUtils.getButtonClass(platform, theme), "hover:bg-green-500/20")}
                         title="Save title"
                       >
                         <Check className="w-3 h-3 text-green-400" />
                       </button>
                       <button
-                        onClick={handleCancelHeaderTitleEdit}
-                        className={cn(
-                          "p-1 rounded transition-colors flex-shrink-0",
-                          "hover:bg-red-500/20"
-                        )}
+                        onClick={headerTitleEdit.cancelEdit}
+                        className={cn(ThemeUtils.getButtonClass(platform, theme), "hover:bg-red-500/20")}
                         title="Cancel editing"
                       >
                         <X className="w-3 h-3 text-red-400" />
@@ -1741,18 +1427,13 @@ export default function GlassChatPiP() {
                     </div>
                   ) : (
                     <button
-                      onClick={handleStartHeaderTitleEdit}
+                      onClick={() => headerTitleEdit.startEdit(activeChat?.title)}
                       className={cn(
                         "flex-1 text-sm font-medium truncate text-left px-2 py-1.5 rounded transition-colors min-w-0",
-                        platform === 'win32'
-                          ? "text-white/90 hover:text-white hover:bg-white/10"
-                          : theme === 'dark'
-                            ? "text-white/90 hover:text-white hover:bg-white/10"
-                            : "text-black/90 hover:text-black hover:bg-black/10"
+                        ThemeUtils.getTextClass(platform, theme),
+                        ThemeUtils.getBackgroundClass(platform, theme, 'hover')
                       )}
-                      style={{
-                        WebkitAppRegion: 'no-drag'
-                      } as React.CSSProperties}
+                      style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
                       title="Click to rename chat"
                     >
                       {activeChat?.title || 'Chat'}
@@ -2247,11 +1928,7 @@ export default function GlassChatPiP() {
                         "flex-1 px-3 py-2 rounded-xl text-sm border transition-all",
                         "focus:outline-none focus:ring-2",
                         platform !== 'win32' && "backdrop-blur-md",
-                        platform === 'win32'
-                          ? "bg-white/10 border-white/10 placeholder:text-white/40 focus:ring-white/20"
-                          : theme === 'dark'
-                            ? "bg-white/10 border-white/10 placeholder:text-white/40 focus:ring-white/20"
-                            : "bg-black/10 border-black/10 placeholder:text-black/40 focus:ring-black/20"
+                        ThemeUtils.getInputClass(platform, theme)
                       )}
                     />
                     <button
