@@ -31,6 +31,11 @@ interface CollapsedHeaderProps {
   onHide: () => void;
   onCopyMessage: (content: string) => void;
   onPreviewToggle?: (isExpanded: boolean) => void;
+  onMessageEdit?: (messageId: string, newContent: string) => void;
+  onMessageFork?: (messageId: string, newContent: string) => void;
+  onMessageDelete?: (messageId: string) => void;
+  onCopyCode?: (text: string, codeId: string) => void;
+  onRunCode?: (command: string, codeId: string) => void;
   isResizing: boolean;
   size: string;
   ollamaAvailable: boolean;
@@ -38,6 +43,7 @@ interface CollapsedHeaderProps {
   hasNewContext: boolean;
   contextData: any;
   contextToggleEnabled: boolean;
+  uiSettings?: any;
 }
 
 export default function CollapsedHeader({
@@ -54,13 +60,19 @@ export default function CollapsedHeader({
   onHide,
   onCopyMessage,
   onPreviewToggle,
+  onMessageEdit,
+  onMessageFork,
+  onMessageDelete,
+  onCopyCode,
+  onRunCode,
   isResizing,
   size,
   ollamaAvailable,
   serverStatus,
   hasNewContext,
   contextData,
-  contextToggleEnabled
+  contextToggleEnabled,
+  uiSettings
 }: CollapsedHeaderProps) {
   const [isContextExpanded, setIsContextExpanded] = useState(false);
 
@@ -154,7 +166,10 @@ export default function CollapsedHeader({
       </div>
 
       {/* Input section */}
-      <div className="px-3 pb-2">
+      <div 
+        className="px-3 pb-2"
+        style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+      >
         <form
           onSubmit={(e) => {
             e.preventDefault();
@@ -215,54 +230,59 @@ export default function CollapsedHeader({
 
       {/* Context Dropdown */}
       {hasNewContext && (contextData.clipboard || contextData.selectedText) && (
-        <div className="px-3 pb-2">
+        <div 
+          className="px-3 pb-2"
+          style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+        >
           <div className={cn(
             "border rounded-lg overflow-hidden",
             ThemeUtils.getBorderClass(platform, theme)
           )}>
-            {/* Context Header - Collapsible */}
+            {/* Context Header - Collapsible (like EditableMessage) */}
             <button
               onClick={() => setIsContextExpanded(!isContextExpanded)}
               className={cn(
-                "w-full flex items-center justify-between px-3 py-2",
-                "bg-blue-500/10 hover:bg-blue-500/15 transition-colors",
-                "text-blue-300"
+                "w-full flex items-center justify-between p-3 text-left transition-colors",
+                "hover:bg-white/5 rounded-lg"
               )}
               style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
             >
               <div className="flex items-center gap-2">
-                <FileText className="w-3 h-3" />
-                <span className="text-xs font-medium">
-                  {contextData.clipboard ? 'Clipboard' : 'Selected Text'}
+                <Clipboard className="w-3 h-3 opacity-60" />
+                <span className="text-xs font-medium opacity-80">
+                  Context attached
                 </span>
-                <div className="w-1.5 h-1.5 bg-blue-400 rounded-full animate-pulse" />
               </div>
-              {isContextExpanded ? (
-                <ChevronUp className="w-3 h-3" />
-              ) : (
-                <ChevronDown className="w-3 h-3" />
-              )}
+              <ChevronDown className={cn(
+                "w-3 h-3 opacity-60 transition-transform duration-200",
+                isContextExpanded && "rotate-180"
+              )} />
             </button>
 
-            {/* Context Content - Expandable */}
+            {/* Context Content - Expandable (like EditableMessage) */}
             <AnimatePresence>
               {isContextExpanded && (
                 <motion.div
-                  initial={{ height: 0, opacity: 0 }}
-                  animate={{ height: 'auto', opacity: 1 }}
-                  exit={{ height: 0, opacity: 0 }}
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  exit={{ opacity: 0, height: 0 }}
                   transition={{ duration: 0.2, ease: 'easeInOut' }}
                   className="overflow-hidden"
                 >
                   <div className={cn(
-                    "p-3 max-h-24 overflow-y-auto text-xs",
-                    ThemeUtils.getTextClass(platform, theme, 'secondary'),
-                    ThemeUtils.getScrollbarClass(platform, theme)
+                    "px-3 pb-3 border-t",
+                    ThemeUtils.getBorderClass(platform, theme)
                   )}>
-                    <pre className="whitespace-pre-wrap font-mono">
-                      {(contextData.clipboard || contextData.selectedText || '').substring(0, 200)}
-                      {(contextData.clipboard || contextData.selectedText || '').length > 200 && '...'}
-                    </pre>
+                    <div className="text-xs opacity-70 font-medium mb-2">Context Details:</div>
+                    <div className={cn(
+                      "p-2 rounded max-h-32 overflow-y-auto",
+                      "bg-black/20 text-xs font-mono",
+                      ThemeUtils.getScrollbarClass(platform, theme)
+                    )}>
+                      <pre className="whitespace-pre-wrap">
+                        {contextData.clipboard || contextData.selectedText || ''}
+                      </pre>
+                    </div>
                   </div>
                 </motion.div>
               )}
@@ -279,6 +299,12 @@ export default function CollapsedHeader({
         isTyping={isTyping}
         onCopyMessage={onCopyMessage}
         onPreviewToggle={onPreviewToggle}
+        onMessageEdit={onMessageEdit}
+        onMessageFork={onMessageFork}
+        onMessageDelete={onMessageDelete}
+        onCopyCode={onCopyCode}
+        onRunCode={onRunCode}
+        uiSettings={uiSettings}
       />
     </div>
   );
