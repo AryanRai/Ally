@@ -21,7 +21,8 @@ import {
   Square,
   Copy,
   Check,
-  Menu
+  Menu,
+  Terminal
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import SettingsModal from './SettingsModal';
@@ -946,6 +947,9 @@ export default function GlassChatPiP() {
   // State for copy functionality
   const [copiedCode, setCopiedCode] = useState<Set<string>>(new Set());
 
+  // State for run functionality
+  const [runningCommands, setRunningCommands] = useState<Set<string>>(new Set());
+
   // Copy to clipboard function
   const copyToClipboard = async (text: string, codeId: string) => {
     try {
@@ -962,6 +966,94 @@ export default function GlassChatPiP() {
       }, 2000);
     } catch (err) {
       console.error('Failed to copy text: ', err);
+    }
+  };
+
+  // Run command in terminal function
+  const runInTerminal = async (command: string, codeId: string) => {
+    try {
+      if (!window.pip?.system) {
+        console.error('System command execution not available');
+        return;
+      }
+
+      // Clean the command - remove common prefixes and trim
+      let cleanCommand = command.trim();
+
+      // Remove common command prefixes that might be in code blocks
+      cleanCommand = cleanCommand.replace(/^\$\s*/, ''); // Remove $ prefix
+      cleanCommand = cleanCommand.replace(/^>\s*/, ''); // Remove > prefix
+      cleanCommand = cleanCommand.replace(/^#\s*/, ''); // Remove # prefix (comments)
+
+      // Skip if it's just a comment or empty
+      if (!cleanCommand || cleanCommand.startsWith('#')) {
+        return;
+      }
+
+      setRunningCommands(prev => new Set([...prev, codeId]));
+
+      console.log('Running command in terminal:', cleanCommand);
+
+      // Execute the command
+      const result = await window.pip.system.executeCommand(cleanCommand);
+
+      // Create a message showing the result
+      let responseContent = `🔧 **Executed:** \`${cleanCommand}\`\n\n`;
+
+      if (result.success) {
+        responseContent += `✅ **Success**\n\n`;
+
+        if (result.stdout && result.stdout.trim()) {
+          responseContent += `**Output:**\n\`\`\`\n${result.stdout.trim()}\n\`\`\`\n\n`;
+        }
+
+        if (result.stderr && result.stderr.trim()) {
+          responseContent += `**Warnings:**\n\`\`\`\n${result.stderr.trim()}\n\`\`\``;
+        }
+
+        if (!result.stdout?.trim() && !result.stderr?.trim()) {
+          responseContent += `Command completed with no output.`;
+        }
+      } else {
+        responseContent += `❌ **Failed**\n\n`;
+        responseContent += `**Error:** ${result.error}\n\n`;
+
+        if (result.stderr && result.stderr.trim()) {
+          responseContent += `**Details:**\n\`\`\`\n${result.stderr.trim()}\n\`\`\``;
+        }
+      }
+
+      // Add the result as a new message
+      const resultMessage: Message = {
+        id: Date.now().toString(),
+        role: 'assistant',
+        content: responseContent,
+        timestamp: Date.now()
+      };
+
+      addMessageToActiveChat(resultMessage);
+
+    } catch (error) {
+      console.error('Error running command:', error);
+
+      // Add error message
+      const errorMessage: Message = {
+        id: Date.now().toString(),
+        role: 'assistant',
+        content: `❌ **Command execution failed**\n\nError: ${error instanceof Error ? error.message : 'Unknown error occurred'}`,
+        timestamp: Date.now()
+      };
+
+      addMessageToActiveChat(errorMessage);
+    } finally {
+      // Reset running state after 1 second
+      setTimeout(() => {
+        setRunningCommands(prev => {
+          const newSet = new Set(prev);
+          newSet.delete(codeId);
+          return newSet;
+        });
+      }, 1000);
     }
   };
 
@@ -997,24 +1089,40 @@ export default function GlassChatPiP() {
                     </code>
                   ) : (
                     <div className="relative group my-2">
-                      <pre className="bg-black/20 rounded-lg p-3 pr-12 overflow-x-auto">
+                      <pre className="bg-black/20 rounded-lg p-3 pr-20 overflow-x-auto">
                         <code className={cn("text-xs", className)} {...props}>
                           {children}
                         </code>
                       </pre>
-                      <button
-                        onClick={() => copyToClipboard(codeText, codeId)}
-                        className={cn(
-                          "absolute top-2 right-2 p-1.5 rounded-md transition-all duration-200",
-                          "opacity-0 group-hover:opacity-100 focus:opacity-100",
-                          isCopied
-                            ? "bg-green-500/20 text-green-300"
-                            : "bg-white/10 hover:bg-white/20 text-white/70 hover:text-white"
-                        )}
-                        title={isCopied ? "Copied!" : "Copy code"}
-                      >
-                        {isCopied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
-                      </button>
+                      <div className="absolute top-2 right-2 flex gap-1">
+                        <button
+                          onClick={() => runInTerminal(codeText, codeId)}
+                          className={cn(
+                            "p-1.5 rounded-md transition-all duration-200",
+                            "opacity-0 group-hover:opacity-100 focus:opacity-100",
+                            runningCommands.has(codeId)
+                              ? "bg-blue-500/20 text-blue-300"
+                              : "bg-white/10 hover:bg-white/20 text-white/70 hover:text-white"
+                          )}
+                          title={runningCommands.has(codeId) ? "Running..." : "Run in terminal"}
+                          disabled={runningCommands.has(codeId)}
+                        >
+                          <Terminal className="w-3 h-3" />
+                        </button>
+                        <button
+                          onClick={() => copyToClipboard(codeText, codeId)}
+                          className={cn(
+                            "p-1.5 rounded-md transition-all duration-200",
+                            "opacity-0 group-hover:opacity-100 focus:opacity-100",
+                            isCopied
+                              ? "bg-green-500/20 text-green-300"
+                              : "bg-white/10 hover:bg-white/20 text-white/70 hover:text-white"
+                          )}
+                          title={isCopied ? "Copied!" : "Copy code"}
+                        >
+                          {isCopied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+                        </button>
+                      </div>
                     </div>
                   );
                 },
@@ -1101,24 +1209,40 @@ export default function GlassChatPiP() {
                       </code>
                     ) : (
                       <div className="relative group my-2">
-                        <pre className="bg-black/20 rounded-lg p-3 pr-12 overflow-x-auto">
+                        <pre className="bg-black/20 rounded-lg p-3 pr-20 overflow-x-auto">
                           <code className={cn("text-xs", className)} {...props}>
                             {children}
                           </code>
                         </pre>
-                        <button
-                          onClick={() => copyToClipboard(codeText, codeId)}
-                          className={cn(
-                            "absolute top-2 right-2 p-1.5 rounded-md transition-all duration-200",
-                            "opacity-0 group-hover:opacity-100 focus:opacity-100",
-                            isCopied
-                              ? "bg-green-500/20 text-green-300"
-                              : "bg-white/10 hover:bg-white/20 text-white/70 hover:text-white"
-                          )}
-                          title={isCopied ? "Copied!" : "Copy code"}
-                        >
-                          {isCopied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
-                        </button>
+                        <div className="absolute top-2 right-2 flex gap-1">
+                          <button
+                            onClick={() => runInTerminal(codeText, codeId)}
+                            className={cn(
+                              "p-1.5 rounded-md transition-all duration-200",
+                              "opacity-0 group-hover:opacity-100 focus:opacity-100",
+                              runningCommands.has(codeId)
+                                ? "bg-blue-500/20 text-blue-300"
+                                : "bg-white/10 hover:bg-white/20 text-white/70 hover:text-white"
+                            )}
+                            title={runningCommands.has(codeId) ? "Running..." : "Run in terminal"}
+                            disabled={runningCommands.has(codeId)}
+                          >
+                            <Terminal className="w-3 h-3" />
+                          </button>
+                          <button
+                            onClick={() => copyToClipboard(codeText, codeId)}
+                            className={cn(
+                              "p-1.5 rounded-md transition-all duration-200",
+                              "opacity-0 group-hover:opacity-100 focus:opacity-100",
+                              isCopied
+                                ? "bg-green-500/20 text-green-300"
+                                : "bg-white/10 hover:bg-white/20 text-white/70 hover:text-white"
+                            )}
+                            title={isCopied ? "Copied!" : "Copy code"}
+                          >
+                            {isCopied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+                          </button>
+                        </div>
                       </div>
                     );
                   },
@@ -1166,24 +1290,40 @@ export default function GlassChatPiP() {
                 </code>
               ) : (
                 <div className="relative group my-2">
-                  <pre className="bg-black/20 rounded-lg p-3 pr-12 overflow-x-auto">
+                  <pre className="bg-black/20 rounded-lg p-3 pr-20 overflow-x-auto">
                     <code className={cn("text-xs", className)} {...props}>
                       {children}
                     </code>
                   </pre>
-                  <button
-                    onClick={() => copyToClipboard(codeText, codeId)}
-                    className={cn(
-                      "absolute top-2 right-2 p-1.5 rounded-md transition-all duration-200",
-                      "opacity-0 group-hover:opacity-100 focus:opacity-100",
-                      isCopied
-                        ? "bg-green-500/20 text-green-300"
-                        : "bg-white/10 hover:bg-white/20 text-white/70 hover:text-white"
-                    )}
-                    title={isCopied ? "Copied!" : "Copy code"}
-                  >
-                    {isCopied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
-                  </button>
+                  <div className="absolute top-2 right-2 flex gap-1">
+                    <button
+                      onClick={() => runInTerminal(codeText, codeId)}
+                      className={cn(
+                        "p-1.5 rounded-md transition-all duration-200",
+                        "opacity-0 group-hover:opacity-100 focus:opacity-100",
+                        runningCommands.has(codeId)
+                          ? "bg-blue-500/20 text-blue-300"
+                          : "bg-white/10 hover:bg-white/20 text-white/70 hover:text-white"
+                      )}
+                      title={runningCommands.has(codeId) ? "Running..." : "Run in terminal"}
+                      disabled={runningCommands.has(codeId)}
+                    >
+                      <Terminal className="w-3 h-3" />
+                    </button>
+                    <button
+                      onClick={() => copyToClipboard(codeText, codeId)}
+                      className={cn(
+                        "p-1.5 rounded-md transition-all duration-200",
+                        "opacity-0 group-hover:opacity-100 focus:opacity-100",
+                        isCopied
+                          ? "bg-green-500/20 text-green-300"
+                          : "bg-white/10 hover:bg-white/20 text-white/70 hover:text-white"
+                      )}
+                      title={isCopied ? "Copied!" : "Copy code"}
+                    >
+                      {isCopied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+                    </button>
+                  </div>
                 </div>
               );
             },
