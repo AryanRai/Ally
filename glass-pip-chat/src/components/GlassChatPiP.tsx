@@ -557,7 +557,7 @@ Non-input:
     baseHeight: 140, // Compact height for header + input
     expandedHeight: 340, // Height when preview is expanded
     contextHeight: 80, // Additional height when context is shown and expanded
-    responseHeight: 200 // Height for response preview area
+    responseHeight: 140 // Height for response preview area (reduced further for better fit)
   };
   
   // Dynamic collapsed height based on preview expansion, context, and response

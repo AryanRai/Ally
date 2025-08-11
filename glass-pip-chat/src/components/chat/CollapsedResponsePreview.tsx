@@ -48,7 +48,7 @@ export default function CollapsedResponsePreview({
           style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
         >
           {/* Response Header */}
-          <div className="flex items-center justify-between px-3 py-2 bg-green-500/10">
+          <div className="flex items-center justify-between px-3 py-1.5 bg-green-500/10">
             <div className="flex items-center gap-2">
               <Bot className="w-3 h-3 opacity-60" />
               <span className="text-xs font-medium opacity-80">
@@ -73,7 +73,7 @@ export default function CollapsedResponsePreview({
           <div
             ref={scrollRef}
             className={cn(
-              "max-h-48 overflow-y-auto px-3 pb-3 pt-2",
+              "max-h-40 overflow-y-auto px-3 pb-2 pt-1.5",
               "transition-all duration-200",
               ThemeUtils.getScrollbarClass(platform, theme)
             )}
