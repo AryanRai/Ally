@@ -97,6 +97,7 @@ export default function ChatInput({
         className="flex items-center gap-2"
       >
         <input
+          id="main-input"
           type="text"
           value={input}
           onChange={(e) => setInput(e.target.value)}
