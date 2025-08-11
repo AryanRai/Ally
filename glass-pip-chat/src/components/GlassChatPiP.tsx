@@ -27,6 +27,7 @@ import { cn } from '../lib/utils';
 import SettingsModal from './SettingsModal';
 import ChatSidebar from './ChatSidebar';
 import AnimatedOrb from './AnimatedOrb';
+import EditableMessage from './EditableMessage';
 import { ChatManager } from '../utils/chatManager';
 import { Chat, Message } from '../types/chat';
 
@@ -147,6 +148,36 @@ export default function GlassChatPiP() {
     if (activeChat && chatManager.addMessage(activeChat.id, message)) {
       setChats(chatManager.getAllChats());
       setActiveChat(chatManager.getActiveChat());
+    }
+  };
+
+  const handleMessageEdit = (messageId: string, newContent: string) => {
+    if (activeChat && chatManager.updateMessage(activeChat.id, messageId, newContent)) {
+      setChats(chatManager.getAllChats());
+      setActiveChat(chatManager.getActiveChat());
+    }
+  };
+
+  const handleMessageFork = (messageId: string, newContent: string) => {
+    if (activeChat && chatManager.editMessage(activeChat.id, messageId, newContent)) {
+      setChats(chatManager.getAllChats());
+      setActiveChat(chatManager.getActiveChat());
+    }
+  };
+
+  const handleMessageDelete = (messageId: string) => {
+    if (activeChat && chatManager.deleteMessage(activeChat.id, messageId)) {
+      setChats(chatManager.getAllChats());
+      setActiveChat(chatManager.getActiveChat());
+    }
+  };
+
+  const handleMessageCopy = async (content: string) => {
+    try {
+      await navigator.clipboard.writeText(content);
+      // Could add a toast notification here
+    } catch (error) {
+      console.error('Failed to copy message:', error);
     }
   };
 
@@ -1817,24 +1848,18 @@ export default function GlassChatPiP() {
                   ? "scrollbar-thumb-white/10"
                   : theme === 'dark' ? "scrollbar-thumb-white/10" : "scrollbar-thumb-black/10"
               )}>
-                {messages.map((message) => (
-                  <motion.div
+                {messages.map((message, index) => (
+                  <EditableMessage
                     key={message.id}
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    className={cn(
-                      "max-w-[85%] rounded-2xl px-3 py-2 text-sm select-text",
-                      message.role === 'user' 
-                        ? "ml-auto bg-blue-500/20" + (platform !== 'win32' ? " backdrop-blur-md" : "")
-                        : platform === 'win32'
-                          ? "bg-white/10" // Consistent on Windows
-                          : theme === 'dark' 
-                            ? "bg-white/10 backdrop-blur-md"
-                            : "bg-black/10 backdrop-blur-md"
-                    )}
-                  >
-                    {renderMessageContent(message.content, message.id)}
-                  </motion.div>
+                    message={message}
+                    isLast={index === messages.length - 1}
+                    onEdit={handleMessageEdit}
+                    onFork={handleMessageFork}
+                    onDelete={handleMessageDelete}
+                    onCopy={handleMessageCopy}
+                    theme={theme}
+                    platform={platform}
+                  />
                 ))}
                 {isTyping && (
                   <motion.div
