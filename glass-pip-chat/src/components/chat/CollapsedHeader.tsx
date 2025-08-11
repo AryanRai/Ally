@@ -9,13 +9,15 @@ import {
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { ThemeUtils } from '../../utils/themeUtils';
+import { Message } from '../../types/chat';
 import AnimatedOrb from '../AnimatedOrb';
+import CollapsedChatPreview from './CollapsedChatPreview';
 
 interface CollapsedHeaderProps {
   platform: string;
   theme: 'light' | 'dark';
   isTyping: boolean;
-  lastAssistantMessage: string;
+  messages: Message[];
   quickInput: string;
   setQuickInput: (value: string) => void;
   onSend: (message?: string, fromQuickInput?: boolean) => void;
@@ -23,6 +25,7 @@ interface CollapsedHeaderProps {
   onCollapseToggle: () => void;
   onSizeChange: () => void;
   onHide: () => void;
+  onCopyMessage: (content: string) => void;
   isResizing: boolean;
   size: string;
   ollamaAvailable: boolean;
@@ -36,7 +39,7 @@ export default function CollapsedHeader({
   platform,
   theme,
   isTyping,
-  lastAssistantMessage,
+  messages,
   quickInput,
   setQuickInput,
   onSend,
@@ -44,6 +47,7 @@ export default function CollapsedHeader({
   onCollapseToggle,
   onSizeChange,
   onHide,
+  onCopyMessage,
   isResizing,
   size,
   ollamaAvailable,
@@ -53,10 +57,10 @@ export default function CollapsedHeader({
   contextToggleEnabled
 }: CollapsedHeaderProps) {
   return (
-    <>
-      {/* Top row - Orb, thinking indicator, and response preview */}
+    <div className="flex flex-col">
+      {/* Header with controls */}
       <div
-        className="flex items-center gap-2"
+        className="flex items-center gap-2 px-3 py-2"
         style={{
           WebkitAppRegion: 'drag',
           WebkitUserSelect: 'none',
@@ -64,41 +68,10 @@ export default function CollapsedHeader({
         } as React.CSSProperties}
       >
         <Grip className="w-3 h-3 opacity-50 flex-shrink-0" />
-        <AnimatedOrb isActive={isTyping} size="md" />
-
-        {/* Response preview or thinking indicator */}
-        <div
-          className="flex-1 min-w-0 cursor-pointer hover:bg-white/5 rounded-lg p-1 transition-colors"
-          onClick={onCollapseToggle}
-          title="Click to expand chat"
-          style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
-        >
-          {isTyping ? (
-            <div className="flex items-center gap-1">
-              <span className="text-xs opacity-70">Thinking</span>
-              <motion.span
-                className="text-xs opacity-70"
-                animate={{ opacity: [0.3, 1, 0.3] }}
-                transition={{ duration: 1.5, repeat: Infinity }}
-              >
-                ...
-              </motion.span>
-            </div>
-          ) : (
-            <div className="flex items-center gap-2">
-              <div className="text-xs opacity-70 truncate flex-1">
-                {lastAssistantMessage
-                  ? lastAssistantMessage.slice(0, 50) + (lastAssistantMessage.length > 50 ? '...' : '')
-                  : 'Ready to chat'}
-              </div>
-              <Maximize2 className="w-3 h-3 opacity-40" />
-            </div>
-          )}
-        </div>
+        <AnimatedOrb isActive={isTyping} size="sm" />
 
         {/* Status indicators */}
         <div className="flex items-center gap-1 flex-shrink-0">
-          {/* Ollama status */}
           <div
             className={cn(
               "w-2 h-2 rounded-full",
@@ -106,8 +79,6 @@ export default function CollapsedHeader({
             )}
             title={ollamaAvailable ? "Ollama connected" : "Ollama offline"}
           />
-
-          {/* Server status */}
           {serverStatus && (
             <div
               className={cn(
@@ -128,66 +99,9 @@ export default function CollapsedHeader({
             <div className="w-1.5 h-1.5 bg-blue-400 rounded-full animate-pulse" />
           </div>
         )}
-      </div>
 
-      {/* Bottom row - Input and controls */}
-      <div className="flex items-center gap-2">
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            onSend(quickInput, true);
-          }}
-          className="flex items-center gap-2 flex-1"
-          style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
-        >
-          <input
-            type="text"
-            value={quickInput}
-            onChange={(e) => setQuickInput(e.target.value)}
-            placeholder="Type your message..."
-            className={cn(
-              "flex-1 px-3 py-1.5 text-sm",
-              platform !== 'win32' && "backdrop-blur-md",
-              ThemeUtils.getInputClass(platform, theme)
-            )}
-          />
-
-          {/* Context indicator */}
-          {(contextData.clipboard || contextData.selectedText) && contextToggleEnabled && (
-            <div
-              className={cn(
-                "flex items-center gap-1 px-2 py-1 rounded-md text-xs flex-shrink-0",
-                "bg-blue-500/20 border border-blue-500/30 text-blue-300"
-              )}
-              title="Context will be auto-attached"
-            >
-              <Clipboard className="w-3 h-3" />
-              <span>Context</span>
-            </div>
-          )}
-
-          <button
-            type="submit"
-            disabled={!quickInput.trim() && !isTyping}
-            onClick={(e) => {
-              if (isTyping) {
-                e.preventDefault();
-                onStop();
-              }
-            }}
-            className={cn(
-              "p-1.5 rounded-lg transition-all flex-shrink-0",
-              "disabled:opacity-50 disabled:cursor-not-allowed",
-              platform !== 'win32' && "backdrop-blur-md",
-              isTyping
-                ? "bg-red-500/20 hover:bg-red-500/30 text-red-300"
-                : ThemeUtils.getBackgroundClass(platform, theme, 'hover')
-            )}
-            title={isTyping ? "Stop" : "Send"}
-          >
-            {isTyping ? <Square className="w-3.5 h-3.5" /> : <CornerDownLeft className="w-3.5 h-3.5" />}
-          </button>
-        </form>
+        {/* Spacer */}
+        <div className="flex-1" />
 
         {/* Control buttons */}
         <div className="flex items-center gap-1 flex-shrink-0">
@@ -227,6 +141,75 @@ export default function CollapsedHeader({
           </button>
         </div>
       </div>
-    </>
+
+      {/* Input section */}
+      <div className="px-3 pb-2">
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            onSend(quickInput, true);
+          }}
+          className="flex items-center gap-2"
+          style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+        >
+          <input
+            type="text"
+            value={quickInput}
+            onChange={(e) => setQuickInput(e.target.value)}
+            placeholder="Type your message..."
+            className={cn(
+              "flex-1 px-3 py-2 text-sm rounded-xl",
+              platform !== 'win32' && "backdrop-blur-md",
+              ThemeUtils.getInputClass(platform, theme)
+            )}
+          />
+
+          {/* Context indicator */}
+          {(contextData.clipboard || contextData.selectedText) && contextToggleEnabled && (
+            <div
+              className={cn(
+                "flex items-center gap-1 px-2 py-1 rounded-md text-xs flex-shrink-0",
+                "bg-blue-500/20 border border-blue-500/30 text-blue-300"
+              )}
+              title="Context will be auto-attached"
+            >
+              <Clipboard className="w-3 h-3" />
+              <span>Context</span>
+            </div>
+          )}
+
+          <button
+            type="submit"
+            disabled={!quickInput.trim() && !isTyping}
+            onClick={(e) => {
+              if (isTyping) {
+                e.preventDefault();
+                onStop();
+              }
+            }}
+            className={cn(
+              "p-2 rounded-xl transition-all flex-shrink-0",
+              "disabled:opacity-50 disabled:cursor-not-allowed",
+              platform !== 'win32' && "backdrop-blur-md",
+              isTyping
+                ? "bg-red-500/20 hover:bg-red-500/30 text-red-300"
+                : ThemeUtils.getBackgroundClass(platform, theme, 'hover')
+            )}
+            title={isTyping ? "Stop" : "Send"}
+          >
+            {isTyping ? <Square className="w-4 h-4" /> : <CornerDownLeft className="w-4 h-4" />}
+          </button>
+        </form>
+      </div>
+
+      {/* Chat Preview */}
+      <CollapsedChatPreview
+        platform={platform}
+        theme={theme}
+        messages={messages}
+        isTyping={isTyping}
+        onCopyMessage={onCopyMessage}
+      />
+    </div>
   );
 }
