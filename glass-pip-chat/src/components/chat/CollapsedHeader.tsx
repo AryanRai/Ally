@@ -15,6 +15,7 @@ import { ThemeUtils } from '../../utils/themeUtils';
 import { Message } from '../../types/chat';
 import AnimatedOrb from '../AnimatedOrb';
 import CollapsedChatPreview from './CollapsedChatPreview';
+import CollapsedResponsePreview from './CollapsedResponsePreview';
 import { useState } from 'react';
 
 interface CollapsedHeaderProps {
@@ -44,6 +45,7 @@ interface CollapsedHeaderProps {
   contextData: any;
   contextToggleEnabled: boolean;
   uiSettings?: any;
+  currentResponse?: string;
 }
 
 export default function CollapsedHeader({
@@ -72,7 +74,8 @@ export default function CollapsedHeader({
   hasNewContext,
   contextData,
   contextToggleEnabled,
-  uiSettings
+  uiSettings,
+  currentResponse
 }: CollapsedHeaderProps) {
   const [isContextExpanded, setIsContextExpanded] = useState(false);
 
@@ -227,6 +230,15 @@ export default function CollapsedHeader({
           </button>
         </form>
       </div>
+
+      {/* Current Response Preview - Auto-reader */}
+      <CollapsedResponsePreview
+        platform={platform}
+        theme={theme}
+        response={currentResponse || ''}
+        isTyping={isTyping}
+        onStop={onStop}
+      />
 
       {/* Context Dropdown */}
       {hasNewContext && (contextData.clipboard || contextData.selectedText) && (
