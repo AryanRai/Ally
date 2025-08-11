@@ -173,7 +173,6 @@ export function useWindowManagement() {
     setIsResizing,
     serverStatus,
     sizePx,
-    syncWindowSize,
     handleSizeChange,
     handleCollapseToggle,
     handleHide
