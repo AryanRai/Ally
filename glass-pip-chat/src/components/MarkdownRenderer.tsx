@@ -5,11 +5,15 @@ import { cn } from '../lib/utils';
 
 interface MarkdownRendererProps {
   content: string;
-  messageId: string;
-  copiedCode: Set<string>;
-  runningCommands: Set<string>;
-  onCopyCode: (text: string, codeId: string) => void;
-  onRunCommand: (command: string, codeId: string) => void;
+  messageId?: string;
+  copiedCode?: Set<string>;
+  runningCommands?: Set<string>;
+  onCopyCode?: (text: string, codeId: string) => void;
+  onRunCommand?: (command: string, codeId: string) => void;
+  // Optional props sometimes passed by callers even if unused here
+  platform?: string;
+  theme?: 'light' | 'dark';
+  compact?: boolean;
 }
 
 export default function MarkdownRenderer({
@@ -20,6 +24,12 @@ export default function MarkdownRenderer({
   onCopyCode,
   onRunCommand
 }: MarkdownRendererProps) {
+  const effectiveMessageId = messageId ?? 'md';
+  const safeCopiedCode = copiedCode ?? new Set<string>();
+  const safeRunningCommands = runningCommands ?? new Set<string>();
+  const canRun = typeof onRunCommand === 'function';
+  const canCopy = typeof onCopyCode === 'function';
+
   return (
     <div className="prose prose-sm max-w-none prose-invert">
       <ReactMarkdown
@@ -28,8 +38,8 @@ export default function MarkdownRenderer({
           p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
           code: ({ inline, className, children, ...props }) => {
             const codeText = String(children);
-            const codeId = `${messageId}-${Math.random().toString(36).substr(2, 9)}`;
-            const isCopied = copiedCode.has(codeId);
+            const codeId = `${effectiveMessageId}-${Math.random().toString(36).slice(2, 11)}`;
+            const isCopied = safeCopiedCode.has(codeId);
 
             return inline ? (
               <code className="px-1 py-0.5 bg-white/10 rounded text-xs" {...props}>
@@ -42,35 +52,41 @@ export default function MarkdownRenderer({
                     {children}
                   </code>
                 </pre>
-                <div className="absolute top-2 right-2 flex gap-1">
-                  <button
-                    onClick={() => onRunCommand(codeText, codeId)}
-                    className={cn(
-                      "p-1.5 rounded-md transition-all duration-200",
-                      "opacity-0 group-hover:opacity-100 focus:opacity-100",
-                      runningCommands.has(codeId)
-                        ? "bg-blue-500/20 text-blue-300"
-                        : "bg-white/10 hover:bg-white/20 text-white/70 hover:text-white"
+                {(canRun || canCopy) && (
+                  <div className="absolute top-2 right-2 flex gap-1">
+                    {canRun && (
+                      <button
+                        onClick={() => onRunCommand && onRunCommand(codeText, codeId)}
+                        className={cn(
+                          "p-1.5 rounded-md transition-all duration-200",
+                          "opacity-0 group-hover:opacity-100 focus:opacity-100",
+                          safeRunningCommands.has(codeId)
+                            ? "bg-blue-500/20 text-blue-300"
+                            : "bg-white/10 hover:bg-white/20 text-white/70 hover:text-white"
+                        )}
+                        title={safeRunningCommands.has(codeId) ? "Running..." : "Run in terminal"}
+                        disabled={safeRunningCommands.has(codeId)}
+                      >
+                        <Terminal className="w-3 h-3" />
+                      </button>
                     )}
-                    title={runningCommands.has(codeId) ? "Running..." : "Run in terminal"}
-                    disabled={runningCommands.has(codeId)}
-                  >
-                    <Terminal className="w-3 h-3" />
-                  </button>
-                  <button
-                    onClick={() => onCopyCode(codeText, codeId)}
-                    className={cn(
-                      "p-1.5 rounded-md transition-all duration-200",
-                      "opacity-0 group-hover:opacity-100 focus:opacity-100",
-                      isCopied
-                        ? "bg-green-500/20 text-green-300"
-                        : "bg-white/10 hover:bg-white/20 text-white/70 hover:text-white"
+                    {canCopy && (
+                      <button
+                        onClick={() => onCopyCode && onCopyCode(codeText, codeId)}
+                        className={cn(
+                          "p-1.5 rounded-md transition-all duration-200",
+                          "opacity-0 group-hover:opacity-100 focus:opacity-100",
+                          isCopied
+                            ? "bg-green-500/20 text-green-300"
+                            : "bg-white/10 hover:bg-white/20 text-white/70 hover:text-white"
+                        )}
+                        title={isCopied ? "Copied!" : "Copy code"}
+                      >
+                        {isCopied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+                      </button>
                     )}
-                    title={isCopied ? "Copied!" : "Copy code"}
-                  >
-                    {isCopied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
-                  </button>
-                </div>
+                  </div>
+                )}
               </div>
             );
           },

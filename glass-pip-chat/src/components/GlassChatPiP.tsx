@@ -12,7 +12,6 @@ import { useCommandExecution } from '../hooks/useCommandExecution';
 import SettingsModal from './SettingsModal';
 import ChatSidebar from './ChatSidebar';
 import EditableMessage from './EditableMessage';
-import MarkdownRenderer from './MarkdownRenderer';
 import ClickAwayHandler from './ClickAwayHandler';
 import CollapsedHeader from './chat/CollapsedHeader';
 import ExpandedHeader from './chat/ExpandedHeader';
@@ -47,7 +46,7 @@ export default function GlassChatPiP() {
   const ollamaIntegration = useOllamaIntegration();
 
   // Command execution
-  const { runningCommands, executeSystemCommand, runInTerminal } = useCommandExecution();
+  const { executeSystemCommand, runInTerminal } = useCommandExecution();
 
   // Chat management
   const [chatManager] = useState(() => ChatManager.getInstance());
@@ -69,8 +68,7 @@ export default function GlassChatPiP() {
   const [inputHistory, setInputHistory] = useState<string[]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
   // Copy functionality state
-  const [copiedCode, setCopiedCode] = useState<Set<string>>(new Set());
-  const [expandedContexts, setExpandedContexts] = useState<Set<string>>(new Set());
+  // Local state no longer needed here
 
   // Refs
   const inputRef = useRef<HTMLInputElement>(null);
@@ -244,15 +242,6 @@ export default function GlassChatPiP() {
   const copyToClipboard = async (text: string, codeId: string) => {
     try {
       await navigator.clipboard.writeText(text);
-      setCopiedCode(prev => new Set([...prev, codeId]));
-
-      setTimeout(() => {
-        setCopiedCode(prev => {
-          const newSet = new Set(prev);
-          newSet.delete(codeId);
-          return newSet;
-        });
-      }, 2000);
     } catch (err) {
       console.error('Failed to copy text: ', err);
     }
@@ -723,11 +712,16 @@ export default function GlassChatPiP() {
   }, [input, quickInput, inputHistory, historyIndex, isTyping, handleCustomCollapseToggle, handleChatCreate, handleSend, handleStop, handleHide, handleSizeChange, setShowSettings]);
 
   const dims = sizePx[state.size];
-  const padding = appSettings.ui.windowPadding * 2; // Padding on both sides
+  const padding = appSettings.ui.windowPadding; // Single padding value
   
   // Optimized collapsed dimensions - much smaller and content-fitted
+  const collapsedWidthBySize: Record<string, number> = {
+    S: 320,
+    M: 360,
+    L: 420
+  };
   const collapsedDims = {
-    width: 360, // Optimal width for input + buttons
+    width: collapsedWidthBySize[state.size] ?? 360, // Width varies with size in collapsed mode
     baseHeight: 140, // Compact height for header + input
     expandedHeight: 340, // Height when preview is expanded
     contextHeight: 80, // Additional height when context is shown and expanded
@@ -760,11 +754,11 @@ export default function GlassChatPiP() {
     
     // Use optimized dimensions for collapsed mode
     const width = state.collapsed 
-      ? collapsedDims.width + padding
-      : dims.w + sidebarWidth + padding;
+      ? (collapsedWidthBySize[state.size] ?? collapsedDims.width) + (padding * 2)
+      : dims.w + sidebarWidth + (padding * 2);
     const height = state.collapsed 
-      ? collapsedHeight + padding 
-      : dims.h + padding;
+      ? collapsedHeight + (padding * 2)
+      : dims.h + (padding * 2);
 
     console.log('Resizing window to:', width, 'x', height, 'collapsed:', state.collapsed, 'preview expanded:', isPreviewExpanded, 'current response:', !!currentResponse, 'sidebar:', sidebarWidth, 'context present:', contextMonitoring.hasNewContext);
 
@@ -792,8 +786,8 @@ export default function GlassChatPiP() {
     <motion.div
       className="fixed bg-transparent flex items-center justify-center"
       style={{
-        width: state.collapsed ? collapsedDims.width + padding : (sidebarCollapsed ? dims.w + 48 + padding : dims.w + 280 + padding),
-        height: state.collapsed ? collapsedHeight + padding : dims.h + padding,
+        width: state.collapsed ? collapsedDims.width + (padding * 2) : (sidebarCollapsed ? dims.w + 48 + (padding * 2) : dims.w + 280 + (padding * 2)),
+        height: state.collapsed ? collapsedHeight + (padding * 2) : dims.h + (padding * 2),
         zIndex: 50
       } as React.CSSProperties}
       initial={{ opacity: 0, scale: 0.9 }}
@@ -815,8 +809,9 @@ export default function GlassChatPiP() {
           theme === 'dark' ? "text-white/90" : "text-black/90"
         )}
         style={{
-          width: state.collapsed ? collapsedDims.width : (sidebarCollapsed ? dims.w + 48 : dims.w + 280),
-          height: state.collapsed ? collapsedHeight : dims.h
+          width: state.collapsed ? (collapsedWidthBySize[state.size] ?? collapsedDims.width) : (sidebarCollapsed ? dims.w + 48 : dims.w + 280),
+          height: state.collapsed ? collapsedHeight : dims.h,
+          margin: `${padding}px`
         } as React.CSSProperties}
       >
         {/* Chat Sidebar */}
