@@ -190,8 +190,8 @@ export default function GlassChatPiP() {
     setIsResizing(true);
     const dims = sizePx[state.size];
     const sidebarWidth = state.collapsed ? 0 : (sidebarCollapsed ? 48 : 280);
-    const width = dims.w + sidebarWidth;
-    const height = state.collapsed ? 120 : dims.h;
+    const width = dims.w + sidebarWidth + 16; // Add 16px for spacing (8px padding on each side)
+    const height = (state.collapsed ? 120 : dims.h) + 16; // Add 16px for spacing (8px padding on top/bottom)
 
     console.log('Resizing window to:', width, 'x', height, 'collapsed:', state.collapsed, 'sidebar:', sidebarWidth);
 
@@ -371,13 +371,10 @@ export default function GlassChatPiP() {
 
   return (
     <motion.div
-      className={cn(
-        "fixed transition-all duration-300",
-        isResizing && "shadow-lg"
-      )}
+      className="fixed bg-transparent flex items-center justify-center"
       style={{
-        width: state.collapsed ? dims.w : (sidebarCollapsed ? dims.w + 48 : dims.w + 280),
-        height: state.collapsed ? 120 : dims.h,
+        width: state.collapsed ? dims.w + 16 : (sidebarCollapsed ? dims.w + 48 + 16 : dims.w + 280 + 16),
+        height: state.collapsed ? 120 + 16 : dims.h + 16,
         zIndex: 50
       } as React.CSSProperties}
       initial={{ opacity: 0, scale: 0.9 }}
@@ -387,16 +384,21 @@ export default function GlassChatPiP() {
       <motion.div
         layout
         className={cn(
-          "h-full w-full overflow-hidden relative flex",
+          "overflow-hidden relative flex transition-all duration-300",
           platform === 'win32' ? "rounded-3xl" : "rounded-2xl",
           "border border-white/20 shadow-[0_8px_40px_rgba(0,0,0,0.4)]",
+          isResizing && "shadow-lg scale-[1.01]",
           platform === 'win32'
-            ? "bg-transparent"
+            ? "bg-transparent backdrop-blur-2xl backdrop-saturate-150"
             : theme === 'dark'
               ? "bg-gradient-to-b from-white/[0.08] to-white/[0.02] backdrop-blur-2xl backdrop-saturate-150"
               : "bg-gradient-to-b from-black/[0.08] to-black/[0.02] backdrop-blur-2xl backdrop-saturate-150",
           theme === 'dark' ? "text-white/90" : "text-black/90"
         )}
+        style={{
+          width: state.collapsed ? dims.w : (sidebarCollapsed ? dims.w + 48 : dims.w + 280),
+          height: state.collapsed ? 120 : dims.h
+        } as React.CSSProperties}
       >
         {/* Chat Sidebar */}
         {!state.collapsed && (
