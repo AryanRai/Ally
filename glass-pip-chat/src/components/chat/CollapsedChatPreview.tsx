@@ -142,6 +142,7 @@ export default function CollapsedChatPreview({
                         messageSpacing: 'compact', 
                         messagePadding: 'tight' 
                       }}
+                      isCollapsed={true}
                     />
                   </div>
                 </motion.div>
