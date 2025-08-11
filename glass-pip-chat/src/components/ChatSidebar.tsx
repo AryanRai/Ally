@@ -138,7 +138,7 @@ export default function ChatSidebar({
             <button
               onClick={onChatCreate}
               className={cn(
-                "p-1.5 rounded-lg transition-colors flex items-center justify-center",
+                "p-1.5 rounded-lg transition-colors flex items-center justify-center min-w-[28px] min-h-[28px]",
                 platform === 'win32' 
                   ? "hover:bg-white/10"
                   : theme === 'dark' ? "hover:bg-white/10" : "hover:bg-black/10"
@@ -368,7 +368,7 @@ export default function ChatSidebar({
               )}
               title="New chat"
             >
-              <Plus className="w-4 h-4 flex-shrink-0" />
+              <Plus className="w-4 h-4 flex-shrink-0 opacity-70" />
             </button>
           </div>
         )}
