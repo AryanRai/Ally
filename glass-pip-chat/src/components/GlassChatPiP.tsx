@@ -64,8 +64,6 @@ export default function GlassChatPiP() {
   const [quickInput, setQuickInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
-  const [lastAssistantMessage, setLastAssistantMessage] = useState<string>('');
-
   // Copy functionality state
   const [copiedCode, setCopiedCode] = useState<Set<string>>(new Set());
   const [expandedContexts, setExpandedContexts] = useState<Set<string>>(new Set());
@@ -173,6 +171,9 @@ export default function GlassChatPiP() {
     loadChats();
   }, [chatManager]);
 
+  // Get messages early for use in effects
+  const messages = activeChat?.messages || [];
+
   // Listen for settings changes
   useEffect(() => {
     const unsubscribe = settingsManager.subscribe((newSettings) => {
@@ -193,7 +194,9 @@ export default function GlassChatPiP() {
     const sidebarWidth = state.collapsed ? 0 : (sidebarCollapsed ? 48 : 280);
     const padding = appSettings.ui.windowPadding * 2; // Padding on both sides
     const width = dims.w + sidebarWidth + padding;
-    const height = (state.collapsed ? 120 : dims.h) + padding;
+    // Fixed collapsed height for consistent window size
+    const collapsedHeight = 280; // Fixed height for collapsed mode
+    const height = (state.collapsed ? collapsedHeight : dims.h) + padding;
 
     console.log('Resizing window to:', width, 'x', height, 'collapsed:', state.collapsed, 'sidebar:', sidebarWidth);
 
@@ -215,14 +218,6 @@ export default function GlassChatPiP() {
     };
   }, [state.size, state.collapsed, sidebarCollapsed, appSettings.ui.windowPadding]);
 
-  // Track last assistant message for preview
-  useEffect(() => {
-    const messages = activeChat?.messages || [];
-    const lastAssistant = messages.filter(m => m.role === 'assistant').slice(-1)[0];
-    if (lastAssistant) {
-      setLastAssistantMessage(lastAssistant.content);
-    }
-  }, [activeChat?.messages]);
 
   // Auto-scroll to bottom
   useEffect(() => {
@@ -304,8 +299,6 @@ export default function GlassChatPiP() {
     setIsTyping(true);
 
     try {
-      const messages = activeChat?.messages || [];
-
       if (ollamaIntegration.ollamaAvailable && ollamaIntegration.currentModel) {
         // Create a temporary message for streaming
         const tempMessageId = (Date.now() + 1).toString();
@@ -369,15 +362,15 @@ export default function GlassChatPiP() {
   };
 
   const dims = sizePx[state.size];
-  const messages = activeChat?.messages || [];
   const padding = appSettings.ui.windowPadding * 2; // Padding on both sides
+  const collapsedHeight = 280; // Fixed height for collapsed mode
 
   return (
     <motion.div
       className="fixed bg-transparent flex items-center justify-center"
       style={{
         width: state.collapsed ? dims.w + padding : (sidebarCollapsed ? dims.w + 48 + padding : dims.w + 280 + padding),
-        height: state.collapsed ? 120 + padding : dims.h + padding,
+        height: state.collapsed ? collapsedHeight + padding : dims.h + padding,
         zIndex: 50
       } as React.CSSProperties}
       initial={{ opacity: 0, scale: 0.9 }}
@@ -400,7 +393,7 @@ export default function GlassChatPiP() {
         )}
         style={{
           width: state.collapsed ? dims.w : (sidebarCollapsed ? dims.w + 48 : dims.w + 280),
-          height: state.collapsed ? 120 : dims.h
+          height: state.collapsed ? collapsedHeight : dims.h
         } as React.CSSProperties}
       >
         {/* Chat Sidebar */}
@@ -445,7 +438,7 @@ export default function GlassChatPiP() {
                 platform={platform}
                 theme={theme}
                 isTyping={isTyping}
-                lastAssistantMessage={lastAssistantMessage}
+                messages={messages}
                 quickInput={quickInput}
                 setQuickInput={setQuickInput}
                 onSend={handleSend}
@@ -453,6 +446,7 @@ export default function GlassChatPiP() {
                 onCollapseToggle={handleCollapseToggle}
                 onSizeChange={handleSizeChange}
                 onHide={handleHide}
+                onCopyMessage={handleMessageCopy}
                 isResizing={isResizing}
                 size={state.size}
                 ollamaAvailable={ollamaIntegration.ollamaAvailable}
