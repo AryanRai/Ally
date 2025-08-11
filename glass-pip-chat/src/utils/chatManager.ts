@@ -165,6 +165,67 @@ export class ChatManager {
     return this.state.chats.find(c => c.id === chatId) || null;
   }
 
+  editMessage(chatId: string, messageId: string, newContent: string): boolean {
+    const chat = this.state.chats.find(c => c.id === chatId);
+    if (!chat) return false;
+
+    const messageIndex = chat.messages.findIndex(m => m.id === messageId);
+    if (messageIndex === -1) return false;
+
+    // Create a new chat with messages up to and including the edited message
+    const forkedMessages = chat.messages.slice(0, messageIndex + 1);
+    
+    // Update the last message with new content
+    forkedMessages[forkedMessages.length - 1] = {
+      ...forkedMessages[forkedMessages.length - 1],
+      content: newContent,
+      timestamp: Date.now()
+    };
+
+    // Create a new forked chat
+    const now = Date.now();
+    const forkedChat: Chat = {
+      id: `chat_${now}_${Math.random().toString(36).substr(2, 9)}`,
+      title: `${chat.title} (edited)`,
+      messages: forkedMessages,
+      createdAt: now,
+      updatedAt: now
+    };
+
+    // Add the forked chat and switch to it
+    this.state.chats.push(forkedChat);
+    this.state.activeChat = forkedChat.id;
+    this.saveState();
+    return true;
+  }
+
+  updateMessage(chatId: string, messageId: string, newContent: string): boolean {
+    const chat = this.state.chats.find(c => c.id === chatId);
+    if (!chat) return false;
+
+    const message = chat.messages.find(m => m.id === messageId);
+    if (!message) return false;
+
+    message.content = newContent;
+    message.timestamp = Date.now();
+    chat.updatedAt = Date.now();
+    this.saveState();
+    return true;
+  }
+
+  deleteMessage(chatId: string, messageId: string): boolean {
+    const chat = this.state.chats.find(c => c.id === chatId);
+    if (!chat) return false;
+
+    const messageIndex = chat.messages.findIndex(m => m.id === messageId);
+    if (messageIndex === -1) return false;
+
+    chat.messages.splice(messageIndex, 1);
+    chat.updatedAt = Date.now();
+    this.saveState();
+    return true;
+  }
+
   getState(): ChatState {
     return { ...this.state };
   }
