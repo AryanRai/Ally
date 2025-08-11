@@ -607,6 +607,7 @@ export default function GlassChatPiP() {
     }
   };
 
+  // Update the handleSend function to use enhanced streaming
   const handleSend = async (messageInput?: string, fromQuickInput?: boolean) => {
     const textToSend = messageInput || input.trim();
     if (!textToSend) return;
@@ -704,38 +705,57 @@ export default function GlassChatPiP() {
         };
         
         setMessages(prev => [...prev, streamingMessage]);
-        setStreamingResponse('');
         
-        // Handle streaming response
+        // Enhanced streaming with thinking process
         let fullResponse = '';
+        let thinkingContent = '';
+        let responseContent = '';
         
-        const response = await window.pip.ollama.chat(chatHistory, currentModel);
+        // Use the new enhanced streaming method
+        await window.pip.ollama.streamChatWithThinking(chatHistory, currentModel, (chunk) => {
+          if (chunk.type === 'thinking') {
+            thinkingContent += chunk.content;
+            
+            // Update the message with thinking content
+            setMessages(prev => prev.map(msg => 
+              msg.id === tempMessageId 
+                ? { 
+                    ...msg, 
+                    content: `💭 **Thinking...**\n\n${thinkingContent}\n\n---\n\n${responseContent}`
+                  }
+                : msg
+            ));
+          } else if (chunk.type === 'response') {
+            responseContent += chunk.content;
+            
+            // Update the message with response content
+            setMessages(prev => prev.map(msg => 
+              msg.id === tempMessageId 
+                ? { 
+                    ...msg, 
+                    content: thinkingContent 
+                      ? `💭 **Thinking Process:**\n\n${thinkingContent}\n\n---\n\n**Response:**\n\n${responseContent}`
+                      : responseContent
+                  }
+                : msg
+            ));
+          } else if (chunk.type === 'done') {
+            // Final update
+            setMessages(prev => prev.map(msg => 
+              msg.id === tempMessageId 
+                ? { 
+                    ...msg, 
+                    content: thinkingContent 
+                      ? `💭 **Thinking Process:**\n\n${thinkingContent}\n\n---\n\n**Final Response:**\n\n${responseContent}`
+                      : responseContent
+                  }
+                : msg
+            ));
+          }
+        });
         
-        // Since we can't easily access the streaming callback from the IPC,
-        // we'll simulate streaming by updating the message progressively
-        const words = response.split(' ');
-        for (let i = 0; i < words.length; i++) {
-          const partialResponse = words.slice(0, i + 1).join(' ');
-          
-          setMessages(prev => prev.map(msg => 
-            msg.id === tempMessageId 
-              ? { ...msg, content: partialResponse }
-              : msg
-          ));
-          
-          // Add delay to simulate real-time typing
-          await new Promise(resolve => setTimeout(resolve, 50));
-        }
-        
-        fullResponse = response;
-        console.log('Ollama response:', fullResponse);
-        
-        // Final update with complete response
-        setMessages(prev => prev.map(msg => 
-          msg.id === tempMessageId 
-            ? { ...msg, content: fullResponse }
-            : msg
-        ));
+        fullResponse = responseContent;
+        console.log('Ollama response with thinking:', { thinking: thinkingContent, response: responseContent });
         
       } else {
         // Fallback response when Ollama is not available
@@ -744,7 +764,7 @@ export default function GlassChatPiP() {
           : !currentModel 
             ? "No model selected" 
             : "Ollama API not available";
-            
+          
         const response = `⚠️ **Ollama Unavailable**\n\nReason: ${reason}\n\nPlease:\n1. Make sure Ollama is installed and running\n2. Check that you have models installed (\`ollama list\`)\n3. Try refreshing the connection in Settings`;
         
         const assistantMessage: Message = {
