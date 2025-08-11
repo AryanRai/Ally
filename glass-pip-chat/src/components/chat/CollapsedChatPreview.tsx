@@ -4,6 +4,7 @@ import { ChevronUp, ChevronDown, User, Bot } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { ThemeUtils } from '../../utils/themeUtils';
 import { Message } from '../../types/chat';
+import MarkdownRenderer from '../MarkdownRenderer';
 
 interface CollapsedChatPreviewProps {
   platform: string;
@@ -48,19 +49,24 @@ export default function CollapsedChatPreview({
     );
   }
 
-  const formatMessageContent = (content: string) => {
-    // Remove markdown formatting for preview
-    let preview = content
-      .replace(/[#*`]/g, '') // Remove markdown symbols
-      .replace(/\n+/g, ' ') // Replace line breaks with spaces
-      .trim();
-    
-    // Truncate long messages
-    if (preview.length > 100) {
-      preview = preview.substring(0, 97) + '...';
+  const formatMessageContent = (content: string, forPreview: boolean = false) => {
+    if (forPreview) {
+      // Remove markdown formatting for brief preview
+      let preview = content
+        .replace(/[#*`]/g, '') // Remove markdown symbols
+        .replace(/\n+/g, ' ') // Replace line breaks with spaces
+        .trim();
+      
+      // Truncate long messages
+      if (preview.length > 100) {
+        preview = preview.substring(0, 97) + '...';
+      }
+      
+      return preview;
     }
     
-    return preview;
+    // Return full content for markdown rendering
+    return content;
   };
 
   return (
@@ -149,9 +155,14 @@ export default function CollapsedChatPreview({
                         })}
                       </span>
                     </div>
-                    <p className="text-xs opacity-90 leading-relaxed">
-                      {formatMessageContent(message.content)}
-                    </p>
+                    <div className="text-xs opacity-90 leading-relaxed">
+                      <MarkdownRenderer 
+                        content={formatMessageContent(message.content)} 
+                        platform={platform}
+                        theme={theme}
+                        compact={true}
+                      />
+                    </div>
                   </div>
                 </motion.div>
               ))}
