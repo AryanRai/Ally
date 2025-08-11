@@ -9,10 +9,13 @@ import {
   Copy, 
   Trash2, 
   GitBranch,
-  MoreHorizontal
+  MoreHorizontal,
+  ChevronDown,
+  Clipboard
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { Message } from '../types/chat';
+import { UISettings } from '../types/settings';
 
 interface EditableMessageProps {
   message: Message;
@@ -23,6 +26,7 @@ interface EditableMessageProps {
   onCopy: (content: string) => void;
   theme: 'light' | 'dark';
   platform: string;
+  uiSettings: UISettings;
 }
 
 export default function EditableMessage({
@@ -33,13 +37,45 @@ export default function EditableMessage({
   onDelete,
   onCopy,
   theme,
-  platform
+  platform,
+  uiSettings
 }: EditableMessageProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [editContent, setEditContent] = useState(message.content);
   const [showMenu, setShowMenu] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
+  const [contextExpanded, setContextExpanded] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Get CSS classes based on settings
+  const getFontSizeClass = () => {
+    const sizeMap = {
+      xs: 'text-xs',
+      sm: 'text-sm',
+      base: 'text-base',
+      lg: 'text-lg',
+      xl: 'text-xl'
+    };
+    return sizeMap[uiSettings.fontSize];
+  };
+
+  const getPaddingClass = () => {
+    const paddingMap = {
+      tight: 'p-2',
+      normal: 'p-4',
+      spacious: 'p-6'
+    };
+    return paddingMap[uiSettings.messagePadding];
+  };
+
+  const getTextareaPaddingClass = () => {
+    const paddingMap = {
+      tight: 'p-2',
+      normal: 'p-3',
+      spacious: 'p-4'
+    };
+    return paddingMap[uiSettings.messagePadding];
+  };
 
   useEffect(() => {
     if (isEditing && textareaRef.current) {
@@ -93,6 +129,183 @@ export default function EditableMessage({
     e.target.style.height = e.target.scrollHeight + 'px';
   };
 
+  // Parse message content to extract context
+  const parseMessageContent = (content: string) => {
+    const contextRegex = /\[Context: ([^\]]+)\]/;
+    const contextMatch = content.match(contextRegex);
+    
+    if (contextMatch) {
+      const beforeContext = content.substring(0, contextMatch.index);
+      const afterContext = content.substring(contextMatch.index! + contextMatch[0].length);
+      const contextText = contextMatch[1];
+      
+      return {
+        hasContext: true,
+        beforeContext: beforeContext.trim(),
+        afterContext: afterContext.trim(),
+        contextText
+      };
+    }
+    
+    return {
+      hasContext: false,
+      beforeContext: content,
+      afterContext: '',
+      contextText: ''
+    };
+  };
+
+  const renderMessageContent = (content: string) => {
+    const parsed = parseMessageContent(content);
+    
+    if (!parsed.hasContext) {
+      return (
+        <ReactMarkdown 
+          remarkPlugins={[remarkGfm]}
+          components={{
+            p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
+            code: ({ inline, className, children, ...props }: any) => {
+              const codeSize = uiSettings.fontSize === 'xs' ? 'text-xs' :
+                             uiSettings.fontSize === 'sm' ? 'text-xs' :
+                             uiSettings.fontSize === 'base' ? 'text-sm' :
+                             uiSettings.fontSize === 'lg' ? 'text-base' : 'text-lg';
+              
+              return inline ? (
+                <code className={cn("px-1 py-0.5 bg-white/10 rounded", codeSize)} {...props}>
+                  {children}
+                </code>
+              ) : (
+                <pre className={cn("bg-black/20 rounded-lg overflow-x-auto my-2", getTextareaPaddingClass())}>
+                  <code className={cn(codeSize, className)} {...props}>
+                    {children}
+                  </code>
+                </pre>
+              );
+            }
+          }}
+        >
+          {content}
+        </ReactMarkdown>
+      );
+    }
+
+    return (
+      <div className="space-y-3">
+        {/* Main message content */}
+        {parsed.beforeContext && (
+          <ReactMarkdown 
+            remarkPlugins={[remarkGfm]}
+            components={{
+              p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
+              code: ({ inline, className, children, ...props }: any) => {
+                const codeSize = uiSettings.fontSize === 'xs' ? 'text-xs' :
+                               uiSettings.fontSize === 'sm' ? 'text-xs' :
+                               uiSettings.fontSize === 'base' ? 'text-sm' :
+                               uiSettings.fontSize === 'lg' ? 'text-base' : 'text-lg';
+                
+                return inline ? (
+                  <code className={cn("px-1 py-0.5 bg-white/10 rounded", codeSize)} {...props}>
+                    {children}
+                  </code>
+                ) : (
+                  <pre className={cn("bg-black/20 rounded-lg overflow-x-auto my-2", getTextareaPaddingClass())}>
+                    <code className={cn(codeSize, className)} {...props}>
+                      {children}
+                    </code>
+                  </pre>
+                );
+              }
+            }}
+          >
+            {parsed.beforeContext}
+          </ReactMarkdown>
+        )}
+
+        {/* Expandable context section */}
+        <div className={cn(
+          "border rounded-lg transition-all duration-200",
+          platform === 'win32'
+            ? "border-white/10 bg-white/5"
+            : theme === 'dark'
+              ? "border-white/10 bg-white/5"
+              : "border-black/10 bg-black/5"
+        )}>
+          <button
+            onClick={() => setContextExpanded(!contextExpanded)}
+            className={cn(
+              "w-full flex items-center justify-between p-3 text-left transition-colors",
+              "hover:bg-white/5 rounded-lg"
+            )}
+          >
+            <div className="flex items-center gap-2">
+              <Clipboard className="w-3 h-3 opacity-60" />
+              <span className="text-xs font-medium opacity-80">
+                Context attached
+              </span>
+            </div>
+            <ChevronDown className={cn(
+              "w-3 h-3 opacity-60 transition-transform duration-200",
+              contextExpanded && "rotate-180"
+            )} />
+          </button>
+          
+          <AnimatePresence>
+            {contextExpanded && (
+              <motion.div
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: 'auto' }}
+                exit={{ opacity: 0, height: 0 }}
+                className="border-t border-white/10"
+              >
+                <div className="p-3 space-y-2">
+                  <div className="text-xs opacity-70 font-medium">Context Details:</div>
+                  <div className={cn(
+                    "text-xs p-2 rounded bg-black/20 max-h-32 overflow-y-auto scrollbar-thin",
+                    platform === 'win32'
+                      ? "scrollbar-thumb-white/10"
+                      : theme === 'dark' ? "scrollbar-thumb-white/10" : "scrollbar-thumb-black/10"
+                  )}>
+                    {parsed.contextText}
+                  </div>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+
+        {/* After context content */}
+        {parsed.afterContext && (
+          <ReactMarkdown 
+            remarkPlugins={[remarkGfm]}
+            components={{
+              p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
+              code: ({ inline, className, children, ...props }: any) => {
+                const codeSize = uiSettings.fontSize === 'xs' ? 'text-xs' :
+                               uiSettings.fontSize === 'sm' ? 'text-xs' :
+                               uiSettings.fontSize === 'base' ? 'text-sm' :
+                               uiSettings.fontSize === 'lg' ? 'text-base' : 'text-lg';
+                
+                return inline ? (
+                  <code className={cn("px-1 py-0.5 bg-white/10 rounded", codeSize)} {...props}>
+                    {children}
+                  </code>
+                ) : (
+                  <pre className={cn("bg-black/20 rounded-lg overflow-x-auto my-2", getTextareaPaddingClass())}>
+                    <code className={cn(codeSize, className)} {...props}>
+                      {children}
+                    </code>
+                  </pre>
+                );
+              }
+            }}
+          >
+            {parsed.afterContext}
+          </ReactMarkdown>
+        )}
+      </div>
+    );
+  };
+
   return (
     <motion.div
       className={cn(
@@ -106,7 +319,9 @@ export default function EditableMessage({
       transition={{ duration: 0.2 }}
     >
       <div className={cn(
-        "relative rounded-2xl p-4 transition-all duration-200",
+        "relative rounded-2xl transition-all duration-200",
+        getPaddingClass(),
+        getFontSizeClass(),
         message.role === 'user'
           ? platform === 'win32'
             ? "bg-blue-500/20 ml-auto max-w-[85%]"
@@ -136,8 +351,10 @@ export default function EditableMessage({
                 onChange={handleTextareaChange}
                 onKeyDown={handleKeyDown}
                 className={cn(
-                  "w-full bg-transparent border rounded-lg p-3 text-sm resize-none min-h-[80px]",
+                  "w-full bg-transparent border rounded-lg resize-none min-h-[80px]",
                   "focus:outline-none focus:ring-2",
+                  getTextareaPaddingClass(),
+                  getFontSizeClass(),
                   platform === 'win32'
                     ? "border-white/20 focus:ring-white/30"
                     : theme === 'dark'
@@ -197,29 +414,15 @@ export default function EditableMessage({
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              className="prose prose-sm max-w-none prose-invert"
+              className={cn(
+                "prose max-w-none prose-invert",
+                uiSettings.fontSize === 'xs' ? 'prose-xs' :
+                uiSettings.fontSize === 'sm' ? 'prose-sm' :
+                uiSettings.fontSize === 'base' ? 'prose-base' :
+                uiSettings.fontSize === 'lg' ? 'prose-lg' : 'prose-xl'
+              )}
             >
-              <ReactMarkdown 
-                remarkPlugins={[remarkGfm]}
-                components={{
-                  p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
-                  code: ({ inline, className, children, ...props }) => {
-                    return inline ? (
-                      <code className="px-1 py-0.5 bg-white/10 rounded text-xs" {...props}>
-                        {children}
-                      </code>
-                    ) : (
-                      <pre className="bg-black/20 rounded-lg p-3 overflow-x-auto my-2">
-                        <code className={cn("text-xs", className)} {...props}>
-                          {children}
-                        </code>
-                      </pre>
-                    );
-                  }
-                }}
-              >
-                {message.content}
-              </ReactMarkdown>
+              {renderMessageContent(message.content)}
             </motion.div>
           )}
         </AnimatePresence>

@@ -29,7 +29,9 @@ import ChatSidebar from './ChatSidebar';
 import AnimatedOrb from './AnimatedOrb';
 import EditableMessage from './EditableMessage';
 import { ChatManager } from '../utils/chatManager';
+import { SettingsManager } from '../utils/settingsManager';
 import { Chat, Message } from '../types/chat';
+import { AppSettings } from '../types/settings';
 
 type Size = 'S' | 'M' | 'L';
 const sizePx: Record<Size, { w: number; h: number }> = {
@@ -70,6 +72,10 @@ export default function GlassChatPiP() {
   const [chats, setChats] = useState<Chat[]>([]);
   const [activeChat, setActiveChat] = useState<Chat | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  
+  // Settings management
+  const [settingsManager] = useState(() => SettingsManager.getInstance());
+  const [appSettings, setAppSettings] = useState<AppSettings>(() => settingsManager.getSettings());
   
   // Current chat messages (derived from active chat)
   const messages = activeChat?.messages || [];
@@ -204,6 +210,15 @@ export default function GlassChatPiP() {
 
     loadChats();
   }, [chatManager]);
+
+  // Listen for settings changes
+  useEffect(() => {
+    const unsubscribe = settingsManager.subscribe((newSettings) => {
+      setAppSettings(newSettings);
+    });
+
+    return unsubscribe;
+  }, [settingsManager]);
 
   // Save state
   useEffect(() => {
@@ -1843,7 +1858,10 @@ export default function GlassChatPiP() {
 
               {/* Messages */}
               <div className={cn(
-                "flex-1 overflow-y-auto p-3 space-y-3 scrollbar-thin select-text",
+                "flex-1 overflow-y-auto p-3 scrollbar-thin select-text",
+                // Configurable message spacing
+                appSettings.ui.messageSpacing === 'compact' ? 'space-y-2' :
+                appSettings.ui.messageSpacing === 'normal' ? 'space-y-3' : 'space-y-4',
                 platform === 'win32'
                   ? "scrollbar-thumb-white/10"
                   : theme === 'dark' ? "scrollbar-thumb-white/10" : "scrollbar-thumb-black/10"
@@ -1859,6 +1877,7 @@ export default function GlassChatPiP() {
                     onCopy={handleMessageCopy}
                     theme={theme}
                     platform={platform}
+                    uiSettings={appSettings.ui}
                   />
                 ))}
                 {isTyping && (
@@ -2022,6 +2041,8 @@ export default function GlassChatPiP() {
         theme={theme}
         contextToggleEnabled={contextToggleEnabled}
         onContextToggleChange={setContextToggleEnabled}
+        appSettings={appSettings}
+        onSettingsChange={(updates) => settingsManager.updateSettings(updates)}
       />
     </motion.div>
   );

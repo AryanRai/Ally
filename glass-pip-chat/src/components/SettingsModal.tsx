@@ -3,6 +3,8 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { X, Sun, Moon, Monitor, Server, Wifi, WifiOff, RefreshCw } from 'lucide-react';
 import { cn } from '../lib/utils';
 
+import { AppSettings, UISettings } from '../types/settings';
+
 interface SettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -10,6 +12,8 @@ interface SettingsModalProps {
   theme: 'light' | 'dark';
   contextToggleEnabled?: boolean;
   onContextToggleChange?: (enabled: boolean) => void;
+  appSettings: AppSettings;
+  onSettingsChange: (settings: Partial<AppSettings>) => void;
 }
 
 export default function SettingsModal({ 
@@ -18,7 +22,9 @@ export default function SettingsModal({
   platform, 
   theme: initialTheme, 
   contextToggleEnabled = true,
-  onContextToggleChange 
+  onContextToggleChange,
+  appSettings,
+  onSettingsChange
 }: SettingsModalProps) {
   const [theme, setTheme] = useState<'light' | 'dark'>(initialTheme);
   const [serverStatus, setServerStatus] = useState<any>(null);
@@ -217,6 +223,112 @@ export default function SettingsModal({
                       <Moon className="w-4 h-4" />
                       <span className="text-sm">Dark</span>
                     </button>
+                  </div>
+                </div>
+
+                {/* UI Settings */}
+                <div className="space-y-3">
+                  <h4 className={cn(
+                    "text-sm font-medium",
+                    platform === 'win32'
+                      ? "text-white/80"
+                      : theme === 'dark' ? "text-white/80" : "text-black/80"
+                  )}>Interface</h4>
+                  
+                  {/* Font Size */}
+                  <div className="space-y-2">
+                    <label className={cn(
+                      "text-xs font-medium",
+                      platform === 'win32'
+                        ? "text-white/80"
+                        : theme === 'dark' ? "text-white/80" : "text-black/80"
+                    )}>Font Size</label>
+                    <div className="grid grid-cols-5 gap-1">
+                      {(['xs', 'sm', 'base', 'lg', 'xl'] as const).map((size) => (
+                        <button
+                          key={size}
+                          onClick={() => onSettingsChange({ 
+                            ui: { ...appSettings.ui, fontSize: size } 
+                          })}
+                          className={cn(
+                            "px-2 py-1.5 text-xs rounded transition-all border",
+                            appSettings.ui.fontSize === size
+                              ? "bg-blue-500/20 border-blue-500/40 text-blue-300"
+                              : platform === 'win32'
+                                ? "border-white/10 bg-white/5 hover:bg-white/10 text-white/80"
+                                : theme === 'dark' 
+                                  ? "border-white/10 bg-white/5 hover:bg-white/10 text-white/80"
+                                  : "border-black/10 bg-black/5 hover:bg-black/10 text-black/80"
+                          )}
+                        >
+                          {size.toUpperCase()}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Message Spacing */}
+                  <div className="space-y-2">
+                    <label className={cn(
+                      "text-xs font-medium",
+                      platform === 'win32'
+                        ? "text-white/80"
+                        : theme === 'dark' ? "text-white/80" : "text-black/80"
+                    )}>Message Spacing</label>
+                    <div className="grid grid-cols-3 gap-2">
+                      {(['compact', 'normal', 'comfortable'] as const).map((spacing) => (
+                        <button
+                          key={spacing}
+                          onClick={() => onSettingsChange({ 
+                            ui: { ...appSettings.ui, messageSpacing: spacing } 
+                          })}
+                          className={cn(
+                            "px-2 py-1.5 text-xs rounded transition-all border",
+                            appSettings.ui.messageSpacing === spacing
+                              ? "bg-blue-500/20 border-blue-500/40 text-blue-300"
+                              : platform === 'win32'
+                                ? "border-white/10 bg-white/5 hover:bg-white/10 text-white/80"
+                                : theme === 'dark' 
+                                  ? "border-white/10 bg-white/5 hover:bg-white/10 text-white/80"
+                                  : "border-black/10 bg-black/5 hover:bg-black/10 text-black/80"
+                          )}
+                        >
+                          {spacing.charAt(0).toUpperCase() + spacing.slice(1)}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Message Padding */}
+                  <div className="space-y-2">
+                    <label className={cn(
+                      "text-xs font-medium",
+                      platform === 'win32'
+                        ? "text-white/80"
+                        : theme === 'dark' ? "text-white/80" : "text-black/80"
+                    )}>Message Padding</label>
+                    <div className="grid grid-cols-3 gap-2">
+                      {(['tight', 'normal', 'spacious'] as const).map((padding) => (
+                        <button
+                          key={padding}
+                          onClick={() => onSettingsChange({ 
+                            ui: { ...appSettings.ui, messagePadding: padding } 
+                          })}
+                          className={cn(
+                            "px-2 py-1.5 text-xs rounded transition-all border",
+                            appSettings.ui.messagePadding === padding
+                              ? "bg-blue-500/20 border-blue-500/40 text-blue-300"
+                              : platform === 'win32'
+                                ? "border-white/10 bg-white/5 hover:bg-white/10 text-white/80"
+                                : theme === 'dark' 
+                                  ? "border-white/10 bg-white/5 hover:bg-white/10 text-white/80"
+                                  : "border-black/10 bg-black/5 hover:bg-black/10 text-black/80"
+                          )}
+                        >
+                          {padding.charAt(0).toUpperCase() + padding.slice(1)}
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 </div>
 
