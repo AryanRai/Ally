@@ -18,6 +18,7 @@ interface CollapsedChatPreviewProps {
   onMessageDelete?: (messageId: string) => void;
   onCopyCode?: (text: string, codeId: string) => void;
   onRunCode?: (command: string, codeId: string) => void;
+  onRecompute?: (messageId: string) => void;
   uiSettings?: any;
 }
 
@@ -33,6 +34,7 @@ export default function CollapsedChatPreview({
   onMessageDelete,
   onCopyCode,
   onRunCode,
+  onRecompute,
   uiSettings
 }: CollapsedChatPreviewProps) {
   const [isExpanded, setIsExpanded] = useState(false);
@@ -135,6 +137,7 @@ export default function CollapsedChatPreview({
                       onCopy={onCopyMessage}
                       onCopyCode={onCopyCode}
                       onRunCode={onRunCode}
+                      onRecompute={onRecompute}
                       theme={theme}
                       platform={platform}
                       uiSettings={uiSettings || { 

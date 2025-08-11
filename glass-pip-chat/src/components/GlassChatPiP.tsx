@@ -139,6 +139,99 @@ export default function GlassChatPiP() {
     }
   };
 
+  const handleMessageRecompute = async (messageId: string) => {
+    if (!activeChat) return;
+    
+    // Find the message to recompute
+    const messageIndex = activeChat.messages.findIndex(msg => msg.id === messageId);
+    if (messageIndex === -1 || messageIndex === 0) return; // Can't recompute first message or if not found
+    
+    // Get the user message that prompted this response
+    const userMessage = activeChat.messages[messageIndex - 1];
+    if (userMessage.role !== 'user') return;
+    
+    // Remove the current assistant response
+    const updatedMessages = activeChat.messages.slice(0, messageIndex);
+    activeChat.messages = updatedMessages;
+    setActiveChat({ ...activeChat });
+    
+    // Set typing state and clear any current response
+    setIsTyping(true);
+    setCurrentResponse('');
+    
+    try {
+      if (ollamaIntegration.ollamaAvailable && ollamaIntegration.currentModel) {
+        // Create a new streaming message
+        const tempMessageId = (Date.now() + 1).toString();
+        const streamingMessage: Message = {
+          id: tempMessageId,
+          role: 'assistant',
+          content: '',
+          timestamp: Date.now()
+        };
+
+        addMessageToActiveChat(streamingMessage);
+
+        // Get messages up to the user message (excluding the old response)
+        const messagesUpToUser = updatedMessages.slice(0, messageIndex);
+        
+        await ollamaIntegration.sendMessageToOllama(messagesUpToUser, userMessage.content, (update) => {
+          if (activeChat) {
+            const responseContent = update.type === 'thinking'
+              ? `💭 **Thinking...**\n\n${update.thinking}\n\n---\n\n${update.response}`
+              : update.thinking
+                ? `💭 **Thinking Process:**\n\n${update.thinking}\n\n---\n\n**Response:**\n\n${update.response}`
+                : update.response;
+
+            // Update current response for collapsed preview
+            setCurrentResponse(responseContent);
+
+            const updatedMessages = activeChat.messages.map(msg =>
+              msg.id === tempMessageId ? {
+                ...msg,
+                content: responseContent
+              } : msg
+            );
+            activeChat.messages = updatedMessages;
+            setActiveChat({ ...activeChat });
+
+            if (update.type === 'done') {
+              chatManager.getChatById(activeChat.id)!.messages = updatedMessages;
+              // Clear current response after completion
+              setTimeout(() => setCurrentResponse(''), 1000);
+            }
+          }
+        });
+      } else {
+        // Fallback response when Ollama is not available
+        const reason = ollamaIntegration.getUnavailableReason();
+        const response = `⚠️ **Ollama Unavailable**\n\nReason: ${reason}\n\nPlease:\n1. Make sure Ollama is installed and running\n2. Check that you have models installed (\`ollama list\`)\n3. Try refreshing the connection in Settings`;
+
+        const assistantMessage: Message = {
+          id: (Date.now() + 1).toString(),
+          role: 'assistant',
+          content: response,
+          timestamp: Date.now()
+        };
+
+        addMessageToActiveChat(assistantMessage);
+      }
+    } catch (error) {
+      console.error('Error recomputing response:', error);
+
+      const errorMessage: Message = {
+        id: (Date.now() + 1).toString(),
+        role: 'assistant',
+        content: `Error: ${error instanceof Error ? error.message : 'Failed to recompute response'}`,
+        timestamp: Date.now()
+      };
+
+      addMessageToActiveChat(errorMessage);
+    } finally {
+      setIsTyping(false);
+    }
+  };
+
   const handleMessageCopy = async (content: string) => {
     try {
       await navigator.clipboard.writeText(content);
@@ -764,35 +857,36 @@ export default function GlassChatPiP() {
             title={state.collapsed ? "" : "Drag to move window"}
           >
             {state.collapsed ? (
-              <CollapsedHeader
-                platform={platform}
-                theme={theme}
-                isTyping={isTyping}
-                messages={messages}
-                quickInput={quickInput}
-                setQuickInput={setQuickInput}
-                onSend={handleSend}
-                onStop={handleStop}
-                onCollapseToggle={handleCustomCollapseToggle}
-                onSizeChange={handleSizeChange}
-                onHide={handleHide}
-                onCopyMessage={handleMessageCopy}
-                onPreviewToggle={handlePreviewToggle}
-                onMessageEdit={handleMessageEdit}
-                onMessageFork={handleMessageFork}
-                onMessageDelete={handleMessageDelete}
-                onCopyCode={copyToClipboard}
-                onRunCode={(command, codeId) => runInTerminal(command, codeId, addMessageToActiveChat)}
-                isResizing={isResizing}
-                size={state.size}
-                ollamaAvailable={ollamaIntegration.ollamaAvailable}
-                serverStatus={serverStatus}
-                hasNewContext={contextMonitoring.hasNewContext}
-                contextData={contextMonitoring.contextData}
-                contextToggleEnabled={contextMonitoring.contextToggleEnabled}
-                uiSettings={appSettings.ui}
-                currentResponse={currentResponse}
-              />
+                             <CollapsedHeader
+                 platform={platform}
+                 theme={theme}
+                 isTyping={isTyping}
+                 messages={messages}
+                 quickInput={quickInput}
+                 setQuickInput={setQuickInput}
+                 onSend={handleSend}
+                 onStop={handleStop}
+                 onCollapseToggle={handleCustomCollapseToggle}
+                 onSizeChange={handleSizeChange}
+                 onHide={handleHide}
+                 onCopyMessage={handleMessageCopy}
+                 onPreviewToggle={handlePreviewToggle}
+                 onMessageEdit={handleMessageEdit}
+                 onMessageFork={handleMessageFork}
+                 onMessageDelete={handleMessageDelete}
+                 onCopyCode={copyToClipboard}
+                 onRunCode={(command, codeId) => runInTerminal(command, codeId, addMessageToActiveChat)}
+                 onRecompute={handleMessageRecompute}
+                 isResizing={isResizing}
+                 size={state.size}
+                 ollamaAvailable={ollamaIntegration.ollamaAvailable}
+                 serverStatus={serverStatus}
+                 hasNewContext={contextMonitoring.hasNewContext}
+                 contextData={contextMonitoring.contextData}
+                 contextToggleEnabled={contextMonitoring.contextToggleEnabled}
+                 uiSettings={appSettings.ui}
+                 currentResponse={currentResponse}
+               />
             ) : (
               <ExpandedHeader
                 platform={platform}
@@ -875,6 +969,7 @@ export default function GlassChatPiP() {
                       onCopy={handleMessageCopy}
                       onCopyCode={copyToClipboard}
                       onRunCode={(command, codeId) => runInTerminal(command, codeId, addMessageToActiveChat)}
+                      onRecompute={handleMessageRecompute}
                       theme={theme}
                       platform={platform}
                       uiSettings={appSettings.ui}
