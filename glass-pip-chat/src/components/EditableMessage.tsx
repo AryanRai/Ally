@@ -11,7 +11,8 @@ import {
   GitBranch,
   MoreHorizontal,
   ChevronDown,
-  Clipboard
+  Clipboard,
+  Terminal
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { Message } from '../types/chat';
@@ -24,6 +25,8 @@ interface EditableMessageProps {
   onFork: (messageId: string, newContent: string) => void;
   onDelete: (messageId: string) => void;
   onCopy: (content: string) => void;
+  onCopyCode?: (text: string, codeId: string) => void;
+  onRunCode?: (command: string, codeId: string) => void;
   theme: 'light' | 'dark';
   platform: string;
   uiSettings: UISettings;
@@ -36,6 +39,8 @@ export default function EditableMessage({
   onFork,
   onDelete,
   onCopy,
+  onCopyCode,
+  onRunCode,
   theme,
   platform,
   uiSettings
@@ -45,6 +50,8 @@ export default function EditableMessage({
   const [showMenu, setShowMenu] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
   const [contextExpanded, setContextExpanded] = useState(false);
+  const [copiedCode, setCopiedCode] = useState<Set<string>>(new Set());
+  const [runningCommands, setRunningCommands] = useState<Set<string>>(new Set());
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // Get CSS classes based on settings
@@ -129,6 +136,105 @@ export default function EditableMessage({
     e.target.style.height = e.target.scrollHeight + 'px';
   };
 
+  // Handle code copy
+  const handleCopyCode = async (text: string, codeId: string) => {
+    if (onCopyCode) {
+      onCopyCode(text, codeId);
+    } else {
+      // Fallback to direct clipboard copy
+      try {
+        await navigator.clipboard.writeText(text);
+      } catch (error) {
+        console.error('Failed to copy code:', error);
+      }
+    }
+    
+    setCopiedCode(prev => new Set([...prev, codeId]));
+    setTimeout(() => {
+      setCopiedCode(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(codeId);
+        return newSet;
+      });
+    }, 2000);
+  };
+
+  // Handle code run
+  const handleRunCode = (command: string, codeId: string) => {
+    if (onRunCode) {
+      setRunningCommands(prev => new Set([...prev, codeId]));
+      onRunCode(command, codeId);
+      
+      setTimeout(() => {
+        setRunningCommands(prev => {
+          const newSet = new Set(prev);
+          newSet.delete(codeId);
+          return newSet;
+        });
+      }, 1000);
+    }
+  };
+
+  // Enhanced code component with copy and run buttons
+  const CodeBlock = ({ inline, className, children, ...props }: any) => {
+    const codeSize = uiSettings.fontSize === 'xs' ? 'text-xs' :
+                     uiSettings.fontSize === 'sm' ? 'text-xs' :
+                     uiSettings.fontSize === 'base' ? 'text-sm' :
+                     uiSettings.fontSize === 'lg' ? 'text-base' : 'text-lg';
+    
+    if (inline) {
+      return (
+        <code className={cn("px-1 py-0.5 bg-white/10 rounded", codeSize)} {...props}>
+          {children}
+        </code>
+      );
+    }
+
+    const codeText = String(children);
+    const codeId = `${message.id}-${Math.random().toString(36).substr(2, 9)}`;
+    const isCopied = copiedCode.has(codeId);
+    const isRunning = runningCommands.has(codeId);
+
+    return (
+      <div className="relative group my-2">
+        <pre className={cn("bg-black/20 rounded-lg overflow-x-auto pr-20", getTextareaPaddingClass())}>
+          <code className={cn(codeSize, className)} {...props}>
+            {children}
+          </code>
+        </pre>
+        <div className="absolute top-2 right-2 flex gap-1">
+          <button
+            onClick={() => handleRunCode(codeText, codeId)}
+            className={cn(
+              "p-1.5 rounded-md transition-all duration-200",
+              "opacity-0 group-hover:opacity-100 focus:opacity-100",
+              isRunning
+                ? "bg-blue-500/20 text-blue-300"
+                : "bg-white/10 hover:bg-white/20 text-white/70 hover:text-white"
+            )}
+            title={isRunning ? "Running..." : "Run in terminal"}
+            disabled={isRunning}
+          >
+            <Terminal className="w-3 h-3" />
+          </button>
+          <button
+            onClick={() => handleCopyCode(codeText, codeId)}
+            className={cn(
+              "p-1.5 rounded-md transition-all duration-200",
+              "opacity-0 group-hover:opacity-100 focus:opacity-100",
+              isCopied
+                ? "bg-green-500/20 text-green-300"
+                : "bg-white/10 hover:bg-white/20 text-white/70 hover:text-white"
+            )}
+            title={isCopied ? "Copied!" : "Copy code"}
+          >
+            {isCopied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+          </button>
+        </div>
+      </div>
+    );
+  };
+
   // Parse message content to extract context
   const parseMessageContent = (content: string) => {
     const contextRegex = /\[Context: ([^\]]+)\]/;
@@ -164,24 +270,7 @@ export default function EditableMessage({
           remarkPlugins={[remarkGfm]}
           components={{
             p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
-            code: ({ inline, className, children, ...props }: any) => {
-              const codeSize = uiSettings.fontSize === 'xs' ? 'text-xs' :
-                             uiSettings.fontSize === 'sm' ? 'text-xs' :
-                             uiSettings.fontSize === 'base' ? 'text-sm' :
-                             uiSettings.fontSize === 'lg' ? 'text-base' : 'text-lg';
-              
-              return inline ? (
-                <code className={cn("px-1 py-0.5 bg-white/10 rounded", codeSize)} {...props}>
-                  {children}
-                </code>
-              ) : (
-                <pre className={cn("bg-black/20 rounded-lg overflow-x-auto my-2", getTextareaPaddingClass())}>
-                  <code className={cn(codeSize, className)} {...props}>
-                    {children}
-                  </code>
-                </pre>
-              );
-            }
+            code: CodeBlock
           }}
         >
           {content}
@@ -197,24 +286,7 @@ export default function EditableMessage({
             remarkPlugins={[remarkGfm]}
             components={{
               p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
-              code: ({ inline, className, children, ...props }: any) => {
-                const codeSize = uiSettings.fontSize === 'xs' ? 'text-xs' :
-                               uiSettings.fontSize === 'sm' ? 'text-xs' :
-                               uiSettings.fontSize === 'base' ? 'text-sm' :
-                               uiSettings.fontSize === 'lg' ? 'text-base' : 'text-lg';
-                
-                return inline ? (
-                  <code className={cn("px-1 py-0.5 bg-white/10 rounded", codeSize)} {...props}>
-                    {children}
-                  </code>
-                ) : (
-                  <pre className={cn("bg-black/20 rounded-lg overflow-x-auto my-2", getTextareaPaddingClass())}>
-                    <code className={cn(codeSize, className)} {...props}>
-                      {children}
-                    </code>
-                  </pre>
-                );
-              }
+              code: CodeBlock
             }}
           >
             {parsed.beforeContext}
