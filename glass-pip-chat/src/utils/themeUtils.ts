@@ -74,4 +74,23 @@ export class ThemeUtils {
         : theme === 'dark' ? "scrollbar-thumb-white/10" : "scrollbar-thumb-black/10"
     );
   }
+
+  static getBorderRadiusClass(radius: 'none' | 'sm' | 'md' | 'lg' | 'xl' | '2xl' | '3xl', platform?: string) {
+    const radiusClasses = {
+      none: 'rounded-none',
+      sm: 'rounded-sm',
+      md: 'rounded-md', 
+      lg: 'rounded-lg',
+      xl: 'rounded-xl',
+      '2xl': 'rounded-2xl',
+      '3xl': 'rounded-3xl'
+    };
+    
+    // Use platform-specific defaults if provided
+    if (platform === 'win32' && radius === '2xl') {
+      return 'rounded-3xl'; // Windows prefers more rounded corners
+    }
+    
+    return radiusClasses[radius];
+  }
 }

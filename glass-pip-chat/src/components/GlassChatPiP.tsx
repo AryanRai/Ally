@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '../lib/utils';
+import { ThemeUtils } from '../utils/themeUtils';
 import { useEditState } from '../hooks/useEditState';
 import { useWindowManagement } from '../hooks/useWindowManagement';
 import { useContextMonitoring } from '../hooks/useContextMonitoring';
@@ -190,8 +191,9 @@ export default function GlassChatPiP() {
     setIsResizing(true);
     const dims = sizePx[state.size];
     const sidebarWidth = state.collapsed ? 0 : (sidebarCollapsed ? 48 : 280);
-    const width = dims.w + sidebarWidth + 16; // Add 16px for spacing (8px padding on each side)
-    const height = (state.collapsed ? 120 : dims.h) + 16; // Add 16px for spacing (8px padding on top/bottom)
+    const padding = appSettings.ui.windowPadding * 2; // Padding on both sides
+    const width = dims.w + sidebarWidth + padding;
+    const height = (state.collapsed ? 120 : dims.h) + padding;
 
     console.log('Resizing window to:', width, 'x', height, 'collapsed:', state.collapsed, 'sidebar:', sidebarWidth);
 
@@ -211,7 +213,7 @@ export default function GlassChatPiP() {
       clearTimeout(resizeTimeout);
       clearTimeout(resetTimeout);
     };
-  }, [state.size, state.collapsed, sidebarCollapsed]);
+  }, [state.size, state.collapsed, sidebarCollapsed, appSettings.ui.windowPadding]);
 
   // Track last assistant message for preview
   useEffect(() => {
@@ -368,13 +370,14 @@ export default function GlassChatPiP() {
 
   const dims = sizePx[state.size];
   const messages = activeChat?.messages || [];
+  const padding = appSettings.ui.windowPadding * 2; // Padding on both sides
 
   return (
     <motion.div
       className="fixed bg-transparent flex items-center justify-center"
       style={{
-        width: state.collapsed ? dims.w + 16 : (sidebarCollapsed ? dims.w + 48 + 16 : dims.w + 280 + 16),
-        height: state.collapsed ? 120 + 16 : dims.h + 16,
+        width: state.collapsed ? dims.w + padding : (sidebarCollapsed ? dims.w + 48 + padding : dims.w + 280 + padding),
+        height: state.collapsed ? 120 + padding : dims.h + padding,
         zIndex: 50
       } as React.CSSProperties}
       initial={{ opacity: 0, scale: 0.9 }}
@@ -385,7 +388,7 @@ export default function GlassChatPiP() {
         layout
         className={cn(
           "overflow-hidden relative flex transition-all duration-300",
-          platform === 'win32' ? "rounded-3xl" : "rounded-2xl",
+          ThemeUtils.getBorderRadiusClass(appSettings.ui.borderRadius, platform),
           "border border-white/20 shadow-[0_8px_40px_rgba(0,0,0,0.4)]",
           isResizing && "shadow-lg scale-[1.01]",
           platform === 'win32'

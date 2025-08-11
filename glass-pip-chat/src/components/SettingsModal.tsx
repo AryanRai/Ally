@@ -330,6 +330,85 @@ export default function SettingsModal({
                       ))}
                     </div>
                   </div>
+
+                  {/* Window Padding */}
+                  <div className="space-y-2">
+                    <label className={cn(
+                      "text-xs font-medium",
+                      platform === 'win32'
+                        ? "text-white/80"
+                        : theme === 'dark' ? "text-white/80" : "text-black/80"
+                    )}>Window Padding</label>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="range"
+                        min="0"
+                        max="32"
+                        step="2"
+                        value={appSettings.ui.windowPadding}
+                        onChange={(e) => onSettingsChange({ 
+                          ui: { ...appSettings.ui, windowPadding: parseInt(e.target.value) } 
+                        })}
+                        className="flex-1 h-2 bg-white/10 rounded-lg appearance-none slider"
+                      />
+                      <span className={cn(
+                        "text-xs font-mono min-w-[3rem] text-right",
+                        platform === 'win32'
+                          ? "text-white/60"
+                          : theme === 'dark' ? "text-white/60" : "text-black/60"
+                      )}>
+                        {appSettings.ui.windowPadding}px
+                      </span>
+                    </div>
+                    <p className={cn(
+                      "text-xs",
+                      platform === 'win32'
+                        ? "text-white/50"
+                        : theme === 'dark' ? "text-white/50" : "text-black/50"
+                    )}>
+                      Spacing around chat container (0px = full window)
+                    </p>
+                  </div>
+
+                  {/* Border Radius */}
+                  <div className="space-y-2">
+                    <label className={cn(
+                      "text-xs font-medium",
+                      platform === 'win32'
+                        ? "text-white/80"
+                        : theme === 'dark' ? "text-white/80" : "text-black/80"
+                    )}>Corner Radius</label>
+                    <div className="grid grid-cols-4 gap-1">
+                      {(['none', 'sm', 'md', 'lg', 'xl', '2xl', '3xl'] as const).map((radius) => (
+                        <button
+                          key={radius}
+                          onClick={() => onSettingsChange({ 
+                            ui: { ...appSettings.ui, borderRadius: radius } 
+                          })}
+                          className={cn(
+                            "px-2 py-1.5 text-xs rounded transition-all border",
+                            appSettings.ui.borderRadius === radius
+                              ? "bg-blue-500/20 border-blue-500/40 text-blue-300"
+                              : platform === 'win32'
+                                ? "border-white/10 bg-white/5 hover:bg-white/10 text-white/80"
+                                : theme === 'dark' 
+                                  ? "border-white/10 bg-white/5 hover:bg-white/10 text-white/80"
+                                  : "border-black/10 bg-black/5 hover:bg-black/10 text-black/80"
+                          )}
+                        >
+                          {radius === 'none' ? '□' : radius.toUpperCase()}
+                        </button>
+                      ))}
+                    </div>
+                    <p className={cn(
+                      "text-xs",
+                      platform === 'win32'
+                        ? "text-white/50"
+                        : theme === 'dark' ? "text-white/50" : "text-black/50"
+                    )}>
+                      Rounded corners of chat container
+                    </p>
+                  </div>
                 </div>
 
                 {/* Windows Acrylic Settings */}
