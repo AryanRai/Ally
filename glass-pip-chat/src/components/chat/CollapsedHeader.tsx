@@ -120,7 +120,7 @@ export default function CollapsedHeader({
           {hasNewContext && (contextData.clipboard || contextData.selectedText) && (
             <div className="flex items-center gap-1 px-2 py-0.5 bg-blue-500/20 rounded-full flex-shrink-0">
               <Clipboard className="w-2.5 h-2.5" />
-              <span className="text-xs">New</span>
+              <span className="text-xs">Context</span>
               <div className="w-1.5 h-1.5 bg-blue-400 rounded-full animate-pulse" />
             </div>
           )}
@@ -194,19 +194,7 @@ export default function CollapsedHeader({
             )}
           />
 
-          {/* Context indicator */}
-          {(contextData.clipboard || contextData.selectedText) && contextToggleEnabled && (
-            <div
-              className={cn(
-                "flex items-center gap-1 px-2 py-1 rounded-md text-xs flex-shrink-0",
-                "bg-blue-500/20 border border-blue-500/30 text-blue-300"
-              )}
-              title="Context will be auto-attached"
-            >
-              <Clipboard className="w-3 h-3" />
-              <span>Context</span>
-            </div>
-          )}
+
 
           <button
             type="submit"
@@ -241,7 +229,7 @@ export default function CollapsedHeader({
         onStop={onStop}
       />
 
-      {/* Context Dropdown */}
+      {/* Unified Context Element */}
       {hasNewContext && (contextData.clipboard || contextData.selectedText) && (
         <div 
           className="px-3 pb-2"
@@ -251,11 +239,11 @@ export default function CollapsedHeader({
             "border rounded-lg overflow-hidden",
             ThemeUtils.getBorderClass(platform, theme)
           )}>
-            {/* Context Header - Collapsible (like EditableMessage) */}
+            {/* Context Header - Collapsible */}
             <button
               onClick={() => setIsContextExpanded(!isContextExpanded)}
               className={cn(
-                "w-full flex items-center justify-between p-3 text-left transition-colors",
+                "w-full flex items-center justify-between p-2 text-left transition-colors",
                 "hover:bg-white/5 rounded-lg"
               )}
               style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
@@ -263,8 +251,12 @@ export default function CollapsedHeader({
               <div className="flex items-center gap-2">
                 <Clipboard className="w-3 h-3 opacity-60" />
                 <span className="text-xs font-medium opacity-80">
-                  Context attached
+                  Context
                 </span>
+                {contextToggleEnabled && (
+                  <span className="text-xs opacity-50">(auto-attach)</span>
+                )}
+                <div className="w-1.5 h-1.5 bg-blue-400 rounded-full animate-pulse" />
               </div>
               <ChevronDown className={cn(
                 "w-3 h-3 opacity-60 transition-transform duration-200",
@@ -272,7 +264,7 @@ export default function CollapsedHeader({
               )} />
             </button>
 
-            {/* Context Content - Expandable (like EditableMessage) */}
+            {/* Context Content - Expandable */}
             <AnimatePresence>
               {isContextExpanded && (
                 <motion.div
