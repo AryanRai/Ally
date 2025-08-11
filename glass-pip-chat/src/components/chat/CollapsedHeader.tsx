@@ -182,6 +182,7 @@ export default function CollapsedHeader({
           style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
         >
           <input
+            id="quick-input"
             type="text"
             value={quickInput}
             onChange={(e) => setQuickInput(e.target.value)}

@@ -66,6 +66,8 @@ export default function GlassChatPiP() {
   const [showSettings, setShowSettings] = useState(false);
   const [isPreviewExpanded, setIsPreviewExpanded] = useState(false);
   const [currentResponse, setCurrentResponse] = useState('');
+  const [inputHistory, setInputHistory] = useState<string[]>([]);
+  const [historyIndex, setHistoryIndex] = useState(-1);
   // Copy functionality state
   const [copiedCode, setCopiedCode] = useState<Set<string>>(new Set());
   const [expandedContexts, setExpandedContexts] = useState<Set<string>>(new Set());
@@ -288,6 +290,12 @@ export default function GlassChatPiP() {
     const textToSend = messageInput || input.trim();
     if (!textToSend) return;
 
+    // Add to input history
+    if (textToSend && !inputHistory.includes(textToSend)) {
+      setInputHistory(prev => [...prev, textToSend].slice(-50)); // Keep last 50 messages
+    }
+    setHistoryIndex(-1); // Reset history index
+
     // Check if this is a command execution request
     const isCommand = textToSend.startsWith('/run ') || textToSend.startsWith('/cmd ') || textToSend.startsWith('/exec ');
 
@@ -407,6 +415,138 @@ export default function GlassChatPiP() {
       setIsTyping(false);
     }
   };
+
+  // Comprehensive keyboard shortcuts
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const activeElement = document.activeElement;
+      const isInputFocused = activeElement && (
+        activeElement.tagName === 'INPUT' || 
+        activeElement.tagName === 'TEXTAREA' ||
+        activeElement.contentEditable === 'true'
+      );
+
+      // Global shortcuts (work regardless of focus)
+      if ((event.ctrlKey || event.metaKey) && event.shiftKey) {
+        switch (event.key) {
+          case 'C':
+            event.preventDefault();
+            handleCustomCollapseToggle();
+            return;
+          case 'S':
+            event.preventDefault();
+            setShowSettings(true);
+            return;
+          case 'N':
+            event.preventDefault();
+            handleChatCreate();
+            return;
+        }
+      }
+
+      // Input-specific shortcuts
+      if (isInputFocused) {
+        const inputElement = activeElement as HTMLInputElement;
+        
+        // Up/Down arrow for input history
+        if (event.key === 'ArrowUp' && inputHistory.length > 0) {
+          event.preventDefault();
+          const newIndex = Math.min(historyIndex + 1, inputHistory.length - 1);
+          setHistoryIndex(newIndex);
+          const historicalInput = inputHistory[inputHistory.length - 1 - newIndex];
+          
+          if (inputElement.id === 'quick-input') {
+            setQuickInput(historicalInput);
+          } else {
+            setInput(historicalInput);
+          }
+          return;
+        }
+        
+        if (event.key === 'ArrowDown' && historyIndex >= 0) {
+          event.preventDefault();
+          const newIndex = historyIndex - 1;
+          setHistoryIndex(newIndex);
+          
+          if (newIndex >= 0) {
+            const historicalInput = inputHistory[inputHistory.length - 1 - newIndex];
+            if (inputElement.id === 'quick-input') {
+              setQuickInput(historicalInput);
+            } else {
+              setInput(historicalInput);
+            }
+          } else {
+            // Clear input when going below history
+            if (inputElement.id === 'quick-input') {
+              setQuickInput('');
+            } else {
+              setInput('');
+            }
+          }
+          return;
+        }
+        
+        // Send message with Ctrl/Cmd + Enter
+        if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+          event.preventDefault();
+          const currentInput = inputElement.id === 'quick-input' ? quickInput : input;
+          if (currentInput.trim()) {
+            handleSend(currentInput, inputElement.id === 'quick-input');
+          }
+          return;
+        }
+      }
+
+      // Non-input shortcuts
+      if (!isInputFocused) {
+        switch (event.key) {
+          case '/':
+            event.preventDefault();
+            inputRef.current?.focus();
+            return;
+          case 'n':
+            if (event.ctrlKey || event.metaKey) {
+              event.preventDefault();
+              handleChatCreate();
+            }
+            return;
+          case 's':
+            if (event.ctrlKey || event.metaKey) {
+              event.preventDefault();
+              setShowSettings(true);
+            }
+            return;
+          case '?':
+            if (event.shiftKey) {
+              event.preventDefault();
+              // Show keyboard shortcuts help
+              alert(`Keyboard Shortcuts:
+
+Global:
+• Ctrl+Shift+C - Toggle collapse/expand
+• Ctrl+Shift+S - Open settings  
+• Ctrl+Shift+N - New chat
+• Escape - Hide window (when not in input)
+• / - Focus input field
+
+Input (when focused):
+• ↑ - Previous message from history
+• ↓ - Next message from history  
+• Ctrl+Enter - Send message
+• Escape - Cancel editing
+
+Non-input:
+• Ctrl+N - New chat
+• Ctrl+S - Settings`);
+            }
+            return;
+        }
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [input, quickInput, inputHistory, historyIndex, handleCustomCollapseToggle, handleChatCreate, handleSend, setShowSettings]);
 
   const dims = sizePx[state.size];
   const padding = appSettings.ui.windowPadding * 2; // Padding on both sides

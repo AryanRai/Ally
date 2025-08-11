@@ -103,13 +103,23 @@ export function useWindowManagement() {
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
-        event.preventDefault();
-        event.stopPropagation();
-        window.pip?.hide();
+        // Only hide if no input/textarea is focused and not in an editable element
+        const activeElement = document.activeElement;
+        const isInputFocused = activeElement && (
+          activeElement.tagName === 'INPUT' || 
+          activeElement.tagName === 'TEXTAREA' ||
+          activeElement.contentEditable === 'true'
+        );
+        
+        if (!isInputFocused) {
+          event.preventDefault();
+          event.stopPropagation();
+          window.pip?.hide();
+        }
       }
     };
 
-    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keydown', handleKeyDown, { capture: false });
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
