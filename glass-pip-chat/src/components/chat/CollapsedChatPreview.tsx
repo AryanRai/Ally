@@ -4,7 +4,7 @@ import { ChevronUp, ChevronDown, User, Bot } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { ThemeUtils } from '../../utils/themeUtils';
 import { Message } from '../../types/chat';
-import MarkdownRenderer from '../MarkdownRenderer';
+import EditableMessage from '../EditableMessage';
 
 interface CollapsedChatPreviewProps {
   platform: string;
@@ -13,6 +13,12 @@ interface CollapsedChatPreviewProps {
   isTyping: boolean;
   onCopyMessage: (content: string) => void;
   onPreviewToggle?: (isExpanded: boolean) => void;
+  onMessageEdit?: (messageId: string, newContent: string) => void;
+  onMessageFork?: (messageId: string, newContent: string) => void;
+  onMessageDelete?: (messageId: string) => void;
+  onCopyCode?: (text: string, codeId: string) => void;
+  onRunCode?: (command: string, codeId: string) => void;
+  uiSettings?: any;
 }
 
 export default function CollapsedChatPreview({
@@ -21,7 +27,13 @@ export default function CollapsedChatPreview({
   messages,
   isTyping,
   onCopyMessage,
-  onPreviewToggle
+  onPreviewToggle,
+  onMessageEdit,
+  onMessageFork,
+  onMessageDelete,
+  onCopyCode,
+  onRunCode,
+  uiSettings
 }: CollapsedChatPreviewProps) {
   const [isExpanded, setIsExpanded] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -49,31 +61,15 @@ export default function CollapsedChatPreview({
     );
   }
 
-  const formatMessageContent = (content: string, forPreview: boolean = false) => {
-    if (forPreview) {
-      // Remove markdown formatting for brief preview
-      let preview = content
-        .replace(/[#*`]/g, '') // Remove markdown symbols
-        .replace(/\n+/g, ' ') // Replace line breaks with spaces
-        .trim();
-      
-      // Truncate long messages
-      if (preview.length > 100) {
-        preview = preview.substring(0, 97) + '...';
-      }
-      
-      return preview;
-    }
-    
-    // Return full content for markdown rendering
-    return content;
-  };
 
   return (
-    <div className={cn(
-      "border-t transition-all duration-200",
-      ThemeUtils.getBorderClass(platform, theme)
-    )}>
+    <div 
+      className={cn(
+        "border-t transition-all duration-200",
+        ThemeUtils.getBorderClass(platform, theme)
+      )}
+      style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+    >
       {/* Toggle Button */}
       <button
         onClick={() => {
@@ -126,43 +122,27 @@ export default function CollapsedChatPreview({
                   initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: index * 0.05 }}
-                  className={cn(
-                    "flex items-start gap-2 p-2 rounded-lg group",
-                    "hover:bg-white/5 transition-colors cursor-pointer",
-                    message.role === 'user' 
-                      ? "ml-4 bg-blue-500/10" 
-                      : "mr-4 bg-white/5"
-                  )}
-                  onClick={() => onCopyMessage(message.content)}
-                  title="Click to copy message"
+                  className="mb-2 last:mb-0"
+                  style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
                 >
-                  <div className="flex-shrink-0 mt-0.5">
-                    {message.role === 'user' ? (
-                      <User className="w-3 h-3 opacity-60" />
-                    ) : (
-                      <Bot className="w-3 h-3 opacity-60" />
-                    )}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-1">
-                      <span className="text-xs font-medium opacity-80">
-                        {message.role === 'user' ? 'You' : 'Assistant'}
-                      </span>
-                      <span className="text-xs opacity-50">
-                        {new Date(message.timestamp).toLocaleTimeString([], { 
-                          hour: '2-digit', 
-                          minute: '2-digit' 
-                        })}
-                      </span>
-                    </div>
-                    <div className="text-xs opacity-90 leading-relaxed">
-                      <MarkdownRenderer 
-                        content={formatMessageContent(message.content)} 
-                        platform={platform}
-                        theme={theme}
-                        compact={true}
-                      />
-                    </div>
+                  <div className="scale-90 origin-top-left transform">
+                    <EditableMessage
+                      message={message}
+                      isLast={index === messages.length - 1}
+                      onEdit={onMessageEdit || (() => {})}
+                      onFork={onMessageFork || (() => {})}
+                      onDelete={onMessageDelete || (() => {})}
+                      onCopy={onCopyMessage}
+                      onCopyCode={onCopyCode}
+                      onRunCode={onRunCode}
+                      theme={theme}
+                      platform={platform}
+                      uiSettings={uiSettings || { 
+                        fontSize: 'xs', 
+                        messageSpacing: 'compact', 
+                        messagePadding: 'tight' 
+                      }}
+                    />
                   </div>
                 </motion.div>
               ))}

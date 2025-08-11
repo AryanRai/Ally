@@ -469,6 +469,11 @@ export default function GlassChatPiP() {
                 onHide={handleHide}
                 onCopyMessage={handleMessageCopy}
                 onPreviewToggle={handlePreviewToggle}
+                onMessageEdit={handleMessageEdit}
+                onMessageFork={handleMessageFork}
+                onMessageDelete={handleMessageDelete}
+                onCopyCode={copyToClipboard}
+                onRunCode={(command, codeId) => runInTerminal(command, codeId, addMessageToActiveChat)}
                 isResizing={isResizing}
                 size={state.size}
                 ollamaAvailable={ollamaIntegration.ollamaAvailable}
@@ -476,6 +481,7 @@ export default function GlassChatPiP() {
                 hasNewContext={contextMonitoring.hasNewContext}
                 contextData={contextMonitoring.contextData}
                 contextToggleEnabled={contextMonitoring.contextToggleEnabled}
+                uiSettings={appSettings.ui}
               />
             ) : (
               <ExpandedHeader
