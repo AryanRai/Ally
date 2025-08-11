@@ -189,6 +189,37 @@ export default function GlassChatPiP() {
     setIsPreviewExpanded(expanded);
   };
 
+  // Custom collapse toggle with state cleanup
+  const handleCustomCollapseToggle = () => {
+    const willBeCollapsed = !state.collapsed;
+    
+    // If we're collapsing TO collapsed mode, reset collapsed-specific states immediately
+    if (willBeCollapsed) {
+      setIsPreviewExpanded(false); // Reset message preview expansion
+      setCurrentResponse(''); // Clear any current response
+      
+      // Call the original collapse toggle after a small delay to ensure state cleanup
+      setTimeout(() => {
+        handleCollapseToggle();
+        
+        // Force a resize after collapse to ensure proper dimensions
+        setTimeout(() => {
+          if (window.pip) {
+            const padding = appSettings.ui.windowPadding * 2;
+            const baseHeight = collapsedDims.baseHeight + padding;
+            const baseWidth = collapsedDims.width + padding;
+            
+            console.log('Force resizing collapsed window to:', baseWidth, 'x', baseHeight);
+            window.pip.resizeWindow(baseWidth, baseHeight);
+          }
+        }, 100);
+      }, 10);
+    } else {
+      // Expanding - no cleanup needed, call immediately
+      handleCollapseToggle();
+    }
+  };
+
   // Sync window size when size state changes
   useEffect(() => {
     if (!window.pip) {
@@ -209,19 +240,21 @@ export default function GlassChatPiP() {
       ? collapsedHeight + padding 
       : dims.h + padding;
 
-    console.log('Resizing window to:', width, 'x', height, 'collapsed:', state.collapsed, 'preview expanded:', isPreviewExpanded, 'sidebar:', sidebarWidth);
+    console.log('Resizing window to:', width, 'x', height, 'collapsed:', state.collapsed, 'preview expanded:', isPreviewExpanded, 'current response:', !!currentResponse, 'sidebar:', sidebarWidth);
 
-    // Use a small delay to ensure state has settled
+    // Use a longer delay for collapse transitions to ensure state cleanup has completed
+    const resizeDelay = state.collapsed && (isPreviewExpanded || currentResponse) ? 100 : 50;
+    
     const resizeTimeout = setTimeout(() => {
       try {
         window.pip.resizeWindow(width, height);
       } catch (error) {
         console.error('Failed to resize window:', error);
       }
-    }, 50);
+    }, resizeDelay);
 
     // Reset resizing state after animation
-    const resetTimeout = setTimeout(() => setIsResizing(false), 400);
+    const resetTimeout = setTimeout(() => setIsResizing(false), 400 + resizeDelay);
 
     return () => {
       clearTimeout(resizeTimeout);
@@ -479,7 +512,7 @@ export default function GlassChatPiP() {
                 setQuickInput={setQuickInput}
                 onSend={handleSend}
                 onStop={handleStop}
-                onCollapseToggle={handleCollapseToggle}
+                onCollapseToggle={handleCustomCollapseToggle}
                 onSizeChange={handleSizeChange}
                 onHide={handleHide}
                 onCopyMessage={handleMessageCopy}
@@ -526,7 +559,7 @@ export default function GlassChatPiP() {
                 }}
                 onSizeChange={handleSizeChange}
                 onSettings={() => setShowSettings(true)}
-                onCollapseToggle={handleCollapseToggle}
+                onCollapseToggle={handleCustomCollapseToggle}
                 onHide={handleHide}
                 size={state.size}
               />
