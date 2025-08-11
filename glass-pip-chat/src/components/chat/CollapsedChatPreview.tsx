@@ -73,6 +73,7 @@ export default function CollapsedChatPreview({
           "w-full flex items-center justify-between px-3 py-2",
           "hover:bg-white/5 transition-colors"
         )}
+        style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
       >
         <div className="flex items-center gap-2">
           <div className={cn(
