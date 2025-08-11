@@ -138,14 +138,14 @@ export default function ChatSidebar({
             <button
               onClick={onChatCreate}
               className={cn(
-                "p-1.5 rounded-lg transition-colors",
+                "p-1.5 rounded-lg transition-colors flex items-center justify-center",
                 platform === 'win32' 
                   ? "hover:bg-white/10"
                   : theme === 'dark' ? "hover:bg-white/10" : "hover:bg-black/10"
               )}
               title="New chat"
             >
-              <Plus className="w-4 h-4" />
+              <Plus className="w-4 h-4 flex-shrink-0" />
             </button>
           )}
           
@@ -359,7 +359,7 @@ export default function ChatSidebar({
             <button
               onClick={onChatCreate}
               className={cn(
-                "w-full p-3 rounded-lg border-2 border-dashed transition-colors",
+                "w-full h-12 flex items-center justify-center rounded-lg border-2 border-dashed transition-colors",
                 platform === 'win32'
                   ? "border-white/20 hover:border-white/40 hover:bg-white/5"
                   : theme === 'dark' 
@@ -368,7 +368,7 @@ export default function ChatSidebar({
               )}
               title="New chat"
             >
-              <Plus className="w-4 h-4 mx-auto" />
+              <Plus className="w-4 h-4 flex-shrink-0" />
             </button>
           </div>
         )}
