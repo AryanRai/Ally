@@ -12,7 +12,8 @@ import {
   MoreHorizontal,
   ChevronDown,
   Clipboard,
-  Terminal
+  Terminal,
+  RefreshCw
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { Message } from '../types/chat';
@@ -27,6 +28,7 @@ interface EditableMessageProps {
   onCopy: (content: string) => void;
   onCopyCode?: (text: string, codeId: string) => void;
   onRunCode?: (command: string, codeId: string) => void;
+  onRecompute?: (messageId: string) => void;
   theme: 'light' | 'dark';
   platform: string;
   uiSettings: UISettings;
@@ -42,6 +44,7 @@ export default function EditableMessage({
   onCopy,
   onCopyCode,
   onRunCode,
+  onRecompute,
   theme,
   platform,
   uiSettings,
@@ -553,6 +556,24 @@ export default function EditableMessage({
               >
                 <Edit3 className="w-3 h-3" />
               </button>
+              
+              {/* Recompute button - only show for assistant messages */}
+              {message.role === 'assistant' && onRecompute && (
+                <button
+                  onClick={() => onRecompute(message.id)}
+                  className={cn(
+                    "p-1.5 rounded-lg transition-colors backdrop-blur-sm",
+                    platform === 'win32'
+                      ? "bg-black/50 hover:bg-black/70"
+                      : theme === 'dark'
+                        ? "bg-black/50 hover:bg-black/70"
+                        : "bg-white/50 hover:bg-white/70"
+                  )}
+                  title="Recompute response"
+                >
+                  <RefreshCw className="w-3 h-3" />
+                </button>
+              )}
               
               <div className="relative">
                 <button

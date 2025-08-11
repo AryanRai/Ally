@@ -37,6 +37,7 @@ interface CollapsedHeaderProps {
   onMessageDelete?: (messageId: string) => void;
   onCopyCode?: (text: string, codeId: string) => void;
   onRunCode?: (command: string, codeId: string) => void;
+  onRecompute?: (messageId: string) => void;
   isResizing: boolean;
   size: string;
   ollamaAvailable: boolean;
@@ -67,6 +68,7 @@ export default function CollapsedHeader({
   onMessageDelete,
   onCopyCode,
   onRunCode,
+  onRecompute,
   isResizing,
   size,
   ollamaAvailable,
@@ -309,6 +311,7 @@ export default function CollapsedHeader({
         onMessageDelete={onMessageDelete}
         onCopyCode={onCopyCode}
         onRunCode={onRunCode}
+        onRecompute={onRecompute}
         uiSettings={uiSettings}
       />
     </div>
