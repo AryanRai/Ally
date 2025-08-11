@@ -208,13 +208,20 @@ export default function GlassChatPiP() {
         setTimeout(() => {
           if (window.pip) {
             const padding = appSettings.ui.windowPadding * 2;
-            const baseHeight = collapsedDims.baseHeight + padding;
+            // Calculate the actual collapsed height based on current state
+            let actualCollapsedHeight = collapsedDims.baseHeight;
+            // Add context height if context is present
+            if (contextMonitoring.hasNewContext && (contextMonitoring.contextData.clipboard || contextMonitoring.contextData.selectedText)) {
+              actualCollapsedHeight += collapsedDims.contextHeight;
+            }
+            
+            const baseHeight = actualCollapsedHeight + padding;
             const baseWidth = collapsedDims.width + padding;
             
-            console.log('Force resizing collapsed window to:', baseWidth, 'x', baseHeight);
+            console.log('Force resizing collapsed window to:', baseWidth, 'x', baseHeight, 'context present:', contextMonitoring.hasNewContext);
             window.pip.resizeWindow(baseWidth, baseHeight);
           }
-        }, 100);
+        }, 150); // Increased delay to ensure state updates have propagated
       }, 10);
     } else {
       // Expanding - no cleanup needed, call immediately
@@ -222,47 +229,7 @@ export default function GlassChatPiP() {
     }
   };
 
-  // Sync window size when size state changes
-  useEffect(() => {
-    if (!window.pip) {
-      console.warn('window.pip not available');
-      return;
-    }
 
-    setIsResizing(true);
-    const dims = sizePx[state.size];
-    const sidebarWidth = state.collapsed ? 0 : (sidebarCollapsed ? 48 : 280);
-    const padding = appSettings.ui.windowPadding * 2; // Padding on both sides
-    
-    // Use optimized dimensions for collapsed mode
-    const width = state.collapsed 
-      ? collapsedDims.width + padding
-      : dims.w + sidebarWidth + padding;
-    const height = state.collapsed 
-      ? collapsedHeight + padding 
-      : dims.h + padding;
-
-    console.log('Resizing window to:', width, 'x', height, 'collapsed:', state.collapsed, 'preview expanded:', isPreviewExpanded, 'current response:', !!currentResponse, 'sidebar:', sidebarWidth);
-
-    // Use a longer delay for collapse transitions to ensure state cleanup has completed
-    const resizeDelay = state.collapsed && (isPreviewExpanded || currentResponse) ? 100 : 50;
-    
-    const resizeTimeout = setTimeout(() => {
-      try {
-        window.pip.resizeWindow(width, height);
-      } catch (error) {
-        console.error('Failed to resize window:', error);
-      }
-    }, resizeDelay);
-
-    // Reset resizing state after animation
-    const resetTimeout = setTimeout(() => setIsResizing(false), 400 + resizeDelay);
-
-    return () => {
-      clearTimeout(resizeTimeout);
-      clearTimeout(resetTimeout);
-    };
-  }, [state.size, state.collapsed, sidebarCollapsed, appSettings.ui.windowPadding, isPreviewExpanded, contextMonitoring.hasNewContext, contextMonitoring.contextData, currentResponse, isTyping]);
 
 
   // Auto-scroll to bottom
@@ -423,8 +390,14 @@ export default function GlassChatPiP() {
       const isInputFocused = activeElement && (
         activeElement.tagName === 'INPUT' || 
         activeElement.tagName === 'TEXTAREA' ||
-        activeElement.contentEditable === 'true'
+        (activeElement as HTMLElement).contentEditable === 'true'
       );
+
+      // Prevent default for certain keys to avoid conflicts
+      const preventDefaultKeys = ['Escape', 'F1', 'F2', 'F3', 'F4', 'F5', 'F6', 'F7', 'F8', 'F9', 'F10', 'F11', 'F12'];
+      if (preventDefaultKeys.includes(event.key)) {
+        event.preventDefault();
+      }
 
       // Global shortcuts (work regardless of focus)
       if ((event.ctrlKey || event.metaKey) && event.shiftKey) {
@@ -440,6 +413,45 @@ export default function GlassChatPiP() {
           case 'N':
             event.preventDefault();
             handleChatCreate();
+            return;
+          case 'H':
+            event.preventDefault();
+            handleHide();
+            return;
+          case 'R':
+            event.preventDefault();
+            handleSizeChange();
+            return;
+        }
+      }
+
+      // Ctrl/Cmd shortcuts (work regardless of focus)
+      if (event.ctrlKey || event.metaKey) {
+        switch (event.key) {
+          case 'n':
+          case 'N':
+            event.preventDefault();
+            handleChatCreate();
+            return;
+          case 's':
+          case 'S':
+            event.preventDefault();
+            setShowSettings(true);
+            return;
+          case 'h':
+          case 'H':
+            event.preventDefault();
+            handleHide();
+            return;
+          case 'r':
+          case 'R':
+            event.preventDefault();
+            handleSizeChange();
+            return;
+          case 'w':
+          case 'W':
+            event.preventDefault();
+            handleHide();
             return;
         }
       }
@@ -495,6 +507,50 @@ export default function GlassChatPiP() {
           }
           return;
         }
+
+        // Stop typing with Ctrl/Cmd + .
+        if ((event.ctrlKey || event.metaKey) && event.key === '.') {
+          event.preventDefault();
+          if (isTyping) {
+            handleStop();
+          }
+          return;
+        }
+
+        // Clear input with Ctrl/Cmd + K
+        if ((event.ctrlKey || event.metaKey) && event.key === 'k') {
+          event.preventDefault();
+          if (inputElement.id === 'quick-input') {
+            setQuickInput('');
+          } else {
+            setInput('');
+          }
+          setHistoryIndex(-1);
+          return;
+        }
+
+        // Escape handling for inputs
+        if (event.key === 'Escape') {
+          event.preventDefault();
+          event.stopPropagation();
+          
+          // Clear input history index
+          setHistoryIndex(-1);
+          
+          // Clear input if it's empty or just whitespace
+          const currentInput = inputElement.id === 'quick-input' ? quickInput : input;
+          if (!currentInput.trim()) {
+            if (inputElement.id === 'quick-input') {
+              setQuickInput('');
+            } else {
+              setInput('');
+            }
+          }
+          
+          // Blur the input
+          inputElement.blur();
+          return;
+        }
       }
 
       // Non-input shortcuts
@@ -504,49 +560,74 @@ export default function GlassChatPiP() {
             event.preventDefault();
             inputRef.current?.focus();
             return;
-          case 'n':
-            if (event.ctrlKey || event.metaKey) {
-              event.preventDefault();
-              handleChatCreate();
-            }
+          case 'Escape':
+            event.preventDefault();
+            event.stopPropagation();
+            handleHide();
             return;
-          case 's':
-            if (event.ctrlKey || event.metaKey) {
-              event.preventDefault();
-              setShowSettings(true);
-            }
+          case 'F1':
+            event.preventDefault();
+            setShowSettings(true);
+            return;
+          case 'F2':
+            event.preventDefault();
+            handleChatCreate();
+            return;
+          case 'F3':
+            event.preventDefault();
+            handleCustomCollapseToggle();
+            return;
+          case 'F4':
+            event.preventDefault();
+            handleSizeChange();
             return;
           case '?':
             if (event.shiftKey) {
               event.preventDefault();
-              // Show keyboard shortcuts help
-              alert(`Keyboard Shortcuts:
+              // Show comprehensive keyboard shortcuts help
+              const shortcuts = `
+🎯 KEYBOARD SHORTCUTS
 
-Global:
-• Ctrl+Shift+C - Toggle collapse/expand
-• Ctrl+Shift+S - Open settings  
-• Ctrl+Shift+N - New chat
-• Escape - Hide window (when not in input)
+🌐 GLOBAL SHORTCUTS (anywhere):
+• Ctrl+Shift+C / F3 - Toggle collapse/expand
+• Ctrl+Shift+S / F1 - Open settings  
+• Ctrl+Shift+N / F2 - New chat
+• Ctrl+Shift+H - Hide window
+• Ctrl+Shift+R / F4 - Resize window
+• Escape - Hide window
 • / - Focus input field
 
-Input (when focused):
+⌨️ INPUT SHORTCUTS (when typing):
 • ↑ - Previous message from history
 • ↓ - Next message from history  
 • Ctrl+Enter - Send message
-• Escape - Cancel editing
+• Ctrl+. - Stop typing
+• Ctrl+K - Clear input
+• Escape - Clear history & blur input
 
-Non-input:
+📱 APPLICATION SHORTCUTS:
 • Ctrl+N - New chat
-• Ctrl+S - Settings`);
+• Ctrl+S - Settings
+• Ctrl+H - Hide window
+• Ctrl+R - Resize window
+• Ctrl+W - Hide window
+• F1-F4 - Quick actions
+
+💡 TIPS:
+• Use Ctrl+Shift+? to see this help again
+• Arrow keys work in any input field
+• Escape safely hides the window
+• Most shortcuts work globally`;
+              alert(shortcuts);
             }
             return;
         }
       }
     };
 
-    document.addEventListener('keydown', handleKeyDown);
-    return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [input, quickInput, inputHistory, historyIndex, handleCustomCollapseToggle, handleChatCreate, handleSend, setShowSettings]);
+    document.addEventListener('keydown', handleKeyDown, true); // Use capture phase
+    return () => document.removeEventListener('keydown', handleKeyDown, true);
+  }, [input, quickInput, inputHistory, historyIndex, isTyping, handleCustomCollapseToggle, handleChatCreate, handleSend, handleStop, handleHide, handleSizeChange, setShowSettings]);
 
   const dims = sizePx[state.size];
   const padding = appSettings.ui.windowPadding * 2; // Padding on both sides
@@ -573,6 +654,46 @@ Non-input:
   if (currentResponse || isTyping) {
     collapsedHeight += collapsedDims.responseHeight;
   }
+
+  // Sync window size when size state changes
+  useEffect(() => {
+    if (!window.pip) {
+      console.warn('window.pip not available');
+      return;
+    }
+
+    setIsResizing(true);
+    const sidebarWidth = state.collapsed ? 0 : (sidebarCollapsed ? 48 : 280);
+    
+    // Use optimized dimensions for collapsed mode
+    const width = state.collapsed 
+      ? collapsedDims.width + padding
+      : dims.w + sidebarWidth + padding;
+    const height = state.collapsed 
+      ? collapsedHeight + padding 
+      : dims.h + padding;
+
+    console.log('Resizing window to:', width, 'x', height, 'collapsed:', state.collapsed, 'preview expanded:', isPreviewExpanded, 'current response:', !!currentResponse, 'sidebar:', sidebarWidth, 'context present:', contextMonitoring.hasNewContext);
+
+    // Use a longer delay for collapse transitions to ensure state cleanup has completed
+    const resizeDelay = state.collapsed ? 200 : 50; // Increased delay for collapsed mode
+    
+    const resizeTimeout = setTimeout(() => {
+      try {
+        window.pip.resizeWindow(width, height);
+      } catch (error) {
+        console.error('Failed to resize window:', error);
+      }
+    }, resizeDelay);
+
+    // Reset resizing state after animation
+    const resetTimeout = setTimeout(() => setIsResizing(false), 400 + resizeDelay);
+
+    return () => {
+      clearTimeout(resizeTimeout);
+      clearTimeout(resetTimeout);
+    };
+  }, [state.size, state.collapsed, sidebarCollapsed, appSettings.ui.windowPadding, isPreviewExpanded, contextMonitoring.hasNewContext, contextMonitoring.contextData, currentResponse, isTyping, collapsedHeight]);
 
   return (
     <motion.div
