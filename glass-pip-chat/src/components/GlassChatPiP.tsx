@@ -1538,9 +1538,12 @@ export default function GlassChatPiP() {
                     )}
                     title={sidebarCollapsed ? "Show chats" : "Hide chats"}
                   >
-                    <Menu className="w-3.5 h-3.5" />
+                    <img
+                      src="/allay.png"
+                      alt="Allay"
+                      className="w-4 h-4 flex-shrink-0"
+                    />
                   </button>
-                  <MessageSquare className="w-4 h-4 flex-shrink-0" />
 
                   {/* Editable chat title */}
                   {isEditingHeaderTitle ? (
