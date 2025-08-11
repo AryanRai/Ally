@@ -1178,7 +1178,7 @@ export default function GlassChatPiP() {
         isResizing && "shadow-lg"
       )}
       style={{ 
-        width: sidebarCollapsed ? dims.w : dims.w + 280, 
+        width: state.collapsed ? dims.w : (sidebarCollapsed ? dims.w + 48 : dims.w + 280), 
         height: state.collapsed ? 120 : dims.h,
         zIndex: 50
       } as React.CSSProperties}
@@ -1445,7 +1445,7 @@ export default function GlassChatPiP() {
                 <button
                   onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
                   className={cn(
-                    "p-1 rounded transition-colors",
+                    "flex items-center justify-center p-1 rounded transition-colors",
                     platform === 'win32' 
                       ? "hover:bg-white/10"
                       : theme === 'dark' ? "hover:bg-white/10" : "hover:bg-black/10"
