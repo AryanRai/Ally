@@ -65,6 +65,7 @@ export default function GlassChatPiP() {
   const [isTyping, setIsTyping] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [isPreviewExpanded, setIsPreviewExpanded] = useState(false);
+  const [currentResponse, setCurrentResponse] = useState('');
   // Copy functionality state
   const [copiedCode, setCopiedCode] = useState<Set<string>>(new Set());
   const [expandedContexts, setExpandedContexts] = useState<Set<string>>(new Set());
@@ -226,7 +227,7 @@ export default function GlassChatPiP() {
       clearTimeout(resizeTimeout);
       clearTimeout(resetTimeout);
     };
-  }, [state.size, state.collapsed, sidebarCollapsed, appSettings.ui.windowPadding, isPreviewExpanded, contextMonitoring.hasNewContext, contextMonitoring.contextData]);
+  }, [state.size, state.collapsed, sidebarCollapsed, appSettings.ui.windowPadding, isPreviewExpanded, contextMonitoring.hasNewContext, contextMonitoring.contextData, currentResponse, isTyping]);
 
 
   // Auto-scroll to bottom
@@ -246,6 +247,7 @@ export default function GlassChatPiP() {
   // Handle stop typing
   const handleStop = () => {
     setIsTyping(false);
+    setCurrentResponse(''); // Clear current response when stopping
   };
 
   // Main send function
@@ -301,6 +303,7 @@ export default function GlassChatPiP() {
     }
 
     setIsTyping(true);
+    setCurrentResponse(''); // Clear previous response
 
     try {
       if (ollamaIntegration.ollamaAvailable && ollamaIntegration.currentModel) {
@@ -317,14 +320,19 @@ export default function GlassChatPiP() {
 
         await ollamaIntegration.sendMessageToOllama(messages, messageContent, (update) => {
           if (activeChat) {
+            const responseContent = update.type === 'thinking'
+              ? `💭 **Thinking...**\n\n${update.thinking}\n\n---\n\n${update.response}`
+              : update.thinking
+                ? `💭 **Thinking Process:**\n\n${update.thinking}\n\n---\n\n**Response:**\n\n${update.response}`
+                : update.response;
+
+            // Update current response for collapsed preview
+            setCurrentResponse(responseContent);
+
             const updatedMessages = activeChat.messages.map(msg =>
               msg.id === tempMessageId ? {
                 ...msg,
-                content: update.type === 'thinking'
-                  ? `💭 **Thinking...**\n\n${update.thinking}\n\n---\n\n${update.response}`
-                  : update.thinking
-                    ? `💭 **Thinking Process:**\n\n${update.thinking}\n\n---\n\n**Response:**\n\n${update.response}`
-                    : update.response
+                content: responseContent
               } : msg
             );
             activeChat.messages = updatedMessages;
@@ -332,6 +340,8 @@ export default function GlassChatPiP() {
 
             if (update.type === 'done') {
               chatManager.getChatById(activeChat.id)!.messages = updatedMessages;
+              // Clear current response after completion (it's now in messages)
+              setTimeout(() => setCurrentResponse(''), 1000);
             }
           }
         });
@@ -373,10 +383,11 @@ export default function GlassChatPiP() {
     width: 360, // Optimal width for input + buttons
     baseHeight: 140, // Compact height for header + input
     expandedHeight: 340, // Height when preview is expanded
-    contextHeight: 80 // Additional height when context is shown and expanded
+    contextHeight: 80, // Additional height when context is shown and expanded
+    responseHeight: 200 // Height for response preview area
   };
   
-  // Dynamic collapsed height based on preview expansion and context
+  // Dynamic collapsed height based on preview expansion, context, and response
   let collapsedHeight = collapsedDims.baseHeight;
   if (isPreviewExpanded) {
     collapsedHeight = collapsedDims.expandedHeight;
@@ -384,6 +395,10 @@ export default function GlassChatPiP() {
   // Add extra space if context is present (whether expanded or not, it takes some space)
   if (contextMonitoring.hasNewContext && (contextMonitoring.contextData.clipboard || contextMonitoring.contextData.selectedText)) {
     collapsedHeight += collapsedDims.contextHeight;
+  }
+  // Add space for response preview when active
+  if (currentResponse || isTyping) {
+    collapsedHeight += collapsedDims.responseHeight;
   }
 
   return (
@@ -482,6 +497,7 @@ export default function GlassChatPiP() {
                 contextData={contextMonitoring.contextData}
                 contextToggleEnabled={contextMonitoring.contextToggleEnabled}
                 uiSettings={appSettings.ui}
+                currentResponse={currentResponse}
               />
             ) : (
               <ExpandedHeader
