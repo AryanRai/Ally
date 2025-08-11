@@ -59,52 +59,55 @@ export default function CollapsedHeader({
   return (
     <div className="flex flex-col">
       {/* Header with controls */}
-      <div
-        className="flex items-center gap-2 px-3 py-2"
-        style={{
-          WebkitAppRegion: 'drag',
-          WebkitUserSelect: 'none',
-          userSelect: 'none'
-        } as React.CSSProperties}
-      >
-        <Grip className="w-3 h-3 opacity-50 flex-shrink-0" />
-        <AnimatedOrb isActive={isTyping} size="sm" />
+      <div className="flex items-center gap-2 px-3 py-2">
+        {/* Draggable area */}
+        <div 
+          className="flex items-center gap-2 flex-1"
+          style={{
+            WebkitAppRegion: 'drag',
+            WebkitUserSelect: 'none',
+            userSelect: 'none'
+          } as React.CSSProperties}
+        >
+          <Grip className="w-3 h-3 opacity-50 flex-shrink-0" />
+          <AnimatedOrb isActive={isTyping} size="sm" />
 
-        {/* Status indicators */}
-        <div className="flex items-center gap-1 flex-shrink-0">
-          <div
-            className={cn(
-              "w-2 h-2 rounded-full",
-              ollamaAvailable ? "bg-green-400" : "bg-red-400"
-            )}
-            title={ollamaAvailable ? "Ollama connected" : "Ollama offline"}
-          />
-          {serverStatus && (
+          {/* Status indicators */}
+          <div className="flex items-center gap-1 flex-shrink-0">
             <div
               className={cn(
                 "w-2 h-2 rounded-full",
-                serverStatus.status === 'online' ? "bg-green-400" :
-                  serverStatus.status === 'offline' ? "bg-red-400" : "bg-yellow-400"
+                ollamaAvailable ? "bg-green-400" : "bg-red-400"
               )}
-              title={`Server ${serverStatus.status}: ${serverStatus.domain || serverStatus.ip}`}
+              title={ollamaAvailable ? "Ollama connected" : "Ollama offline"}
             />
+            {serverStatus && (
+              <div
+                className={cn(
+                  "w-2 h-2 rounded-full",
+                  serverStatus.status === 'online' ? "bg-green-400" :
+                    serverStatus.status === 'offline' ? "bg-red-400" : "bg-yellow-400"
+                )}
+                title={`Server ${serverStatus.status}: ${serverStatus.domain || serverStatus.ip}`}
+              />
+            )}
+          </div>
+
+          {/* Context indicator */}
+          {hasNewContext && (contextData.clipboard || contextData.selectedText) && (
+            <div className="flex items-center gap-1 px-2 py-0.5 bg-blue-500/20 rounded-full flex-shrink-0">
+              <Clipboard className="w-2.5 h-2.5" />
+              <span className="text-xs">New</span>
+              <div className="w-1.5 h-1.5 bg-blue-400 rounded-full animate-pulse" />
+            </div>
           )}
         </div>
 
-        {/* Context indicator */}
-        {hasNewContext && (contextData.clipboard || contextData.selectedText) && (
-          <div className="flex items-center gap-1 px-2 py-0.5 bg-blue-500/20 rounded-full flex-shrink-0">
-            <Clipboard className="w-2.5 h-2.5" />
-            <span className="text-xs">New</span>
-            <div className="w-1.5 h-1.5 bg-blue-400 rounded-full animate-pulse" />
-          </div>
-        )}
-
-        {/* Spacer */}
-        <div className="flex-1" />
-
-        {/* Control buttons */}
-        <div className="flex items-center gap-1 flex-shrink-0">
+        {/* Control buttons - no-drag region */}
+        <div 
+          className="flex items-center gap-1 flex-shrink-0"
+          style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+        >
           <button
             onClick={onSizeChange}
             className={cn(
