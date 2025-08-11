@@ -64,6 +64,7 @@ export default function GlassChatPiP() {
   const [quickInput, setQuickInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [isPreviewExpanded, setIsPreviewExpanded] = useState(false);
   // Copy functionality state
   const [copiedCode, setCopiedCode] = useState<Set<string>>(new Set());
   const [expandedContexts, setExpandedContexts] = useState<Set<string>>(new Set());
@@ -182,6 +183,11 @@ export default function GlassChatPiP() {
     return unsubscribe;
   }, [settingsManager]);
 
+  // Handle preview toggle callback
+  const handlePreviewToggle = (expanded: boolean) => {
+    setIsPreviewExpanded(expanded);
+  };
+
   // Sync window size when size state changes
   useEffect(() => {
     if (!window.pip) {
@@ -193,12 +199,16 @@ export default function GlassChatPiP() {
     const dims = sizePx[state.size];
     const sidebarWidth = state.collapsed ? 0 : (sidebarCollapsed ? 48 : 280);
     const padding = appSettings.ui.windowPadding * 2; // Padding on both sides
-    const width = dims.w + sidebarWidth + padding;
-    // Fixed collapsed height for consistent window size
-    const collapsedHeight = 280; // Fixed height for collapsed mode
-    const height = (state.collapsed ? collapsedHeight : dims.h) + padding;
+    
+    // Use optimized dimensions for collapsed mode
+    const width = state.collapsed 
+      ? collapsedDims.width + padding
+      : dims.w + sidebarWidth + padding;
+    const height = state.collapsed 
+      ? collapsedHeight + padding 
+      : dims.h + padding;
 
-    console.log('Resizing window to:', width, 'x', height, 'collapsed:', state.collapsed, 'sidebar:', sidebarWidth);
+    console.log('Resizing window to:', width, 'x', height, 'collapsed:', state.collapsed, 'preview expanded:', isPreviewExpanded, 'sidebar:', sidebarWidth);
 
     // Use a small delay to ensure state has settled
     const resizeTimeout = setTimeout(() => {
@@ -216,7 +226,7 @@ export default function GlassChatPiP() {
       clearTimeout(resizeTimeout);
       clearTimeout(resetTimeout);
     };
-  }, [state.size, state.collapsed, sidebarCollapsed, appSettings.ui.windowPadding]);
+  }, [state.size, state.collapsed, sidebarCollapsed, appSettings.ui.windowPadding, isPreviewExpanded]);
 
 
   // Auto-scroll to bottom
@@ -363,13 +373,22 @@ export default function GlassChatPiP() {
 
   const dims = sizePx[state.size];
   const padding = appSettings.ui.windowPadding * 2; // Padding on both sides
-  const collapsedHeight = 280; // Fixed height for collapsed mode
+  
+  // Optimized collapsed dimensions - much smaller and content-fitted
+  const collapsedDims = {
+    width: 360, // Optimal width for input + buttons
+    baseHeight: 140, // Compact height for header + input
+    expandedHeight: 340 // Height when preview is expanded
+  };
+  
+  // Dynamic collapsed height based on preview expansion
+  const collapsedHeight = isPreviewExpanded ? collapsedDims.expandedHeight : collapsedDims.baseHeight;
 
   return (
     <motion.div
       className="fixed bg-transparent flex items-center justify-center"
       style={{
-        width: state.collapsed ? dims.w + padding : (sidebarCollapsed ? dims.w + 48 + padding : dims.w + 280 + padding),
+        width: state.collapsed ? collapsedDims.width + padding : (sidebarCollapsed ? dims.w + 48 + padding : dims.w + 280 + padding),
         height: state.collapsed ? collapsedHeight + padding : dims.h + padding,
         zIndex: 50
       } as React.CSSProperties}
@@ -392,7 +411,7 @@ export default function GlassChatPiP() {
           theme === 'dark' ? "text-white/90" : "text-black/90"
         )}
         style={{
-          width: state.collapsed ? dims.w : (sidebarCollapsed ? dims.w + 48 : dims.w + 280),
+          width: state.collapsed ? collapsedDims.width : (sidebarCollapsed ? dims.w + 48 : dims.w + 280),
           height: state.collapsed ? collapsedHeight : dims.h
         } as React.CSSProperties}
       >
@@ -447,6 +466,7 @@ export default function GlassChatPiP() {
                 onSizeChange={handleSizeChange}
                 onHide={handleHide}
                 onCopyMessage={handleMessageCopy}
+                onPreviewToggle={handlePreviewToggle}
                 isResizing={isResizing}
                 size={state.size}
                 ollamaAvailable={ollamaIntegration.ollamaAvailable}
