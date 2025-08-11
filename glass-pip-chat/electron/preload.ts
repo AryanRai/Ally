@@ -55,6 +55,20 @@ const pipAPI = {
     isAvailable: () => ipcRenderer.invoke('ollama:isAvailable'),
     getModels: () => ipcRenderer.invoke('ollama:getModels'),
     chat: (messages: any[], model?: string) => ipcRenderer.invoke('ollama:chat', messages, model),
+    streamChatWithThinking: async (messages: any[], model: string, onProgress: (chunk: any) => void) => {
+      // Set up listener for progress updates
+      const progressHandler = (_: any, chunk: any) => onProgress(chunk);
+      ipcRenderer.on('ollama:streamProgress', progressHandler);
+      
+      try {
+        // Start the streaming request
+        const result = await ipcRenderer.invoke('ollama:streamChatWithThinking', messages, model);
+        return result;
+      } finally {
+        // Clean up the listener
+        ipcRenderer.removeListener('ollama:streamProgress', progressHandler);
+      }
+    },
     getConfig: () => ipcRenderer.invoke('ollama:getConfig'),
     updateConfig: (config: any) => ipcRenderer.send('ollama:updateConfig', config)
   },

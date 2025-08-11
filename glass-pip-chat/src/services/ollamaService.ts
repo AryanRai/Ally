@@ -29,6 +29,13 @@ export interface OllamaServiceConfig {
   streamTimeout: number;
 }
 
+// Enhanced streaming with real-time thinking process
+export interface ThinkingChunk {
+  type: 'thinking' | 'response' | 'done';
+  content: string;
+  isComplete: boolean;
+}
+
 export class OllamaService {
   private config: OllamaServiceConfig;
 
@@ -228,6 +235,210 @@ export class OllamaService {
         throw new Error('Cannot connect to Ollama. Make sure Ollama is running on http://localhost:11434');
       }
       
+      throw error;
+    }
+  }
+
+  // Enhanced streaming with real-time thinking and word-by-word display
+  async streamChatWithThinking(
+    messages: ChatMessage[],
+    model: string,
+    onProgress: (chunk: ThinkingChunk) => void
+  ): Promise<string> {
+    try {
+      console.log('Starting enhanced streaming with thinking detection...');
+      
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => {
+        controller.abort();
+      }, this.config.streamTimeout);
+
+      const response = await fetch(`${this.config.baseUrl}/api/chat`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model,
+          messages,
+          stream: true,
+          // Add options to encourage thinking output
+          options: {
+            temperature: 0.7,
+            top_p: 0.9,
+            // Enable thinking tokens if supported
+            num_predict: -1
+          }
+        }),
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const reader = response.body?.getReader();
+      if (!reader) {
+        throw new Error('Failed to get response reader');
+      }
+
+      let fullResponse = '';
+      let thinkingBuffer = '';
+      let isInThinking = false;
+      let currentWord = '';
+
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          
+          if (done) {
+            console.log('Stream completed');
+            onProgress({ type: 'done', content: fullResponse, isComplete: true });
+            break;
+          }
+
+          const chunk = new TextDecoder().decode(value);
+          const lines = chunk.split('\n').filter(line => line.trim());
+
+          for (const line of lines) {
+            try {
+              const data: ChatResponse = JSON.parse(line);
+              
+              if (data.message?.content) {
+                const content = data.message.content;
+                
+                // Enhanced thinking detection
+                const thinkingStartPatterns = [
+                  '<thinking>',
+                  'Let me think',
+                  'Let\'s think',
+                  'I need to think',
+                  'thinking:',
+                  'hmm,',
+                  'well,',
+                  'considering',
+                  'analyzing'
+                ];
+                
+                const thinkingEndPatterns = [
+                  '</thinking>',
+                  'Therefore,',
+                  'So,',
+                  'In conclusion,',
+                  'Thus,',
+                  'Now,',
+                  'Based on this'
+                ];
+
+                // Check for thinking start
+                for (const pattern of thinkingStartPatterns) {
+                  if (content.toLowerCase().includes(pattern.toLowerCase()) && !isInThinking) {
+                    isInThinking = true;
+                    onProgress({ 
+                      type: 'thinking', 
+                      content: '💭 Starting to think...', 
+                      isComplete: false 
+                    });
+                  }
+                }
+
+                // Process content character by character for real-time effect
+                for (let i = 0; i < content.length; i++) {
+                  const char = content[i];
+                  currentWord += char;
+                  
+                  // Send word when we hit space or punctuation
+                  if (char === ' ' || char === '.' || char === ',' || char === '!' || char === '?') {
+                    if (currentWord.trim()) {
+                      onProgress({ 
+                        type: isInThinking ? 'thinking' : 'response', 
+                        content: currentWord, 
+                        isComplete: false 
+                      });
+                      currentWord = '';
+                    }
+                  }
+                  
+                  // Small delay for word-by-word effect
+                  await new Promise(resolve => setTimeout(resolve, 10));
+                }
+
+                // Handle remaining word
+                if (currentWord.trim()) {
+                  onProgress({ 
+                    type: isInThinking ? 'thinking' : 'response', 
+                    content: currentWord, 
+                    isComplete: false 
+                  });
+                  currentWord = '';
+                }
+
+                // Check for thinking end
+                for (const pattern of thinkingEndPatterns) {
+                  if (content.toLowerCase().includes(pattern.toLowerCase()) && isInThinking) {
+                    isInThinking = false;
+                    onProgress({ 
+                      type: 'thinking', 
+                      content: '✅ Thinking complete!', 
+                      isComplete: false 
+                    });
+                  }
+                }
+
+                fullResponse += content;
+              }
+              
+              if (data.done) {
+                onProgress({ type: 'done', content: fullResponse, isComplete: true });
+                break;
+              }
+            } catch (parseError) {
+              console.warn('Failed to parse streaming chunk:', parseError);
+            }
+          }
+        }
+      } finally {
+        reader.releaseLock();
+      }
+
+      return fullResponse;
+      
+    } catch (error: any) {
+      console.error('Enhanced streaming failed:', error);
+      throw error;
+    }
+  }
+
+  // Method to get thinking tokens specifically
+  async getThinkingResponse(
+    messages: ChatMessage[],
+    model: string,
+    onProgress: (thinking: string, response: string) => void
+  ): Promise<{ thinking: string, response: string }> {
+    try {
+      let thinking = '';
+      let response = '';
+      let phase: 'thinking' | 'response' = 'thinking';
+
+      await this.streamChatWithThinking(messages, model, (chunk) => {
+        if (chunk.type === 'thinking') {
+          thinking += chunk.content;
+          phase = 'thinking';
+        } else if (chunk.type === 'response') {
+          if (phase === 'thinking') {
+            phase = 'response';
+          }
+          response += chunk.content;
+        }
+        
+        onProgress(thinking, response);
+      });
+
+      return { thinking, response };
+    } catch (error) {
+      console.error('Failed to get thinking response:', error);
       throw error;
     }
   }

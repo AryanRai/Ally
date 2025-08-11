@@ -396,6 +396,18 @@ ipcMain.on('ollama:updateConfig', (_, config) => {
   ollamaService.updateConfig(config);
 });
 
+ipcMain.handle('ollama:streamChatWithThinking', async (event, messages: ChatMessage[], model: string) => {
+  try {
+    return await ollamaService.streamChatWithThinking(messages, model, (chunk) => {
+      // Send progress updates back to renderer
+      event.sender.send('ollama:streamProgress', chunk);
+    });
+  } catch (error) {
+    console.error('Error in Ollama streamChatWithThinking:', error);
+    throw error;
+  }
+});
+
 // Server status handlers
 ipcMain.handle('server:getStatus', () => {
   return serverStatus;
