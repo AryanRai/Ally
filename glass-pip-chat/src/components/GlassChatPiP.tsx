@@ -280,7 +280,7 @@ export default function GlassChatPiP() {
   useEffect(() => {
     if (allyRemote.incomingMessages.length > 0) {
       const latestMessage = allyRemote.incomingMessages[allyRemote.incomingMessages.length - 1];
-      
+
       // Add remote message to chat
       const remoteMessage: Message = {
         id: `remote-${Date.now()}`,
@@ -289,12 +289,12 @@ export default function GlassChatPiP() {
         timestamp: new Date(),
         fromQuickInput: false
       };
-      
+
       addMessageToActiveChat(remoteMessage);
-      
+
       // Send response back to remote
       allyRemote.sendMessage(`Message received and processed: "${latestMessage}"`);
-      
+
       // Clear the message from the queue
       allyRemote.clearMessages();
     }
@@ -1058,7 +1058,12 @@ export default function GlassChatPiP() {
       />
 
       {/* Remote Settings - Floating */}
-      <div className="fixed top-4 right-4 z-50">
+      <div className={cn(
+        "fixed z-40",
+        state.collapsed
+          ? "top-4 -right-32" // Position to the right of the control buttons when collapsed
+          : "top-16 right-4"   // Position below the header buttons when expanded
+      )}>
         <RemoteSettings
           connected={allyRemote.connected}
           status={allyRemote.status}

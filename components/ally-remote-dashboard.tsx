@@ -9,10 +9,12 @@ import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
-import { Send, Circle, Bot, User, Wifi, WifiOff, Server } from 'lucide-react';
+import { Send, Bot, User, Server } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import ServerConfig from '@/components/server-config';
 import ConnectionStatus from '@/components/connection-status';
+import SetupGuide from '@/components/setup-guide';
+
 
 interface AllyInstance {
   token: string;
@@ -56,8 +58,8 @@ export default function AllyRemoteDashboard() {
     });
 
     allySocketManager.onAllyStatus((data) => {
-      setInstances(prev => prev.map(instance => 
-        instance.token === data.token 
+      setInstances(prev => prev.map(instance =>
+        instance.token === data.token
           ? { ...instance, status: data.status }
           : instance
       ));
@@ -119,7 +121,7 @@ export default function AllyRemoteDashboard() {
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-950 dark:to-slate-900">
       <div className="container mx-auto p-6 max-w-7xl">
         {/* Header */}
-        <motion.div 
+        <motion.div
           initial={{ opacity: 0, y: -20 }}
           animate={{ opacity: 1, y: 0 }}
           className="mb-8"
@@ -146,6 +148,7 @@ export default function AllyRemoteDashboard() {
                 onConnect={handleConnect}
                 onDisconnect={handleDisconnect}
               />
+              <SetupGuide />
             </div>
           </div>
         </motion.div>
@@ -170,9 +173,20 @@ export default function AllyRemoteDashboard() {
                     <div className="text-center py-8">
                       <Bot className="w-12 h-12 mx-auto text-muted-foreground/50 mb-3" />
                       <p className="text-sm text-muted-foreground">No Ally instances connected</p>
-                      <p className="text-xs text-muted-foreground mt-1">
-                        Start your Glass PiP Chat to see it here
-                      </p>
+                      {connected ? (
+                        <p className="text-xs text-muted-foreground mt-1">
+                          Start your Glass PiP Chat to see it here
+                        </p>
+                      ) : (
+                        <div className="mt-3 space-y-2">
+                          <p className="text-xs text-muted-foreground">
+                            Configure your server connection first
+                          </p>
+                          <div className="flex justify-center">
+                            <SetupGuide />
+                          </div>
+                        </div>
+                      )}
                     </div>
                   ) : (
                     instances.map((instance) => (
@@ -180,11 +194,10 @@ export default function AllyRemoteDashboard() {
                         key={instance.token}
                         whileHover={{ scale: 1.02 }}
                         whileTap={{ scale: 0.98 }}
-                        className={`p-4 rounded-lg border cursor-pointer transition-all duration-200 ${
-                          selectedAlly === instance.token 
-                            ? 'bg-primary/10 border-primary shadow-md' 
-                            : 'hover:bg-muted/50 hover:shadow-sm'
-                        }`}
+                        className={`p-4 rounded-lg border cursor-pointer transition-all duration-200 ${selectedAlly === instance.token
+                          ? 'bg-primary/10 border-primary shadow-md'
+                          : 'hover:bg-muted/50 hover:shadow-sm'
+                          }`}
                         onClick={() => setSelectedAlly(instance.token)}
                       >
                         <div className="flex items-center gap-3">
@@ -197,7 +210,7 @@ export default function AllyRemoteDashboard() {
                             <p className="font-medium truncate">{instance.name}</p>
                             <p className="text-xs text-muted-foreground truncate">{instance.allyId}</p>
                           </div>
-                          <Badge 
+                          <Badge
                             variant={instance.status === 'online' ? 'default' : 'secondary'}
                             className={instance.status === 'online' ? 'bg-green-500' : ''}
                           >
@@ -266,24 +279,22 @@ export default function AllyRemoteDashboard() {
                               >
                                 <div className={`flex items-start gap-3 max-w-[80%] ${message.type === 'command' ? 'flex-row-reverse' : ''}`}>
                                   <Avatar className="w-8 h-8 mt-1">
-                                    <AvatarFallback className={message.type === 'command' 
-                                      ? 'bg-blue-500 text-white' 
+                                    <AvatarFallback className={message.type === 'command'
+                                      ? 'bg-blue-500 text-white'
                                       : 'bg-purple-500 text-white'
                                     }>
                                       {message.type === 'command' ? <User className="w-4 h-4" /> : <Bot className="w-4 h-4" />}
                                     </AvatarFallback>
                                   </Avatar>
                                   <div
-                                    className={`p-4 rounded-2xl ${
-                                      message.type === 'command'
-                                        ? 'bg-blue-500 text-white rounded-br-md'
-                                        : 'bg-muted rounded-bl-md'
-                                    }`}
+                                    className={`p-4 rounded-2xl ${message.type === 'command'
+                                      ? 'bg-blue-500 text-white rounded-br-md'
+                                      : 'bg-muted rounded-bl-md'
+                                      }`}
                                   >
                                     <p className="text-sm whitespace-pre-wrap">{message.content}</p>
-                                    <p className={`text-xs mt-2 ${
-                                      message.type === 'command' ? 'text-blue-100' : 'text-muted-foreground'
-                                    }`}>
+                                    <p className={`text-xs mt-2 ${message.type === 'command' ? 'text-blue-100' : 'text-muted-foreground'
+                                      }`}>
                                       {message.timestamp.toLocaleTimeString()}
                                     </p>
                                   </div>
@@ -302,12 +313,12 @@ export default function AllyRemoteDashboard() {
                       <Input
                         placeholder="Type a message to send to your Ally..."
                         value={command}
-                        onChange={(e) => setCommand(e.target.value)}
-                        onKeyPress={(e) => e.key === 'Enter' && sendCommand()}
+                        onChange={(e: React.ChangeEvent<HTMLInputElement>) => setCommand(e.target.value)}
+                        onKeyPress={(e: React.KeyboardEvent<HTMLInputElement>) => e.key === 'Enter' && sendCommand()}
                         disabled={selectedInstance.status !== 'online'}
                         className="flex-1"
                       />
-                      <Button 
+                      <Button
                         onClick={sendCommand}
                         disabled={!command.trim() || selectedInstance.status !== 'online'}
                         size="icon"
@@ -318,7 +329,7 @@ export default function AllyRemoteDashboard() {
                     </div>
 
                     {selectedInstance.status !== 'online' && (
-                      <motion.p 
+                      <motion.p
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}
                         className="text-sm text-muted-foreground text-center mt-3 p-3 bg-yellow-50 dark:bg-yellow-900/20 rounded-lg border border-yellow-200 dark:border-yellow-800"
