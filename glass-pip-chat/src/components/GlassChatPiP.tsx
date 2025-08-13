@@ -53,7 +53,7 @@ export default function GlassChatPiP() {
   // Remote control integration
   const allyRemote = useAllyRemote({
     allyName: 'Glass PiP Ally',
-    autoConnect: false
+    autoConnect: true
   });
 
   // Chat management

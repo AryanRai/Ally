@@ -1,7 +1,7 @@
 const AllyClient = require('./ally-client');
 
 // Configuration - UPDATE THIS WITH YOUR DIGITAL OCEAN IP
-const SERVER_URL = process.env.SERVER_URL || 'http://YOUR_DROPLET_IP:3001';
+const SERVER_URL = process.env.SERVER_URL || 'http://ally.aryanrai.me:3001';
 const ALLY_CONFIG = {
   allyId: process.env.ALLY_ID || `ally-${require('os').hostname()}`,
   name: process.env.ALLY_NAME || 'Ally Desktop'
