@@ -45,6 +45,9 @@ export default function AllyRemoteDashboard() {
     setServerUrl(allySocketManager.getServerUrl());
     setConnected(allySocketManager.isConnected());
 
+    console.log('Dashboard initializing with server URL:', allySocketManager.getServerUrl());
+    console.log('Initial connection status:', allySocketManager.isConnected());
+
     // Set up connection change listener
     allySocketManager.onConnectionChange(setConnected);
 
@@ -54,6 +57,7 @@ export default function AllyRemoteDashboard() {
     socket.on('disconnect', () => setConnected(false));
 
     allySocketManager.onAllyInstances((instances) => {
+      console.log('Received ally instances:', instances);
       setInstances(instances);
     });
 

@@ -1,7 +1,7 @@
 // Remote server configuration
 export const REMOTE_CONFIG = {
   // Replace with your Digital Ocean droplet IP
-  DEFAULT_SERVER_URL: 'http://YOUR_DROPLET_IP:3001',
+  DEFAULT_SERVER_URL: 'http://ally.aryanrai.me:3001',
   
   // Connection settings
   RECONNECT_ATTEMPTS: 5,
@@ -11,7 +11,7 @@ export const REMOTE_CONFIG = {
   DEFAULT_ALLY_NAME: 'Glass PiP Ally',
   
   // Auto-connect on startup (set to true if you want automatic connection)
-  AUTO_CONNECT: false
+  AUTO_CONNECT: true
 };
 
 // Helper function to get server URL from localStorage or default

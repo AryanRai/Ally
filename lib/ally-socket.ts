@@ -6,7 +6,7 @@ class AllySocketManager {
   private connectionCallbacks: ((connected: boolean) => void)[] = [];
 
   constructor() {
-    this.serverUrl = this.getStoredUrl() || process.env.NEXT_PUBLIC_SOCKET_URL || 'http://YOUR_DROPLET_IP:3001';
+    this.serverUrl = this.getStoredUrl() || process.env.NEXT_PUBLIC_SOCKET_URL || 'http://ally.aryanrai.me:3001';
   }
 
   private getStoredUrl(): string | null {
