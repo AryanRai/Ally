@@ -3,13 +3,12 @@ const http = require('http');
 const socketIo = require('socket.io');
 const cors = require('cors');
 const { v4: uuidv4 } = require('uuid');
-require('dotenv').config();
 
 const app = express();
 const server = http.createServer(app);
 const io = socketIo(server, {
   cors: {
-    origin: process.env.ALLOWED_ORIGINS?.split(',') || ["https://aryanrai.me", "http://localhost:3000"],
+    origin: ["http://localhost:3000"],
     methods: ["GET", "POST"]
   }
 });
@@ -34,6 +33,7 @@ app.post('/api/ally/register', (req, res) => {
     socket: null
   });
   
+  console.log(`Ally registered: ${name} with token: ${token}`);
   res.json({ token, allyId });
 });
 
@@ -64,7 +64,7 @@ io.on('connection', (socket) => {
       socket.join(`ally:${token}`);
       socket.allyToken = token;
       
-      console.log(`Ally connected: ${ally.name} (${token})`);
+      console.log(`✅ Ally connected: ${ally.name} (${token})`);
       
       // Send updated instances list to all web clients
       const instances = Array.from(allyInstances.entries()).map(([token, data]) => ({
@@ -72,12 +72,13 @@ io.on('connection', (socket) => {
         ...data,
         socket: undefined
       }));
+      console.log(`📤 Broadcasting ${instances.length} instances to web clients`);
       io.to('web-clients').emit('ally:instances', instances);
       
       // Also notify about status change
       io.to('web-clients').emit('ally:status', { token, status: 'online', ally });
     } else {
-      console.log(`Unknown ally token attempted to connect: ${token}`);
+      console.log(`❌ Unknown ally token attempted to connect: ${token}`);
     }
   });
 
@@ -87,7 +88,7 @@ io.on('connection', (socket) => {
     webClients.set(socket.id, { clientId, socket });
     socket.join('web-clients');
     
-    console.log(`Web client connected: ${clientId}`);
+    console.log(`🌐 Web client connected: ${clientId}`);
     
     // Send current Ally instances
     const instances = Array.from(allyInstances.entries()).map(([token, data]) => ({
@@ -95,54 +96,8 @@ io.on('connection', (socket) => {
       ...data,
       socket: undefined
     }));
-    console.log(`Sending ${instances.length} instances to web client ${clientId}`);
+    console.log(`📤 Sending ${instances.length} instances to web client ${clientId}`);
     socket.emit('ally:instances', instances);
-  });
-
-  // Web client sends command to Ally
-  socket.on('command:send', (data) => {
-    const { token, command, payload } = data;
-    const ally = allyInstances.get(token);
-    
-    if (ally && ally.socket) {
-      ally.socket.emit('command:receive', { command, payload });
-      console.log(`Command sent to ${ally.name}: ${command}`);
-    } else {
-      socket.emit('error', { message: 'Ally not connected' });
-    }
-  });
-
-  // Ally sends response back
-  socket.on('response:send', (data) => {
-    const { response, type } = data;
-    const token = socket.allyToken;
-    
-    if (token) {
-      // Broadcast to all web clients
-      io.to('web-clients').emit('response:receive', { token, response, type });
-    }
-  });
-
-  // Ally sends status update
-  socket.on('ally:status', (data) => {
-    const token = socket.allyToken;
-    const ally = allyInstances.get(token);
-    
-    if (ally) {
-      ally.lastSeen = new Date();
-      Object.assign(ally, data);
-      
-      // Send updated instances list to all web clients
-      const instances = Array.from(allyInstances.entries()).map(([token, data]) => ({
-        token,
-        ...data,
-        socket: undefined
-      }));
-      io.to('web-clients').emit('ally:instances', instances);
-      
-      // Also broadcast status change
-      io.to('web-clients').emit('ally:status', { token, ...data });
-    }
   });
 
   socket.on('disconnect', () => {
@@ -154,20 +109,7 @@ io.on('connection', (socket) => {
       if (ally) {
         ally.status = 'offline';
         ally.socket = null;
-        
-        // Send updated instances list to all web clients
-        const instances = Array.from(allyInstances.entries()).map(([token, data]) => ({
-          token,
-          ...data,
-          socket: undefined
-        }));
-        io.to('web-clients').emit('ally:instances', instances);
-        
-        // Also notify about status change
-        io.to('web-clients').emit('ally:status', { 
-          token: socket.allyToken, 
-          status: 'offline' 
-        });
+        console.log(`❌ Ally disconnected: ${ally.name}`);
       }
     }
     
@@ -176,7 +118,8 @@ io.on('connection', (socket) => {
   });
 });
 
-const PORT = process.env.PORT || 3001;
+const PORT = 3002; // Different port for local testing
 server.listen(PORT, () => {
-  console.log(`Ally middleware server running on port ${PORT}`);
+  console.log(`🚀 Local test server running on port ${PORT}`);
+  console.log(`Test it at: http://localhost:${PORT}/api/ally/instances`);
 });
