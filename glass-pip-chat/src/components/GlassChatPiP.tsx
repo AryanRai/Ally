@@ -7,6 +7,7 @@ import { useWindowManagement } from '../hooks/useWindowManagement';
 import { useContextMonitoring } from '../hooks/useContextMonitoring';
 import { useOllamaIntegration } from '../hooks/useOllamaIntegration';
 import { useCommandExecution } from '../hooks/useCommandExecution';
+import { useAllyRemote } from '../hooks/useAllyRemote';
 
 // Components
 import SettingsModal from './SettingsModal';
@@ -17,6 +18,7 @@ import CollapsedHeader from './chat/CollapsedHeader';
 import ExpandedHeader from './chat/ExpandedHeader';
 import ContextDisplay from './chat/ContextDisplay';
 import ChatInput from './chat/ChatInput';
+import { RemoteSettings } from './RemoteSettings';
 
 // Utils & Types
 import { ChatManager } from '../utils/chatManager';
@@ -47,6 +49,12 @@ export default function GlassChatPiP() {
 
   // Command execution
   const { executeSystemCommand, runInTerminal } = useCommandExecution();
+
+  // Remote control integration
+  const allyRemote = useAllyRemote({
+    allyName: 'Glass PiP Ally',
+    autoConnect: false
+  });
 
   // Chat management
   const [chatManager] = useState(() => ChatManager.getInstance());
@@ -139,24 +147,24 @@ export default function GlassChatPiP() {
 
   const handleMessageRecompute = async (messageId: string) => {
     if (!activeChat) return;
-    
+
     // Find the message to recompute
     const messageIndex = activeChat.messages.findIndex(msg => msg.id === messageId);
     if (messageIndex === -1 || messageIndex === 0) return; // Can't recompute first message or if not found
-    
+
     // Get the user message that prompted this response
     const userMessage = activeChat.messages[messageIndex - 1];
     if (userMessage.role !== 'user') return;
-    
+
     // Remove the current assistant response
     const updatedMessages = activeChat.messages.slice(0, messageIndex);
     activeChat.messages = updatedMessages;
     setActiveChat({ ...activeChat });
-    
+
     // Set typing state and clear any current response
     setIsTyping(true);
     setCurrentResponse('');
-    
+
     try {
       if (ollamaIntegration.ollamaAvailable && ollamaIntegration.currentModel) {
         // Create a new streaming message
@@ -172,7 +180,7 @@ export default function GlassChatPiP() {
 
         // Get messages up to the user message (excluding the old response)
         const messagesUpToUser = updatedMessages.slice(0, messageIndex);
-        
+
         await ollamaIntegration.sendMessageToOllama(messagesUpToUser, userMessage.content, (update) => {
           if (activeChat) {
             const responseContent = update.type === 'thinking'
@@ -268,6 +276,30 @@ export default function GlassChatPiP() {
     return unsubscribe;
   }, [settingsManager]);
 
+  // Handle incoming remote messages
+  useEffect(() => {
+    if (allyRemote.incomingMessages.length > 0) {
+      const latestMessage = allyRemote.incomingMessages[allyRemote.incomingMessages.length - 1];
+      
+      // Add remote message to chat
+      const remoteMessage: Message = {
+        id: `remote-${Date.now()}`,
+        content: `🌐 Remote: ${latestMessage}`,
+        role: 'user',
+        timestamp: new Date(),
+        fromQuickInput: false
+      };
+      
+      addMessageToActiveChat(remoteMessage);
+      
+      // Send response back to remote
+      allyRemote.sendMessage(`Message received and processed: "${latestMessage}"`);
+      
+      // Clear the message from the queue
+      allyRemote.clearMessages();
+    }
+  }, [allyRemote.incomingMessages, addMessageToActiveChat, allyRemote]);
+
   // Handle preview toggle callback
   const handlePreviewToggle = (expanded: boolean) => {
     setIsPreviewExpanded(expanded);
@@ -276,16 +308,16 @@ export default function GlassChatPiP() {
   // Custom collapse toggle with state cleanup
   const handleCustomCollapseToggle = () => {
     const willBeCollapsed = !state.collapsed;
-    
+
     // If we're collapsing TO collapsed mode, reset collapsed-specific states immediately
     if (willBeCollapsed) {
       setIsPreviewExpanded(false); // Reset message preview expansion
       setCurrentResponse(''); // Clear any current response
-      
+
       // Call the original collapse toggle after a small delay to ensure state cleanup
       setTimeout(() => {
         handleCollapseToggle();
-        
+
         // Force a resize after collapse to ensure proper dimensions
         setTimeout(() => {
           if (window.pip) {
@@ -296,10 +328,10 @@ export default function GlassChatPiP() {
             if (contextMonitoring.hasNewContext && (contextMonitoring.contextData.clipboard || contextMonitoring.contextData.selectedText)) {
               actualCollapsedHeight += collapsedDims.contextHeight;
             }
-            
+
             const baseHeight = actualCollapsedHeight + padding;
             const baseWidth = collapsedDims.width + padding;
-            
+
             console.log('Force resizing collapsed window to:', baseWidth, 'x', baseHeight, 'context present:', contextMonitoring.hasNewContext);
             window.pip.resizeWindow(baseWidth, baseHeight);
           }
@@ -470,7 +502,7 @@ export default function GlassChatPiP() {
     const handleKeyDown = (event: KeyboardEvent) => {
       const activeElement = document.activeElement;
       const isInputFocused = activeElement && (
-        activeElement.tagName === 'INPUT' || 
+        activeElement.tagName === 'INPUT' ||
         activeElement.tagName === 'TEXTAREA' ||
         (activeElement as HTMLElement).contentEditable === 'true'
       );
@@ -541,14 +573,14 @@ export default function GlassChatPiP() {
       // Input-specific shortcuts
       if (isInputFocused) {
         const inputElement = activeElement as HTMLInputElement;
-        
+
         // Up/Down arrow for input history
         if (event.key === 'ArrowUp' && inputHistory.length > 0) {
           event.preventDefault();
           const newIndex = Math.min(historyIndex + 1, inputHistory.length - 1);
           setHistoryIndex(newIndex);
           const historicalInput = inputHistory[inputHistory.length - 1 - newIndex];
-          
+
           if (inputElement.id === 'quick-input') {
             setQuickInput(historicalInput);
           } else {
@@ -556,12 +588,12 @@ export default function GlassChatPiP() {
           }
           return;
         }
-        
+
         if (event.key === 'ArrowDown' && historyIndex >= 0) {
           event.preventDefault();
           const newIndex = historyIndex - 1;
           setHistoryIndex(newIndex);
-          
+
           if (newIndex >= 0) {
             const historicalInput = inputHistory[inputHistory.length - 1 - newIndex];
             if (inputElement.id === 'quick-input') {
@@ -579,7 +611,7 @@ export default function GlassChatPiP() {
           }
           return;
         }
-        
+
         // Send message with Ctrl/Cmd + Enter
         if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
           event.preventDefault();
@@ -615,10 +647,10 @@ export default function GlassChatPiP() {
         if (event.key === 'Escape') {
           event.preventDefault();
           event.stopPropagation();
-          
+
           // Clear input history index
           setHistoryIndex(-1);
-          
+
           // Clear input if it's empty or just whitespace
           const currentInput = inputElement.id === 'quick-input' ? quickInput : input;
           if (!currentInput.trim()) {
@@ -628,7 +660,7 @@ export default function GlassChatPiP() {
               setInput('');
             }
           }
-          
+
           // Blur the input
           inputElement.blur();
           return;
@@ -713,7 +745,7 @@ export default function GlassChatPiP() {
 
   const dims = sizePx[state.size];
   const padding = appSettings.ui.windowPadding; // Single padding value
-  
+
   // Optimized collapsed dimensions - much smaller and content-fitted
   const collapsedWidthBySize: Record<string, number> = {
     S: 320,
@@ -727,7 +759,7 @@ export default function GlassChatPiP() {
     contextHeight: 80, // Additional height when context is shown and expanded
     responseHeight: 140 // Height for response preview area (reduced further for better fit)
   };
-  
+
   // Dynamic collapsed height based on preview expansion, context, and response
   let collapsedHeight = collapsedDims.baseHeight;
   if (isPreviewExpanded) {
@@ -751,12 +783,12 @@ export default function GlassChatPiP() {
 
     setIsResizing(true);
     const sidebarWidth = state.collapsed ? 0 : (sidebarCollapsed ? 48 : 280);
-    
+
     // Use optimized dimensions for collapsed mode
-    const width = state.collapsed 
+    const width = state.collapsed
       ? (collapsedWidthBySize[state.size] ?? collapsedDims.width) + (padding * 2)
       : dims.w + sidebarWidth + (padding * 2);
-    const height = state.collapsed 
+    const height = state.collapsed
       ? collapsedHeight + (padding * 2)
       : dims.h + (padding * 2);
 
@@ -764,7 +796,7 @@ export default function GlassChatPiP() {
 
     // Use a longer delay for collapse transitions to ensure state cleanup has completed
     const resizeDelay = state.collapsed ? 200 : 50; // Increased delay for collapsed mode
-    
+
     const resizeTimeout = setTimeout(() => {
       try {
         window.pip.resizeWindow(width, height);
@@ -852,36 +884,36 @@ export default function GlassChatPiP() {
             title={state.collapsed ? "" : "Drag to move window"}
           >
             {state.collapsed ? (
-                             <CollapsedHeader
-                 platform={platform}
-                 theme={theme}
-                 isTyping={isTyping}
-                 messages={messages}
-                 quickInput={quickInput}
-                 setQuickInput={setQuickInput}
-                 onSend={handleSend}
-                 onStop={handleStop}
-                 onCollapseToggle={handleCustomCollapseToggle}
-                 onSizeChange={handleSizeChange}
-                 onHide={handleHide}
-                 onCopyMessage={handleMessageCopy}
-                 onPreviewToggle={handlePreviewToggle}
-                 onMessageEdit={handleMessageEdit}
-                 onMessageFork={handleMessageFork}
-                 onMessageDelete={handleMessageDelete}
-                 onCopyCode={copyToClipboard}
-                 onRunCode={(command, codeId) => runInTerminal(command, codeId, addMessageToActiveChat)}
-                 onRecompute={handleMessageRecompute}
-                 isResizing={isResizing}
-                 size={state.size}
-                 ollamaAvailable={ollamaIntegration.ollamaAvailable}
-                 serverStatus={serverStatus}
-                 hasNewContext={contextMonitoring.hasNewContext}
-                 contextData={contextMonitoring.contextData}
-                 contextToggleEnabled={contextMonitoring.contextToggleEnabled}
-                 uiSettings={appSettings.ui}
-                 currentResponse={currentResponse}
-               />
+              <CollapsedHeader
+                platform={platform}
+                theme={theme}
+                isTyping={isTyping}
+                messages={messages}
+                quickInput={quickInput}
+                setQuickInput={setQuickInput}
+                onSend={handleSend}
+                onStop={handleStop}
+                onCollapseToggle={handleCustomCollapseToggle}
+                onSizeChange={handleSizeChange}
+                onHide={handleHide}
+                onCopyMessage={handleMessageCopy}
+                onPreviewToggle={handlePreviewToggle}
+                onMessageEdit={handleMessageEdit}
+                onMessageFork={handleMessageFork}
+                onMessageDelete={handleMessageDelete}
+                onCopyCode={copyToClipboard}
+                onRunCode={(command, codeId) => runInTerminal(command, codeId, addMessageToActiveChat)}
+                onRecompute={handleMessageRecompute}
+                isResizing={isResizing}
+                size={state.size}
+                ollamaAvailable={ollamaIntegration.ollamaAvailable}
+                serverStatus={serverStatus}
+                hasNewContext={contextMonitoring.hasNewContext}
+                contextData={contextMonitoring.contextData}
+                contextToggleEnabled={contextMonitoring.contextToggleEnabled}
+                uiSettings={appSettings.ui}
+                currentResponse={currentResponse}
+              />
             ) : (
               <ExpandedHeader
                 platform={platform}
@@ -1024,6 +1056,19 @@ export default function GlassChatPiP() {
         isActive={ollamaIntegration.showModelSelector}
         onClickAway={() => ollamaIntegration.setShowModelSelector(false)}
       />
+
+      {/* Remote Settings - Floating */}
+      <div className="fixed top-4 right-4 z-50">
+        <RemoteSettings
+          connected={allyRemote.connected}
+          status={allyRemote.status}
+          token={allyRemote.token}
+          error={allyRemote.error}
+          onConnect={allyRemote.connect}
+          onDisconnect={allyRemote.disconnect}
+          onUpdateServerUrl={allyRemote.updateServerUrl}
+        />
+      </div>
 
       {/* Settings Modal */}
       <SettingsModal

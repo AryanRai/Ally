@@ -1,21 +1,23 @@
 import type { Config } from "tailwindcss"
-import defaultConfig from "shadcn/ui/tailwind.config"
 
 const config: Config = {
-  ...defaultConfig,
+  darkMode: ["class"],
   content: [
-    ...defaultConfig.content,
     "./pages/**/*.{js,ts,jsx,tsx,mdx}",
     "./components/**/*.{js,ts,jsx,tsx,mdx}",
     "./app/**/*.{js,ts,jsx,tsx,mdx}",
     "*.{js,ts,jsx,tsx,mdx}",
   ],
   theme: {
-    ...defaultConfig.theme,
+    container: {
+      center: true,
+      padding: "2rem",
+      screens: {
+        "2xl": "1400px",
+      },
+    },
     extend: {
-      ...defaultConfig.theme.extend,
       colors: {
-        ...defaultConfig.theme.extend.colors,
         glass: {
           light: "rgba(0, 230, 118, 0.15)", // Neon Green tint
           dark: "rgba(17, 24, 39, 0.8)", // Dark gray with opacity
@@ -29,7 +31,16 @@ const config: Config = {
           },
         },
         purple: {
-          ...defaultConfig.theme.extend.colors.purple,
+          50: "#faf5ff",
+          100: "#f3e8ff",
+          200: "#e9d5ff",
+          300: "#d8b4fe",
+          400: "#c084fc",
+          500: "#a855f7",
+          600: "#9333ea",
+          700: "#7c3aed",
+          800: "#6b21a8",
+          900: "#581c87",
           950: "#1e1b4b",
         },
         border: "hsl(var(--border))",
@@ -111,7 +122,7 @@ const config: Config = {
       },
     },
   },
-  plugins: [...defaultConfig.plugins, require("tailwindcss-animate")],
+  plugins: [require("tailwindcss-animate")],
 }
 
 export default config
