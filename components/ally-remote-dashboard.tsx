@@ -11,6 +11,8 @@ import { Separator } from '@/components/ui/separator';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Send, Circle, Bot, User, Wifi, WifiOff, Server } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import ServerConfig from '@/components/server-config';
+import ConnectionStatus from '@/components/connection-status';
 
 interface AllyInstance {
   token: string;
@@ -34,8 +36,16 @@ export default function AllyRemoteDashboard() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [command, setCommand] = useState('');
   const [connected, setConnected] = useState(false);
+  const [serverUrl, setServerUrl] = useState('');
 
   useEffect(() => {
+    // Initialize server URL from storage
+    setServerUrl(allySocketManager.getServerUrl());
+    setConnected(allySocketManager.isConnected());
+
+    // Set up connection change listener
+    allySocketManager.onConnectionChange(setConnected);
+
     const socket = allySocketManager.connect();
 
     socket.on('connect', () => setConnected(true));
@@ -85,6 +95,23 @@ export default function AllyRemoteDashboard() {
     setCommand('');
   };
 
+  const handleServerUrlChange = (url: string) => {
+    allySocketManager.updateServerUrl(url);
+    setServerUrl(url);
+  };
+
+  const handleConnect = () => {
+    allySocketManager.connect();
+  };
+
+  const handleDisconnect = () => {
+    allySocketManager.disconnect();
+  };
+
+  const handleTestConnection = async (): Promise<boolean> => {
+    return await allySocketManager.testConnection();
+  };
+
   const selectedInstance = instances.find(i => i.token === selectedAlly);
   const selectedMessages = messages.filter(m => m.token === selectedAlly);
 
@@ -107,19 +134,18 @@ export default function AllyRemoteDashboard() {
               </p>
             </div>
             <div className="flex items-center gap-3">
-              <div className="flex items-center gap-2 px-4 py-2 rounded-full bg-white/50 dark:bg-slate-800/50 backdrop-blur-sm border">
-                {connected ? (
-                  <>
-                    <Wifi className="w-4 h-4 text-green-500" />
-                    <span className="text-sm font-medium text-green-700 dark:text-green-400">Connected</span>
-                  </>
-                ) : (
-                  <>
-                    <WifiOff className="w-4 h-4 text-red-500" />
-                    <span className="text-sm font-medium text-red-700 dark:text-red-400">Disconnected</span>
-                  </>
-                )}
-              </div>
+              <ConnectionStatus
+                connected={connected}
+                serverUrl={serverUrl}
+                onTest={handleTestConnection}
+              />
+              <ServerConfig
+                currentUrl={serverUrl}
+                connected={connected}
+                onUrlChange={handleServerUrlChange}
+                onConnect={handleConnect}
+                onDisconnect={handleDisconnect}
+              />
             </div>
           </div>
         </motion.div>
