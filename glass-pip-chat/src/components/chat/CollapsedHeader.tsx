@@ -47,6 +47,11 @@ interface CollapsedHeaderProps {
   contextToggleEnabled: boolean;
   uiSettings?: any;
   currentResponse?: string;
+  availableModels: any[];
+  currentModel: string;
+  showModelSelector: boolean;
+  onModelSelectorToggle: () => void;
+  onModelSelect: (model: string) => void;
 }
 
 export default function CollapsedHeader({
@@ -77,7 +82,12 @@ export default function CollapsedHeader({
   contextData,
   contextToggleEnabled,
   uiSettings,
-  currentResponse
+  currentResponse,
+  availableModels,
+  currentModel,
+  showModelSelector,
+  onModelSelectorToggle,
+  onModelSelect
 }: CollapsedHeaderProps) {
   const [isContextExpanded, setIsContextExpanded] = useState(false);
 
@@ -133,6 +143,62 @@ export default function CollapsedHeader({
           className="flex items-center gap-1 flex-shrink-0"
           style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
         >
+          {/* Model Selector */}
+          {ollamaAvailable && availableModels.length > 0 && (
+            <div className="relative">
+              <button
+                onClick={onModelSelectorToggle}
+                className={cn(
+                  "p-1.5 rounded-lg hover:bg-white/10 transition-colors text-xs",
+                  showModelSelector && "bg-blue-500/20"
+                )}
+                title={`Model: ${currentModel}`}
+              >
+                <span className="text-xs font-mono">{currentModel.split(':')[0]}</span>
+                <ChevronDown className={cn(
+                  "w-2.5 h-2.5 ml-1 inline transition-transform",
+                  showModelSelector && "rotate-180"
+                )} />
+              </button>
+
+              {/* Model dropdown */}
+              {showModelSelector && (
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.9, y: -10 }}
+                  animate={{ opacity: 1, scale: 1, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.9, y: -10 }}
+                  className={cn(
+                    "absolute right-0 top-full mt-1 z-50 min-w-[160px] rounded-lg border shadow-lg",
+                    "bg-black/90 border-white/20 backdrop-blur-xl"
+                  )}
+                >
+                  <div className="p-1">
+                    <div className="text-xs font-medium opacity-60 px-2 py-1">
+                      Select Model
+                    </div>
+                    {availableModels.map((model) => (
+                      <button
+                        key={model.name}
+                        onClick={() => onModelSelect(model.name)}
+                        className={cn(
+                          "w-full text-left px-2 py-1.5 text-xs rounded transition-colors",
+                          currentModel === model.name
+                            ? "bg-blue-500/20 text-blue-300"
+                            : "hover:bg-white/10"
+                        )}
+                      >
+                        <div className="font-medium">{model.name}</div>
+                        <div className="text-xs opacity-60">
+                          {(model.size / (1024 * 1024 * 1024)).toFixed(1)}GB
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </motion.div>
+              )}
+            </div>
+          )}
+
           <button
             onClick={onSizeChange}
             className={cn(

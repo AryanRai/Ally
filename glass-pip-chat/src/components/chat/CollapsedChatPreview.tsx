@@ -91,7 +91,7 @@ export default function CollapsedChatPreview({
             isTyping ? "bg-blue-400 animate-pulse" : "bg-green-400"
           )} />
           <span className="text-xs font-medium opacity-80">
-            {isTyping ? 'Thinking...' : `${messages.length} message${messages.length !== 1 ? 's' : ''}`}
+            {`${messages.length} message${messages.length !== 1 ? 's' : ''}`}
           </span>
         </div>
         {isExpanded ? (
@@ -174,7 +174,7 @@ export default function CollapsedChatPreview({
                       <div className={cn(
                         "w-1 h-1 rounded-full animate-bounce bg-blue-400"
                       )} style={{ animationDelay: '300ms' }} />
-                      <span className="text-xs opacity-70 ml-2">Thinking...</span>
+                      <span className="text-xs opacity-70 ml-2">Processing...</span>
                     </div>
                   </div>
                 </motion.div>

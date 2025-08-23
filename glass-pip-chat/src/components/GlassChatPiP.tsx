@@ -551,6 +551,12 @@ export default function GlassChatPiP() {
           case 'F4':
             handleSizeChange();
             return;
+          case 'F5':
+            // Toggle sidebar (only in expanded mode)
+            if (!state.collapsed) {
+              setSidebarCollapsed(!sidebarCollapsed);
+            }
+            return;
         }
       }
 
@@ -706,6 +712,7 @@ export default function GlassChatPiP() {
 • Ctrl+Shift+N / F2 - New chat
 • Ctrl+Shift+H - Hide window
 • Ctrl+Shift+R / F4 - Resize window
+• F5 - Toggle sidebar (expanded mode)
 • Escape - Hide window
 • / - Focus input field
 
@@ -911,6 +918,14 @@ export default function GlassChatPiP() {
                 contextToggleEnabled={contextMonitoring.contextToggleEnabled}
                 uiSettings={appSettings.ui}
                 currentResponse={currentResponse}
+                availableModels={ollamaIntegration.availableModels}
+                currentModel={ollamaIntegration.currentModel}
+                showModelSelector={ollamaIntegration.showModelSelector}
+                onModelSelectorToggle={() => ollamaIntegration.setShowModelSelector(!ollamaIntegration.showModelSelector)}
+                onModelSelect={(model) => {
+                  ollamaIntegration.setCurrentModel(model);
+                  ollamaIntegration.setShowModelSelector(false);
+                }}
               />
             ) : (
               <ExpandedHeader
