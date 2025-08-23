@@ -1,3 +1,4 @@
+import { forwardRef } from 'react';
 import { 
   CornerDownLeft, 
   Square, 
@@ -21,7 +22,7 @@ interface ChatInputProps {
   onRunCommand: () => void;
 }
 
-export default function ChatInput({
+const ChatInput = forwardRef<HTMLInputElement, ChatInputProps>(({
   platform,
   theme,
   input,
@@ -33,7 +34,7 @@ export default function ChatInput({
   onExplainClipboard,
   onHelpSelected,
   onRunCommand
-}: ChatInputProps) {
+}, ref) => {
   return (
     <div className={cn(
       "border-t p-3",
@@ -97,6 +98,7 @@ export default function ChatInput({
         className="flex items-center gap-2"
       >
         <input
+          ref={ref}
           id="main-input"
           type="text"
           value={input}
@@ -132,4 +134,8 @@ export default function ChatInput({
       </form>
     </div>
   );
-}
+});
+
+ChatInput.displayName = 'ChatInput';
+
+export default ChatInput;
