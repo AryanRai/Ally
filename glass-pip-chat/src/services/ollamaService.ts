@@ -194,14 +194,14 @@ export class OllamaService {
                 // Check for thinking patterns
                 if (content.includes('<thinking>') || content.includes('thinking:') || content.includes('Let me think')) {
                   thinkingMode = true;
-                  onProgress?.(`💭 *${content}*`);
-                } else if (thinkingMode && (content.includes('</thinking>') || content.includes('Now,') || content.includes('So,'))) {
-                  thinkingMode = false;
-                  onProgress?.(content);
-                } else {
-                  // Regular content - display immediately
-                  onProgress?.(content);
                 }
+                
+                if (thinkingMode && (content.includes('</thinking>') || content.includes('Now,') || content.includes('So,'))) {
+                  thinkingMode = false;
+                }
+                
+                // Always display the actual content
+                onProgress?.(content);
                 
                 fullResponse += content;
               }
@@ -296,6 +296,7 @@ export class OllamaService {
       let thinkingBuffer = '';
       let isInThinking = false;
       let currentWord = '';
+      let responseStarted = false;
 
       try {
         while (true) {
@@ -327,7 +328,12 @@ export class OllamaService {
                   'hmm,',
                   'well,',
                   'considering',
-                  'analyzing'
+                  'analyzing',
+                  'first,',
+                  'initially,',
+                  'to start',
+                  'looking at',
+                  'examining'
                 ];
                 
                 const thinkingEndPatterns = [
@@ -337,18 +343,34 @@ export class OllamaService {
                   'In conclusion,',
                   'Thus,',
                   'Now,',
-                  'Based on this'
+                  'Based on this',
+                  'Given this',
+                  'With that',
+                  'Alright,',
+                  'Okay,',
+                  'Here\'s'
                 ];
 
                 // Check for thinking start
                 for (const pattern of thinkingStartPatterns) {
-                  if (content.toLowerCase().includes(pattern.toLowerCase()) && !isInThinking) {
+                  if (content.toLowerCase().includes(pattern.toLowerCase()) && !isInThinking && !responseStarted) {
                     isInThinking = true;
-                    onProgress({ 
-                      type: 'thinking', 
-                      content: '💭 Starting to think...', 
-                      isComplete: false 
-                    });
+                  }
+                }
+
+                // Check for thinking end
+                for (const pattern of thinkingEndPatterns) {
+                  if (content.toLowerCase().includes(pattern.toLowerCase()) && isInThinking) {
+                    isInThinking = false;
+                    responseStarted = true;
+                  }
+                }
+
+                // If we haven't detected thinking patterns but this looks like reasoning, treat as thinking
+                if (!responseStarted && !isInThinking && fullResponse.length < 200) {
+                  const reasoningKeywords = ['because', 'since', 'due to', 'given that', 'considering', 'analysis', 'approach'];
+                  if (reasoningKeywords.some(keyword => content.toLowerCase().includes(keyword))) {
+                    isInThinking = true;
                   }
                 }
 
@@ -360,8 +382,10 @@ export class OllamaService {
                   // Send word when we hit space or punctuation
                   if (char === ' ' || char === '.' || char === ',' || char === '!' || char === '?') {
                     if (currentWord.trim()) {
+                      const chunkType = isInThinking ? 'thinking' : 'response';
+                      console.log(`Sending ${chunkType} chunk:`, currentWord);
                       onProgress({ 
-                        type: isInThinking ? 'thinking' : 'response', 
+                        type: chunkType, 
                         content: currentWord, 
                         isComplete: false 
                       });
@@ -375,24 +399,14 @@ export class OllamaService {
 
                 // Handle remaining word
                 if (currentWord.trim()) {
+                  const chunkType = isInThinking ? 'thinking' : 'response';
+                  console.log(`Sending final ${chunkType} chunk:`, currentWord);
                   onProgress({ 
-                    type: isInThinking ? 'thinking' : 'response', 
+                    type: chunkType, 
                     content: currentWord, 
                     isComplete: false 
                   });
                   currentWord = '';
-                }
-
-                // Check for thinking end
-                for (const pattern of thinkingEndPatterns) {
-                  if (content.toLowerCase().includes(pattern.toLowerCase()) && isInThinking) {
-                    isInThinking = false;
-                    onProgress({ 
-                      type: 'thinking', 
-                      content: '✅ Thinking complete!', 
-                      isComplete: false 
-                    });
-                  }
                 }
 
                 fullResponse += content;

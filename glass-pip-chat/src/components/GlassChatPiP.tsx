@@ -184,9 +184,9 @@ export default function GlassChatPiP() {
         await ollamaIntegration.sendMessageToOllama(messagesUpToUser, userMessage.content, (update) => {
           if (activeChat) {
             const responseContent = update.type === 'thinking'
-              ? `💭 **Thinking...**\n\n${update.thinking}\n\n---\n\n${update.response}`
+              ? `💭 **Thinking...**\n\n${update.thinking}${update.response ? `\n\n---\n\n${update.response}` : ''}`
               : update.thinking
-                ? `💭 **Thinking Process:**\n\n${update.thinking}\n\n---\n\n**Response:**\n\n${update.response}`
+                ? `💭 **Thought Process:**\n\n${update.thinking}\n\n---\n\n**Answer:**\n\n${update.response}`
                 : update.response;
 
             // Update current response for collapsed preview
@@ -453,9 +453,9 @@ export default function GlassChatPiP() {
         await ollamaIntegration.sendMessageToOllama(messages, messageContent, (update) => {
           if (activeChat) {
             const responseContent = update.type === 'thinking'
-              ? `💭 **Thinking...**\n\n${update.thinking}\n\n---\n\n${update.response}`
+              ? `💭 **Thinking...**\n\n${update.thinking}${update.response ? `\n\n---\n\n${update.response}` : ''}`
               : update.thinking
-                ? `💭 **Thinking Process:**\n\n${update.thinking}\n\n---\n\n**Response:**\n\n${update.response}`
+                ? `💭 **Thought Process:**\n\n${update.thinking}\n\n---\n\n**Answer:**\n\n${update.response}`
                 : update.response;
 
             // Update current response for collapsed preview
