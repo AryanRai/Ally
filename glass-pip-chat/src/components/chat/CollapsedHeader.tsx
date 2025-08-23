@@ -8,9 +8,7 @@ import {
   CornerDownLeft,
   X,
   Clipboard,
-  ChevronDown,
-  ChevronUp,
-  FileText
+  ChevronDown
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { ThemeUtils } from '../../utils/themeUtils';
@@ -18,7 +16,6 @@ import { Message } from '../../types/chat';
 import AnimatedOrb from '../AnimatedOrb';
 import CollapsedChatPreview from './CollapsedChatPreview';
 import CollapsedResponsePreview from './CollapsedResponsePreview';
-import { useState } from 'react';
 
 interface CollapsedHeaderProps {
   platform: string;
@@ -93,15 +90,23 @@ export default function CollapsedHeader({
 }: CollapsedHeaderProps) {
   const [isContextExpanded, setIsContextExpanded] = useState(false);
   const modelButtonRef = useRef<HTMLButtonElement>(null);
-  const [dropdownPosition, setDropdownPosition] = useState({ top: 0, right: 0 });
+  const [dropdownPosition, setDropdownPosition] = useState({ top: 0, right: 0, maxHeight: 256 });
 
-  // Update dropdown position when it opens
+  // Update dropdown position and calculate available height when it opens
   useEffect(() => {
     if (showModelSelector && modelButtonRef.current) {
       const rect = modelButtonRef.current.getBoundingClientRect();
+      const viewportHeight = window.innerHeight;
+      const spaceBelow = viewportHeight - rect.bottom - 8; // 8px margin
+      const spaceAbove = rect.top - 8; // 8px margin
+      
+      // Calculate optimal height - prefer showing below, but use above if more space
+      const maxHeight = Math.max(120, Math.min(256, Math.max(spaceBelow, spaceAbove) - 20)); // Min 120px, max 256px, with 20px buffer
+      
       setDropdownPosition({
         top: rect.bottom + 4,
-        right: window.innerWidth - rect.right
+        right: window.innerWidth - rect.right,
+        maxHeight
       });
     }
   }, [showModelSelector]);
@@ -179,50 +184,69 @@ export default function CollapsedHeader({
 
               {/* Model dropdown - Rendered via Portal */}
               {showModelSelector && createPortal(
-                <AnimatePresence>
-                  <motion.div
-                    initial={{ opacity: 0, scale: 0.9, y: -10 }}
-                    animate={{ opacity: 1, scale: 1, y: 0 }}
-                    exit={{ opacity: 0, scale: 0.9, y: -10 }}
-                    className={cn(
-                      "fixed min-w-[160px] rounded-lg border shadow-xl",
-                      "bg-black/95 border-white/20 backdrop-blur-xl"
-                    )}
-                    style={{ 
-                      top: dropdownPosition.top,
-                      right: dropdownPosition.right,
-                      zIndex: 999999,
-                      pointerEvents: 'auto'
-                    } as React.CSSProperties}
-                  >
+                <>
+                  {/* Backdrop to close dropdown */}
+                  <div
+                    className="fixed inset-0 z-[999998]"
+                    onClick={onModelSelectorToggle}
+                    style={{ pointerEvents: 'auto' }}
+                  />
+                  <AnimatePresence>
+                    <motion.div
+                      initial={{ opacity: 0, scale: 0.9, y: -10 }}
+                      animate={{ opacity: 1, scale: 1, y: 0 }}
+                      exit={{ opacity: 0, scale: 0.9, y: -10 }}
+                      className={cn(
+                        "fixed min-w-[160px] rounded-lg border shadow-xl",
+                        "bg-black/95 border-white/20 backdrop-blur-xl"
+                      )}
+                      style={{ 
+                        top: dropdownPosition.top,
+                        right: dropdownPosition.right,
+                        zIndex: 999999,
+                        pointerEvents: 'auto'
+                      } as React.CSSProperties}
+                    >
                     <div className="p-1">
                       <div className="text-xs font-medium opacity-60 px-2 py-1">
                         Select Model
                       </div>
-                      {availableModels.map((model) => (
-                        <button
-                          key={model.name}
-                          onClick={() => {
-                            console.log('Model selected:', model.name);
-                            onModelSelect(model.name);
-                          }}
-                          className={cn(
-                            "w-full text-left px-2 py-1.5 text-xs rounded transition-colors",
-                            "cursor-pointer select-none",
-                            currentModel === model.name
-                              ? "bg-blue-500/20 text-blue-300"
-                              : "hover:bg-white/10 text-white/90"
-                          )}
-                        >
-                          <div className="font-medium">{model.name}</div>
-                          <div className="text-xs opacity-60">
-                            {(model.size / (1024 * 1024 * 1024)).toFixed(1)}GB
-                          </div>
-                        </button>
-                      ))}
+                      <div className={cn(
+                        "overflow-y-auto scrollbar-youtube",
+                        "scroll-smooth"
+                      )}
+                      style={{
+                        maxHeight: `${dropdownPosition.maxHeight}px`,
+                        scrollbarWidth: 'thin',
+                        scrollbarColor: 'rgba(255, 255, 255, 0.4) rgba(255, 255, 255, 0.1)'
+                      }}
+                      >
+                        {availableModels.map((model) => (
+                          <button
+                            key={model.name}
+                            onClick={() => {
+                              console.log('Model selected:', model.name);
+                              onModelSelect(model.name);
+                            }}
+                            className={cn(
+                              "w-full text-left px-2 py-1.5 text-xs rounded transition-colors",
+                              "cursor-pointer select-none",
+                              currentModel === model.name
+                                ? "bg-blue-500/20 text-blue-300"
+                                : "hover:bg-white/10 text-white/90"
+                            )}
+                          >
+                            <div className="font-medium">{model.name}</div>
+                            <div className="text-xs opacity-60">
+                              {(model.size / (1024 * 1024 * 1024)).toFixed(1)}GB
+                            </div>
+                          </button>
+                        ))}
+                      </div>
                     </div>
-                  </motion.div>
-                </AnimatePresence>,
+                    </motion.div>
+                  </AnimatePresence>
+                </>,
                 document.body
               )}
             </>
@@ -399,6 +423,7 @@ export default function CollapsedHeader({
         theme={theme}
         messages={messages}
         isTyping={isTyping}
+        currentResponse={currentResponse}
         onCopyMessage={onCopyMessage}
         onPreviewToggle={onPreviewToggle}
         onMessageEdit={onMessageEdit}
