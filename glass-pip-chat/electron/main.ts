@@ -56,10 +56,45 @@ interface WindowBounds {
 
 function loadBounds(): WindowBounds | null {
   try {
-    return JSON.parse(fs.readFileSync(BOUNDS_FILE, 'utf8'));
+    const bounds = JSON.parse(fs.readFileSync(BOUNDS_FILE, 'utf8'));
+    return validateBounds(bounds);
   } catch {
     return null;
   }
+}
+
+function validateBounds(bounds: WindowBounds): WindowBounds | null {
+  if (!bounds) return null;
+  
+  // Get all displays
+  const displays = screen.getAllDisplays();
+  
+  // Check if the window position is within any display
+  const windowRect = {
+    x: bounds.x || 0,
+    y: bounds.y || 0,
+    width: bounds.width,
+    height: bounds.height
+  };
+  
+  // Check if window is visible on any display
+  const isVisible = displays.some(display => {
+    const { x, y, width, height } = display.workArea;
+    
+    // Window is visible if any part of it overlaps with the display
+    return !(windowRect.x >= x + width || 
+             windowRect.x + windowRect.width <= x ||
+             windowRect.y >= y + height ||
+             windowRect.y + windowRect.height <= y);
+  });
+  
+  if (isVisible) {
+    return bounds;
+  }
+  
+  // If not visible, return null to use default positioning
+  console.log('Window bounds are off-screen, using default position');
+  return null;
 }
 
 function saveBounds(): void {
@@ -178,6 +213,31 @@ function createTray() {
     },
     { type: 'separator' },
     {
+      label: 'Reset Position',
+      click: () => {
+        if (!win) return;
+        
+        // Get primary display
+        const primaryDisplay = screen.getPrimaryDisplay();
+        const { width: screenWidth, height: screenHeight } = primaryDisplay.workArea;
+        
+        // Get current window size
+        const [windowWidth, windowHeight] = win.getSize();
+        
+        // Center the window on the primary display
+        const x = Math.floor((screenWidth - windowWidth) / 2);
+        const y = Math.floor((screenHeight - windowHeight) / 2);
+        
+        win.setPosition(x, y);
+        win.show();
+        win.focus();
+        saveBounds();
+        
+        console.log(`Window repositioned to center: ${x}, ${y}`);
+      }
+    },
+    { type: 'separator' },
+    {
       label: 'Quit',
       click: () => {
         app.isQuitting = true;
@@ -231,7 +291,7 @@ ipcMain.on('window:resize', (_, { width, height }) => {
   console.log('Received resize request:', width, 'x', height);
   if (!win) return;
 
-  // Get current position
+  // Get current position and size
   const [x, y] = win.getPosition();
   const [currentWidth, currentHeight] = win.getSize();
 
@@ -243,13 +303,16 @@ ipcMain.on('window:resize', (_, { width, height }) => {
 
   // Only resize if dimensions actually changed
   if (currentWidth !== constrainedWidth || currentHeight !== constrainedHeight) {
+    // Check if the new size would go off-screen and adjust position if needed
+    const { x: newX, y: newY } = ensureWindowOnScreen(x, y, constrainedWidth, constrainedHeight);
+    
     // Set new size with animation
     win.setSize(constrainedWidth, constrainedHeight, true);
 
-    // Maintain position (important for PiP behavior)
-    win.setPosition(x, y);
+    // Set position (may be adjusted to keep window on screen)
+    win.setPosition(newX, newY);
 
-    console.log('Window resized to:', constrainedWidth, 'x', constrainedHeight);
+    console.log('Window resized to:', constrainedWidth, 'x', constrainedHeight, 'at position:', newX, 'x', newY);
 
     // Verify the resize worked and save bounds
     setTimeout(() => {
@@ -265,11 +328,68 @@ ipcMain.on('window:resize', (_, { width, height }) => {
   }
 });
 
+function ensureWindowOnScreen(x: number, y: number, width: number, height: number): { x: number, y: number } {
+  // Get the display that contains the current position
+  const currentDisplay = screen.getDisplayNearestPoint({ x, y });
+  const { x: screenX, y: screenY, width: screenWidth, height: screenHeight } = currentDisplay.workArea;
+  
+  let newX = x;
+  let newY = y;
+  
+  // Check if window would extend beyond right edge
+  if (x + width > screenX + screenWidth) {
+    newX = screenX + screenWidth - width;
+  }
+  
+  // Check if window would extend beyond bottom edge
+  if (y + height > screenY + screenHeight) {
+    newY = screenY + screenHeight - height;
+  }
+  
+  // Check if window would be beyond left edge
+  if (newX < screenX) {
+    newX = screenX;
+  }
+  
+  // Check if window would be beyond top edge
+  if (newY < screenY) {
+    newY = screenY;
+  }
+  
+  // If position was adjusted, log it
+  if (newX !== x || newY !== y) {
+    console.log(`Adjusted window position from (${x}, ${y}) to (${newX}, ${newY}) to keep on screen`);
+  }
+  
+  return { x: newX, y: newY };
+}
+
 ipcMain.handle('window:get-size', () => {
   if (!win) return { width: 400, height: 560 };
 
   const [width, height] = win.getSize();
   return { width, height };
+});
+
+ipcMain.handle('window:reset-position', () => {
+  if (!win) return false;
+  
+  // Get primary display
+  const primaryDisplay = screen.getPrimaryDisplay();
+  const { width: screenWidth, height: screenHeight } = primaryDisplay.workArea;
+  
+  // Get current window size
+  const [windowWidth, windowHeight] = win.getSize();
+  
+  // Center the window on the primary display
+  const x = Math.floor((screenWidth - windowWidth) / 2);
+  const y = Math.floor((screenHeight - windowHeight) / 2);
+  
+  win.setPosition(x, y);
+  saveBounds();
+  
+  console.log(`Window repositioned to center: ${x}, ${y}`);
+  return true;
 });
 
 ipcMain.handle('system:get-platform', () => {

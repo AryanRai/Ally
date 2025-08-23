@@ -507,13 +507,9 @@ export default function GlassChatPiP() {
         (activeElement as HTMLElement).contentEditable === 'true'
       );
 
-      // Prevent default for certain keys to avoid conflicts
-      const preventDefaultKeys = ['Escape', 'F1', 'F2', 'F3', 'F4', 'F5', 'F6', 'F7', 'F8', 'F9', 'F10', 'F11', 'F12'];
-      if (preventDefaultKeys.includes(event.key)) {
-        event.preventDefault();
-      }
-
-      // Global shortcuts (work regardless of focus)
+      // Handle global shortcuts first (these work regardless of focus and should always be processed)
+      
+      // Global shortcuts with Ctrl+Shift (work regardless of focus)
       if ((event.ctrlKey || event.metaKey) && event.shiftKey) {
         switch (event.key) {
           case 'C':
@@ -537,6 +533,50 @@ export default function GlassChatPiP() {
             handleSizeChange();
             return;
         }
+      }
+
+      // Function keys (work regardless of focus)
+      if (event.key.startsWith('F') && ['F1', 'F2', 'F3', 'F4'].includes(event.key)) {
+        event.preventDefault();
+        switch (event.key) {
+          case 'F1':
+            setShowSettings(true);
+            return;
+          case 'F2':
+            handleChatCreate();
+            return;
+          case 'F3':
+            handleCustomCollapseToggle();
+            return;
+          case 'F4':
+            handleSizeChange();
+            return;
+        }
+      }
+
+      // Escape key (works regardless of focus)
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        event.stopPropagation();
+        
+        if (isInputFocused) {
+          // If input is focused, clear history and blur
+          setHistoryIndex(-1);
+          const inputElement = activeElement as HTMLInputElement;
+          const currentInput = inputElement.id === 'quick-input' ? quickInput : input;
+          if (!currentInput.trim()) {
+            if (inputElement.id === 'quick-input') {
+              setQuickInput('');
+            } else {
+              setInput('');
+            }
+          }
+          inputElement.blur();
+        } else {
+          // If no input focused, hide window
+          handleHide();
+        }
+        return;
       }
 
       // Ctrl/Cmd shortcuts (work regardless of focus)
@@ -643,28 +683,7 @@ export default function GlassChatPiP() {
           return;
         }
 
-        // Escape handling for inputs
-        if (event.key === 'Escape') {
-          event.preventDefault();
-          event.stopPropagation();
-
-          // Clear input history index
-          setHistoryIndex(-1);
-
-          // Clear input if it's empty or just whitespace
-          const currentInput = inputElement.id === 'quick-input' ? quickInput : input;
-          if (!currentInput.trim()) {
-            if (inputElement.id === 'quick-input') {
-              setQuickInput('');
-            } else {
-              setInput('');
-            }
-          }
-
-          // Blur the input
-          inputElement.blur();
-          return;
-        }
+        // Note: Escape is handled globally above
       }
 
       // Non-input shortcuts
@@ -673,27 +692,6 @@ export default function GlassChatPiP() {
           case '/':
             event.preventDefault();
             inputRef.current?.focus();
-            return;
-          case 'Escape':
-            event.preventDefault();
-            event.stopPropagation();
-            handleHide();
-            return;
-          case 'F1':
-            event.preventDefault();
-            setShowSettings(true);
-            return;
-          case 'F2':
-            event.preventDefault();
-            handleChatCreate();
-            return;
-          case 'F3':
-            event.preventDefault();
-            handleCustomCollapseToggle();
-            return;
-          case 'F4':
-            event.preventDefault();
-            handleSizeChange();
             return;
           case '?':
             if (event.shiftKey) {
@@ -1027,6 +1025,7 @@ export default function GlassChatPiP() {
 
                 {/* Chat Input */}
                 <ChatInput
+                  ref={inputRef}
                   platform={platform}
                   theme={theme}
                   input={input}

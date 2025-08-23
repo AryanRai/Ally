@@ -175,112 +175,114 @@ export default function ChatSidebar({
               exit={{ opacity: 0, y: -10 }}
               className="relative"
             >
-              <button
-                onClick={() => onChatSelect(chat.id)}
-                className={cn(
-                  "w-full text-left transition-colors relative group",
-                  isCollapsed ? "p-3" : "p-3",
-                  activeChat === chat.id
-                    ? platform === 'win32'
-                      ? "bg-blue-500/20 border-r-2 border-blue-400"
-                      : theme === 'dark'
-                        ? "bg-blue-500/20 border-r-2 border-blue-400"
-                        : "bg-blue-500/20 border-r-2 border-blue-600"
-                    : platform === 'win32'
-                      ? "hover:bg-white/5"
-                      : theme === 'dark'
-                        ? "hover:bg-white/5"
-                        : "hover:bg-black/5"
-                )}
-              >
-                <div className="flex items-center gap-3">
-                  <MessageSquare className={cn(
-                    "w-4 h-4 flex-shrink-0",
+              <div className="relative group">
+                <button
+                  onClick={() => onChatSelect(chat.id)}
+                  className={cn(
+                    "w-full text-left transition-colors relative",
+                    isCollapsed ? "p-3" : "p-3",
                     activeChat === chat.id
-                      ? "text-blue-400"
+                      ? platform === 'win32'
+                        ? "bg-blue-500/20 border-r-2 border-blue-400"
+                        : theme === 'dark'
+                          ? "bg-blue-500/20 border-r-2 border-blue-400"
+                          : "bg-blue-500/20 border-r-2 border-blue-600"
                       : platform === 'win32'
-                        ? "text-white/60"
-                        : theme === 'dark' ? "text-white/60" : "text-black/60"
-                  )} />
-                  
-                  <AnimatePresence mode="wait">
-                    {!isCollapsed && (
-                      <motion.div
-                        initial={{ opacity: 0, width: 0 }}
-                        animate={{ opacity: 1, width: 'auto' }}
-                        exit={{ opacity: 0, width: 0 }}
-                        className="flex-1 min-w-0"
-                      >
-                        {editingChat === chat.id ? (
-                          <div className="flex items-center gap-2">
-                            <input
-                              ref={editInputRef}
-                              value={editTitle}
-                              onChange={(e) => setEditTitle(e.target.value)}
-                              onKeyDown={(e) => {
-                                if (e.key === 'Enter') handleSaveEdit();
-                                if (e.key === 'Escape') handleCancelEdit();
-                              }}
-                              className={cn(
-                                "flex-1 bg-transparent border rounded px-2 py-1 text-xs",
-                                platform === 'win32'
-                                  ? "border-white/20 text-white"
-                                  : theme === 'dark' 
+                        ? "hover:bg-white/5"
+                        : theme === 'dark'
+                          ? "hover:bg-white/5"
+                          : "hover:bg-black/5"
+                  )}
+                >
+                  <div className="flex items-center gap-3">
+                    <MessageSquare className={cn(
+                      "w-4 h-4 flex-shrink-0",
+                      activeChat === chat.id
+                        ? "text-blue-400"
+                        : platform === 'win32'
+                          ? "text-white/60"
+                          : theme === 'dark' ? "text-white/60" : "text-black/60"
+                    )} />
+                    
+                    <AnimatePresence mode="wait">
+                      {!isCollapsed && (
+                        <motion.div
+                          initial={{ opacity: 0, width: 0 }}
+                          animate={{ opacity: 1, width: 'auto' }}
+                          exit={{ opacity: 0, width: 0 }}
+                          className="flex-1 min-w-0"
+                        >
+                          {editingChat === chat.id ? (
+                            <div className="flex items-center gap-2">
+                              <input
+                                ref={editInputRef}
+                                value={editTitle}
+                                onChange={(e) => setEditTitle(e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') handleSaveEdit();
+                                  if (e.key === 'Escape') handleCancelEdit();
+                                }}
+                                className={cn(
+                                  "flex-1 bg-transparent border rounded px-2 py-1 text-xs",
+                                  platform === 'win32'
                                     ? "border-white/20 text-white"
-                                    : "border-black/20 text-black"
-                              )}
-                            />
-                            <button
-                              onClick={handleSaveEdit}
-                              className="p-1 hover:bg-green-500/20 rounded"
-                            >
-                              <Check className="w-3 h-3 text-green-400" />
-                            </button>
-                            <button
-                              onClick={handleCancelEdit}
-                              className="p-1 hover:bg-red-500/20 rounded"
-                            >
-                              <X className="w-3 h-3 text-red-400" />
-                            </button>
-                          </div>
-                        ) : (
-                          <div className="space-y-1">
-                            <div className="flex items-center justify-between">
-                              <h3 className={cn(
-                                "text-sm font-medium truncate",
-                                activeChat === chat.id
-                                  ? "text-blue-400"
-                                  : platform === 'win32'
-                                    ? "text-white/90"
-                                    : theme === 'dark' ? "text-white/90" : "text-black/90"
-                              )}>
-                                {chat.title}
-                              </h3>
-                              <span className={cn(
-                                "text-xs flex-shrink-0 ml-2",
-                                platform === 'win32'
-                                  ? "text-white/50"
-                                  : theme === 'dark' ? "text-white/50" : "text-black/50"
-                              )}>
-                                {formatTime(chat.updatedAt)}
-                              </span>
+                                    : theme === 'dark' 
+                                      ? "border-white/20 text-white"
+                                      : "border-black/20 text-black"
+                                )}
+                              />
+                              <button
+                                onClick={handleSaveEdit}
+                                className="p-1 hover:bg-green-500/20 rounded"
+                              >
+                                <Check className="w-3 h-3 text-green-400" />
+                              </button>
+                              <button
+                                onClick={handleCancelEdit}
+                                className="p-1 hover:bg-red-500/20 rounded"
+                              >
+                                <X className="w-3 h-3 text-red-400" />
+                              </button>
                             </div>
-                            <p className={cn(
-                              "text-xs truncate",
-                              platform === 'win32'
-                                ? "text-white/60"
-                                : theme === 'dark' ? "text-white/60" : "text-black/60"
-                            )}>
-                              {getLastMessage(chat)}
-                            </p>
-                          </div>
-                        )}
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
-                </div>
+                          ) : (
+                            <div className="space-y-1">
+                              <div className="flex items-center justify-between">
+                                <h3 className={cn(
+                                  "text-sm font-medium truncate",
+                                  activeChat === chat.id
+                                    ? "text-blue-400"
+                                    : platform === 'win32'
+                                      ? "text-white/90"
+                                      : theme === 'dark' ? "text-white/90" : "text-black/90"
+                                )}>
+                                  {chat.title}
+                                </h3>
+                                <span className={cn(
+                                  "text-xs flex-shrink-0 ml-2",
+                                  platform === 'win32'
+                                    ? "text-white/50"
+                                    : theme === 'dark' ? "text-white/50" : "text-black/50"
+                                )}>
+                                  {formatTime(chat.updatedAt)}
+                                </span>
+                              </div>
+                              <p className={cn(
+                                "text-xs truncate",
+                                platform === 'win32'
+                                  ? "text-white/60"
+                                  : theme === 'dark' ? "text-white/60" : "text-black/60"
+                              )}>
+                                {getLastMessage(chat)}
+                              </p>
+                            </div>
+                          )}
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </div>
+                </button>
 
-                {/* Menu button */}
+                {/* Menu button - now outside the main button */}
                 {!isCollapsed && editingChat !== chat.id && (
                   <button
                     onClick={(e) => {
@@ -288,7 +290,7 @@ export default function ChatSidebar({
                       setShowMenu(showMenu === chat.id ? null : chat.id);
                     }}
                     className={cn(
-                      "absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded opacity-0 group-hover:opacity-100 transition-opacity",
+                      "absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded opacity-0 group-hover:opacity-100 transition-opacity z-10",
                       platform === 'win32' 
                         ? "hover:bg-white/10"
                         : theme === 'dark' ? "hover:bg-white/10" : "hover:bg-black/10"
@@ -297,7 +299,7 @@ export default function ChatSidebar({
                     <MoreHorizontal className="w-3 h-3" />
                   </button>
                 )}
-              </button>
+              </div>
 
               {/* Context Menu */}
               <AnimatePresence>
