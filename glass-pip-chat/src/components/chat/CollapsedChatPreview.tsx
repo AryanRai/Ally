@@ -11,6 +11,7 @@ interface CollapsedChatPreviewProps {
   theme: 'light' | 'dark';
   messages: Message[];
   isTyping: boolean;
+  currentResponse?: string;
   onCopyMessage: (content: string) => void;
   onPreviewToggle?: (isExpanded: boolean) => void;
   onMessageEdit?: (messageId: string, newContent: string) => void;
@@ -27,6 +28,7 @@ export default function CollapsedChatPreview({
   theme,
   messages,
   isTyping,
+  currentResponse,
   onCopyMessage,
   onPreviewToggle,
   onMessageEdit,
@@ -151,8 +153,8 @@ export default function CollapsedChatPreview({
                 </motion.div>
               ))}
               
-              {/* Typing Indicator */}
-              {isTyping && (
+              {/* Typing Indicator - Only show if no current response is being displayed */}
+              {isTyping && !currentResponse && (
                 <motion.div
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
