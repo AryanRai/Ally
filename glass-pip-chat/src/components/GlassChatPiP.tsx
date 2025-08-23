@@ -1069,6 +1069,7 @@ export default function GlassChatPiP() {
       <ClickAwayHandler
         isActive={ollamaIntegration.showModelSelector}
         onClickAway={() => ollamaIntegration.setShowModelSelector(false)}
+        className="fixed inset-0 z-40"
       />
 
       {/* Remote Settings - Floating */}

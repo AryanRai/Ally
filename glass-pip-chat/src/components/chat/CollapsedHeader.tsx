@@ -1,3 +1,5 @@
+import { useState, useRef, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   Grip, 
@@ -90,6 +92,19 @@ export default function CollapsedHeader({
   onModelSelect
 }: CollapsedHeaderProps) {
   const [isContextExpanded, setIsContextExpanded] = useState(false);
+  const modelButtonRef = useRef<HTMLButtonElement>(null);
+  const [dropdownPosition, setDropdownPosition] = useState({ top: 0, right: 0 });
+
+  // Update dropdown position when it opens
+  useEffect(() => {
+    if (showModelSelector && modelButtonRef.current) {
+      const rect = modelButtonRef.current.getBoundingClientRect();
+      setDropdownPosition({
+        top: rect.bottom + 4,
+        right: window.innerWidth - rect.right
+      });
+    }
+  }, [showModelSelector]);
 
   return (
     <div className="flex flex-col">
@@ -145,8 +160,9 @@ export default function CollapsedHeader({
         >
           {/* Model Selector */}
           {ollamaAvailable && availableModels.length > 0 && (
-            <div className="relative">
+            <>
               <button
+                ref={modelButtonRef}
                 onClick={onModelSelectorToggle}
                 className={cn(
                   "p-1.5 rounded-lg hover:bg-white/10 transition-colors text-xs",
@@ -161,42 +177,55 @@ export default function CollapsedHeader({
                 )} />
               </button>
 
-              {/* Model dropdown */}
-              {showModelSelector && (
-                <motion.div
-                  initial={{ opacity: 0, scale: 0.9, y: -10 }}
-                  animate={{ opacity: 1, scale: 1, y: 0 }}
-                  exit={{ opacity: 0, scale: 0.9, y: -10 }}
-                  className={cn(
-                    "absolute right-0 top-full mt-1 z-50 min-w-[160px] rounded-lg border shadow-lg",
-                    "bg-black/90 border-white/20 backdrop-blur-xl"
-                  )}
-                >
-                  <div className="p-1">
-                    <div className="text-xs font-medium opacity-60 px-2 py-1">
-                      Select Model
+              {/* Model dropdown - Rendered via Portal */}
+              {showModelSelector && createPortal(
+                <AnimatePresence>
+                  <motion.div
+                    initial={{ opacity: 0, scale: 0.9, y: -10 }}
+                    animate={{ opacity: 1, scale: 1, y: 0 }}
+                    exit={{ opacity: 0, scale: 0.9, y: -10 }}
+                    className={cn(
+                      "fixed min-w-[160px] rounded-lg border shadow-xl",
+                      "bg-black/95 border-white/20 backdrop-blur-xl"
+                    )}
+                    style={{ 
+                      top: dropdownPosition.top,
+                      right: dropdownPosition.right,
+                      zIndex: 999999,
+                      pointerEvents: 'auto'
+                    } as React.CSSProperties}
+                  >
+                    <div className="p-1">
+                      <div className="text-xs font-medium opacity-60 px-2 py-1">
+                        Select Model
+                      </div>
+                      {availableModels.map((model) => (
+                        <button
+                          key={model.name}
+                          onClick={() => {
+                            console.log('Model selected:', model.name);
+                            onModelSelect(model.name);
+                          }}
+                          className={cn(
+                            "w-full text-left px-2 py-1.5 text-xs rounded transition-colors",
+                            "cursor-pointer select-none",
+                            currentModel === model.name
+                              ? "bg-blue-500/20 text-blue-300"
+                              : "hover:bg-white/10 text-white/90"
+                          )}
+                        >
+                          <div className="font-medium">{model.name}</div>
+                          <div className="text-xs opacity-60">
+                            {(model.size / (1024 * 1024 * 1024)).toFixed(1)}GB
+                          </div>
+                        </button>
+                      ))}
                     </div>
-                    {availableModels.map((model) => (
-                      <button
-                        key={model.name}
-                        onClick={() => onModelSelect(model.name)}
-                        className={cn(
-                          "w-full text-left px-2 py-1.5 text-xs rounded transition-colors",
-                          currentModel === model.name
-                            ? "bg-blue-500/20 text-blue-300"
-                            : "hover:bg-white/10"
-                        )}
-                      >
-                        <div className="font-medium">{model.name}</div>
-                        <div className="text-xs opacity-60">
-                          {(model.size / (1024 * 1024 * 1024)).toFixed(1)}GB
-                        </div>
-                      </button>
-                    ))}
-                  </div>
-                </motion.div>
+                  </motion.div>
+                </AnimatePresence>,
+                document.body
               )}
-            </div>
+            </>
           )}
 
           <button

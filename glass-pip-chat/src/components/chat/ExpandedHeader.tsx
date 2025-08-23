@@ -1,4 +1,6 @@
-import { motion } from 'framer-motion';
+import { useRef, useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { motion, AnimatePresence } from 'framer-motion';
 import { 
   Grip, 
   Maximize2, 
@@ -70,6 +72,20 @@ export default function ExpandedHeader({
   onHide,
   size
 }: ExpandedHeaderProps) {
+  const modelButtonRef = useRef<HTMLButtonElement>(null);
+  const [dropdownPosition, setDropdownPosition] = useState({ top: 0, right: 0 });
+
+  // Update dropdown position when it opens
+  useEffect(() => {
+    if (showModelSelector && modelButtonRef.current) {
+      const rect = modelButtonRef.current.getBoundingClientRect();
+      setDropdownPosition({
+        top: rect.bottom + 8,
+        right: window.innerWidth - rect.right
+      });
+    }
+  }, [showModelSelector]);
+
   return (
     <>
       <div className="flex items-center gap-2 flex-1 min-w-0">
@@ -190,8 +206,9 @@ export default function ExpandedHeader({
       >
         {/* Model Selector */}
         {ollamaAvailable && availableModels.length > 0 && (
-          <div className="relative">
+          <>
             <button
+              ref={modelButtonRef}
               onClick={onModelSelectorToggle}
               className={cn(
                 "p-1.5 rounded-lg hover:bg-white/10 transition-colors",
@@ -206,48 +223,60 @@ export default function ExpandedHeader({
               )}
             </button>
 
-            {/* Model dropdown */}
-            {showModelSelector && (
-              <motion.div
-                initial={{ opacity: 0, scale: 0.9, y: -10 }}
-                animate={{ opacity: 1, scale: 1, y: 0 }}
-                exit={{ opacity: 0, scale: 0.9, y: -10 }}
-                className={cn(
-                  "absolute top-full right-0 mt-2 w-48 z-50",
-                  ThemeUtils.getModalClass(platform, theme)
-                )}
-              >
-                <div className="p-2">
-                  <div className={cn(
-                    "text-xs font-medium mb-2 px-2",
-                    ThemeUtils.getTextClass(platform, theme, 'secondary')
-                  )}>
-                    Select Model
+            {/* Model dropdown - Rendered via Portal */}
+            {showModelSelector && createPortal(
+              <AnimatePresence>
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.9, y: -10 }}
+                  animate={{ opacity: 1, scale: 1, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.9, y: -10 }}
+                  className={cn(
+                    "fixed w-48",
+                    ThemeUtils.getModalClass(platform, theme)
+                  )}
+                  style={{ 
+                    top: dropdownPosition.top,
+                    right: dropdownPosition.right,
+                    zIndex: 999999,
+                    pointerEvents: 'auto'
+                  } as React.CSSProperties}
+                >
+                  <div className="p-2">
+                    <div className={cn(
+                      "text-xs font-medium mb-2 px-2",
+                      ThemeUtils.getTextClass(platform, theme, 'secondary')
+                    )}>
+                      Select Model
+                    </div>
+                    {availableModels.map((model) => (
+                      <button
+                        key={model.name}
+                        onClick={() => {
+                          console.log('Model selected:', model.name);
+                          onModelSelect(model.name);
+                        }}
+                        className={cn(
+                          "w-full text-left px-2 py-1.5 text-xs rounded transition-colors cursor-pointer select-none",
+                          currentModel === model.name
+                            ? "bg-blue-500/20 text-blue-300"
+                            : cn(
+                                ThemeUtils.getBackgroundClass(platform, theme, 'hover'),
+                                ThemeUtils.getTextClass(platform, theme, 'secondary')
+                              )
+                        )}
+                      >
+                        <div className="font-medium">{model.name}</div>
+                        <div className={cn("text-xs opacity-60")}>
+                          {(model.size / (1024 * 1024 * 1024)).toFixed(1)}GB
+                        </div>
+                      </button>
+                    ))}
                   </div>
-                  {availableModels.map((model) => (
-                    <button
-                      key={model.name}
-                      onClick={() => onModelSelect(model.name)}
-                      className={cn(
-                        "w-full text-left px-2 py-1.5 text-xs rounded transition-colors",
-                        currentModel === model.name
-                          ? "bg-blue-500/20 text-blue-300"
-                          : cn(
-                              ThemeUtils.getBackgroundClass(platform, theme, 'hover'),
-                              ThemeUtils.getTextClass(platform, theme, 'secondary')
-                            )
-                      )}
-                    >
-                      <div className="font-medium">{model.name}</div>
-                      <div className={cn("text-xs opacity-60")}>
-                        {(model.size / (1024 * 1024 * 1024)).toFixed(1)}GB
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              </motion.div>
+                </motion.div>
+              </AnimatePresence>,
+              document.body
             )}
-          </div>
+          </>
         )}
 
         <button
