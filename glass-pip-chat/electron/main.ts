@@ -150,10 +150,7 @@ async function createWindow(): Promise<void> {
     ...(process.platform === 'win32' ? {
       backgroundMaterial: 'acrylic' as const,
       titleBarStyle: 'hidden' as const,
-      titleBarOverlay: {
-        color: '#00000000',
-        symbolColor: '#ffffff'
-      }
+      titleBarOverlay: false
     } : {})
   });
 
