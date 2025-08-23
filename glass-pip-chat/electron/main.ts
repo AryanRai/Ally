@@ -150,6 +150,10 @@ async function createWindow(): Promise<void> {
     ...(process.platform === 'win32' ? {
       backgroundMaterial: 'acrylic' as const,
       titleBarStyle: 'hidden' as const,
+      titleBarOverlay: {
+        color: '#00000000',
+        symbolColor: '#ffffff'
+      }
     } : {})
   });
 
@@ -157,6 +161,25 @@ async function createWindow(): Promise<void> {
   if (process.platform === 'darwin') {
     win.setAlwaysOnTop(true, 'floating', 1);
     win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  }
+
+  // Windows specific settings for acrylic effect
+  if (process.platform === 'win32') {
+    // Ensure acrylic is properly applied
+    win.once('ready-to-show', () => {
+      try {
+        // Force refresh the acrylic effect
+        win.setBackgroundMaterial('acrylic');
+      } catch (error) {
+        console.warn('Failed to set acrylic background:', error);
+        // Fallback to mica if acrylic fails
+        try {
+          win.setBackgroundMaterial('mica');
+        } catch (micaError) {
+          console.warn('Failed to set mica background:', micaError);
+        }
+      }
+    });
   }
 
   // Save window bounds on move and resize
@@ -516,16 +539,38 @@ ipcMain.on('ollama:updateConfig', (_, config) => {
   ollamaService.updateConfig(config);
 });
 
+// Global abort controller for Ollama requests
+let currentOllamaController: AbortController | null = null;
+
 ipcMain.handle('ollama:streamChatWithThinking', async (event, messages: ChatMessage[], model: string) => {
   try {
+    // Create new abort controller for this request
+    currentOllamaController = new AbortController();
+    
     return await ollamaService.streamChatWithThinking(messages, model, (chunk) => {
       // Send progress updates back to renderer
       event.sender.send('ollama:streamProgress', chunk);
-    });
-  } catch (error) {
+    }, currentOllamaController.signal);
+  } catch (error: any) {
+    if (error.name === 'AbortError') {
+      console.log('Ollama request was aborted');
+      return 'Request stopped by user';
+    }
     console.error('Error in Ollama streamChatWithThinking:', error);
     throw error;
+  } finally {
+    currentOllamaController = null;
   }
+});
+
+// Handle stop request
+ipcMain.handle('ollama:stop', () => {
+  if (currentOllamaController) {
+    currentOllamaController.abort();
+    currentOllamaController = null;
+    return true;
+  }
+  return false;
 });
 
 // Server status handlers

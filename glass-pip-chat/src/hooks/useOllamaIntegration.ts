@@ -73,30 +73,43 @@ export function useOllamaIntegration() {
     let thinkingContent = '';
     let responseContent = '';
 
-    // Use the enhanced streaming method
-    await window.pip.ollama.streamChatWithThinking(chatHistory, currentModel, (chunk: any) => {
-      if (chunk.type === 'thinking') {
-        thinkingContent += chunk.content;
-        onStreamUpdate({
-          type: 'thinking',
-          thinking: thinkingContent,
-          response: responseContent
-        });
-      } else if (chunk.type === 'response') {
-        responseContent += chunk.content;
-        onStreamUpdate({
-          type: 'response',
-          thinking: thinkingContent,
-          response: responseContent
-        });
-      } else if (chunk.type === 'done') {
+    try {
+      // Use the enhanced streaming method
+      await window.pip.ollama.streamChatWithThinking(chatHistory, currentModel, (chunk: any) => {
+        if (chunk.type === 'thinking') {
+          thinkingContent += chunk.content;
+          onStreamUpdate({
+            type: 'thinking',
+            thinking: thinkingContent,
+            response: responseContent
+          });
+        } else if (chunk.type === 'response') {
+          responseContent += chunk.content;
+          onStreamUpdate({
+            type: 'response',
+            thinking: thinkingContent,
+            response: responseContent
+          });
+        } else if (chunk.type === 'done') {
+          onStreamUpdate({
+            type: 'done',
+            thinking: thinkingContent,
+            response: responseContent
+          });
+        }
+      });
+    } catch (error: any) {
+      if (error.message?.includes('aborted') || error.name === 'AbortError') {
+        // Handle graceful stop
         onStreamUpdate({
           type: 'done',
           thinking: thinkingContent,
-          response: responseContent
+          response: responseContent || 'Stopped by user'
         });
+        return responseContent || 'Stopped by user';
       }
-    });
+      throw error;
+    }
 
     fullResponse = responseContent;
     console.log('Ollama response with thinking:', { thinking: thinkingContent, response: responseContent });

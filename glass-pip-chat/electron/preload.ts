@@ -69,6 +69,7 @@ const pipAPI = {
         ipcRenderer.removeListener('ollama:streamProgress', progressHandler);
       }
     },
+    stop: () => ipcRenderer.invoke('ollama:stop'),
     getConfig: () => ipcRenderer.invoke('ollama:getConfig'),
     updateConfig: (config: any) => ipcRenderer.send('ollama:updateConfig', config)
   },

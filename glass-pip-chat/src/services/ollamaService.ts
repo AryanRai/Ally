@@ -243,7 +243,8 @@ export class OllamaService {
   async streamChatWithThinking(
     messages: ChatMessage[],
     model: string,
-    onProgress: (chunk: ThinkingChunk) => void
+    onProgress: (chunk: ThinkingChunk) => void,
+    abortSignal?: AbortSignal
   ): Promise<string> {
     try {
       console.log('Starting enhanced streaming with thinking detection...');
@@ -252,6 +253,13 @@ export class OllamaService {
       const timeoutId = setTimeout(() => {
         controller.abort();
       }, this.config.streamTimeout);
+
+      // If external abort signal is provided, listen to it
+      if (abortSignal) {
+        abortSignal.addEventListener('abort', () => {
+          controller.abort();
+        });
+      }
 
       const response = await fetch(`${this.config.baseUrl}/api/chat`, {
         method: 'POST',
@@ -407,6 +415,13 @@ export class OllamaService {
       
     } catch (error: any) {
       console.error('Enhanced streaming failed:', error);
+      
+      if (error.name === 'AbortError') {
+        console.log('Streaming was aborted by user');
+        onProgress({ type: 'done', content: 'Stopped by user', isComplete: false });
+        return 'Stopped by user';
+      }
+      
       throw error;
     }
   }
