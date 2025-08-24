@@ -10,13 +10,16 @@ Apple-style glassmorphic, picture-in-picture chat window (Electron + React/Tailw
 
 ## Features
 
-- 🪟 **Frameless, transparent window** with macOS vibrancy support
+- 🪟 **Frameless, transparent window** with cross-platform blur support (macOS vibrancy, Windows Acrylic, Linux compositor blur)
 - 🎯 **Always-on-top PiP mode** visible on all workspaces
 - 🔄 **Drag to move, snap to corners** with smooth animations
 - 📏 **Three sizes (S/M/L)** with collapse/expand states
 - ⌨️ **Global shortcut** (Cmd/Ctrl+Shift+C) to toggle visibility
 - 💾 **Persistent state** for window position and size
-- 🎨 **Glassmorphic design** with backdrop blur effects
+- 🎨 **Glassmorphic design** with adaptive blur effects:
+  - Auto-detects compositor capabilities on Linux
+  - Optimized for KWin, Picom, Compiz, and Mutter
+  - CSS backdrop-filter fallback for maximum compatibility
 
 ## High-Level Flow
 
@@ -35,6 +38,38 @@ Renderer (PiP UI)  <->  Preload IPC  <->  Main (Electron)
 - Node.js 18+ and npm/pnpm
 - Ollama installed locally (for M2/M3 milestone)
 - macOS, Windows, or Linux
+
+#### Linux-Specific Requirements
+
+For optimal blur effects on Linux, ensure you have a compositor that supports blur:
+
+- **KDE Plasma**: KWin compositor (built-in blur support)
+- **GNOME**: Mutter with blur extensions
+- **i3/bspwm/etc.**: Picom compositor with blur enabled
+- **Compiz**: Built-in blur plugin
+
+**Picom Configuration Example** (for tiling window managers):
+```bash
+# ~/.config/picom/picom.conf
+blur: {
+  method = "dual_kawase";
+  strength = 8;
+  background = false;
+  background-frame = false;
+  background-fixed = false;
+}
+
+blur-background-exclude = [
+  "window_type = 'dock'",
+  "window_type = 'desktop'",
+  "_GTK_FRAME_EXTENTS@:c"
+];
+```
+
+**Quick Setup**: Run the Linux blur setup helper:
+```bash
+./scripts/setup-linux-blur.sh
+```
 
 ### Installation
 
@@ -62,6 +97,12 @@ npm run build:win
 npm run build:linux
 ```
 
+**Linux Build Outputs:**
+- AppImage (portable, runs on most distributions)
+- DEB package (Debian/Ubuntu)
+
+The Linux builds include automatic blur detection and compositor-specific optimizations.
+
 ## Development
 
 ### Project Structure
@@ -86,6 +127,20 @@ glass-pip-chat/
 - **`npm run lint`** – Run ESLint and TypeScript checks
 - **`npm run typecheck`** – Type checking only
 
+### Testing Linux Blur Support
+
+To test blur functionality in development:
+
+```javascript
+// In browser console
+import('./src/utils/linuxBlur.test.js').then(m => m.testLinuxBlur());
+```
+
+Or run the Linux setup helper:
+```bash
+./scripts/setup-linux-blur.sh
+```
+
 ## Milestones
 
 ### ✅ M0 – UI Prototype (v0)
@@ -94,7 +149,10 @@ glass-pip-chat/
 - No backend calls yet.
 
 ### ✅ M1 – Electron Shell (Current)
-- Frameless, transparent window, always-on-top, vibrancy/Acrylic.
+- Frameless, transparent window, always-on-top, cross-platform blur effects:
+  - **macOS**: Native vibrancy effects (`under-window`, `under-page`)
+  - **Windows**: Acrylic background material with fallback to Mica
+  - **Linux**: Compositor-aware blur (KWin, Picom, Compiz) with CSS backdrop-filter fallback
 - Global shortcut toggle.
 - Bounds persistence in `userData`.
 - Preload exposes safe IPC for show/hide/toggle.

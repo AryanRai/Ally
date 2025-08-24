@@ -833,7 +833,8 @@ export default function GlassChatPiP() {
     <motion.div
       className={cn(
         "fixed bg-transparent flex items-center justify-center",
-        platform === 'win32' && "win32-acrylic"
+        platform === 'win32' && "win32-acrylic",
+        platform === 'linux' && "linux-glass-effect"
       )}
       style={{
         width: state.collapsed ? collapsedDims.width + (padding * 2) : (sidebarCollapsed ? dims.w + 48 + (padding * 2) : dims.w + 280 + (padding * 2)),
@@ -853,9 +854,13 @@ export default function GlassChatPiP() {
           isResizing && "shadow-lg scale-[1.01]",
           platform === 'win32'
             ? "bg-transparent"
-            : theme === 'dark'
-              ? "bg-gradient-to-b from-white/[0.08] to-white/[0.02] backdrop-blur-2xl backdrop-saturate-150"
-              : "bg-gradient-to-b from-black/[0.08] to-black/[0.02] backdrop-blur-2xl backdrop-saturate-150",
+            : platform === 'linux'
+              ? theme === 'dark'
+                ? "linux-blur bg-gradient-to-b from-white/[0.06] to-white/[0.01]"
+                : "linux-blur-light bg-gradient-to-b from-black/[0.06] to-black/[0.01]"
+              : theme === 'dark'
+                ? "bg-gradient-to-b from-white/[0.08] to-white/[0.02] backdrop-blur-2xl backdrop-saturate-150"
+                : "bg-gradient-to-b from-black/[0.08] to-black/[0.02] backdrop-blur-2xl backdrop-saturate-150",
           theme === 'dark' ? "text-white/90" : "text-black/90"
         )}
         style={{
