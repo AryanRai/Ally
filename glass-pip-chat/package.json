@@ -12,6 +12,9 @@
     "build:vite": "vite build",
     "build:electron": "node scripts/build-electron.js",
     "dist": "electron-builder --config electron-builder.json",
+    "build:mac": "npm run build:vite && npm run build:electron && electron-builder --mac --config electron-builder.json",
+    "build:win": "npm run build:vite && npm run build:electron && electron-builder --win --config electron-builder.json",
+    "build:linux": "npm run build:vite && npm run build:electron && electron-builder --linux --config electron-builder.json",
     "preview": "vite preview",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0 && tsc --noEmit",
     "typecheck": "tsc --noEmit"

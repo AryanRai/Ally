@@ -116,6 +116,73 @@ function saveTheme(theme: 'light' | 'dark'): void {
   fs.writeFileSync(THEME_FILE, JSON.stringify({ theme }));
 }
 
+function setupLinuxBlur(window: BrowserWindow): void {
+  try {
+    // Get the native window handle
+    const nativeWindowHandle = window.getNativeWindowHandle();
+    
+    // Try to set blur effects using X11 properties for common compositors
+    const { exec } = require('child_process');
+    
+    // Get window ID for X11 operations
+    exec(`xprop -root _NET_ACTIVE_WINDOW`, (error, stdout) => {
+      if (error) {
+        console.warn('Could not get active window for blur setup:', error);
+        return;
+      }
+      
+      // Extract window ID and apply blur
+      const windowId = stdout.match(/0x[0-9a-f]+/i)?.[0];
+      if (windowId) {
+        // Try different compositor blur methods
+        
+        // KWin (KDE) blur
+        exec(`xprop -id ${windowId} -f _KDE_NET_WM_BLUR_BEHIND_REGION 32c -set _KDE_NET_WM_BLUR_BEHIND_REGION 0`, (kwinError) => {
+          if (kwinError) {
+            console.log('KWin blur not available, trying other methods...');
+          } else {
+            console.log('Applied KWin blur effects');
+          }
+        });
+        
+        // Compiz blur
+        exec(`xprop -id ${windowId} -f _COMPIZ_WM_WINDOW_BLUR 32c -set _COMPIZ_WM_WINDOW_BLUR 1`, (compizError) => {
+          if (compizError) {
+            console.log('Compiz blur not available');
+          } else {
+            console.log('Applied Compiz blur effects');
+          }
+        });
+        
+        // Picom blur (for i3, bspwm, etc.)
+        exec(`xprop -id ${windowId} -f _PICOM_BLUR 32c -set _PICOM_BLUR 1`, (picomError) => {
+          if (picomError) {
+            console.log('Picom blur not available');
+          } else {
+            console.log('Applied Picom blur effects');
+          }
+        });
+      }
+    });
+    
+    // Alternative method: Set window class for compositor rules
+    window.webContents.executeJavaScript(`
+      if (typeof window !== 'undefined' && window.require) {
+        const { remote } = window.require('electron');
+        if (remote && remote.getCurrentWindow) {
+          const win = remote.getCurrentWindow();
+          win.setTitle('Glass PiP Chat - Blur');
+        }
+      }
+    `).catch(() => {
+      // Ignore errors in renderer context
+    });
+    
+  } catch (error) {
+    console.warn('Error setting up Linux blur:', error);
+  }
+}
+
 async function createWindow(): Promise<void> {
   const savedBounds = loadBounds();
   currentTheme = loadTheme();
@@ -151,6 +218,12 @@ async function createWindow(): Promise<void> {
       backgroundMaterial: 'acrylic' as const,
       titleBarStyle: 'hidden' as const,
       titleBarOverlay: false
+    } : {}),
+    ...(process.platform === 'linux' ? {
+      // Linux blur effects using compositor
+      show: false, // Don't show immediately to allow blur setup
+      skipTaskbar: false,
+      type: 'normal'
     } : {})
   });
 
@@ -175,6 +248,27 @@ async function createWindow(): Promise<void> {
         } catch (micaError) {
           console.warn('Failed to set mica background:', micaError);
         }
+      }
+    });
+  }
+
+  // Linux specific settings for blur effects
+  if (process.platform === 'linux') {
+    win.once('ready-to-show', () => {
+      try {
+        // Apply Linux blur effects using native window properties
+        setupLinuxBlur(win);
+        win.show(); // Show window after blur setup
+      } catch (error) {
+        console.warn('Failed to set Linux blur effects:', error);
+        win.show(); // Show window anyway
+      }
+    });
+  } else {
+    // For non-Linux platforms, show immediately when ready
+    win.once('ready-to-show', () => {
+      if (process.platform !== 'linux') {
+        win.show();
       }
     });
   }
@@ -496,6 +590,12 @@ ipcMain.on('theme:set', (_, theme: 'light' | 'dark') => {
   // On macOS, update vibrancy
   if (win && process.platform === 'darwin') {
     win.setVibrancy(theme === 'dark' ? 'under-window' : 'under-page');
+    win.webContents.send('theme:changed', theme);
+  }
+  
+  // On Linux, refresh blur effects for theme change
+  if (win && process.platform === 'linux') {
+    setupLinuxBlur(win);
     win.webContents.send('theme:changed', theme);
   }
 });
