@@ -88,8 +88,13 @@ class SpeechService:
         # Queues
         self.audio_queue = queue.Queue(maxsize=5)
         self.text_queue = queue.Queue(maxsize=10)
-        self.tts_queue = queue.Queue(maxsize=3)
+        self.tts_queue = queue.Queue(maxsize=10)  # Increased for better queuing
         self.broadcast_queue = queue.Queue(maxsize=20)  # Queue for messages to broadcast
+        
+        # TTS processing state
+        self.is_processing_tts = False
+        self.current_tts_id = None
+        self.tts_lock = threading.Lock()
         
         # Buffers
         self.speech_buffer = collections.deque()
@@ -226,8 +231,12 @@ class SpeechService:
                 
             elif command == 'synthesize_speech':
                 text = payload.get('text', '')
+                message_id = payload.get('messageId')
                 if text:
-                    await self._handle_tts_request(websocket, text)
+                    await self._handle_tts_request(websocket, text, message_id)
+                    
+            elif command == 'stop_tts':
+                await self._handle_stop_tts(websocket)
                     
             elif command == 'send_ggwave':
                 text = payload.get('text', '')
@@ -238,7 +247,10 @@ class SpeechService:
                 status = {
                     'listening': self.running,
                     'device': self.device,
-                    'models_loaded': bool(self.whisper_model and self.tts_model)
+                    'models_loaded': bool(self.whisper_model and self.tts_model),
+                    'tts_queue_size': self.tts_queue.qsize(),
+                    'is_processing_tts': self.is_processing_tts,
+                    'current_tts_id': self.current_tts_id
                 }
                 await self._send_response(websocket, 'status', status)
                 
@@ -284,7 +296,7 @@ class SpeechService:
         # Remove disconnected clients
         self.websocket_clients -= disconnected_clients
     
-    async def _handle_tts_request(self, websocket, text):
+    async def _handle_tts_request(self, websocket, text, message_id=None):
         """Handle TTS synthesis request"""
         if not self.tts_model:
             await self._send_response(websocket, 'speech_error', {
@@ -293,7 +305,7 @@ class SpeechService:
             return
             
         try:
-            logger.info(f"Processing TTS request for text: '{text[:50]}...'")
+            logger.info(f"Processing TTS request for text: '{text[:50]}...' (ID: {message_id})")
             
             # Check if this is a streaming request
             payload = {'text': text}
@@ -302,11 +314,27 @@ class SpeechService:
             
             streaming = payload.get('streaming', False)
             
-            if streaming:
-                await self._handle_streaming_tts(websocket, text)
-            else:
-                # Legacy single-shot TTS
-                await self._handle_single_tts(websocket, text)
+            # Queue the TTS request for sequential processing
+            tts_request = {
+                'websocket': websocket,
+                'text': text,
+                'message_id': message_id,
+                'streaming': streaming,
+                'timestamp': time.time()
+            }
+            
+            try:
+                self.tts_queue.put_nowait(tts_request)
+                logger.info(f"📝 Queued TTS request {message_id} (queue size: {self.tts_queue.qsize()})")
+                
+                # Start processing if not already processing
+                asyncio.create_task(self._process_tts_queue())
+                
+            except queue.Full:
+                logger.warning("TTS queue full, rejecting request")
+                await self._send_response(websocket, 'speech_error', {
+                    'error': 'TTS queue full, please try again later'
+                })
                 
         except Exception as e:
             logger.error(f"TTS request error: {e}")
@@ -314,22 +342,102 @@ class SpeechService:
                 'error': str(e)
             })
     
-    async def _handle_streaming_tts(self, websocket, text):
+    async def _handle_stop_tts(self, websocket):
+        """Handle stop TTS command"""
+        try:
+            with self.tts_lock:
+                if self.is_processing_tts:
+                    logger.info(f"⏹️ Stopping current TTS: {self.current_tts_id}")
+                    # Clear the queue and reset processing state
+                    while not self.tts_queue.empty():
+                        try:
+                            self.tts_queue.get_nowait()
+                        except queue.Empty:
+                            break
+                    
+                    self.is_processing_tts = False
+                    self.current_tts_id = None
+                    
+                    await self._send_response(websocket, 'tts_stopped', {
+                        'message': 'TTS processing stopped'
+                    })
+                else:
+                    await self._send_response(websocket, 'tts_stopped', {
+                        'message': 'No TTS currently processing'
+                    })
+        except Exception as e:
+            logger.error(f"Error stopping TTS: {e}")
+    
+    async def _process_tts_queue(self):
+        """Process TTS requests from queue sequentially"""
+        with self.tts_lock:
+            if self.is_processing_tts:
+                return  # Already processing
+            
+            if self.tts_queue.empty():
+                return  # Nothing to process
+            
+            self.is_processing_tts = True
+        
+        try:
+            while not self.tts_queue.empty():
+                try:
+                    tts_request = self.tts_queue.get_nowait()
+                    websocket = tts_request['websocket']
+                    text = tts_request['text']
+                    message_id = tts_request['message_id']
+                    streaming = tts_request['streaming']
+                    
+                    self.current_tts_id = message_id
+                    logger.info(f"🎵 Processing TTS {message_id} ({self.tts_queue.qsize()} remaining)")
+                    
+                    if streaming:
+                        await self._handle_streaming_tts(websocket, text, message_id)
+                    else:
+                        await self._handle_single_tts(websocket, text, message_id)
+                    
+                    self.tts_queue.task_done()
+                    
+                except queue.Empty:
+                    break
+                except Exception as e:
+                    logger.error(f"Error processing TTS request: {e}")
+                    # Continue processing other requests
+                    continue
+        finally:
+            with self.tts_lock:
+                self.is_processing_tts = False
+                self.current_tts_id = None
+    
+    async def _handle_streaming_tts(self, websocket, text, message_id=None):
         """Handle streaming TTS synthesis request"""
         try:
+            # Check if we should stop processing
+            with self.tts_lock:
+                if not self.is_processing_tts or self.current_tts_id != message_id:
+                    logger.info(f"TTS {message_id} cancelled or superseded")
+                    return
+            
             # Split text into sentences for streaming
             sentences = self._split_into_sentences(text)
             
-            logger.info(f"Streaming TTS for {len(sentences)} sentences")
+            logger.info(f"Streaming TTS for {len(sentences)} sentences (ID: {message_id})")
             
             # Send start streaming signal
             await self._send_response(websocket, 'tts_stream_start', {
                 'total_sentences': len(sentences),
-                'text': text
+                'text': text,
+                'message_id': message_id
             })
             
             # Process each sentence
             for i, sentence in enumerate(sentences):
+                # Check if we should stop processing
+                with self.tts_lock:
+                    if not self.is_processing_tts or self.current_tts_id != message_id:
+                        logger.info(f"TTS {message_id} cancelled during processing")
+                        return
+                
                 if sentence.strip():
                     logger.info(f"Processing sentence {i+1}/{len(sentences)}: '{sentence[:30]}...'")
                     
@@ -350,7 +458,8 @@ class SpeechService:
                             'text': sentence.strip(),
                             'chunk_index': i,
                             'total_chunks': len(sentences),
-                            'is_final': i == len(sentences) - 1
+                            'is_final': i == len(sentences) - 1,
+                            'message_id': message_id
                         })
                         
                         # Clean up temp file
@@ -364,39 +473,56 @@ class SpeechService:
             # Send completion signal
             await self._send_response(websocket, 'tts_stream_complete', {
                 'text': text,
-                'total_chunks': len(sentences)
+                'total_chunks': len(sentences),
+                'message_id': message_id
             })
             
         except Exception as e:
             logger.error(f"Streaming TTS error: {e}")
             await self._send_response(websocket, 'tts_stream_error', {
-                'error': str(e)
+                'error': str(e),
+                'message_id': message_id
             })
     
-    async def _handle_single_tts(self, websocket, text):
+    async def _handle_single_tts(self, websocket, text, message_id=None):
         """Handle single-shot TTS synthesis request (legacy)"""
-        # Generate speech in a separate thread to avoid blocking
-        loop = asyncio.get_event_loop()
-        wav_file = await loop.run_in_executor(None, self._generate_speech, text)
-        
-        if wav_file and os.path.exists(wav_file):
-            # Read the audio file and send as base64
-            with open(wav_file, 'rb') as f:
-                audio_data = f.read()
+        try:
+            # Check if we should stop processing
+            with self.tts_lock:
+                if not self.is_processing_tts or self.current_tts_id != message_id:
+                    logger.info(f"TTS {message_id} cancelled")
+                    return
             
-            import base64
-            audio_b64 = base64.b64encode(audio_data).decode('utf-8')
+            # Generate speech in a separate thread to avoid blocking
+            loop = asyncio.get_event_loop()
+            wav_file = await loop.run_in_executor(None, self._generate_speech, text)
             
-            await self._send_response(websocket, 'speech_generated', {
-                'audio_data': audio_b64,
-                'text': text
-            })
-            
-            # Clean up temp file
-            os.remove(wav_file)
-        else:
+            if wav_file and os.path.exists(wav_file):
+                # Read the audio file and send as base64
+                with open(wav_file, 'rb') as f:
+                    audio_data = f.read()
+                
+                import base64
+                audio_b64 = base64.b64encode(audio_data).decode('utf-8')
+                
+                await self._send_response(websocket, 'speech_generated', {
+                    'audio_data': audio_b64,
+                    'text': text,
+                    'message_id': message_id
+                })
+                
+                # Clean up temp file
+                os.remove(wav_file)
+            else:
+                await self._send_response(websocket, 'speech_error', {
+                    'error': 'Failed to generate speech',
+                    'message_id': message_id
+                })
+        except Exception as e:
+            logger.error(f"Single TTS error: {e}")
             await self._send_response(websocket, 'speech_error', {
-                'error': 'Failed to generate speech'
+                'error': str(e),
+                'message_id': message_id
             })
     
     def _split_into_sentences(self, text: str) -> list:

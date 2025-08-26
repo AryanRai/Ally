@@ -801,6 +801,33 @@ ipcMain.handle('speech:getStatus', () => {
   }
 });
 
+ipcMain.handle('speech:clearTTSQueue', () => {
+  try {
+    speechService.clearTTSQueue();
+    return { success: true };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('speech:getTTSQueueStatus', () => {
+  try {
+    const status = speechService.getTTSQueueStatus();
+    return { success: true, data: status };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('speech:skipCurrentTTS', () => {
+  try {
+    speechService.skipCurrentTTS();
+    return { success: true };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+});
+
 // Setup speech service event forwarding to renderer
 function setupSpeechServiceEvents() {
   speechService.on('connected', () => {

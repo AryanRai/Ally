@@ -70,6 +70,8 @@ export function useSpeechService(): UseSpeechServiceReturn {
   const audioQueueRef = useRef<string[]>([]);
   const isPlayingRef = useRef<boolean>(false);
   const currentAudioSourceRef = useRef<AudioBufferSourceNode | null>(null);
+  const currentStreamIdRef = useRef<string | null>(null);
+  const pendingChunksRef = useRef<Map<string, string[]>>(new Map());
 
   // Initialize audio context
   useEffect(() => {
@@ -160,20 +162,42 @@ export function useSpeechService(): UseSpeechServiceReturn {
     // Streaming TTS events
     cleanupFunctions.push(
       window.pip.speech.onTTSStreamStart((data: any) => {
-        console.log('TTS streaming started:', data);
-        audioQueueRef.current = [];
-        isPlayingRef.current = false;
+        console.log('🎵 TTS streaming started:', data.message_id);
+        const messageId = data.message_id || 'default';
+        
+        // If this is a new stream and we're not currently playing, start it
+        if (!currentStreamIdRef.current) {
+          currentStreamIdRef.current = messageId;
+          audioQueueRef.current = [];
+          isPlayingRef.current = false;
+          console.log('🎯 Starting new TTS stream:', messageId);
+        } else {
+          // Queue this stream for later
+          pendingChunksRef.current.set(messageId, []);
+          console.log('📝 Queuing TTS stream:', messageId);
+        }
       })
     );
 
     cleanupFunctions.push(
       window.pip.speech.onTTSStreamChunk((data: any) => {
-        console.log('TTS chunk received:', data.chunk_index, '/', data.total_chunks);
+        const messageId = data.message_id || 'default';
+        console.log('📦 TTS chunk received:', messageId, data.chunk_index, '/', data.total_chunks);
+        
         if (data.audio_data) {
-          audioQueueRef.current.push(data.audio_data);
-          // Start playing if not already playing
-          if (!isPlayingRef.current) {
-            playNextAudioChunk();
+          // If this chunk belongs to the current stream, add to active queue
+          if (currentStreamIdRef.current === messageId) {
+            audioQueueRef.current.push(data.audio_data);
+            // Start playing if not already playing
+            if (!isPlayingRef.current) {
+              playNextAudioChunk();
+            }
+          } else {
+            // Otherwise, store in pending chunks
+            const chunks = pendingChunksRef.current.get(messageId) || [];
+            chunks.push(data.audio_data);
+            pendingChunksRef.current.set(messageId, chunks);
+            console.log('📋 Stored chunk for queued stream:', messageId);
           }
         }
       })
@@ -181,16 +205,34 @@ export function useSpeechService(): UseSpeechServiceReturn {
 
     cleanupFunctions.push(
       window.pip.speech.onTTSStreamComplete((data: any) => {
-        console.log('TTS streaming completed:', data);
+        const messageId = data.message_id || 'default';
+        console.log('✅ TTS streaming completed:', messageId);
+        
+        // If this was the current stream, prepare to start next
+        if (currentStreamIdRef.current === messageId) {
+          // Wait for current audio to finish, then start next stream
+          const checkAndStartNext = () => {
+            if (!isPlayingRef.current && audioQueueRef.current.length === 0) {
+              startNextPendingStream();
+            } else {
+              setTimeout(checkAndStartNext, 100);
+            }
+          };
+          setTimeout(checkAndStartNext, 100);
+        }
       })
     );
 
     cleanupFunctions.push(
       window.pip.speech.onTTSStreamError((error: string) => {
-        console.error('TTS streaming error:', error);
+        console.error('❌ TTS streaming error:', error);
         setSpeechError(`TTS streaming error: ${error}`);
+        
+        // Clear current stream and start next
+        currentStreamIdRef.current = null;
         audioQueueRef.current = [];
         isPlayingRef.current = false;
+        startNextPendingStream();
       })
     );
 
@@ -344,6 +386,31 @@ export function useSpeechService(): UseSpeechServiceReturn {
     }
   }, []);
 
+  const startNextPendingStream = useCallback(() => {
+    // Find the next pending stream
+    const pendingStreams = Array.from(pendingChunksRef.current.entries());
+    if (pendingStreams.length > 0) {
+      const [nextMessageId, chunks] = pendingStreams[0];
+      
+      console.log('🎯 Starting next pending TTS stream:', nextMessageId, 'with', chunks.length, 'chunks');
+      
+      // Set as current stream
+      currentStreamIdRef.current = nextMessageId;
+      audioQueueRef.current = [...chunks];
+      
+      // Remove from pending
+      pendingChunksRef.current.delete(nextMessageId);
+      
+      // Start playing
+      if (!isPlayingRef.current && audioQueueRef.current.length > 0) {
+        playNextAudioChunk();
+      }
+    } else {
+      currentStreamIdRef.current = null;
+      console.log('🏁 No more pending TTS streams');
+    }
+  }, []);
+
   const playNextAudioChunk = useCallback(async () => {
     if (isPlayingRef.current || audioQueueRef.current.length === 0) {
       return;
@@ -367,9 +434,13 @@ export function useSpeechService(): UseSpeechServiceReturn {
       // Continue playing next chunk if available
       if (audioQueueRef.current.length > 0) {
         setTimeout(() => playNextAudioChunk(), 50);
+      } else if (currentStreamIdRef.current) {
+        // Current stream finished, start next pending stream
+        console.log('🎵 Current stream finished, checking for next...');
+        setTimeout(() => startNextPendingStream(), 100);
       }
     }
-  }, [playGeneratedSpeech]);
+  }, [playGeneratedSpeech, startNextPendingStream]);
 
   const speakResponse = useCallback(async (text: string) => {
     if (!voiceModeEnabled || !window.pip?.speech) {
@@ -420,11 +491,18 @@ export function useSpeechService(): UseSpeechServiceReturn {
       }
     }
 
-    // Clear audio queue
+    // Clear all queues
     audioQueueRef.current = [];
+    pendingChunksRef.current.clear();
+    currentStreamIdRef.current = null;
     isPlayingRef.current = false;
 
-    console.log('🔇 Speech interrupted and queue cleared');
+    // Also tell the speech service to clear its queue
+    if (window.pip?.speech) {
+      window.pip.speech.clearTTSQueue?.();
+    }
+
+    console.log('🔇 Speech interrupted and all queues cleared');
   }, []);
 
   const interruptAndSpeak = useCallback(async (newText: string) => {
