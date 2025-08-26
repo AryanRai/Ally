@@ -187,6 +187,23 @@ export class SpeechServiceClient extends EventEmitter {
         this.emit('speechError', payload.error);
         break;
         
+      // Streaming TTS events
+      case 'tts_stream_start':
+        this.emit('ttsStreamStart', payload);
+        break;
+        
+      case 'tts_stream_chunk':
+        this.emit('ttsStreamChunk', payload);
+        break;
+        
+      case 'tts_stream_complete':
+        this.emit('ttsStreamComplete', payload);
+        break;
+        
+      case 'tts_stream_error':
+        this.emit('ttsStreamError', payload.error);
+        break;
+        
       case 'ggwave_sent':
         this.emit('ggwaveSent', payload);
         break;
@@ -250,6 +267,13 @@ export class SpeechServiceClient extends EventEmitter {
    */
   synthesizeSpeech(request: SpeechSynthesisRequest): void {
     this.sendCommand('synthesize_speech', request);
+  }
+
+  /**
+   * Synthesize speech from text with streaming
+   */
+  synthesizeSpeechStreaming(request: SpeechSynthesisRequest): void {
+    this.sendCommand('synthesize_speech', { ...request, streaming: true });
   }
 
   /**
