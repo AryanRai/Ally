@@ -37,12 +37,23 @@ export interface ServiceStatus {
   models_loaded: boolean;
 }
 
+interface QueuedTTSMessage {
+  id: string;
+  request: SpeechSynthesisRequest;
+  timestamp: number;
+}
+
 export class SpeechServiceClient extends EventEmitter {
   private ws: WebSocket | null = null;
   private config: SpeechConfig;
   private reconnectTimer: NodeJS.Timeout | null = null;
   private isConnecting = false;
   private isConnected = false;
+  
+  // TTS Queue management
+  private ttsQueue: QueuedTTSMessage[] = [];
+  private isProcessingTTS = false;
+  private currentTTSId: string | null = null;
 
   constructor(config: Partial<SpeechConfig> = {}) {
     super();
@@ -140,6 +151,11 @@ export class SpeechServiceClient extends EventEmitter {
       this.ws = null;
     }
     
+    // Clear TTS queue on disconnect
+    this.clearTTSQueue();
+    this.isProcessingTTS = false;
+    this.currentTTSId = null;
+    
     this.isConnected = false;
     this.isConnecting = false;
   }
@@ -198,10 +214,14 @@ export class SpeechServiceClient extends EventEmitter {
         
       case 'tts_stream_complete':
         this.emit('ttsStreamComplete', payload);
+        // Process next TTS message in queue
+        this.onTTSComplete();
         break;
         
       case 'tts_stream_error':
         this.emit('ttsStreamError', payload.error);
+        // Process next TTS message in queue even on error
+        this.onTTSComplete();
         break;
         
       case 'ggwave_sent':
@@ -246,6 +266,67 @@ export class SpeechServiceClient extends EventEmitter {
     }, this.config.reconnectInterval);
   }
 
+  /**
+   * Generate unique ID for TTS messages
+   */
+  private generateTTSId(): string {
+    return `tts_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  }
+
+  /**
+   * Process next TTS message in queue
+   */
+  private processNextTTS(): void {
+    if (this.isProcessingTTS || this.ttsQueue.length === 0) {
+      return;
+    }
+
+    const nextMessage = this.ttsQueue.shift()!;
+    this.isProcessingTTS = true;
+    this.currentTTSId = nextMessage.id;
+
+    console.log(`🎵 Processing TTS message ${nextMessage.id} (${this.ttsQueue.length} remaining in queue)`);
+    
+    // Send the actual TTS command
+    this.sendCommand('synthesize_speech', { 
+      ...nextMessage.request, 
+      streaming: true,
+      messageId: nextMessage.id 
+    });
+  }
+
+  /**
+   * Handle TTS completion
+   */
+  private onTTSComplete(): void {
+    console.log(`✅ TTS message ${this.currentTTSId} completed`);
+    this.isProcessingTTS = false;
+    this.currentTTSId = null;
+    
+    // Process next message in queue
+    this.processNextTTS();
+  }
+
+  /**
+   * Add TTS message to queue
+   */
+  private queueTTSMessage(request: SpeechSynthesisRequest): string {
+    const id = this.generateTTSId();
+    const queuedMessage: QueuedTTSMessage = {
+      id,
+      request,
+      timestamp: Date.now()
+    };
+
+    this.ttsQueue.push(queuedMessage);
+    console.log(`📝 Queued TTS message ${id} (queue length: ${this.ttsQueue.length})`);
+    
+    // Start processing if not already processing
+    this.processNextTTS();
+    
+    return id;
+  }
+
   // Public API methods
 
   /**
@@ -263,16 +344,24 @@ export class SpeechServiceClient extends EventEmitter {
   }
 
   /**
-   * Synthesize speech from text
+   * Synthesize speech from text (queued for sequential playback)
    */
-  synthesizeSpeech(request: SpeechSynthesisRequest): void {
-    this.sendCommand('synthesize_speech', request);
+  synthesizeSpeech(request: SpeechSynthesisRequest): string {
+    return this.queueTTSMessage(request);
   }
 
   /**
-   * Synthesize speech from text with streaming
+   * Synthesize speech from text with streaming (queued for sequential playback)
    */
-  synthesizeSpeechStreaming(request: SpeechSynthesisRequest): void {
+  synthesizeSpeechStreaming(request: SpeechSynthesisRequest): string {
+    return this.queueTTSMessage(request);
+  }
+
+  /**
+   * Synthesize speech immediately (bypasses queue - use with caution)
+   */
+  synthesizeSpeechImmediate(request: SpeechSynthesisRequest): void {
+    console.log('⚡ Sending immediate TTS (bypassing queue)');
     this.sendCommand('synthesize_speech', { ...request, streaming: true });
   }
 
@@ -295,6 +384,38 @@ export class SpeechServiceClient extends EventEmitter {
    */
   updateConfig(config: Partial<SpeechConfig>): void {
     this.config = { ...this.config, ...config };
+  }
+
+  /**
+   * Clear TTS queue
+   */
+  clearTTSQueue(): void {
+    const queueLength = this.ttsQueue.length;
+    this.ttsQueue = [];
+    console.log(`🗑️ Cleared TTS queue (${queueLength} messages removed)`);
+  }
+
+  /**
+   * Get TTS queue status
+   */
+  getTTSQueueStatus(): { queueLength: number; isProcessing: boolean; currentId: string | null } {
+    return {
+      queueLength: this.ttsQueue.length,
+      isProcessing: this.isProcessingTTS,
+      currentId: this.currentTTSId
+    };
+  }
+
+  /**
+   * Skip current TTS and move to next
+   */
+  skipCurrentTTS(): void {
+    if (this.isProcessingTTS) {
+      console.log(`⏭️ Skipping current TTS message ${this.currentTTSId}`);
+      // Send stop command to interrupt current TTS
+      this.sendCommand('stop_tts');
+      this.onTTSComplete();
+    }
   }
 }
 

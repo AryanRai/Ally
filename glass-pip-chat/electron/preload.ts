@@ -97,6 +97,9 @@ const pipAPI = {
     synthesizeStreaming: (text: string) => ipcRenderer.invoke('speech:synthesizeStreaming', text),
     sendGGWave: (text: string) => ipcRenderer.invoke('speech:sendGGWave', text),
     getStatus: () => ipcRenderer.invoke('speech:getStatus'),
+    clearTTSQueue: () => ipcRenderer.invoke('speech:clearTTSQueue'),
+    getTTSQueueStatus: () => ipcRenderer.invoke('speech:getTTSQueueStatus'),
+    skipCurrentTTS: () => ipcRenderer.invoke('speech:skipCurrentTTS'),
     
     // Event listeners
     onConnected: (callback: () => void) => {
