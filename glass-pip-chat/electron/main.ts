@@ -774,6 +774,15 @@ ipcMain.handle('speech:synthesize', (_, text: string) => {
   }
 });
 
+ipcMain.handle('speech:synthesizeStreaming', (_, text: string) => {
+  try {
+    speechService.synthesizeSpeechStreaming({ text });
+    return { success: true };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+});
+
 ipcMain.handle('speech:sendGGWave', (_, text: string) => {
   try {
     speechService.sendGGWave({ text });
@@ -851,6 +860,31 @@ function setupSpeechServiceEvents() {
   speechService.on('listeningStopped', () => {
     if (win && !win.isDestroyed()) {
       win.webContents.send('speech:listeningStopped');
+    }
+  });
+
+  // Streaming TTS events
+  speechService.on('ttsStreamStart', (data) => {
+    if (win && !win.isDestroyed()) {
+      win.webContents.send('speech:ttsStreamStart', data);
+    }
+  });
+
+  speechService.on('ttsStreamChunk', (data) => {
+    if (win && !win.isDestroyed()) {
+      win.webContents.send('speech:ttsStreamChunk', data);
+    }
+  });
+
+  speechService.on('ttsStreamComplete', (data) => {
+    if (win && !win.isDestroyed()) {
+      win.webContents.send('speech:ttsStreamComplete', data);
+    }
+  });
+
+  speechService.on('ttsStreamError', (error) => {
+    if (win && !win.isDestroyed()) {
+      win.webContents.send('speech:ttsStreamError', error);
     }
   });
 }

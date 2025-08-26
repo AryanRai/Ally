@@ -221,31 +221,68 @@ export default function GlassChatPiP() {
       const response = await ollamaIntegration.sendMessageToOllama(
         activeChat?.messages || [],
         contextualContent,
-        (update) => {
-          let responseContent = '';
+        (() => {
+          let lastSentenceIndex = 0;
+          let accumulatedResponse = '';
 
-          if (update.type === 'thinking') {
-            // Show thinking in real-time with typing indicator
-            responseContent = `💭 **Thinking...**\n\n${update.thinking}${update.thinking.endsWith('.') || update.thinking.endsWith('!') || update.thinking.endsWith('?') ? '' : '▋'}`;
-          } else if (update.type === 'response') {
-            // Show both thinking (if any) and response
-            if (update.thinking) {
-              responseContent = `💭 **Thought Process:**\n\n${update.thinking}\n\n---\n\n**Answer:**\n\n${update.response}${update.response.endsWith('.') || update.response.endsWith('!') || update.response.endsWith('?') ? '' : '▋'}`;
-            } else {
-              responseContent = `${update.response}${update.response.endsWith('.') || update.response.endsWith('!') || update.response.endsWith('?') ? '' : '▋'}`;
-            }
-          } else if (update.type === 'done') {
-            // Final response without typing indicator
-            if (update.thinking) {
-              responseContent = `💭 **Thought Process:**\n\n${update.thinking}\n\n---\n\n**Answer:**\n\n${update.response}`;
-            } else {
-              responseContent = update.response;
-            }
-          }
+          return (update) => {
+            let responseContent = '';
 
-          // Update current response for both collapsed and expanded modes
-          setCurrentResponse(responseContent);
-        }
+            if (update.type === 'thinking') {
+              // Show thinking in real-time with typing indicator
+              responseContent = `💭 **Thinking...**\n\n${update.thinking}${update.thinking.endsWith('.') || update.thinking.endsWith('!') || update.thinking.endsWith('?') ? '' : '▋'}`;
+            } else if (update.type === 'response') {
+              // Show both thinking (if any) and response
+              if (update.thinking) {
+                responseContent = `💭 **Thought Process:**\n\n${update.thinking}\n\n---\n\n**Answer:**\n\n${update.response}${update.response.endsWith('.') || update.response.endsWith('!') || update.response.endsWith('?') ? '' : '▋'}`;
+              } else {
+                responseContent = `${update.response}${update.response.endsWith('.') || update.response.endsWith('!') || update.response.endsWith('?') ? '' : '▋'}`;
+              }
+
+              // Stream TTS for new sentences if voice mode is enabled
+              if (voiceModeEnabled && update.response) {
+                accumulatedResponse = update.response;
+                const sentences = accumulatedResponse.split(/(?<=[.!?])\s+/);
+
+                // Check if we have new complete sentences to speak
+                if (sentences.length > lastSentenceIndex + 1) {
+                  for (let i = lastSentenceIndex; i < sentences.length - 1; i++) {
+                    const sentence = sentences[i].trim();
+                    if (sentence && sentence.length > 3) {
+                      console.log('Streaming TTS for sentence:', sentence.substring(0, 30) + '...');
+                      speechService.synthesizeSpeechStreaming(sentence).catch(error => {
+                        console.error('Error in streaming TTS:', error);
+                      });
+                    }
+                  }
+                  lastSentenceIndex = sentences.length - 1;
+                }
+              }
+            } else if (update.type === 'done') {
+              // Final response without typing indicator
+              if (update.thinking) {
+                responseContent = `💭 **Thought Process:**\n\n${update.thinking}\n\n---\n\n**Answer:**\n\n${update.response}`;
+              } else {
+                responseContent = update.response;
+              }
+
+              // Speak any remaining incomplete sentence
+              if (voiceModeEnabled && accumulatedResponse) {
+                const sentences = accumulatedResponse.split(/(?<=[.!?])\s+/);
+                const lastSentence = sentences[sentences.length - 1]?.trim();
+                if (lastSentence && lastSentence.length > 3 && !lastSentence.match(/[.!?]$/)) {
+                  console.log('Streaming TTS for final sentence:', lastSentence.substring(0, 30) + '...');
+                  speechService.synthesizeSpeechStreaming(lastSentence).catch(error => {
+                    console.error('Error in final streaming TTS:', error);
+                  });
+                }
+              }
+            }
+
+            // Update current response for both collapsed and expanded modes
+            setCurrentResponse(responseContent);
+          };
+        })()
       );
 
       if (response) {
@@ -259,11 +296,7 @@ export default function GlassChatPiP() {
 
         addMessageToActiveChat(assistantMessage);
 
-        // Auto-speak the response if voice mode is enabled
-        if (voiceModeEnabled) {
-          console.log('Speaking response:', response.substring(0, 50) + '...');
-          await speechService.speakResponse(response);
-        }
+        // TTS is already handled in real-time during streaming
       }
     } catch (error) {
       console.error('Error sending message:', error);
@@ -310,31 +343,68 @@ export default function GlassChatPiP() {
         // Get messages up to the user message (excluding the old response)
         const messagesUpToUser = updatedMessages.slice(0, messageIndex);
 
-        const response = await ollamaIntegration.sendMessageToOllama(messagesUpToUser, userMessage.content, (update) => {
-          let responseContent = '';
+        const response = await ollamaIntegration.sendMessageToOllama(messagesUpToUser, userMessage.content, (() => {
+          let lastSentenceIndex = 0;
+          let accumulatedResponse = '';
 
-          if (update.type === 'thinking') {
-            // Show thinking in real-time with typing indicator
-            responseContent = `💭 **Thinking...**\n\n${update.thinking}${update.thinking.endsWith('.') || update.thinking.endsWith('!') || update.thinking.endsWith('?') ? '' : '▋'}`;
-          } else if (update.type === 'response') {
-            // Show both thinking (if any) and response
-            if (update.thinking) {
-              responseContent = `💭 **Thought Process:**\n\n${update.thinking}\n\n---\n\n**Answer:**\n\n${update.response}${update.response.endsWith('.') || update.response.endsWith('!') || update.response.endsWith('?') ? '' : '▋'}`;
-            } else {
-              responseContent = `${update.response}${update.response.endsWith('.') || update.response.endsWith('!') || update.response.endsWith('?') ? '' : '▋'}`;
-            }
-          } else if (update.type === 'done') {
-            // Final response without typing indicator
-            if (update.thinking) {
-              responseContent = `💭 **Thought Process:**\n\n${update.thinking}\n\n---\n\n**Answer:**\n\n${update.response}`;
-            } else {
-              responseContent = update.response;
-            }
-          }
+          return (update) => {
+            let responseContent = '';
 
-          // Update current response for both collapsed and expanded modes
-          setCurrentResponse(responseContent);
-        });
+            if (update.type === 'thinking') {
+              // Show thinking in real-time with typing indicator
+              responseContent = `💭 **Thinking...**\n\n${update.thinking}${update.thinking.endsWith('.') || update.thinking.endsWith('!') || update.thinking.endsWith('?') ? '' : '▋'}`;
+            } else if (update.type === 'response') {
+              // Show both thinking (if any) and response
+              if (update.thinking) {
+                responseContent = `💭 **Thought Process:**\n\n${update.thinking}\n\n---\n\n**Answer:**\n\n${update.response}${update.response.endsWith('.') || update.response.endsWith('!') || update.response.endsWith('?') ? '' : '▋'}`;
+              } else {
+                responseContent = `${update.response}${update.response.endsWith('.') || update.response.endsWith('!') || update.response.endsWith('?') ? '' : '▋'}`;
+              }
+
+              // Stream TTS for new sentences if voice mode is enabled
+              if (voiceModeEnabled && update.response) {
+                accumulatedResponse = update.response;
+                const sentences = accumulatedResponse.split(/(?<=[.!?])\s+/);
+
+                // Check if we have new complete sentences to speak
+                if (sentences.length > lastSentenceIndex + 1) {
+                  for (let i = lastSentenceIndex; i < sentences.length - 1; i++) {
+                    const sentence = sentences[i].trim();
+                    if (sentence && sentence.length > 3) {
+                      console.log('Streaming TTS for recompute sentence:', sentence.substring(0, 30) + '...');
+                      speechService.synthesizeSpeechStreaming(sentence).catch(error => {
+                        console.error('Error in recompute streaming TTS:', error);
+                      });
+                    }
+                  }
+                  lastSentenceIndex = sentences.length - 1;
+                }
+              }
+            } else if (update.type === 'done') {
+              // Final response without typing indicator
+              if (update.thinking) {
+                responseContent = `💭 **Thought Process:**\n\n${update.thinking}\n\n---\n\n**Answer:**\n\n${update.response}`;
+              } else {
+                responseContent = update.response;
+              }
+
+              // Speak any remaining incomplete sentence
+              if (voiceModeEnabled && accumulatedResponse) {
+                const sentences = accumulatedResponse.split(/(?<=[.!?])\s+/);
+                const lastSentence = sentences[sentences.length - 1]?.trim();
+                if (lastSentence && lastSentence.length > 3 && !lastSentence.match(/[.!?]$/)) {
+                  console.log('Streaming TTS for final recompute sentence:', lastSentence.substring(0, 30) + '...');
+                  speechService.synthesizeSpeechStreaming(lastSentence).catch(error => {
+                    console.error('Error in final recompute streaming TTS:', error);
+                  });
+                }
+              }
+            }
+
+            // Update current response for both collapsed and expanded modes
+            setCurrentResponse(responseContent);
+          };
+        })());
 
         if (response) {
           // Create assistant message only after streaming is complete

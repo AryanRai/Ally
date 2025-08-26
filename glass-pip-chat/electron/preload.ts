@@ -94,6 +94,7 @@ const pipAPI = {
     startListening: () => ipcRenderer.invoke('speech:startListening'),
     stopListening: () => ipcRenderer.invoke('speech:stopListening'),
     synthesize: (text: string) => ipcRenderer.invoke('speech:synthesize', text),
+    synthesizeStreaming: (text: string) => ipcRenderer.invoke('speech:synthesizeStreaming', text),
     sendGGWave: (text: string) => ipcRenderer.invoke('speech:sendGGWave', text),
     getStatus: () => ipcRenderer.invoke('speech:getStatus'),
     
@@ -143,6 +144,28 @@ const pipAPI = {
     onListeningStopped: (callback: () => void) => {
       ipcRenderer.on('speech:listeningStopped', callback);
       return () => ipcRenderer.removeListener('speech:listeningStopped', callback);
+    },
+    
+    // Streaming TTS events
+    onTTSStreamStart: (callback: (data: any) => void) => {
+      const handler = (_: any, data: any) => callback(data);
+      ipcRenderer.on('speech:ttsStreamStart', handler);
+      return () => ipcRenderer.removeListener('speech:ttsStreamStart', handler);
+    },
+    onTTSStreamChunk: (callback: (data: any) => void) => {
+      const handler = (_: any, data: any) => callback(data);
+      ipcRenderer.on('speech:ttsStreamChunk', handler);
+      return () => ipcRenderer.removeListener('speech:ttsStreamChunk', handler);
+    },
+    onTTSStreamComplete: (callback: (data: any) => void) => {
+      const handler = (_: any, data: any) => callback(data);
+      ipcRenderer.on('speech:ttsStreamComplete', handler);
+      return () => ipcRenderer.removeListener('speech:ttsStreamComplete', handler);
+    },
+    onTTSStreamError: (callback: (error: string) => void) => {
+      const handler = (_: any, error: string) => callback(error);
+      ipcRenderer.on('speech:ttsStreamError', handler);
+      return () => ipcRenderer.removeListener('speech:ttsStreamError', handler);
     }
   },
 

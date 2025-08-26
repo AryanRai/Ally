@@ -215,6 +215,9 @@ class SpeechService:
             command = data.get('command')
             payload = data.get('payload', {})
             
+            # Store the last message data for context
+            websocket._last_message_data = data
+            
             if command == 'start_listening':
                 await self._send_response(websocket, 'listening_started', {'status': 'ok'})
                 
@@ -291,35 +294,156 @@ class SpeechService:
             
         try:
             logger.info(f"Processing TTS request for text: '{text[:50]}...'")
-            # Generate speech in a separate thread to avoid blocking
-            loop = asyncio.get_event_loop()
-            wav_file = await loop.run_in_executor(None, self._generate_speech, text)
             
-            if wav_file and os.path.exists(wav_file):
-                # Read the audio file and send as base64
-                with open(wav_file, 'rb') as f:
-                    audio_data = f.read()
-                
-                import base64
-                audio_b64 = base64.b64encode(audio_data).decode('utf-8')
-                
-                await self._send_response(websocket, 'speech_generated', {
-                    'audio_data': audio_b64,
-                    'text': text
-                })
-                
-                # Clean up temp file
-                os.remove(wav_file)
+            # Check if this is a streaming request
+            payload = {'text': text}
+            if hasattr(websocket, '_last_message_data'):
+                payload = websocket._last_message_data.get('payload', {})
+            
+            streaming = payload.get('streaming', False)
+            
+            if streaming:
+                await self._handle_streaming_tts(websocket, text)
             else:
-                await self._send_response(websocket, 'speech_error', {
-                    'error': 'Failed to generate speech'
-                })
+                # Legacy single-shot TTS
+                await self._handle_single_tts(websocket, text)
                 
         except Exception as e:
             logger.error(f"TTS request error: {e}")
             await self._send_response(websocket, 'speech_error', {
                 'error': str(e)
             })
+    
+    async def _handle_streaming_tts(self, websocket, text):
+        """Handle streaming TTS synthesis request"""
+        try:
+            # Split text into sentences for streaming
+            sentences = self._split_into_sentences(text)
+            
+            logger.info(f"Streaming TTS for {len(sentences)} sentences")
+            
+            # Send start streaming signal
+            await self._send_response(websocket, 'tts_stream_start', {
+                'total_sentences': len(sentences),
+                'text': text
+            })
+            
+            # Process each sentence
+            for i, sentence in enumerate(sentences):
+                if sentence.strip():
+                    logger.info(f"Processing sentence {i+1}/{len(sentences)}: '{sentence[:30]}...'")
+                    
+                    # Generate speech for this sentence
+                    loop = asyncio.get_event_loop()
+                    wav_file = await loop.run_in_executor(None, self._generate_speech, sentence.strip())
+                    
+                    if wav_file and os.path.exists(wav_file):
+                        # Read the audio file and send as base64
+                        with open(wav_file, 'rb') as f:
+                            audio_data = f.read()
+                        
+                        import base64
+                        audio_b64 = base64.b64encode(audio_data).decode('utf-8')
+                        
+                        await self._send_response(websocket, 'tts_stream_chunk', {
+                            'audio_data': audio_b64,
+                            'text': sentence.strip(),
+                            'chunk_index': i,
+                            'total_chunks': len(sentences),
+                            'is_final': i == len(sentences) - 1
+                        })
+                        
+                        # Clean up temp file
+                        os.remove(wav_file)
+                        
+                        # Small delay to allow client to process
+                        await asyncio.sleep(0.1)
+                    else:
+                        logger.error(f"Failed to generate speech for sentence: {sentence[:30]}...")
+            
+            # Send completion signal
+            await self._send_response(websocket, 'tts_stream_complete', {
+                'text': text,
+                'total_chunks': len(sentences)
+            })
+            
+        except Exception as e:
+            logger.error(f"Streaming TTS error: {e}")
+            await self._send_response(websocket, 'tts_stream_error', {
+                'error': str(e)
+            })
+    
+    async def _handle_single_tts(self, websocket, text):
+        """Handle single-shot TTS synthesis request (legacy)"""
+        # Generate speech in a separate thread to avoid blocking
+        loop = asyncio.get_event_loop()
+        wav_file = await loop.run_in_executor(None, self._generate_speech, text)
+        
+        if wav_file and os.path.exists(wav_file):
+            # Read the audio file and send as base64
+            with open(wav_file, 'rb') as f:
+                audio_data = f.read()
+            
+            import base64
+            audio_b64 = base64.b64encode(audio_data).decode('utf-8')
+            
+            await self._send_response(websocket, 'speech_generated', {
+                'audio_data': audio_b64,
+                'text': text
+            })
+            
+            # Clean up temp file
+            os.remove(wav_file)
+        else:
+            await self._send_response(websocket, 'speech_error', {
+                'error': 'Failed to generate speech'
+            })
+    
+    def _split_into_sentences(self, text: str) -> list:
+        """Split text into sentences for streaming TTS"""
+        import re
+        
+        # Remove thinking sections and formatting
+        clean_text = text
+        
+        # Remove thinking sections
+        clean_text = re.sub(r'💭\s*\*\*Thinking\.\.\.\*\*\s*\n\n.*?\n\n---\n\n\*\*Answer:\*\*\s*\n\n', '', clean_text, flags=re.DOTALL)
+        clean_text = re.sub(r'💭\s*\*\*Thought Process:\*\*\s*\n\n.*?\n\n---\n\n\*\*Answer:\*\*\s*\n\n', '', clean_text, flags=re.DOTALL)
+        
+        # Remove markdown formatting
+        clean_text = re.sub(r'\*\*(.*?)\*\*', r'\1', clean_text)  # Bold
+        clean_text = re.sub(r'\*(.*?)\*', r'\1', clean_text)      # Italic
+        clean_text = re.sub(r'`(.*?)`', r'\1', clean_text)        # Code
+        clean_text = re.sub(r'#{1,6}\s*(.*)', r'\1', clean_text)  # Headers
+        
+        # Split into sentences
+        sentences = re.split(r'(?<=[.!?])\s+', clean_text.strip())
+        
+        # Filter out empty sentences and very short ones
+        sentences = [s.strip() for s in sentences if s.strip() and len(s.strip()) > 3]
+        
+        # Merge very short sentences with the next one
+        merged_sentences = []
+        i = 0
+        while i < len(sentences):
+            current = sentences[i]
+            
+            # If current sentence is very short and there's a next one, merge them
+            if len(current) < 20 and i + 1 < len(sentences):
+                current += " " + sentences[i + 1]
+                i += 2
+            else:
+                i += 1
+            
+            # Limit sentence length for better TTS
+            if len(current) > self.config.max_sentence_length:
+                # Split long sentences at commas or other natural breaks
+                parts = re.split(r'(?<=,)\s+', current)
+                merged_sentences.extend(parts)
+            else:
+                merged_sentences.append(current)
+        
+        return merged_sentences
     
     def _generate_speech(self, text: str) -> Optional[str]:
         """Generate speech file from text"""

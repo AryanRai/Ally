@@ -29,6 +29,7 @@ export interface UseSpeechServiceReturn {
   startListening: () => Promise<void>;
   stopListening: () => Promise<void>;
   synthesizeSpeech: (text: string) => Promise<void>;
+  synthesizeSpeechStreaming: (text: string) => Promise<void>;
   sendGGWave: (text: string) => Promise<void>;
   
   // Events
@@ -46,6 +47,7 @@ export interface UseSpeechServiceReturn {
   
   // Auto-speak responses
   speakResponse: (text: string) => Promise<void>;
+  speakResponseStreaming: (text: string) => Promise<void>;
 }
 
 export function useSpeechService(): UseSpeechServiceReturn {
@@ -61,6 +63,8 @@ export function useSpeechService(): UseSpeechServiceReturn {
   const [voiceModeEnabled, setVoiceModeEnabled] = useState<boolean>(false);
   const [droidModeEnabled, setDroidModeEnabled] = useState<boolean>(false);
   const audioContextRef = useRef<AudioContext | null>(null);
+  const audioQueueRef = useRef<string[]>([]);
+  const isPlayingRef = useRef<boolean>(false);
 
   // Initialize audio context
   useEffect(() => {
@@ -145,6 +149,43 @@ export function useSpeechService(): UseSpeechServiceReturn {
             console.error('Error playing generated speech:', error);
           });
         }
+      })
+    );
+
+    // Streaming TTS events
+    cleanupFunctions.push(
+      window.pip.speech.onTTSStreamStart((data: any) => {
+        console.log('TTS streaming started:', data);
+        audioQueueRef.current = [];
+        isPlayingRef.current = false;
+      })
+    );
+
+    cleanupFunctions.push(
+      window.pip.speech.onTTSStreamChunk((data: any) => {
+        console.log('TTS chunk received:', data.chunk_index, '/', data.total_chunks);
+        if (data.audio_data) {
+          audioQueueRef.current.push(data.audio_data);
+          // Start playing if not already playing
+          if (!isPlayingRef.current) {
+            playNextAudioChunk();
+          }
+        }
+      })
+    );
+
+    cleanupFunctions.push(
+      window.pip.speech.onTTSStreamComplete((data: any) => {
+        console.log('TTS streaming completed:', data);
+      })
+    );
+
+    cleanupFunctions.push(
+      window.pip.speech.onTTSStreamError((error: string) => {
+        console.error('TTS streaming error:', error);
+        setSpeechError(`TTS streaming error: ${error}`);
+        audioQueueRef.current = [];
+        isPlayingRef.current = false;
       })
     );
 
@@ -234,6 +275,17 @@ export function useSpeechService(): UseSpeechServiceReturn {
     }
   }, []);
 
+  const synthesizeSpeechStreaming = useCallback(async (text: string) => {
+    if (!window.pip?.speech) {
+      throw new Error('Speech service not available');
+    }
+    
+    const result = await window.pip.speech.synthesizeStreaming(text);
+    if (!result.success) {
+      throw new Error(result.error || 'Failed to synthesize streaming speech');
+    }
+  }, []);
+
   const sendGGWave = useCallback(async (text: string) => {
     if (!window.pip?.speech) {
       throw new Error('Speech service not available');
@@ -265,13 +317,41 @@ export function useSpeechService(): UseSpeechServiceReturn {
       const source = audioContextRef.current.createBufferSource();
       source.buffer = audioBuffer;
       source.connect(audioContextRef.current.destination);
-      source.start();
+      
+      return new Promise<void>((resolve, reject) => {
+        source.onended = () => resolve();
+        source.onerror = reject;
+        source.start();
+      });
 
     } catch (error) {
       console.error('Error playing audio:', error);
       throw error;
     }
   }, []);
+
+  const playNextAudioChunk = useCallback(async () => {
+    if (isPlayingRef.current || audioQueueRef.current.length === 0) {
+      return;
+    }
+
+    isPlayingRef.current = true;
+    
+    try {
+      while (audioQueueRef.current.length > 0) {
+        const audioData = audioQueueRef.current.shift();
+        if (audioData) {
+          await playGeneratedSpeech(audioData);
+          // Small delay between chunks
+          await new Promise(resolve => setTimeout(resolve, 50));
+        }
+      }
+    } catch (error) {
+      console.error('Error playing audio chunk:', error);
+    } finally {
+      isPlayingRef.current = false;
+    }
+  }, [playGeneratedSpeech]);
 
   const speakResponse = useCallback(async (text: string) => {
     if (!voiceModeEnabled || !window.pip?.speech) {
@@ -292,6 +372,25 @@ export function useSpeechService(): UseSpeechServiceReturn {
     }
   }, [voiceModeEnabled, droidModeEnabled, sendGGWave, synthesizeSpeech]);
 
+  const speakResponseStreaming = useCallback(async (text: string) => {
+    if (!voiceModeEnabled || !window.pip?.speech) {
+      return;
+    }
+
+    try {
+      if (droidModeEnabled) {
+        // Use ggwave for droid communication (no streaming support)
+        await sendGGWave(text);
+      } else {
+        // Use streaming TTS for normal speech
+        await synthesizeSpeechStreaming(text);
+      }
+    } catch (error) {
+      console.error('Error speaking response with streaming:', error);
+      setSpeechError(`Failed to speak response with streaming: ${error}`);
+    }
+  }, [voiceModeEnabled, droidModeEnabled, sendGGWave, synthesizeSpeechStreaming]);
+
   return {
     // Status
     status,
@@ -304,6 +403,7 @@ export function useSpeechService(): UseSpeechServiceReturn {
     startListening,
     stopListening,
     synthesizeSpeech,
+    synthesizeSpeechStreaming,
     sendGGWave,
     
     // Events
@@ -320,6 +420,7 @@ export function useSpeechService(): UseSpeechServiceReturn {
     setDroidModeEnabled,
     
     // Auto-speak responses
-    speakResponse
+    speakResponse,
+    speakResponseStreaming
   };
 }
