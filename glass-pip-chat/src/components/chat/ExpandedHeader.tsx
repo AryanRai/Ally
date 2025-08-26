@@ -12,7 +12,9 @@ import {
   Clipboard,
   ChevronDown,
   ChevronUp,
-  Check
+  Check,
+  Mic,
+  MicOff
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { ThemeUtils } from '../../utils/themeUtils';
@@ -43,6 +45,8 @@ interface ExpandedHeaderProps {
   onCollapseToggle: () => void;
   onHide: () => void;
   size: string;
+  showSpeechControls: boolean;
+  onSpeechToggle: () => void;
 }
 
 export default function ExpandedHeader({
@@ -70,7 +74,9 @@ export default function ExpandedHeader({
   onSettings,
   onCollapseToggle,
   onHide,
-  size
+  size,
+  showSpeechControls,
+  onSpeechToggle
 }: ExpandedHeaderProps) {
   const modelButtonRef = useRef<HTMLButtonElement>(null);
   const [dropdownPosition, setDropdownPosition] = useState({ top: 0, right: 0, maxHeight: 256 });
@@ -336,6 +342,22 @@ export default function ExpandedHeader({
             "absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full",
             contextToggleEnabled ? "bg-green-400" : "bg-red-400"
           )} />
+        </button>
+
+        <button
+          onClick={onSpeechToggle}
+          className={cn(
+            "p-1.5 rounded-lg transition-colors relative",
+            showSpeechControls
+              ? "bg-blue-500/20 hover:bg-blue-500/30 text-blue-300"
+              : "hover:bg-white/10"
+          )}
+          title={`Speech controls: ${showSpeechControls ? 'ON' : 'OFF'} (Ctrl+Shift+V)`}
+        >
+          {showSpeechControls ? <Mic className="w-3.5 h-3.5" /> : <MicOff className="w-3.5 h-3.5" />}
+          {showSpeechControls && (
+            <div className="absolute -bottom-0.5 -right-0.5 w-2 h-2 bg-blue-400 rounded-full" />
+          )}
         </button>
 
         <button

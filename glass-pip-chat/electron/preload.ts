@@ -84,6 +84,72 @@ const pipAPI = {
   // System commands
   system: {
     executeCommand: (command: string) => ipcRenderer.invoke('system:executeCommand', command)
+  },
+
+  // Speech service
+  speech: {
+    connect: () => ipcRenderer.invoke('speech:connect'),
+    disconnect: () => ipcRenderer.invoke('speech:disconnect'),
+    isConnected: () => ipcRenderer.invoke('speech:isConnected'),
+    startListening: () => ipcRenderer.invoke('speech:startListening'),
+    stopListening: () => ipcRenderer.invoke('speech:stopListening'),
+    synthesize: (text: string) => ipcRenderer.invoke('speech:synthesize', text),
+    sendGGWave: (text: string) => ipcRenderer.invoke('speech:sendGGWave', text),
+    getStatus: () => ipcRenderer.invoke('speech:getStatus'),
+    
+    // Event listeners
+    onConnected: (callback: () => void) => {
+      ipcRenderer.on('speech:connected', callback);
+      return () => ipcRenderer.removeListener('speech:connected', callback);
+    },
+    onDisconnected: (callback: () => void) => {
+      ipcRenderer.on('speech:disconnected', callback);
+      return () => ipcRenderer.removeListener('speech:disconnected', callback);
+    },
+    onSpeechRecognized: (callback: (result: any) => void) => {
+      const handler = (_: any, result: any) => callback(result);
+      ipcRenderer.on('speech:recognized', handler);
+      return () => ipcRenderer.removeListener('speech:recognized', handler);
+    },
+    onSpeechGenerated: (callback: (data: any) => void) => {
+      const handler = (_: any, data: any) => callback(data);
+      ipcRenderer.on('speech:generated', handler);
+      return () => ipcRenderer.removeListener('speech:generated', handler);
+    },
+    onSpeechError: (callback: (error: string) => void) => {
+      const handler = (_: any, error: string) => callback(error);
+      ipcRenderer.on('speech:error', handler);
+      return () => ipcRenderer.removeListener('speech:error', handler);
+    },
+    onGGWaveSent: (callback: (data: any) => void) => {
+      const handler = (_: any, data: any) => callback(data);
+      ipcRenderer.on('speech:ggwaveSent', handler);
+      return () => ipcRenderer.removeListener('speech:ggwaveSent', handler);
+    },
+    onGGWaveError: (callback: (error: string) => void) => {
+      const handler = (_: any, error: string) => callback(error);
+      ipcRenderer.on('speech:ggwaveError', handler);
+      return () => ipcRenderer.removeListener('speech:ggwaveError', handler);
+    },
+    onStatusUpdate: (callback: (status: any) => void) => {
+      const handler = (_: any, status: any) => callback(status);
+      ipcRenderer.on('speech:statusUpdate', handler);
+      return () => ipcRenderer.removeListener('speech:statusUpdate', handler);
+    },
+    onListeningStarted: (callback: () => void) => {
+      ipcRenderer.on('speech:listeningStarted', callback);
+      return () => ipcRenderer.removeListener('speech:listeningStarted', callback);
+    },
+    onListeningStopped: (callback: () => void) => {
+      ipcRenderer.on('speech:listeningStopped', callback);
+      return () => ipcRenderer.removeListener('speech:listeningStopped', callback);
+    }
+  },
+
+  // Listen for speech toggle event
+  onToggleSpeech: (callback: () => void) => {
+    ipcRenderer.on('toggle-speech', callback);
+    return () => ipcRenderer.removeListener('toggle-speech', callback);
   }
 };
 
