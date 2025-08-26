@@ -156,11 +156,19 @@ export default function GlassChatPiP() {
 
   // Chat management functions
   const handleChatSelect = (chatId: string) => {
+    // Clear TTS queue when switching chats to prevent cross-chat audio issues
+    console.log('🔄 Switching chat - resetting TTS queue');
+    speechService.resetTTSQueue();
+    
     chatManager.switchToChat(chatId);
     refreshChatState();
   };
 
   const handleChatCreate = () => {
+    // Clear TTS queue when creating new chat to prevent issues with first message
+    console.log('🆕 Creating new chat - resetting TTS queue');
+    speechService.resetTTSQueue();
+    
     chatManager.createNewChat();
     refreshChatState();
   };
