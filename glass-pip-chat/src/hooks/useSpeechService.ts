@@ -52,6 +52,7 @@ export interface UseSpeechServiceReturn {
   // Interruption control
   stopCurrentSpeech: () => void;
   interruptAndSpeak: (newText: string) => Promise<void>;
+  resetTTSQueue: () => void;
 }
 
 export function useSpeechService(): UseSpeechServiceReturn {
@@ -165,8 +166,16 @@ export function useSpeechService(): UseSpeechServiceReturn {
         console.log('🎵 TTS streaming started:', data.message_id);
         const messageId = data.message_id || 'default';
         
-        // If this is a new stream and we're not currently playing, start it
-        if (!currentStreamIdRef.current) {
+        // Check if we have a stale current stream that's not actually playing
+        const hasStaleStream = currentStreamIdRef.current && 
+                              !isPlayingRef.current && 
+                              audioQueueRef.current.length === 0;
+        
+        // If this is a new stream and we're not currently playing, or we have a stale stream, start it
+        if (!currentStreamIdRef.current || hasStaleStream) {
+          if (hasStaleStream) {
+            console.log('🧹 Clearing stale TTS stream:', currentStreamIdRef.current);
+          }
           currentStreamIdRef.current = messageId;
           audioQueueRef.current = [];
           isPlayingRef.current = false;
@@ -174,7 +183,7 @@ export function useSpeechService(): UseSpeechServiceReturn {
         } else {
           // Queue this stream for later
           pendingChunksRef.current.set(messageId, []);
-          console.log('📝 Queuing TTS stream:', messageId);
+          console.log('📝 Queuing TTS stream:', messageId, '(current stream:', currentStreamIdRef.current, ')');
         }
       })
     );
@@ -326,6 +335,13 @@ export function useSpeechService(): UseSpeechServiceReturn {
     if (!window.pip?.speech) {
       throw new Error('Speech service not available');
     }
+    
+    console.log('🎤 Requesting streaming TTS for:', text.substring(0, 50) + '...', {
+      currentStream: currentStreamIdRef.current,
+      isPlaying: isPlayingRef.current,
+      queueLength: audioQueueRef.current.length,
+      pendingStreams: pendingChunksRef.current.size
+    });
     
     const result = await window.pip.speech.synthesizeStreaming(text);
     if (!result.success) {
@@ -481,17 +497,24 @@ export function useSpeechService(): UseSpeechServiceReturn {
   }, [voiceModeEnabled, droidModeEnabled, sendGGWave, synthesizeSpeechStreaming]);
 
   const stopCurrentSpeech = useCallback(() => {
+    console.log('🔇 Stopping current speech and clearing all queues');
+    
     // Stop current audio playback
     if (currentAudioSourceRef.current) {
       try {
         currentAudioSourceRef.current.stop();
         currentAudioSourceRef.current = null;
+        console.log('🛑 Stopped current audio source');
       } catch (error) {
         console.error('Error stopping current audio:', error);
       }
     }
 
-    // Clear all queues
+    // Clear all queues and reset state
+    const hadPendingStreams = pendingChunksRef.current.size > 0;
+    const hadQueuedAudio = audioQueueRef.current.length > 0;
+    const hadCurrentStream = currentStreamIdRef.current !== null;
+    
     audioQueueRef.current = [];
     pendingChunksRef.current.clear();
     currentStreamIdRef.current = null;
@@ -502,7 +525,11 @@ export function useSpeechService(): UseSpeechServiceReturn {
       window.pip.speech.clearTTSQueue?.();
     }
 
-    console.log('🔇 Speech interrupted and all queues cleared');
+    console.log('🧹 Speech state cleared:', {
+      hadCurrentStream,
+      hadQueuedAudio,
+      hadPendingStreams: hadPendingStreams
+    });
   }, []);
 
   const interruptAndSpeak = useCallback(async (newText: string) => {
@@ -522,6 +549,11 @@ export function useSpeechService(): UseSpeechServiceReturn {
       }
     }, 100);
   }, [stopCurrentSpeech, droidModeEnabled, sendGGWave, synthesizeSpeechStreaming]);
+
+  const resetTTSQueue = useCallback(() => {
+    console.log('🔄 Resetting TTS queue for new conversation');
+    stopCurrentSpeech();
+  }, [stopCurrentSpeech]);
 
   return {
     // Status
@@ -557,6 +589,7 @@ export function useSpeechService(): UseSpeechServiceReturn {
     
     // Interruption control
     stopCurrentSpeech,
-    interruptAndSpeak
+    interruptAndSpeak,
+    resetTTSQueue
   };
 }
