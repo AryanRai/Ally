@@ -404,3 +404,127 @@
   background: rgba(0, 0, 0, 0.05);
   border-radius: 8px;
 }
+
+/* Typing indicator animation */
+@keyframes typing-cursor {
+  0%, 50% {
+    opacity: 1;
+  }
+  51%, 100% {
+    opacity: 0;
+  }
+}
+
+.typing-cursor {
+  animation: typing-cursor 1s infinite;
+  color: #3b82f6;
+  font-weight: bold;
+}
+
+/* Thinking indicator styles */
+.thinking-indicator {
+  position: relative;
+  display: inline-block;
+}
+
+.thinking-indicator::after {
+  content: '';
+  position: absolute;
+  right: -4px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 2px;
+  height: 1em;
+  background: #3b82f6;
+  animation: typing-cursor 1s infinite;
+}
+
+/* Real-time streaming text animation */
+@keyframes text-appear {
+  from {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.streaming-text {
+  animation: text-appear 0.2s ease-out;
+}
+
+/* Thinking bubble animation */
+@keyframes thinking-pulse {
+  0%, 100% {
+    opacity: 0.6;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.02);
+  }
+}
+
+.thinking-bubble {
+  animation: thinking-pulse 2s ease-in-out infinite;
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.1), rgba(147, 51, 234, 0.1));
+  border: 1px solid rgba(59, 130, 246, 0.2);
+  border-radius: 12px;
+  padding: 12px 16px;
+  margin: 8px 0;
+}
+
+/* Response transition animation */
+@keyframes response-slide-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.response-content {
+  animation: response-slide-in 0.3s ease-out;
+}
+
+/* Enhanced typing indicator for better visibility */
+.typing-indicator {
+  display: inline-block;
+  color: #3b82f6;
+  font-size: 1.1em;
+  font-weight: 600;
+  animation: typing-cursor 0.8s infinite;
+  text-shadow: 0 0 4px rgba(59, 130, 246, 0.3);
+}
+
+/* Smooth word-by-word appearance */
+.word-appear {
+  animation: text-appear 0.15s ease-out;
+  display: inline-block;
+}
+
+/* Thinking process highlight */
+.thinking-highlight {
+  background: linear-gradient(90deg, 
+    rgba(59, 130, 246, 0.1) 0%, 
+    rgba(147, 51, 234, 0.1) 50%, 
+    rgba(59, 130, 246, 0.1) 100%);
+  background-size: 200% 100%;
+  animation: thinking-gradient 3s ease-in-out infinite;
+  padding: 2px 4px;
+  border-radius: 4px;
+}
+
+@keyframes thinking-gradient {
+  0%, 100% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+}

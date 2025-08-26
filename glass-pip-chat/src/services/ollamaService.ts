@@ -274,7 +274,6 @@ export class OllamaService {
           options: {
             temperature: 0.7,
             top_p: 0.9,
-            // Enable thinking tokens if supported
             num_predict: -1
           }
         }),
@@ -293,10 +292,11 @@ export class OllamaService {
       }
 
       let fullResponse = '';
-      let thinkingBuffer = '';
+      let thinkingContent = '';
+      let responseContent = '';
       let isInThinking = false;
-      let currentWord = '';
       let responseStarted = false;
+      let buffer = '';
 
       try {
         while (true) {
@@ -317,99 +317,124 @@ export class OllamaService {
               
               if (data.message?.content) {
                 const content = data.message.content;
+                buffer += content;
                 
-                // Enhanced thinking detection
-                const thinkingStartPatterns = [
-                  '<thinking>',
-                  'Let me think',
-                  'Let\'s think',
-                  'I need to think',
-                  'thinking:',
-                  'hmm,',
-                  'well,',
-                  'considering',
-                  'analyzing',
-                  'first,',
-                  'initially,',
-                  'to start',
-                  'looking at',
-                  'examining'
+                // Enhanced thinking detection patterns
+                const thinkingPatterns = [
+                  /let me think/i,
+                  /i need to/i,
+                  /first,?\s/i,
+                  /considering/i,
+                  /analyzing/i,
+                  /looking at/i,
+                  /examining/i,
+                  /hmm,?\s/i,
+                  /well,?\s/i,
+                  /actually,?\s/i,
+                  /wait,?\s/i,
+                  /hold on/i,
+                  /thinking about/i,
+                  /let's see/i,
+                  /i should/i,
+                  /i would/i,
+                  /i could/i,
+                  /perhaps/i,
+                  /maybe/i,
+                  /it seems/i,
+                  /it appears/i,
+                  /based on/i,
+                  /given that/i,
+                  /since/i,
+                  /because/i,
+                  /due to/i,
+                  /as a result/i,
+                  /therefore/i,
+                  /thus/i,
+                  /so/i,
+                  /hence/i,
+                  /consequently/i
                 ];
-                
-                const thinkingEndPatterns = [
-                  '</thinking>',
-                  'Therefore,',
-                  'So,',
-                  'In conclusion,',
-                  'Thus,',
-                  'Now,',
-                  'Based on this',
-                  'Given this',
-                  'With that',
-                  'Alright,',
-                  'Okay,',
-                  'Here\'s'
+
+                const responsePatterns = [
+                  /^(here's|here is)/i,
+                  /^(the answer)/i,
+                  /^(to answer)/i,
+                  /^(in summary)/i,
+                  /^(in conclusion)/i,
+                  /^(finally)/i,
+                  /^(ultimately)/i,
+                  /^(overall)/i,
+                  /^(basically)/i,
+                  /^(simply put)/i,
+                  /^(in other words)/i,
+                  /^(that means)/i,
+                  /^(this means)/i,
+                  /^(so the)/i,
+                  /^(therefore the)/i,
+                  /^(thus the)/i
                 ];
 
-                // Check for thinking start
-                for (const pattern of thinkingStartPatterns) {
-                  if (content.toLowerCase().includes(pattern.toLowerCase()) && !isInThinking && !responseStarted) {
-                    isInThinking = true;
+                // Detect thinking phase
+                if (!responseStarted && !isInThinking) {
+                  for (const pattern of thinkingPatterns) {
+                    if (pattern.test(buffer)) {
+                      isInThinking = true;
+                      console.log('Detected thinking phase with pattern:', pattern);
+                      break;
+                    }
                   }
                 }
 
-                // Check for thinking end
-                for (const pattern of thinkingEndPatterns) {
-                  if (content.toLowerCase().includes(pattern.toLowerCase()) && isInThinking) {
-                    isInThinking = false;
-                    responseStarted = true;
-                  }
-                }
-
-                // If we haven't detected thinking patterns but this looks like reasoning, treat as thinking
-                if (!responseStarted && !isInThinking && fullResponse.length < 200) {
-                  const reasoningKeywords = ['because', 'since', 'due to', 'given that', 'considering', 'analysis', 'approach'];
-                  if (reasoningKeywords.some(keyword => content.toLowerCase().includes(keyword))) {
-                    isInThinking = true;
-                  }
-                }
-
-                // Process content character by character for real-time effect
-                for (let i = 0; i < content.length; i++) {
-                  const char = content[i];
-                  currentWord += char;
-                  
-                  // Send word when we hit space or punctuation
-                  if (char === ' ' || char === '.' || char === ',' || char === '!' || char === '?') {
-                    if (currentWord.trim()) {
-                      const chunkType = isInThinking ? 'thinking' : 'response';
-                      console.log(`Sending ${chunkType} chunk:`, currentWord);
-                      onProgress({ 
-                        type: chunkType, 
-                        content: currentWord, 
-                        isComplete: false 
-                      });
-                      currentWord = '';
+                // Detect response phase
+                if (isInThinking && !responseStarted) {
+                  for (const pattern of responsePatterns) {
+                    if (pattern.test(content)) {
+                      isInThinking = false;
+                      responseStarted = true;
+                      console.log('Detected response phase with pattern:', pattern);
+                      break;
                     }
                   }
                   
-                  // Small delay for word-by-word effect
-                  await new Promise(resolve => setTimeout(resolve, 10));
+                  // Also check for sentence completion that might indicate end of thinking
+                  if (content.includes('.') || content.includes('!') || content.includes('?')) {
+                    const sentences = buffer.split(/[.!?]+/);
+                    if (sentences.length > 2) { // Multiple sentences likely means thinking is done
+                      isInThinking = false;
+                      responseStarted = true;
+                      console.log('Detected response phase after multiple sentences');
+                    }
+                  }
                 }
 
-                // Handle remaining word
-                if (currentWord.trim()) {
-                  const chunkType = isInThinking ? 'thinking' : 'response';
-                  console.log(`Sending final ${chunkType} chunk:`, currentWord);
+                // Auto-transition to response after reasonable thinking length
+                if (isInThinking && thinkingContent.length > 300 && !responseStarted) {
+                  isInThinking = false;
+                  responseStarted = true;
+                  console.log('Auto-transitioning to response phase after long thinking');
+                }
+
+                // Send real-time updates
+                if (isInThinking) {
+                  thinkingContent += content;
                   onProgress({ 
-                    type: chunkType, 
-                    content: currentWord, 
+                    type: 'thinking', 
+                    content: thinkingContent, 
                     isComplete: false 
                   });
-                  currentWord = '';
+                } else {
+                  responseContent += content;
+                  onProgress({ 
+                    type: 'response', 
+                    content: responseContent, 
+                    isComplete: false 
+                  });
                 }
 
                 fullResponse += content;
+                
+                // Add small delay for real-time effect (reduced for better responsiveness)
+                await new Promise(resolve => setTimeout(resolve, 5));
               }
               
               if (data.done) {

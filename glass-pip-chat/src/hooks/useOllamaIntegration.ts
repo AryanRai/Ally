@@ -74,27 +74,33 @@ export function useOllamaIntegration() {
     let responseContent = '';
 
     try {
-      // Use the enhanced streaming method
+      // Use the enhanced streaming method with real-time updates
       await window.pip.ollama.streamChatWithThinking(chatHistory, currentModel, (chunk: any) => {
+        console.log('Received chunk:', chunk);
+        
         if (chunk.type === 'thinking') {
-          thinkingContent += chunk.content;
+          // The chunk.content should already be the accumulated thinking content
+          thinkingContent = chunk.content;
           onStreamUpdate({
             type: 'thinking',
             thinking: thinkingContent,
             response: responseContent
           });
         } else if (chunk.type === 'response') {
-          responseContent += chunk.content;
+          // The chunk.content should already be the accumulated response content
+          responseContent = chunk.content;
           onStreamUpdate({
             type: 'response',
             thinking: thinkingContent,
             response: responseContent
           });
         } else if (chunk.type === 'done') {
+          // Final update
+          fullResponse = chunk.content;
           onStreamUpdate({
             type: 'done',
             thinking: thinkingContent,
-            response: responseContent
+            response: responseContent || fullResponse
           });
         }
       });
@@ -111,7 +117,7 @@ export function useOllamaIntegration() {
       throw error;
     }
 
-    fullResponse = responseContent;
+    fullResponse = responseContent || fullResponse;
     console.log('Ollama response with thinking:', { thinking: thinkingContent, response: responseContent });
 
     return fullResponse;

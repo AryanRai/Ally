@@ -21,6 +21,7 @@ import ChatInput from './chat/ChatInput';
 import { RemoteSettings } from './RemoteSettings';
 import { SpeechControls } from './SpeechControls';
 import { useSpeechService } from '../hooks/useSpeechService';
+import { StreamingTest } from './StreamingTest';
 
 // Utils & Types
 import { ChatManager } from '../utils/chatManager';
@@ -81,6 +82,7 @@ export default function GlassChatPiP() {
   const [inputHistory, setInputHistory] = useState<string[]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
   const [showSpeechControls, setShowSpeechControls] = useState(false);
+  const [showStreamingTest, setShowStreamingTest] = useState(false);
   // Use voice mode state from speech service hook
   const { voiceModeEnabled, setVoiceModeEnabled, droidModeEnabled, setDroidModeEnabled } = speechService;
   // Copy functionality state
@@ -213,16 +215,31 @@ export default function GlassChatPiP() {
         content: contextualContent
       });
 
-      // Stream response from Ollama
+      // Stream response from Ollama with real-time thinking display
       const response = await ollamaIntegration.sendMessageToOllama(
         activeChat?.messages || [],
         contextualContent,
         (update) => {
-          const responseContent = update.type === 'thinking'
-            ? `💭 **Thinking...**\n\n${update.thinking}${update.response ? `\n\n---\n\n${update.response}` : ''}`
-            : update.thinking
-              ? `💭 **Thought Process:**\n\n${update.thinking}\n\n---\n\n**Answer:**\n\n${update.response}`
-              : update.response;
+          let responseContent = '';
+          
+          if (update.type === 'thinking') {
+            // Show thinking in real-time with typing indicator
+            responseContent = `💭 **Thinking...**\n\n${update.thinking}${update.thinking.endsWith('.') || update.thinking.endsWith('!') || update.thinking.endsWith('?') ? '' : '▋'}`;
+          } else if (update.type === 'response') {
+            // Show both thinking (if any) and response
+            if (update.thinking) {
+              responseContent = `💭 **Thought Process:**\n\n${update.thinking}\n\n---\n\n**Answer:**\n\n${update.response}${update.response.endsWith('.') || update.response.endsWith('!') || update.response.endsWith('?') ? '' : '▋'}`;
+            } else {
+              responseContent = `${update.response}${update.response.endsWith('.') || update.response.endsWith('!') || update.response.endsWith('?') ? '' : '▋'}`;
+            }
+          } else if (update.type === 'done') {
+            // Final response without typing indicator
+            if (update.thinking) {
+              responseContent = `💭 **Thought Process:**\n\n${update.thinking}\n\n---\n\n**Answer:**\n\n${update.response}`;
+            } else {
+              responseContent = update.response;
+            }
+          }
 
           setCurrentResponse(responseContent);
         }
@@ -300,11 +317,26 @@ export default function GlassChatPiP() {
 
         await ollamaIntegration.sendMessageToOllama(messagesUpToUser, userMessage.content, (update) => {
           if (activeChat) {
-            const responseContent = update.type === 'thinking'
-              ? `💭 **Thinking...**\n\n${update.thinking}${update.response ? `\n\n---\n\n${update.response}` : ''}`
-              : update.thinking
-                ? `💭 **Thought Process:**\n\n${update.thinking}\n\n---\n\n**Answer:**\n\n${update.response}`
-                : update.response;
+            let responseContent = '';
+            
+            if (update.type === 'thinking') {
+              // Show thinking in real-time with typing indicator
+              responseContent = `💭 **Thinking...**\n\n${update.thinking}${update.thinking.endsWith('.') || update.thinking.endsWith('!') || update.thinking.endsWith('?') ? '' : '▋'}`;
+            } else if (update.type === 'response') {
+              // Show both thinking (if any) and response
+              if (update.thinking) {
+                responseContent = `💭 **Thought Process:**\n\n${update.thinking}\n\n---\n\n**Answer:**\n\n${update.response}${update.response.endsWith('.') || update.response.endsWith('!') || update.response.endsWith('?') ? '' : '▋'}`;
+              } else {
+                responseContent = `${update.response}${update.response.endsWith('.') || update.response.endsWith('!') || update.response.endsWith('?') ? '' : '▋'}`;
+              }
+            } else if (update.type === 'done') {
+              // Final response without typing indicator
+              if (update.thinking) {
+                responseContent = `💭 **Thought Process:**\n\n${update.thinking}\n\n---\n\n**Answer:**\n\n${update.response}`;
+              } else {
+                responseContent = update.response;
+              }
+            }
 
             // Update current response for collapsed preview
             setCurrentResponse(responseContent);
@@ -586,11 +618,26 @@ export default function GlassChatPiP() {
 
         await ollamaIntegration.sendMessageToOllama(messages, messageContent, (update) => {
           if (activeChat) {
-            const responseContent = update.type === 'thinking'
-              ? `💭 **Thinking...**\n\n${update.thinking}${update.response ? `\n\n---\n\n${update.response}` : ''}`
-              : update.thinking
-                ? `💭 **Thought Process:**\n\n${update.thinking}\n\n---\n\n**Answer:**\n\n${update.response}`
-                : update.response;
+            let responseContent = '';
+            
+            if (update.type === 'thinking') {
+              // Show thinking in real-time with typing indicator
+              responseContent = `💭 **Thinking...**\n\n${update.thinking}${update.thinking.endsWith('.') || update.thinking.endsWith('!') || update.thinking.endsWith('?') ? '' : '▋'}`;
+            } else if (update.type === 'response') {
+              // Show both thinking (if any) and response
+              if (update.thinking) {
+                responseContent = `💭 **Thought Process:**\n\n${update.thinking}\n\n---\n\n**Answer:**\n\n${update.response}${update.response.endsWith('.') || update.response.endsWith('!') || update.response.endsWith('?') ? '' : '▋'}`;
+              } else {
+                responseContent = `${update.response}${update.response.endsWith('.') || update.response.endsWith('!') || update.response.endsWith('?') ? '' : '▋'}`;
+              }
+            } else if (update.type === 'done') {
+              // Final response without typing indicator
+              if (update.thinking) {
+                responseContent = `💭 **Thought Process:**\n\n${update.thinking}\n\n---\n\n**Answer:**\n\n${update.response}`;
+              } else {
+                responseContent = update.response;
+              }
+            }
 
             // Update current response for collapsed preview
             setCurrentResponse(responseContent);
@@ -675,6 +722,10 @@ export default function GlassChatPiP() {
           case 'R':
             event.preventDefault();
             handleSizeChange();
+            return;
+          case 'T':
+            event.preventDefault();
+            setShowStreamingTest(true);
             return;
         }
       }
@@ -1279,6 +1330,15 @@ export default function GlassChatPiP() {
         appSettings={appSettings}
         onSettingsChange={(updates) => settingsManager.updateSettings(updates)}
       />
+
+      {/* Streaming Test Modal */}
+      <AnimatePresence>
+        {showStreamingTest && (
+          <StreamingTest
+            onClose={() => setShowStreamingTest(false)}
+          />
+        )}
+      </AnimatePresence>
     </motion.div>
   );
 }
