@@ -24,6 +24,7 @@ interface SpeechControlsProps {
   onSpeechRecognized?: (text: string) => void;
   onVoiceModeChange?: (enabled: boolean) => void;
   onDroidModeChange?: (enabled: boolean) => void;
+  onSettingsOpen?: () => void;
   compact?: boolean;
   voiceModeEnabled?: boolean;
   droidModeEnabled?: boolean;
@@ -34,6 +35,7 @@ export function SpeechControls({
   onSpeechRecognized,
   onVoiceModeChange,
   onDroidModeChange,
+  onSettingsOpen,
   compact = false,
   voiceModeEnabled = false,
   droidModeEnabled = false
@@ -52,8 +54,7 @@ export function SpeechControls({
     speechError
   } = useSpeechService();
 
-  const [showSettings, setShowSettings] = useState(false);
-  const [testText, setTestText] = useState('Hello from Ally!');
+
   const [isConnecting, setIsConnecting] = useState(false);
   const hasTriedConnect = useRef(false);
 
@@ -107,21 +108,7 @@ export function SpeechControls({
     }
   };
 
-  const handleTestTTS = async () => {
-    try {
-      await synthesizeSpeech(testText);
-    } catch (error) {
-      console.error('Failed to synthesize speech:', error);
-    }
-  };
 
-  const handleTestGGWave = async () => {
-    try {
-      await sendGGWave(testText);
-    } catch (error) {
-      console.error('Failed to send GGWave:', error);
-    }
-  };
 
   if (compact) {
     return (
@@ -206,15 +193,17 @@ export function SpeechControls({
         </motion.button>
 
         {/* Settings */}
-        <motion.button
-          onClick={() => setShowSettings(!showSettings)}
-          className="p-2 rounded-lg bg-gray-500/20 text-gray-400 hover:bg-gray-500/30 transition-colors"
-          whileHover={{ scale: 1.05 }}
-          whileTap={{ scale: 0.95 }}
-          title="Show settings"
-        >
-          <Settings className="w-4 h-4" />
-        </motion.button>
+        {onSettingsOpen && (
+          <motion.button
+            onClick={onSettingsOpen}
+            className="p-2 rounded-lg bg-gray-500/20 text-gray-400 hover:bg-gray-500/30 transition-colors"
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.95 }}
+            title="Open main settings"
+          >
+            <Settings className="w-4 h-4" />
+          </motion.button>
+        )}
       </div>
     );
   }
@@ -343,55 +332,7 @@ export function SpeechControls({
         </motion.button>
       </div>
 
-      {/* Test Controls */}
-      <AnimatePresence>
-        {showSettings && (
-          <motion.div
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: 'auto' }}
-            exit={{ opacity: 0, height: 0 }}
-            className="space-y-3 overflow-hidden"
-          >
-            <div className="p-3 bg-black/20 rounded-lg backdrop-blur-sm">
-              <h4 className="text-sm font-medium text-white/80 mb-3">Test Controls</h4>
-              
-              <div className="space-y-3">
-                <input
-                  type="text"
-                  value={testText}
-                  onChange={(e) => setTestText(e.target.value)}
-                  placeholder="Enter test text..."
-                  className="w-full px-3 py-2 bg-white/10 border border-white/20 rounded-lg text-white placeholder-white/50 focus:outline-none focus:border-white/40"
-                />
-                
-                <div className="grid grid-cols-2 gap-2">
-                  <motion.button
-                    onClick={handleTestTTS}
-                    disabled={!isConnected}
-                    className="p-3 rounded-lg bg-purple-500/20 text-purple-400 hover:bg-purple-500/30 transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
-                    whileHover={isConnected ? { scale: 1.02 } : {}}
-                    whileTap={isConnected ? { scale: 0.98 } : {}}
-                  >
-                    <Volume2 className="w-4 h-4" />
-                    <span className="text-sm">Test TTS</span>
-                  </motion.button>
-                  
-                  <motion.button
-                    onClick={handleTestGGWave}
-                    disabled={!isConnected}
-                    className="p-3 rounded-lg bg-orange-500/20 text-orange-400 hover:bg-orange-500/30 transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
-                    whileHover={isConnected ? { scale: 1.02 } : {}}
-                    whileTap={isConnected ? { scale: 0.98 } : {}}
-                  >
-                    <Radio className="w-4 h-4" />
-                    <span className="text-sm">Test GGWave</span>
-                  </motion.button>
-                </div>
-              </div>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+
 
       {/* Last Recognized Text */}
       {lastRecognizedText && (
@@ -414,16 +355,18 @@ export function SpeechControls({
         </motion.div>
       )}
 
-      {/* Settings Toggle */}
-      <motion.button
-        onClick={() => setShowSettings(!showSettings)}
-        className="w-full p-2 rounded-lg bg-gray-500/20 text-gray-400 hover:bg-gray-500/30 transition-colors flex items-center justify-center gap-2"
-        whileHover={{ scale: 1.02 }}
-        whileTap={{ scale: 0.98 }}
-      >
-        <Settings className="w-4 h-4" />
-        <span className="text-sm">{showSettings ? 'Hide' : 'Show'} Settings</span>
-      </motion.button>
+      {/* Settings Link */}
+      {onSettingsOpen && (
+        <motion.button
+          onClick={onSettingsOpen}
+          className="w-full p-2 rounded-lg bg-gray-500/20 text-gray-400 hover:bg-gray-500/30 transition-colors flex items-center justify-center gap-2"
+          whileHover={{ scale: 1.02 }}
+          whileTap={{ scale: 0.98 }}
+        >
+          <Settings className="w-4 h-4" />
+          <span className="text-sm">Open Settings</span>
+        </motion.button>
+      )}
     </div>
   );
 }
