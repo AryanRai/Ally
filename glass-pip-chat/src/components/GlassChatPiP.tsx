@@ -87,6 +87,50 @@ export default function GlassChatPiP() {
   const [showStreamingTest, setShowStreamingTest] = useState(false);
   // Use voice mode state from speech service hook
   const { voiceModeEnabled, setVoiceModeEnabled, droidModeEnabled, setDroidModeEnabled } = speechService;
+
+  // Handle voice mode changes - start/stop listening automatically
+  useEffect(() => {
+    const handleVoiceModeChange = async () => {
+      console.log('🎤 Voice mode change effect triggered:', {
+        voiceModeEnabled,
+        isConnected: speechService.isConnected,
+        isListening: speechService.isListening
+      });
+
+      if (!speechService.isConnected) {
+        console.log('⚠️ Speech service not connected, cannot change voice mode');
+        return;
+      }
+
+      if (voiceModeEnabled) {
+        console.log('🎤 Voice mode enabled - starting speech recognition');
+        try {
+          if (!speechService.isListening) {
+            await speechService.startListening();
+            console.log('✅ Speech recognition started successfully');
+          } else {
+            console.log('ℹ️ Speech recognition already active');
+          }
+        } catch (error) {
+          console.error('❌ Failed to start listening when voice mode enabled:', error);
+        }
+      } else {
+        console.log('🔇 Voice mode disabled - stopping speech recognition');
+        try {
+          if (speechService.isListening) {
+            await speechService.stopListening();
+            console.log('✅ Speech recognition stopped successfully');
+          } else {
+            console.log('ℹ️ Speech recognition already inactive');
+          }
+        } catch (error) {
+          console.error('❌ Failed to stop listening when voice mode disabled:', error);
+        }
+      }
+    };
+
+    handleVoiceModeChange();
+  }, [voiceModeEnabled, speechService.isConnected, speechService.isListening, speechService.startListening, speechService.stopListening]);
   // Copy functionality state
   // Local state no longer needed here
 
@@ -491,6 +535,25 @@ export default function GlassChatPiP() {
     loadChats();
   }, [chatManager]);
 
+  // Auto-connect to speech service on mount
+  useEffect(() => {
+    const autoConnectSpeech = async () => {
+      if (!speechService.isConnected && window.pip?.speech) {
+        console.log('🔌 Auto-connecting to speech service on mount...');
+        try {
+          await speechService.connect();
+          console.log('✅ Speech service auto-connected successfully');
+        } catch (error) {
+          console.log('⚠️ Speech service auto-connect failed (this is normal if service is not running):', error);
+        }
+      }
+    };
+
+    // Delay auto-connect slightly to ensure everything is initialized
+    const timer = setTimeout(autoConnectSpeech, 1000);
+    return () => clearTimeout(timer);
+  }, [speechService.connect, speechService.isConnected]);
+
   // Get messages early for use in effects
   const messages = activeChat?.messages || [];
 
@@ -525,6 +588,19 @@ export default function GlassChatPiP() {
       allyRemote.clearMessages();
     }
   }, [allyRemote.incomingMessages, addMessageToActiveChat, allyRemote]);
+
+  // Handle speech recognition results - automatically send as messages when voice mode is enabled
+  const lastProcessedSpeechRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (speechService.lastRecognizedText && 
+        voiceModeEnabled && 
+        speechService.lastRecognizedText !== lastProcessedSpeechRef.current) {
+      
+      console.log('🎤 Processing speech recognition result:', speechService.lastRecognizedText);
+      lastProcessedSpeechRef.current = speechService.lastRecognizedText;
+      handleSpeechRecognized(speechService.lastRecognizedText);
+    }
+  }, [speechService.lastRecognizedText, voiceModeEnabled]);
 
   // Handle preview toggle callback
   const handlePreviewToggle = (expanded: boolean) => {
@@ -1193,7 +1269,23 @@ export default function GlassChatPiP() {
                   ollamaIntegration.setShowModelSelector(false);
                 }}
                 voiceModeEnabled={voiceModeEnabled}
-                onVoiceModeToggle={() => setVoiceModeEnabled(!voiceModeEnabled)}
+                onVoiceModeToggle={async () => {
+                  const newVoiceMode = !voiceModeEnabled;
+                  console.log('🎤 Voice mode toggle clicked:', newVoiceMode);
+                  
+                  // If enabling voice mode and not connected, try to connect first
+                  if (newVoiceMode && !speechService.isConnected) {
+                    console.log('🔌 Connecting to speech service...');
+                    try {
+                      await speechService.connect();
+                    } catch (error) {
+                      console.error('Failed to connect to speech service:', error);
+                      return; // Don't enable voice mode if connection failed
+                    }
+                  }
+                  
+                  setVoiceModeEnabled(newVoiceMode);
+                }}
                 onSpeechSettingsOpen={() => setShowSettings(true)}
                 speechServiceConnected={speechService.isConnected}
               />
@@ -1397,7 +1489,22 @@ export default function GlassChatPiP() {
                       <div className="p-3">
                         <SpeechControls
                           onSpeechRecognized={handleSpeechRecognized}
-                          onVoiceModeChange={speechService.setVoiceModeEnabled}
+                          onVoiceModeChange={async (enabled: boolean) => {
+                            console.log('🎤 Voice mode change from SpeechControls:', enabled);
+                            
+                            // If enabling voice mode and not connected, try to connect first
+                            if (enabled && !speechService.isConnected) {
+                              console.log('🔌 Connecting to speech service from SpeechControls...');
+                              try {
+                                await speechService.connect();
+                              } catch (error) {
+                                console.error('Failed to connect to speech service:', error);
+                                return; // Don't enable voice mode if connection failed
+                              }
+                            }
+                            
+                            speechService.setVoiceModeEnabled(enabled);
+                          }}
                           onDroidModeChange={speechService.setDroidModeEnabled}
                           onSettingsOpen={() => setShowSettings(true)}
                           voiceModeEnabled={speechService.voiceModeEnabled}
