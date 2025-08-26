@@ -789,6 +789,7 @@ export default function GlassChatPiP() {
             event.preventDefault();
             setShowStreamingTest(true);
             return;
+
         }
       }
 
@@ -1193,6 +1194,8 @@ export default function GlassChatPiP() {
                 }}
                 voiceModeEnabled={voiceModeEnabled}
                 onVoiceModeToggle={() => setVoiceModeEnabled(!voiceModeEnabled)}
+                onSpeechSettingsOpen={() => setShowSettings(true)}
+                speechServiceConnected={speechService.isConnected}
               />
             ) : (
               <ExpandedHeader
@@ -1396,6 +1399,7 @@ export default function GlassChatPiP() {
                           onSpeechRecognized={handleSpeechRecognized}
                           onVoiceModeChange={speechService.setVoiceModeEnabled}
                           onDroidModeChange={speechService.setDroidModeEnabled}
+                          onSettingsOpen={() => setShowSettings(true)}
                           voiceModeEnabled={speechService.voiceModeEnabled}
                           droidModeEnabled={speechService.droidModeEnabled}
                           compact={false}
@@ -1446,6 +1450,8 @@ export default function GlassChatPiP() {
         appSettings={appSettings}
         onSettingsChange={(updates) => settingsManager.updateSettings(updates)}
       />
+
+
 
       {/* Streaming Test Modal */}
       <AnimatePresence>

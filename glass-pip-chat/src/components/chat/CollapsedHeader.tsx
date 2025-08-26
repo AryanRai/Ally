@@ -10,7 +10,8 @@ import {
   Clipboard,
   ChevronDown,
   Volume2,
-  VolumeX
+  VolumeX,
+  Settings
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { ThemeUtils } from '../../utils/themeUtils';
@@ -55,6 +56,8 @@ interface CollapsedHeaderProps {
   onModelSelect: (model: string) => void;
   voiceModeEnabled?: boolean;
   onVoiceModeToggle?: () => void;
+  onSpeechSettingsOpen?: () => void;
+  speechServiceConnected?: boolean;
 }
 
 export default function CollapsedHeader({
@@ -92,7 +95,9 @@ export default function CollapsedHeader({
   onModelSelectorToggle,
   onModelSelect,
   voiceModeEnabled,
-  onVoiceModeToggle
+  onVoiceModeToggle,
+  onSpeechSettingsOpen,
+  speechServiceConnected
 }: CollapsedHeaderProps) {
   const [isContextExpanded, setIsContextExpanded] = useState(false);
   const modelButtonRef = useRef<HTMLButtonElement>(null);
@@ -169,24 +174,43 @@ export default function CollapsedHeader({
           className="flex items-center gap-1 flex-shrink-0"
           style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
         >
-          {/* Voice Mode Toggle */}
+          {/* Voice Mode Toggle with Dropdown */}
           {onVoiceModeToggle && (
-            <button
-              onClick={onVoiceModeToggle}
-              className={cn(
-                "p-1.5 rounded-lg transition-colors",
-                voiceModeEnabled
-                  ? "bg-purple-500/20 text-purple-400 hover:bg-purple-500/30"
-                  : "bg-gray-500/20 text-gray-400 hover:bg-gray-500/30"
-              )}
-              title={`Voice mode: ${voiceModeEnabled ? 'ON' : 'OFF'}`}
-            >
-              {voiceModeEnabled ? (
-                <Volume2 className="w-3.5 h-3.5" />
-              ) : (
-                <VolumeX className="w-3.5 h-3.5" />
-              )}
-            </button>
+            <div className="relative">
+              <button
+                onClick={onVoiceModeToggle}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  onSpeechSettingsOpen?.();
+                }}
+                disabled={!speechServiceConnected}
+                className={cn(
+                  "p-1.5 rounded-lg transition-colors relative group",
+                  voiceModeEnabled && speechServiceConnected
+                    ? "bg-purple-500/20 text-purple-400 hover:bg-purple-500/30"
+                    : "bg-gray-500/20 text-gray-400 hover:bg-gray-500/30",
+                  !speechServiceConnected && "opacity-50 cursor-not-allowed"
+                )}
+                title={
+                  !speechServiceConnected 
+                    ? "Connect to speech service first" 
+                    : `Voice mode: ${voiceModeEnabled ? 'ON' : 'OFF'} - Click to toggle, right-click for settings`
+                }
+              >
+                {voiceModeEnabled ? (
+                  <Volume2 className="w-3.5 h-3.5" />
+                ) : (
+                  <VolumeX className="w-3.5 h-3.5" />
+                )}
+                {/* Status indicator */}
+                <div className={cn(
+                  "absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full",
+                  voiceModeEnabled && speechServiceConnected ? "bg-purple-400" : "bg-gray-400"
+                )} />
+                {/* Settings indicator */}
+                <div className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 bg-blue-400 rounded-full opacity-0 group-hover:opacity-100 transition-opacity" />
+              </button>
+            </div>
           )}
 
           {/* Model Selector */}

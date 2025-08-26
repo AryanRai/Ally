@@ -1,7 +1,8 @@
 import { useEffect, useState, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Sun, Moon, Monitor, Server, Wifi, WifiOff, RefreshCw, Keyboard } from 'lucide-react';
+import { X, Sun, Moon, Monitor, Server, Wifi, WifiOff, RefreshCw, Keyboard, Volume2, Mic } from 'lucide-react';
 import { cn } from '../lib/utils';
+import { useSpeechService } from '../hooks/useSpeechService';
 
 import { AppSettings, UISettings } from '../types/settings';
 
@@ -35,6 +36,18 @@ export default function SettingsModal({
   const [blurType, setBlurType] = useState<'acrylic' | 'mica' | 'standard'>('acrylic'); // Blur type
   const [showShortcuts, setShowShortcuts] = useState(false);
   const modalRef = useRef<HTMLDivElement>(null);
+  
+  // Speech service integration
+  const speechService = useSpeechService();
+  const [speechSettings, setSpeechSettings] = useState({
+    speed: 1.0,
+    pitch: 1.0,
+    volume: 0.8,
+    voice: 'default',
+    language: 'en-US',
+    streamingEnabled: true,
+    ggwaveEnabled: false
+  });
 
   useEffect(() => {
     setTheme(initialTheme);
@@ -127,7 +140,7 @@ export default function SettingsModal({
                 WebkitBackdropFilter: `blur(${blurAmount}px) saturate(180%)`
               }}
               className={cn(
-                "w-80 max-w-full max-h-[90vh] overflow-y-auto",
+                "w-72 max-w-[90vw] max-h-[85vh] overflow-y-auto",
                 "rounded-2xl border shadow-[0_12px_60px_rgba(0,0,0,0.6)]",
                 // YouTube-like scrollbars
                 platform === 'win32' || theme === 'dark' ? "scrollbar-youtube" : "scrollbar-youtube-light",
@@ -1031,6 +1044,230 @@ export default function SettingsModal({
                     </p>
                   </div>
                 )}
+              </div>
+
+              {/* Speech Settings Section */}
+              <div className="space-y-3">
+                <h3 className={cn(
+                  "text-sm font-medium",
+                  platform === 'win32'
+                    ? "text-white/80"
+                    : theme === 'dark' ? "text-white/80" : "text-black/80"
+                )}>Speech Service</h3>
+                
+                <div className="space-y-3">
+                  {/* Connection Status */}
+                  <div className={cn(
+                    "p-3 rounded-lg border",
+                    speechService.isConnected 
+                      ? "bg-green-500/10 border-green-500/20"
+                      : "bg-red-500/10 border-red-500/20"
+                  )}>
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center gap-2">
+                        <div className={cn(
+                          "w-2 h-2 rounded-full",
+                          speechService.isConnected ? "bg-green-400" : "bg-red-400"
+                        )} />
+                        <span className="text-xs font-medium">
+                          {speechService.isConnected ? "Connected" : "Disconnected"}
+                        </span>
+                      </div>
+                      <button
+                        onClick={speechService.isConnected ? speechService.disconnect : speechService.connect}
+                        className={cn(
+                          "px-2 py-1 text-xs rounded border transition-colors",
+                          speechService.isConnected
+                            ? "bg-red-500/20 border-red-500/30 text-red-400 hover:bg-red-500/30"
+                            : "bg-green-500/20 border-green-500/30 text-green-400 hover:bg-green-500/30"
+                        )}
+                      >
+                        {speechService.isConnected ? "Disconnect" : "Connect"}
+                      </button>
+                    </div>
+                    <p className={cn(
+                      "text-xs",
+                      platform === 'win32'
+                        ? "text-white/60"
+                        : theme === 'dark' ? "text-white/60" : "text-black/60"
+                    )}>
+                      WebSocket: localhost:8765 • Auto-reconnect enabled
+                    </p>
+                    {speechService.speechError && (
+                      <p className="text-xs text-red-400 mt-1">
+                        Error: {speechService.speechError}
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Voice Settings */}
+                  <div className={cn(
+                    "p-3 rounded-lg border",
+                    platform === 'win32'
+                      ? "bg-white/5 border-white/10"
+                      : theme === 'dark' 
+                        ? "bg-white/5 border-white/10"
+                        : "bg-black/5 border-black/10"
+                  )}>
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-medium">Voice Settings</span>
+                        <button
+                          onClick={() => speechService.synthesizeSpeech("Hello! This is a test of the speech system.")}
+                          disabled={!speechService.isConnected}
+                          className={cn(
+                            "px-2 py-1 text-xs rounded border transition-colors disabled:opacity-50",
+                            platform === 'win32'
+                              ? "bg-purple-500/20 border-purple-500/30 text-purple-400 hover:bg-purple-500/30"
+                              : theme === 'dark' 
+                                ? "bg-purple-500/20 border-purple-500/30 text-purple-400 hover:bg-purple-500/30"
+                                : "bg-purple-500/20 border-purple-500/30 text-purple-400 hover:bg-purple-500/30"
+                          )}
+                        >
+                          <Volume2 className="w-3 h-3 inline mr-1" />
+                          Test TTS
+                        </button>
+                      </div>
+                      
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className={cn(
+                            "text-xs",
+                            platform === 'win32'
+                              ? "text-white/60"
+                              : theme === 'dark' ? "text-white/60" : "text-black/60"
+                          )}>Voice</label>
+                          <select 
+                            value={speechSettings.voice}
+                            onChange={(e) => setSpeechSettings(prev => ({ ...prev, voice: e.target.value }))}
+                            className={cn(
+                              "w-full mt-1 px-2 py-1 text-xs rounded border",
+                              platform === 'win32'
+                                ? "bg-white/5 border-white/10 text-white"
+                                : theme === 'dark' 
+                                  ? "bg-white/5 border-white/10 text-white"
+                                  : "bg-black/5 border-black/10 text-black"
+                            )}
+                          >
+                            <option value="default">Default Voice</option>
+                            <option value="neural-en-us-1">Neural EN-US Female</option>
+                            <option value="neural-en-us-2">Neural EN-US Male</option>
+                            <option value="neural-en-gb-1">Neural EN-GB Female</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label className={cn(
+                            "text-xs",
+                            platform === 'win32'
+                              ? "text-white/60"
+                              : theme === 'dark' ? "text-white/60" : "text-black/60"
+                          )}>Language</label>
+                          <select 
+                            value={speechSettings.language}
+                            onChange={(e) => setSpeechSettings(prev => ({ ...prev, language: e.target.value }))}
+                            className={cn(
+                              "w-full mt-1 px-2 py-1 text-xs rounded border",
+                              platform === 'win32'
+                                ? "bg-white/5 border-white/10 text-white"
+                                : theme === 'dark' 
+                                  ? "bg-white/5 border-white/10 text-white"
+                                  : "bg-black/5 border-black/10 text-black"
+                            )}
+                          >
+                            <option value="en-US">English (US)</option>
+                            <option value="en-GB">English (UK)</option>
+                            <option value="es-ES">Spanish</option>
+                            <option value="fr-FR">French</option>
+                            <option value="de-DE">German</option>
+                          </select>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-3 gap-3">
+                        <div>
+                          <label className={cn(
+                            "text-xs",
+                            platform === 'win32'
+                              ? "text-white/60"
+                              : theme === 'dark' ? "text-white/60" : "text-black/60"
+                          )}>Speed: {speechSettings.speed.toFixed(1)}x</label>
+                          <input
+                            type="range"
+                            min="0.5"
+                            max="2.0"
+                            step="0.1"
+                            value={speechSettings.speed}
+                            onChange={(e) => setSpeechSettings(prev => ({ ...prev, speed: parseFloat(e.target.value) }))}
+                            className="w-full mt-1 h-1 bg-white/10 rounded-lg appearance-none slider"
+                          />
+                        </div>
+                        <div>
+                          <label className={cn(
+                            "text-xs",
+                            platform === 'win32'
+                              ? "text-white/60"
+                              : theme === 'dark' ? "text-white/60" : "text-black/60"
+                          )}>Pitch: {speechSettings.pitch.toFixed(1)}x</label>
+                          <input
+                            type="range"
+                            min="0.5"
+                            max="2.0"
+                            step="0.1"
+                            value={speechSettings.pitch}
+                            onChange={(e) => setSpeechSettings(prev => ({ ...prev, pitch: parseFloat(e.target.value) }))}
+                            className="w-full mt-1 h-1 bg-white/10 rounded-lg appearance-none slider"
+                          />
+                        </div>
+                        <div>
+                          <label className={cn(
+                            "text-xs",
+                            platform === 'win32'
+                              ? "text-white/60"
+                              : theme === 'dark' ? "text-white/60" : "text-black/60"
+                          )}>Volume: {Math.round(speechSettings.volume * 100)}%</label>
+                          <input
+                            type="range"
+                            min="0"
+                            max="1"
+                            step="0.1"
+                            value={speechSettings.volume}
+                            onChange={(e) => setSpeechSettings(prev => ({ ...prev, volume: parseFloat(e.target.value) }))}
+                            className="w-full mt-1 h-1 bg-white/10 rounded-lg appearance-none slider"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="flex items-center justify-between text-xs">
+                        <label className="flex items-center gap-2">
+                          <input 
+                            type="checkbox" 
+                            checked={speechSettings.streamingEnabled}
+                            onChange={(e) => setSpeechSettings(prev => ({ ...prev, streamingEnabled: e.target.checked }))}
+                            className="w-3 h-3" 
+                          />
+                          <span className={cn(
+                            platform === 'win32'
+                              ? "text-white/60"
+                              : theme === 'dark' ? "text-white/60" : "text-black/60"
+                          )}>Streaming TTS</span>
+                        </label>
+                        <label className="flex items-center gap-2">
+                          <input 
+                            type="checkbox" 
+                            checked={speechSettings.ggwaveEnabled}
+                            onChange={(e) => setSpeechSettings(prev => ({ ...prev, ggwaveEnabled: e.target.checked }))}
+                            className="w-3 h-3" 
+                          />
+                          <span className={cn(
+                            platform === 'win32'
+                              ? "text-white/60"
+                              : theme === 'dark' ? "text-white/60" : "text-black/60"
+                          )}>GGWave Mode</span>
+                        </label>
+                      </div>
+                    </div>
+                  </div>
+                </div>
               </div>
 
               {/* Info Section */}
