@@ -19,6 +19,8 @@ import ExpandedHeader from './chat/ExpandedHeader';
 import ContextDisplay from './chat/ContextDisplay';
 import ChatInput from './chat/ChatInput';
 import { RemoteSettings } from './RemoteSettings';
+import { SpeechControls } from './SpeechControls';
+import { useSpeechService } from '../hooks/useSpeechService';
 
 // Utils & Types
 import { ChatManager } from '../utils/chatManager';
@@ -56,6 +58,9 @@ export default function GlassChatPiP() {
     autoConnect: true
   });
 
+  // Speech service integration
+  const speechService = useSpeechService();
+
   // Chat management
   const [chatManager] = useState(() => ChatManager.getInstance());
   const [chats, setChats] = useState<Chat[]>([]);
@@ -75,6 +80,9 @@ export default function GlassChatPiP() {
   const [currentResponse, setCurrentResponse] = useState('');
   const [inputHistory, setInputHistory] = useState<string[]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
+  const [showSpeechControls, setShowSpeechControls] = useState(false);
+  // Use voice mode state from speech service hook
+  const { voiceModeEnabled, setVoiceModeEnabled, droidModeEnabled, setDroidModeEnabled } = speechService;
   // Copy functionality state
   // Local state no longer needed here
 
@@ -142,6 +150,115 @@ export default function GlassChatPiP() {
   const handleMessageDelete = (messageId: string) => {
     if (activeChat && chatManager.deleteMessage(activeChat.id, messageId)) {
       refreshChatState();
+    }
+  };
+
+  // Speech recognition handler
+  const handleSpeechRecognized = (text: string) => {
+    console.log('Speech recognized:', text, 'Voice mode enabled:', voiceModeEnabled);
+    if (!voiceModeEnabled) return;
+    
+    // Auto-send the message for processing
+    handleSendMessage(text);
+  };
+
+  // Handle sending messages (extracted for reuse)
+  const handleSendMessage = async (messageText?: string) => {
+    const textToSend = messageText || input.trim();
+    if (!textToSend || isTyping) return;
+
+    // Clear input if using the input field
+    if (!messageText) {
+      setInput('');
+    }
+
+    // Add to input history
+    if (!messageText) {
+      setInputHistory(prev => [textToSend, ...prev.slice(0, 19)]);
+      setHistoryIndex(-1);
+    }
+
+    // Create user message
+    const userMessage: Message = {
+      id: `user-${Date.now()}`,
+      role: 'user',
+      content: textToSend,
+      timestamp: Date.now(),
+      metadata: messageText ? { source: 'speech' } : undefined
+    };
+
+    // Add user message to chat
+    addMessageToActiveChat(userMessage);
+
+    // Get context if enabled
+    let contextualContent = textToSend;
+    if (contextMonitoring.includeContextInMessage && contextMonitoring.contextData.clipboard) {
+      contextualContent = `Context: ${contextMonitoring.contextData.clipboard}\n\nUser: ${textToSend}`;
+      contextMonitoring.clearNewContextFlag();
+    }
+
+    setIsTyping(true);
+    setCurrentResponse('');
+
+    try {
+      // Prepare messages for Ollama
+      const messages = activeChat?.messages.map(msg => ({
+        role: msg.role,
+        content: msg.content
+      })) || [];
+
+      // Add the current message
+      messages.push({
+        role: 'user',
+        content: contextualContent
+      });
+
+      // Stream response from Ollama
+      const response = await ollamaIntegration.sendMessageToOllama(
+        activeChat?.messages || [],
+        contextualContent,
+        (update) => {
+          const responseContent = update.type === 'thinking'
+            ? `💭 **Thinking...**\n\n${update.thinking}${update.response ? `\n\n---\n\n${update.response}` : ''}`
+            : update.thinking
+              ? `💭 **Thought Process:**\n\n${update.thinking}\n\n---\n\n**Answer:**\n\n${update.response}`
+              : update.response;
+
+          setCurrentResponse(responseContent);
+        }
+      );
+
+      if (response) {
+        // Create assistant message
+        const assistantMessage: Message = {
+          id: `assistant-${Date.now()}`,
+          role: 'assistant',
+          content: response,
+          timestamp: Date.now()
+        };
+
+        addMessageToActiveChat(assistantMessage);
+
+        // Auto-speak the response if voice mode is enabled
+        if (voiceModeEnabled) {
+          console.log('Speaking response:', response.substring(0, 50) + '...');
+          await speechService.speakResponse(response);
+        }
+      }
+    } catch (error) {
+      console.error('Error sending message:', error);
+      
+      const errorMessage: Message = {
+        id: `error-${Date.now()}`,
+        role: 'assistant',
+        content: `Error: ${error instanceof Error ? error.message : 'Unknown error occurred'}`,
+        timestamp: Date.now()
+      };
+      
+      addMessageToActiveChat(errorMessage);
+    } finally {
+      setIsTyping(false);
+      setCurrentResponse('');
     }
   };
 
@@ -360,6 +477,18 @@ export default function GlassChatPiP() {
     return () => window.removeEventListener('focus-chat-input', handleFocusInput);
   }, []);
 
+  // Listen for speech toggle event
+  useEffect(() => {
+    const handleToggleSpeech = () => {
+      setShowSpeechControls(prev => !prev);
+    };
+    
+    if (window.pip?.onToggleSpeech) {
+      const cleanup = window.pip.onToggleSpeech(handleToggleSpeech);
+      return cleanup;
+    }
+  }, []);
+
   // Handle stop typing
   const handleStop = async () => {
     setIsTyping(false);
@@ -376,8 +505,13 @@ export default function GlassChatPiP() {
     }
   };
 
-  // Main send function
+  // Main send function (wrapper for backward compatibility)
   const handleSend = async (messageInput?: string, fromQuickInput?: boolean) => {
+    await handleSendMessage(messageInput);
+  };
+
+  // Legacy send function
+  const handleSendLegacy = async (messageInput?: string, fromQuickInput?: boolean) => {
     const textToSend = messageInput || input.trim();
     if (!textToSend) return;
 
@@ -975,6 +1109,8 @@ export default function GlassChatPiP() {
                 onCollapseToggle={handleCustomCollapseToggle}
                 onHide={handleHide}
                 size={state.size}
+                showSpeechControls={showSpeechControls}
+                onSpeechToggle={() => setShowSpeechControls(!showSpeechControls)}
               />
             )}
           </div>
@@ -1077,6 +1213,30 @@ export default function GlassChatPiP() {
                   }}
                   onRunCommand={() => setInput('/run ')}
                 />
+
+                {/* Speech Controls */}
+                <AnimatePresence>
+                  {showSpeechControls && (
+                    <motion.div
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: 'auto' }}
+                      exit={{ opacity: 0, height: 0 }}
+                      transition={{ duration: 0.2 }}
+                      className="border-t border-white/10 overflow-hidden"
+                    >
+                      <div className="p-3">
+                        <SpeechControls
+                          onSpeechRecognized={handleSpeechRecognized}
+                          onVoiceModeChange={speechService.setVoiceModeEnabled}
+                          onDroidModeChange={speechService.setDroidModeEnabled}
+                          voiceModeEnabled={speechService.voiceModeEnabled}
+                          droidModeEnabled={speechService.droidModeEnabled}
+                          compact={false}
+                        />
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
               </motion.div>
             )}
           </AnimatePresence>

@@ -2,7 +2,10 @@ import { app, BrowserWindow, globalShortcut, ipcMain, clipboard, screen, Tray, M
 import path from 'node:path';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { exec } from 'node:child_process';
+import { promisify } from 'node:util';
 import { OllamaService, ChatMessage } from '../src/services/ollamaService.js';
+import { getSpeechService, SpeechServiceClient } from '../src/services/speechService.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -29,6 +32,9 @@ const THEME_FILE = path.join(app.getPath('userData'), 'theme.json');
 
 // Ollama service
 const ollamaService = new OllamaService();
+
+// Speech service
+const speechService = getSpeechService();
 
 // Server status (Digital Ocean droplet)
 interface ServerStatus {
@@ -122,7 +128,6 @@ function setupLinuxBlur(window: BrowserWindow): void {
     const nativeWindowHandle = window.getNativeWindowHandle();
     
     // Try to set blur effects using X11 properties for common compositors
-    const { exec } = require('child_process');
     
     // Get window ID for X11 operations
     exec(`xprop -root _NET_ACTIVE_WINDOW`, (error, stdout) => {
@@ -553,7 +558,6 @@ ipcMain.handle('context:get-selected-text', async () => {
     
     // Simulate Ctrl+C to copy selected text (if any)
     // Note: This is a basic approach and might not work in all scenarios
-    const { globalShortcut } = require('electron');
     
     // For now, return the current clipboard as selected text
     // In a production app, you'd want more sophisticated selection detection
@@ -704,8 +708,6 @@ ipcMain.on('server:updateConfig', (_, config: Partial<ServerStatus>) => {
 // Command execution handler
 ipcMain.handle('system:executeCommand', async (_, command: string) => {
   try {
-    const { exec } = require('child_process');
-    const { promisify } = require('util');
     const execAsync = promisify(exec);
     
     const result = await execAsync(command);
@@ -724,6 +726,134 @@ ipcMain.handle('system:executeCommand', async (_, command: string) => {
     };
   }
 });
+
+// Speech service handlers
+ipcMain.handle('speech:connect', async () => {
+  try {
+    await speechService.connect();
+    return { success: true };
+  } catch (error: any) {
+    console.error('Failed to connect to speech service:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('speech:disconnect', () => {
+  speechService.disconnect();
+  return { success: true };
+});
+
+ipcMain.handle('speech:isConnected', () => {
+  return speechService.isServiceConnected();
+});
+
+ipcMain.handle('speech:startListening', () => {
+  try {
+    speechService.startListening();
+    return { success: true };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('speech:stopListening', () => {
+  try {
+    speechService.stopListening();
+    return { success: true };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('speech:synthesize', (_, text: string) => {
+  try {
+    speechService.synthesizeSpeech({ text });
+    return { success: true };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('speech:sendGGWave', (_, text: string) => {
+  try {
+    speechService.sendGGWave({ text });
+    return { success: true };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('speech:getStatus', () => {
+  try {
+    speechService.getStatus();
+    return { success: true };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+});
+
+// Setup speech service event forwarding to renderer
+function setupSpeechServiceEvents() {
+  speechService.on('connected', () => {
+    if (win && !win.isDestroyed()) {
+      win.webContents.send('speech:connected');
+    }
+  });
+
+  speechService.on('disconnected', () => {
+    if (win && !win.isDestroyed()) {
+      win.webContents.send('speech:disconnected');
+    }
+  });
+
+  speechService.on('speechRecognized', (result) => {
+    if (win && !win.isDestroyed()) {
+      win.webContents.send('speech:recognized', result);
+    }
+  });
+
+  speechService.on('speechGenerated', (data) => {
+    if (win && !win.isDestroyed()) {
+      win.webContents.send('speech:generated', data);
+    }
+  });
+
+  speechService.on('speechError', (error) => {
+    if (win && !win.isDestroyed()) {
+      win.webContents.send('speech:error', error);
+    }
+  });
+
+  speechService.on('ggwaveSent', (data) => {
+    if (win && !win.isDestroyed()) {
+      win.webContents.send('speech:ggwaveSent', data);
+    }
+  });
+
+  speechService.on('ggwaveError', (error) => {
+    if (win && !win.isDestroyed()) {
+      win.webContents.send('speech:ggwaveError', error);
+    }
+  });
+
+  speechService.on('statusUpdate', (status) => {
+    if (win && !win.isDestroyed()) {
+      win.webContents.send('speech:statusUpdate', status);
+    }
+  });
+
+  speechService.on('listeningStarted', () => {
+    if (win && !win.isDestroyed()) {
+      win.webContents.send('speech:listeningStarted');
+    }
+  });
+
+  speechService.on('listeningStopped', () => {
+    if (win && !win.isDestroyed()) {
+      win.webContents.send('speech:listeningStopped');
+    }
+  });
+}
 
 // App event handlers
 app.whenReady().then(async () => {
@@ -814,6 +944,30 @@ app.whenReady().then(async () => {
   if (!contextRegistered) {
     console.error('Failed to register context toggle shortcut');
   }
+
+  // Register speech toggle shortcut
+  const speechShortcut = 'CommandOrControl+Shift+V';
+  const speechRegistered = globalShortcut.register(speechShortcut, () => {
+    if (!win) return;
+    if (!win.isVisible()) {
+      win.show();
+      win.focus();
+    }
+    // Toggle speech listening
+    win.webContents.send('toggle-speech');
+  });
+
+  if (!speechRegistered) {
+    console.error('Failed to register speech toggle shortcut');
+  }
+
+  // Setup speech service event forwarding
+  setupSpeechServiceEvents();
+
+  // Auto-connect to speech service
+  speechService.connect().catch(error => {
+    console.warn('Failed to auto-connect to speech service:', error);
+  });
 });
 
 app.on('window-all-closed', () => {

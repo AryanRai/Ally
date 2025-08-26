@@ -35,13 +35,15 @@
     "remark-gfm": "^4.0.1",
     "socket.io-client": "^4.7.2",
     "tailwind-merge": "^2.2.1",
-    "uuid": "^9.0.0"
+    "uuid": "^9.0.0",
+    "ws": "^8.14.2"
   },
   "devDependencies": {
     "@types/node": "^20.12.7",
     "@types/react": "^18.3.1",
     "@types/react-dom": "^18.3.1",
     "@types/uuid": "^9.0.0",
+    "@types/ws": "^8.5.8",
     "@typescript-eslint/eslint-plugin": "^7.8.0",
     "@typescript-eslint/parser": "^7.8.0",
     "@vitejs/plugin-react": "^4.2.1",

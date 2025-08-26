@@ -1,9 +1,8 @@
-
 # Ally – DroidCore Desktop Overlay
 
 **Ally** is a **glassmorphic, picture-in-picture desktop overlay** that provides advanced access to local and remote LLMs, convenience tools for instant actions, and a bridge to the **DroidCore** robotic platform.
 
-It runs as a floating, always-on-top Electron app with Apple-style glass UI, animated interactions, and seamless integration with **Ollama (local models like gpt-oss-20b)**. All chats are logged to a **DigitalOcean-hosted API** with an exposed external domain, enabling persistent conversation history, analytics, and remote control signals for the robot.
+It runs as a floating, always-on-top Electron app with Apple-style glass UI, animated interactions, and seamless integration with **Ollama (local models like gpt-oss-20b)**. All chats are logged to a **Vercel-hosted API** with an exposed external domain, enabling persistent conversation history, analytics, and remote control signals for the robot. The API uses Supabase for database storage and integrates with the PC LLM via public IP exposure.
 
 ---
 
@@ -35,10 +34,17 @@ It is ideal for:
 - **Custom prompts & system personas:** switchable in settings.
 
 ### Chat Logging
-- **DigitalOcean API:** all messages are sent to a dedicated DO droplet.
-- **Storage:** PostgreSQL or SQLite+Litestream for persistence.
+- **Vercel API:** all messages are sent to a Vercel free site/API, which routes to Supabase for storage and can proxy to the PC LLM via public IP.
+- **Storage:** Supabase (PostgreSQL) for persistence.
 - **Secure:** API key authentication, HTTPS enforced, optional IP allowlist.
 - **Retrieval:** pull past chats for context or analysis.
+
+### Speech Integration
+- **Speech-to-Text:** OpenAI Whisper for accurate voice recognition with real-time processing.
+- **Text-to-Speech:** Coqui TTS for natural speech synthesis with multiple voice options.
+- **ggwave Communication:** Audio-based data transmission for robot communication protocols.
+- **WebSocket Service:** Separate Python service for speech processing with GPU acceleration.
+- **Voice Commands:** Hands-free interaction with Ally and LLM conversations.
 
 ### Robot Hooks (DroidCore)
 - **HighLvl integration:** Ally can send structured commands to the DroidCore robot.
@@ -52,7 +58,6 @@ It is ideal for:
 
 ```
 
-```
             +-----------------------+
             |    Ally Overlay UI    |
             |  (Electron + React)   |
@@ -62,22 +67,20 @@ It is ideal for:
                        |
      +-----------------+----------------+
      |                                  |
-```
-
-Local Ollama (LLM)               DigitalOcean Chat API
-[http://localhost:11434](http://localhost:11434)             [https://api.example.com](https://api.example.com)
-(gpt-oss:20b, etc.)                (store/retrieve logs)
-|
-+------v-------+
-\|  LLM Output  |
-+------+-------+
-|
-v
-DroidCore HighLvl Modules
-(Vision, Language, Speech, Sound)
-|
-v
-DroidCore LowLvl Modules
+Local Ollama (LLM)               Vercel API (via Public IP)
+[http://localhost:11434]             [https://api.example.vercel.app]
+(gpt-oss:20b, etc.)                (proxy to Supabase & PC LLM)
+|                                       |
++------v-------+                        v
+|  LLM Output  |               Supabase (store/retrieve logs)
++------+-------+                        ^
+|                                       |
+v                                       |
+DroidCore HighLvl Modules        PC LLM (local integration)
+(Vision, Language, Speech, Sound)       |
+|                                       |
+v                                       |
+DroidCore LowLvl Modules         Back to Vercel/Supabase
 (Motor, FOC, Radar, Fans, Bluetooth)
 
 ```
@@ -93,7 +96,12 @@ DroidCore LowLvl Modules
 │   ├── components/    # GlassChatPiP & related UI
 │   ├── lib/           # ollamaClient, chatLogApi
 │   └── styles/        # Tailwind config & global CSS
-├── HighLvl/           # DroidCore AI & perception modules
+├── speech-service/    # Python speech processing service
+│   ├── speech_service.py    # WebSocket-based STT/TTS/ggwave service
+│   ├── start_service.py     # Service startup script
+│   ├── requirements.txt     # Python dependencies
+│   └── start.bat/sh/ps1     # Platform-specific startup scripts
+├── HighLvl/           # DroidCore AI & perception modules (future)
 │   ├── Vision/        # SLAM, object detection, face recognition
 │   ├── Language/      # LLM reasoning, prompt building
 │   ├── Speech/        # Whisper STT, Piper TTS
@@ -132,21 +140,55 @@ DroidCore LowLvl Modules
 - Bluetooth / Lora communications
 
 **Backend**
-- DigitalOcean droplet (API server)
-- Express.js or FastAPI for chat logging
-- PostgreSQL or SQLite+Litestream
+- Vercel free site/API (serverless API)
+- Express.js or FastAPI for API logic
+- Supabase (PostgreSQL)
 
 ---
 
 ## Roadmap
 
-- [ ] **M0 – UI Prototype** (v0): glass PiP component with animations.
-- [ ] **M1 – Electron Shell**: window vibrancy, bounds persistence, shortcut toggle.
-- [ ] **M2 – Ollama Integration**: local LLM streaming.
-- [ ] **M3 – DO Chat API**: log storage & retrieval.
-- [ ] **M4 – Robot Hooks**: send structured commands to DroidCore LowLvl.
-- [ ] **M5 – Multi-modal**: merge vision, speech, and LLM reasoning for autonomous tasks.
-- [ ] **M6 – Packaging**: cross-platform builds, code signing, autoupdate.
+- [X] **M0 – UI Prototype** (v0): glass PiP component with animations.
+- [X] **M1 – Electron Shell**: window vibrancy, bounds persistence, shortcut toggle.
+- [X] **M2 – Ollama Integration**: local LLM streaming.
+- [X] **M3 – Speech Integration**: STT (Whisper), TTS, and ggwave communication via WebSocket service.
+- [ ] **M4 – Vercel/Supabase Chat API**: log storage & retrieval.
+- [ ] **M5 – Robot Hooks**: send structured commands to DroidCore LowLvl.
+- [ ] **M6 – Multi-modal**: merge vision, speech, and LLM reasoning for autonomous tasks.
+- [ ] **M7 – Packaging**: cross-platform builds, code signing, autoupdate.
+
+---
+
+## Quick Start with Speech
+
+1. **Start the Speech Service:**
+   ```bash
+   cd Ally/speech-service
+   # Windows
+   start.bat
+   # macOS/Linux
+   ./start.sh
+   # PowerShell (cross-platform)
+   pwsh start.ps1
+   ```
+
+2. **Launch Ally:**
+   ```bash
+   cd Ally/glass-pip-chat
+   npm install
+   npm run dev
+   ```
+
+3. **Enable Speech Controls:**
+   - Press `Ctrl+Shift+V` (or `Cmd+Shift+V` on macOS) to toggle speech controls
+   - Click "Connect" to link with the speech service
+   - Start voice recognition and begin talking to Ally
+
+4. **Voice Commands:**
+   - Speak naturally to Ally - recognized text appears in the input field
+   - Use "Please explain..." or "Help me with..." for auto-send
+   - Test TTS with custom text
+   - Send ggwave signals for robot communication
 
 ---
 

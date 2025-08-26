@@ -78,6 +78,32 @@ export interface PipAPI {
   system: {
     executeCommand: (command: string) => Promise<CommandResult>;
   };
+
+  // Speech service
+  speech: {
+    connect: () => Promise<{ success: boolean; error?: string }>;
+    disconnect: () => Promise<{ success: boolean; error?: string }>;
+    isConnected: () => Promise<boolean>;
+    startListening: () => Promise<{ success: boolean; error?: string }>;
+    stopListening: () => Promise<{ success: boolean; error?: string }>;
+    synthesize: (text: string) => Promise<{ success: boolean; error?: string }>;
+    sendGGWave: (text: string) => Promise<{ success: boolean; error?: string }>;
+    getStatus: () => Promise<{ success: boolean; error?: string }>;
+    
+    onConnected: (callback: () => void) => () => void;
+    onDisconnected: (callback: () => void) => () => void;
+    onSpeechRecognized: (callback: (result: any) => void) => () => void;
+    onSpeechGenerated: (callback: (data: any) => void) => () => void;
+    onSpeechError: (callback: (error: string) => void) => () => void;
+    onGGWaveSent: (callback: (data: any) => void) => () => void;
+    onGGWaveError: (callback: (error: string) => void) => () => void;
+    onStatusUpdate: (callback: (status: any) => void) => () => void;
+    onListeningStarted: (callback: () => void) => () => void;
+    onListeningStopped: (callback: () => void) => () => void;
+  };
+
+  // Speech toggle event
+  onToggleSpeech: (callback: () => void) => () => void;
 }
 
 declare global {
