@@ -162,8 +162,24 @@ export default function GlassChatPiP() {
     console.log('Speech recognized:', text, 'Voice mode enabled:', voiceModeEnabled);
     if (!voiceModeEnabled) return;
 
-    // Auto-send the message for processing
-    handleSendMessage(text);
+    // If currently typing (AI is responding), interrupt it
+    if (isTyping) {
+      console.log('🛑 Interrupting current response for new speech input');
+
+      // Stop current speech
+      speechService.stopCurrentSpeech();
+
+      // Stop the current Ollama request
+      handleStop();
+
+      // Small delay to ensure cleanup, then send new message
+      setTimeout(() => {
+        handleSendMessage(text);
+      }, 200);
+    } else {
+      // Normal flow - just send the message
+      handleSendMessage(text);
+    }
   };
 
   // Handle sending messages (extracted for reuse)
@@ -1175,6 +1191,8 @@ export default function GlassChatPiP() {
                   ollamaIntegration.setCurrentModel(model);
                   ollamaIntegration.setShowModelSelector(false);
                 }}
+                voiceModeEnabled={voiceModeEnabled}
+                onVoiceModeToggle={() => setVoiceModeEnabled(!voiceModeEnabled)}
               />
             ) : (
               <ExpandedHeader

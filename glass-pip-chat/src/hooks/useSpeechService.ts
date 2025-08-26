@@ -48,6 +48,10 @@ export interface UseSpeechServiceReturn {
   // Auto-speak responses
   speakResponse: (text: string) => Promise<void>;
   speakResponseStreaming: (text: string) => Promise<void>;
+  
+  // Interruption control
+  stopCurrentSpeech: () => void;
+  interruptAndSpeak: (newText: string) => Promise<void>;
 }
 
 export function useSpeechService(): UseSpeechServiceReturn {
@@ -65,6 +69,7 @@ export function useSpeechService(): UseSpeechServiceReturn {
   const audioContextRef = useRef<AudioContext | null>(null);
   const audioQueueRef = useRef<string[]>([]);
   const isPlayingRef = useRef<boolean>(false);
+  const currentAudioSourceRef = useRef<AudioBufferSourceNode | null>(null);
 
   // Initialize audio context
   useEffect(() => {
@@ -318,9 +323,18 @@ export function useSpeechService(): UseSpeechServiceReturn {
       source.buffer = audioBuffer;
       source.connect(audioContextRef.current.destination);
       
+      // Store reference for interruption
+      currentAudioSourceRef.current = source;
+      
       return new Promise<void>((resolve, reject) => {
-        source.onended = () => resolve();
-        source.onerror = reject;
+        source.onended = () => {
+          currentAudioSourceRef.current = null;
+          resolve();
+        };
+        source.onerror = (error) => {
+          currentAudioSourceRef.current = null;
+          reject(error);
+        };
         source.start();
       });
 
@@ -338,18 +352,22 @@ export function useSpeechService(): UseSpeechServiceReturn {
     isPlayingRef.current = true;
     
     try {
-      while (audioQueueRef.current.length > 0) {
-        const audioData = audioQueueRef.current.shift();
-        if (audioData) {
-          await playGeneratedSpeech(audioData);
-          // Small delay between chunks
-          await new Promise(resolve => setTimeout(resolve, 50));
-        }
+      // Play one chunk at a time, waiting for completion
+      const audioData = audioQueueRef.current.shift();
+      if (audioData) {
+        await playGeneratedSpeech(audioData);
+        // Small delay between chunks for natural speech flow
+        await new Promise(resolve => setTimeout(resolve, 100));
       }
     } catch (error) {
       console.error('Error playing audio chunk:', error);
     } finally {
       isPlayingRef.current = false;
+      
+      // Continue playing next chunk if available
+      if (audioQueueRef.current.length > 0) {
+        setTimeout(() => playNextAudioChunk(), 50);
+      }
     }
   }, [playGeneratedSpeech]);
 
@@ -391,6 +409,42 @@ export function useSpeechService(): UseSpeechServiceReturn {
     }
   }, [voiceModeEnabled, droidModeEnabled, sendGGWave, synthesizeSpeechStreaming]);
 
+  const stopCurrentSpeech = useCallback(() => {
+    // Stop current audio playback
+    if (currentAudioSourceRef.current) {
+      try {
+        currentAudioSourceRef.current.stop();
+        currentAudioSourceRef.current = null;
+      } catch (error) {
+        console.error('Error stopping current audio:', error);
+      }
+    }
+
+    // Clear audio queue
+    audioQueueRef.current = [];
+    isPlayingRef.current = false;
+
+    console.log('🔇 Speech interrupted and queue cleared');
+  }, []);
+
+  const interruptAndSpeak = useCallback(async (newText: string) => {
+    // Stop current speech
+    stopCurrentSpeech();
+
+    // Start new speech after a brief delay
+    setTimeout(async () => {
+      try {
+        if (droidModeEnabled) {
+          await sendGGWave(newText);
+        } else {
+          await synthesizeSpeechStreaming(newText);
+        }
+      } catch (error) {
+        console.error('Error in interrupt and speak:', error);
+      }
+    }, 100);
+  }, [stopCurrentSpeech, droidModeEnabled, sendGGWave, synthesizeSpeechStreaming]);
+
   return {
     // Status
     status,
@@ -421,6 +475,10 @@ export function useSpeechService(): UseSpeechServiceReturn {
     
     // Auto-speak responses
     speakResponse,
-    speakResponseStreaming
+    speakResponseStreaming,
+    
+    // Interruption control
+    stopCurrentSpeech,
+    interruptAndSpeak
   };
 }

@@ -8,7 +8,9 @@ import {
   CornerDownLeft,
   X,
   Clipboard,
-  ChevronDown
+  ChevronDown,
+  Volume2,
+  VolumeX
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { ThemeUtils } from '../../utils/themeUtils';
@@ -51,6 +53,8 @@ interface CollapsedHeaderProps {
   showModelSelector: boolean;
   onModelSelectorToggle: () => void;
   onModelSelect: (model: string) => void;
+  voiceModeEnabled?: boolean;
+  onVoiceModeToggle?: () => void;
 }
 
 export default function CollapsedHeader({
@@ -86,7 +90,9 @@ export default function CollapsedHeader({
   currentModel,
   showModelSelector,
   onModelSelectorToggle,
-  onModelSelect
+  onModelSelect,
+  voiceModeEnabled,
+  onVoiceModeToggle
 }: CollapsedHeaderProps) {
   const [isContextExpanded, setIsContextExpanded] = useState(false);
   const modelButtonRef = useRef<HTMLButtonElement>(null);
@@ -163,6 +169,26 @@ export default function CollapsedHeader({
           className="flex items-center gap-1 flex-shrink-0"
           style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
         >
+          {/* Voice Mode Toggle */}
+          {onVoiceModeToggle && (
+            <button
+              onClick={onVoiceModeToggle}
+              className={cn(
+                "p-1.5 rounded-lg transition-colors",
+                voiceModeEnabled
+                  ? "bg-purple-500/20 text-purple-400 hover:bg-purple-500/30"
+                  : "bg-gray-500/20 text-gray-400 hover:bg-gray-500/30"
+              )}
+              title={`Voice mode: ${voiceModeEnabled ? 'ON' : 'OFF'}`}
+            >
+              {voiceModeEnabled ? (
+                <Volume2 className="w-3.5 h-3.5" />
+              ) : (
+                <VolumeX className="w-3.5 h-3.5" />
+              )}
+            </button>
+          )}
+
           {/* Model Selector */}
           {ollamaAvailable && availableModels.length > 0 && (
             <>
