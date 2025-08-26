@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { cn } from '../lib/utils';
 import { ThemeUtils } from '../utils/themeUtils';
 import { useEditState } from '../hooks/useEditState';
@@ -159,7 +161,7 @@ export default function GlassChatPiP() {
   const handleSpeechRecognized = (text: string) => {
     console.log('Speech recognized:', text, 'Voice mode enabled:', voiceModeEnabled);
     if (!voiceModeEnabled) return;
-    
+
     // Auto-send the message for processing
     handleSendMessage(text);
   };
@@ -221,7 +223,7 @@ export default function GlassChatPiP() {
         contextualContent,
         (update) => {
           let responseContent = '';
-          
+
           if (update.type === 'thinking') {
             // Show thinking in real-time with typing indicator
             responseContent = `💭 **Thinking...**\n\n${update.thinking}${update.thinking.endsWith('.') || update.thinking.endsWith('!') || update.thinking.endsWith('?') ? '' : '▋'}`;
@@ -241,12 +243,13 @@ export default function GlassChatPiP() {
             }
           }
 
+          // Update current response for both collapsed and expanded modes
           setCurrentResponse(responseContent);
         }
       );
 
       if (response) {
-        // Create assistant message
+        // Create assistant message only after streaming is complete
         const assistantMessage: Message = {
           id: `assistant-${Date.now()}`,
           role: 'assistant',
@@ -264,14 +267,14 @@ export default function GlassChatPiP() {
       }
     } catch (error) {
       console.error('Error sending message:', error);
-      
+
       const errorMessage: Message = {
         id: `error-${Date.now()}`,
         role: 'assistant',
         content: `Error: ${error instanceof Error ? error.message : 'Unknown error occurred'}`,
         timestamp: Date.now()
       };
-      
+
       addMessageToActiveChat(errorMessage);
     } finally {
       setIsTyping(false);
@@ -292,8 +295,11 @@ export default function GlassChatPiP() {
 
     // Remove the current assistant response
     const updatedMessages = activeChat.messages.slice(0, messageIndex);
-    activeChat.messages = updatedMessages;
-    setActiveChat({ ...activeChat });
+    const updatedChat = {
+      ...activeChat,
+      messages: updatedMessages
+    };
+    setActiveChat(updatedChat);
 
     // Set typing state and clear any current response
     setIsTyping(true);
@@ -301,62 +307,46 @@ export default function GlassChatPiP() {
 
     try {
       if (ollamaIntegration.ollamaAvailable && ollamaIntegration.currentModel) {
-        // Create a new streaming message
-        const tempMessageId = (Date.now() + 1).toString();
-        const streamingMessage: Message = {
-          id: tempMessageId,
-          role: 'assistant',
-          content: '',
-          timestamp: Date.now()
-        };
-
-        addMessageToActiveChat(streamingMessage);
-
         // Get messages up to the user message (excluding the old response)
         const messagesUpToUser = updatedMessages.slice(0, messageIndex);
 
-        await ollamaIntegration.sendMessageToOllama(messagesUpToUser, userMessage.content, (update) => {
-          if (activeChat) {
-            let responseContent = '';
-            
-            if (update.type === 'thinking') {
-              // Show thinking in real-time with typing indicator
-              responseContent = `💭 **Thinking...**\n\n${update.thinking}${update.thinking.endsWith('.') || update.thinking.endsWith('!') || update.thinking.endsWith('?') ? '' : '▋'}`;
-            } else if (update.type === 'response') {
-              // Show both thinking (if any) and response
-              if (update.thinking) {
-                responseContent = `💭 **Thought Process:**\n\n${update.thinking}\n\n---\n\n**Answer:**\n\n${update.response}${update.response.endsWith('.') || update.response.endsWith('!') || update.response.endsWith('?') ? '' : '▋'}`;
-              } else {
-                responseContent = `${update.response}${update.response.endsWith('.') || update.response.endsWith('!') || update.response.endsWith('?') ? '' : '▋'}`;
-              }
-            } else if (update.type === 'done') {
-              // Final response without typing indicator
-              if (update.thinking) {
-                responseContent = `💭 **Thought Process:**\n\n${update.thinking}\n\n---\n\n**Answer:**\n\n${update.response}`;
-              } else {
-                responseContent = update.response;
-              }
+        const response = await ollamaIntegration.sendMessageToOllama(messagesUpToUser, userMessage.content, (update) => {
+          let responseContent = '';
+
+          if (update.type === 'thinking') {
+            // Show thinking in real-time with typing indicator
+            responseContent = `💭 **Thinking...**\n\n${update.thinking}${update.thinking.endsWith('.') || update.thinking.endsWith('!') || update.thinking.endsWith('?') ? '' : '▋'}`;
+          } else if (update.type === 'response') {
+            // Show both thinking (if any) and response
+            if (update.thinking) {
+              responseContent = `💭 **Thought Process:**\n\n${update.thinking}\n\n---\n\n**Answer:**\n\n${update.response}${update.response.endsWith('.') || update.response.endsWith('!') || update.response.endsWith('?') ? '' : '▋'}`;
+            } else {
+              responseContent = `${update.response}${update.response.endsWith('.') || update.response.endsWith('!') || update.response.endsWith('?') ? '' : '▋'}`;
             }
-
-            // Update current response for collapsed preview
-            setCurrentResponse(responseContent);
-
-            const updatedMessages = activeChat.messages.map(msg =>
-              msg.id === tempMessageId ? {
-                ...msg,
-                content: responseContent
-              } : msg
-            );
-            activeChat.messages = updatedMessages;
-            setActiveChat({ ...activeChat });
-
-            if (update.type === 'done') {
-              chatManager.getChatById(activeChat.id)!.messages = updatedMessages;
-              // Clear current response after completion
-              setTimeout(() => setCurrentResponse(''), 1000);
+          } else if (update.type === 'done') {
+            // Final response without typing indicator
+            if (update.thinking) {
+              responseContent = `💭 **Thought Process:**\n\n${update.thinking}\n\n---\n\n**Answer:**\n\n${update.response}`;
+            } else {
+              responseContent = update.response;
             }
           }
+
+          // Update current response for both collapsed and expanded modes
+          setCurrentResponse(responseContent);
         });
+
+        if (response) {
+          // Create assistant message only after streaming is complete
+          const assistantMessage: Message = {
+            id: (Date.now() + 1).toString(),
+            role: 'assistant',
+            content: response,
+            timestamp: Date.now()
+          };
+
+          addMessageToActiveChat(assistantMessage);
+        }
       } else {
         // Fallback response when Ollama is not available
         const reason = ollamaIntegration.getUnavailableReason();
@@ -384,6 +374,7 @@ export default function GlassChatPiP() {
       addMessageToActiveChat(errorMessage);
     } finally {
       setIsTyping(false);
+      setCurrentResponse('');
     }
   };
 
@@ -514,7 +505,7 @@ export default function GlassChatPiP() {
     const handleToggleSpeech = () => {
       setShowSpeechControls(prev => !prev);
     };
-    
+
     if (window.pip?.onToggleSpeech) {
       const cleanup = window.pip.onToggleSpeech(handleToggleSpeech);
       return cleanup;
@@ -525,7 +516,7 @@ export default function GlassChatPiP() {
   const handleStop = async () => {
     setIsTyping(false);
     setCurrentResponse(''); // Clear current response when stopping
-    
+
     // Stop the Ollama request if it's running
     if (window.pip?.ollama?.stop) {
       try {
@@ -605,59 +596,43 @@ export default function GlassChatPiP() {
 
     try {
       if (ollamaIntegration.ollamaAvailable && ollamaIntegration.currentModel) {
-        // Create a temporary message for streaming
-        const tempMessageId = (Date.now() + 1).toString();
-        const streamingMessage: Message = {
-          id: tempMessageId,
-          role: 'assistant',
-          content: '',
-          timestamp: Date.now()
-        };
+        const response = await ollamaIntegration.sendMessageToOllama(messages, messageContent, (update) => {
+          let responseContent = '';
 
-        addMessageToActiveChat(streamingMessage);
-
-        await ollamaIntegration.sendMessageToOllama(messages, messageContent, (update) => {
-          if (activeChat) {
-            let responseContent = '';
-            
-            if (update.type === 'thinking') {
-              // Show thinking in real-time with typing indicator
-              responseContent = `💭 **Thinking...**\n\n${update.thinking}${update.thinking.endsWith('.') || update.thinking.endsWith('!') || update.thinking.endsWith('?') ? '' : '▋'}`;
-            } else if (update.type === 'response') {
-              // Show both thinking (if any) and response
-              if (update.thinking) {
-                responseContent = `💭 **Thought Process:**\n\n${update.thinking}\n\n---\n\n**Answer:**\n\n${update.response}${update.response.endsWith('.') || update.response.endsWith('!') || update.response.endsWith('?') ? '' : '▋'}`;
-              } else {
-                responseContent = `${update.response}${update.response.endsWith('.') || update.response.endsWith('!') || update.response.endsWith('?') ? '' : '▋'}`;
-              }
-            } else if (update.type === 'done') {
-              // Final response without typing indicator
-              if (update.thinking) {
-                responseContent = `💭 **Thought Process:**\n\n${update.thinking}\n\n---\n\n**Answer:**\n\n${update.response}`;
-              } else {
-                responseContent = update.response;
-              }
+          if (update.type === 'thinking') {
+            // Show thinking in real-time with typing indicator
+            responseContent = `💭 **Thinking...**\n\n${update.thinking}${update.thinking.endsWith('.') || update.thinking.endsWith('!') || update.thinking.endsWith('?') ? '' : '▋'}`;
+          } else if (update.type === 'response') {
+            // Show both thinking (if any) and response
+            if (update.thinking) {
+              responseContent = `💭 **Thought Process:**\n\n${update.thinking}\n\n---\n\n**Answer:**\n\n${update.response}${update.response.endsWith('.') || update.response.endsWith('!') || update.response.endsWith('?') ? '' : '▋'}`;
+            } else {
+              responseContent = `${update.response}${update.response.endsWith('.') || update.response.endsWith('!') || update.response.endsWith('?') ? '' : '▋'}`;
             }
-
-            // Update current response for collapsed preview
-            setCurrentResponse(responseContent);
-
-            const updatedMessages = activeChat.messages.map(msg =>
-              msg.id === tempMessageId ? {
-                ...msg,
-                content: responseContent
-              } : msg
-            );
-            activeChat.messages = updatedMessages;
-            setActiveChat({ ...activeChat });
-
-            if (update.type === 'done') {
-              chatManager.getChatById(activeChat.id)!.messages = updatedMessages;
-              // Clear current response after completion (it's now in messages)
-              setTimeout(() => setCurrentResponse(''), 1000);
+          } else if (update.type === 'done') {
+            // Final response without typing indicator
+            if (update.thinking) {
+              responseContent = `💭 **Thought Process:**\n\n${update.thinking}\n\n---\n\n**Answer:**\n\n${update.response}`;
+            } else {
+              responseContent = update.response;
             }
           }
+
+          // Update current response for both collapsed and expanded modes
+          setCurrentResponse(responseContent);
         });
+
+        if (response) {
+          // Create assistant message only after streaming is complete
+          const assistantMessage: Message = {
+            id: (Date.now() + 1).toString(),
+            role: 'assistant',
+            content: response,
+            timestamp: Date.now()
+          };
+
+          addMessageToActiveChat(assistantMessage);
+        }
       } else {
         // Fallback response when Ollama is not available
         const reason = ollamaIntegration.getUnavailableReason();
@@ -685,6 +660,7 @@ export default function GlassChatPiP() {
       addMessageToActiveChat(errorMessage);
     } finally {
       setIsTyping(false);
+      setCurrentResponse('');
     }
   };
 
@@ -699,7 +675,7 @@ export default function GlassChatPiP() {
       );
 
       // Handle global shortcuts first (these work regardless of focus and should always be processed)
-      
+
       // Global shortcuts with Ctrl+Shift (work regardless of focus)
       if ((event.ctrlKey || event.metaKey) && event.shiftKey) {
         switch (event.key) {
@@ -759,7 +735,7 @@ export default function GlassChatPiP() {
       if (event.key === 'Escape') {
         event.preventDefault();
         event.stopPropagation();
-        
+
         if (isInputFocused) {
           // If input is focused, clear history and blur
           setHistoryIndex(-1);
@@ -1220,7 +1196,59 @@ export default function GlassChatPiP() {
                       uiSettings={appSettings.ui}
                     />
                   ))}
-                  {isTyping && (
+                  {/* Show streaming response in expanded mode */}
+                  {isTyping && currentResponse && (
+                    <motion.div
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className={cn(
+                        "group relative mr-8 max-w-[90%]",
+                        "rounded-2xl p-4 bg-white/5",
+                        appSettings.ui.fontSize === 'xs' ? 'text-xs' :
+                          appSettings.ui.fontSize === 'sm' ? 'text-sm' :
+                            appSettings.ui.fontSize === 'base' ? 'text-base' :
+                              appSettings.ui.fontSize === 'lg' ? 'text-lg' : 'text-xl'
+                      )}
+                    >
+                      <div className={cn(
+                        "prose max-w-none prose-invert",
+                        appSettings.ui.fontSize === 'xs' ? 'prose-xs' :
+                          appSettings.ui.fontSize === 'sm' ? 'prose-sm' :
+                            appSettings.ui.fontSize === 'base' ? 'prose-base' :
+                              appSettings.ui.fontSize === 'lg' ? 'prose-lg' : 'prose-xl'
+                      )}>
+                        <ReactMarkdown
+                          remarkPlugins={[remarkGfm]}
+                          components={{
+                            p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
+                            code: ({ inline, className, children, ...props }: any) => {
+                              if (inline) {
+                                return (
+                                  <code className="px-1 py-0.5 bg-white/10 rounded text-sm" {...props}>
+                                    {children}
+                                  </code>
+                                );
+                              }
+                              return (
+                                <pre className="bg-black/20 rounded-lg overflow-x-auto my-2 p-3">
+                                  <code className={cn("text-sm", className)} {...props}>
+                                    {children}
+                                  </code>
+                                </pre>
+                              );
+                            }
+                          }}
+                        >
+                          {currentResponse}
+                        </ReactMarkdown>
+                        <span className="inline-block w-2 h-4 bg-current animate-pulse ml-1 align-text-bottom" />
+                      </div>
+                      <div className="text-xs opacity-50 mt-2 text-left">
+                        {new Date().toLocaleTimeString()}
+                      </div>
+                    </motion.div>
+                  )}
+                  {isTyping && !currentResponse && (
                     <motion.div
                       initial={{ opacity: 0 }}
                       animate={{ opacity: 1 }}
