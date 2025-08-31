@@ -5,9 +5,37 @@
  * Provides dynamic tool registration, schema validation, and discovery mechanisms
  */
 
-import { EventEmitter } from 'events';
-import Ajv from 'ajv';
-import addFormats from 'ajv-formats';
+// Browser-compatible EventEmitter implementation
+class BrowserEventEmitter {
+  private listeners: Map<string, Function[]> = new Map();
+
+  emit(event: string, data?: any): boolean {
+    const eventListeners = this.listeners.get(event);
+    if (eventListeners) {
+      eventListeners.forEach(listener => listener(data));
+      return true;
+    }
+    return false;
+  }
+
+  on(event: string, listener: Function): this {
+    if (!this.listeners.has(event)) {
+      this.listeners.set(event, []);
+    }
+    this.listeners.get(event)!.push(listener);
+    return this;
+  }
+
+  removeAllListeners(event?: string): this {
+    if (event) {
+      this.listeners.delete(event);
+    } else {
+      this.listeners.clear();
+    }
+    return this;
+  }
+}
+import { SimpleValidator, ValidationResult } from '../utils/validation.js';
 import {
   ToolDefinition,
   ToolRegistration,
@@ -17,22 +45,15 @@ import {
   SecurityLevel
 } from '../types/index.js';
 
-// Import JSON schemas
-import toolDefinitionSchema from '../schemas/tool-definition.schema.json' assert { type: 'json' };
+// Simple validation instead of JSON schemas
 
-export class ToolRegistry extends EventEmitter {
+export class ToolRegistry extends BrowserEventEmitter {
   private tools: Map<string, ToolRegistration> = new Map();
-  private ajv: Ajv;
   private discoveryInfo: Map<string, ToolDiscoveryInfo> = new Map();
-  private healthCheckInterval: NodeJS.Timeout | null = null;
+  private healthCheckInterval: number | null = null;
 
   constructor() {
     super();
-    
-    // Initialize JSON schema validator
-    this.ajv = new Ajv({ allErrors: true, strict: false });
-    addFormats(this.ajv);
-    this.ajv.addSchema(toolDefinitionSchema, 'tool-definition');
     
     // Start health check monitoring
     this.startHealthChecking();
@@ -47,11 +68,10 @@ export class ToolRegistry extends EventEmitter {
     source: 'internal' | 'mcp' | 'external' = 'internal',
     healthCheck?: () => Promise<boolean>
   ): Promise<void> {
-    // Validate tool definition against schema
-    const isValid = this.ajv.validate('tool-definition', definition);
-    if (!isValid) {
-      const errors = this.ajv.errors?.map(err => `${err.instancePath}: ${err.message}`).join(', ');
-      throw new Error(`Tool definition validation failed: ${errors}`);
+    // Validate tool definition
+    const validation = SimpleValidator.validateToolDefinition(definition);
+    if (!validation.valid) {
+      throw new Error(`Tool definition validation failed: ${validation.errors.join(', ')}`);
     }
 
     // Check for name conflicts
@@ -137,10 +157,9 @@ export class ToolRegistry extends EventEmitter {
     }
 
     // Validate new definition
-    const isValid = this.ajv.validate('tool-definition', definition);
-    if (!isValid) {
-      const errors = this.ajv.errors?.map(err => `${err.instancePath}: ${err.message}`).join(', ');
-      throw new Error(`Tool definition validation failed: ${errors}`);
+    const validation = SimpleValidator.validateToolDefinition(definition);
+    if (!validation.valid) {
+      throw new Error(`Tool definition validation failed: ${validation.errors.join(', ')}`);
     }
 
     // Validate security level permissions

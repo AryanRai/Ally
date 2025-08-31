@@ -10,9 +10,9 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { ToolCallingService, ToolCall, ToolCallResult, ConversationContext, ToolAwareMessage } from '../services/toolCallingService';
 import { OllamaService } from '../services/ollamaService';
-import { ToolManager } from '../../tool-calling-framework/src/manager/ToolManager';
-import { ToolRegistry } from '../../tool-calling-framework/src/registry/ToolRegistry';
-import { ToolExecutor } from '../../tool-calling-framework/src/executor/ToolExecutor';
+import { ToolManager } from '../../../tool-calling-framework/src/manager/ToolManager';
+import { ToolRegistry } from '../../../tool-calling-framework/src/registry/ToolRegistry';
+import { ToolExecutor } from '../../../tool-calling-framework/src/executor/ToolExecutor';
 import { Message } from '../types/chat';
 
 export interface ToolCallingState {
@@ -117,7 +117,7 @@ export function useToolCalling(
           toolExecutionHistory: [],
           availableTools: [], // Will be populated when tools are registered
           environment: {
-            platform: navigator.platform,
+            platform: navigator.userAgentData?.platform || navigator.platform,
             userAgent: navigator.userAgent,
             timestamp: new Date().toISOString()
           }
@@ -126,7 +126,7 @@ export function useToolCalling(
         setState(prev => ({
           ...prev,
           conversationContext: context,
-          availableTools: registry.getAllTools().map(tool => tool.name)
+          availableTools: registry.getAllTools().map((tool: any) => tool.name)
         }));
 
         console.log('Tool calling services initialized successfully');
@@ -199,7 +199,7 @@ export function useToolCalling(
           }
 
           // Call progress callback
-          onProgress?({
+          onProgress?.({
             type: progressType,
             content: chunk,
             toolCalls,
@@ -222,7 +222,7 @@ export function useToolCalling(
       }));
 
       // Final progress update
-      onProgress?({
+      onProgress?.({
         type: 'done',
         content: result.response,
         toolCalls: result.toolCalls,
@@ -311,7 +311,7 @@ export function useToolCalling(
       // Update available tools list
       setState(prev => ({
         ...prev,
-        availableTools: toolRegistry.getAllTools().map(tool => tool.name)
+        availableTools: toolRegistry.getAllTools().map((tool: any) => tool.name)
       }));
 
       return true;

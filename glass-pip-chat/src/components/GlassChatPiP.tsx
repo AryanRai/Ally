@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { X } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { ThemeUtils } from '../utils/themeUtils';
 import { useEditState } from '../hooks/useEditState';
@@ -30,7 +31,12 @@ import { ToolExecutionStatus } from './chat/ToolExecutionStatus';
 import { ToolExecutionHistory } from './chat/ToolExecutionHistory';
 import { ToolStatusIndicator } from './chat/ToolStatusIndicator';
 import { ToolManagementInterface } from './chat/ToolManagementInterface';
+import { ToolAnalyticsDashboard } from './chat/ToolAnalyticsDashboard';
 import { useToolCalling } from '../hooks/useToolCalling';
+
+// Unified Tool Integration
+import { useUnifiedToolIntegration } from '../hooks/useUnifiedToolIntegration';
+import { UnifiedChatInterface } from './UnifiedChatInterface';
 
 // Utils & Types
 import { ChatManager } from '../utils/chatManager';
@@ -59,45 +65,27 @@ export default function GlassChatPiP() {
   // Ollama integration
   const ollamaIntegration = useOllamaIntegration();
 
-  // Tool calling integration (mock data for demonstration)
-  const toolCalling = {
-    state: {
-      isEnabled: true,
-      isExecutingTools: false,
-      currentToolCalls: [
-        {
-          id: 'demo-tool-1',
-          name: 'web_search',
-          parameters: { query: 'latest AI developments', limit: 5 }
-        }
-      ],
-      currentToolResults: [
-        {
-          id: 'demo-tool-1',
-          name: 'web_search',
-          result: { results: ['AI breakthrough in language models', 'New robotics advances'] },
-          executionTime: 1200
-        }
-      ],
-      executionHistory: [
-        {
-          id: 'history-1',
-          name: 'web_search',
-          result: { success: true },
-          executionTime: 800
-        },
-        {
-          id: 'history-2',
-          name: 'file_manager',
-          result: null,
-          error: 'Permission denied',
-          executionTime: 300
-        }
-      ],
-      availableTools: ['web_search', 'file_manager', 'calculator', 'weather_api'],
-      conversationContext: null
+  // Chat management - moved up to be available for hooks
+  const [chatManager] = useState(() => ChatManager.getInstance());
+  const [chats, setChats] = useState<Chat[]>([]);
+  const [activeChat, setActiveChat] = useState<Chat | null>(null);
+
+  // Unified Tool Integration
+  const unifiedIntegration = useUnifiedToolIntegration(
+    activeChat?.id || `chat_${Date.now()}`,
+    ollamaIntegration.service,
+    {
+      streamHandlerUrl: 'ws://localhost:3000',
+      enableToolExecution: true,
+      enableConversationMemory: true,
+      autoConnect: true,
+      autoReconnect: true,
+      sourceIdentifier: 'ally_glass_pip_chat'
     }
-  };
+  );
+
+  // Legacy tool calling integration (for backward compatibility)
+  const toolCalling = useToolCalling();
 
   // Command execution
   const { executeSystemCommand, runInTerminal } = useCommandExecution();
@@ -110,11 +98,6 @@ export default function GlassChatPiP() {
 
   // Speech service integration
   const speechService = useSpeechService();
-
-  // Chat management
-  const [chatManager] = useState(() => ChatManager.getInstance());
-  const [chats, setChats] = useState<Chat[]>([]);
-  const [activeChat, setActiveChat] = useState<Chat | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   // Settings management
@@ -134,6 +117,8 @@ export default function GlassChatPiP() {
   const [showStreamingTest, setShowStreamingTest] = useState(false);
   const [showToolManagement, setShowToolManagement] = useState(false);
   const [showToolExecutionHistory, setShowToolExecutionHistory] = useState(false);
+  const [showUnifiedIntegration, setShowUnifiedIntegration] = useState(false);
+  const [showToolAnalytics, setShowToolAnalytics] = useState(false);
   // Use voice mode state from speech service hook
   const { voiceModeEnabled, setVoiceModeEnabled, droidModeEnabled, setDroidModeEnabled } = speechService;
 
@@ -591,6 +576,56 @@ export default function GlassChatPiP() {
     };
     loadChats();
   }, [chatManager]);
+
+  // Register demo tools when unified integration is ready
+  useEffect(() => {
+    if (!unifiedIntegration.isReady()) return;
+
+    // Register demo tools
+    unifiedIntegration.registerTool('calculator', async (params: any) => {
+      const { expression } = params;
+      try {
+        // Simple calculator implementation
+        const result = eval(expression);
+        return { result, expression };
+      } catch (error) {
+        throw new Error(`Invalid expression: ${expression}`);
+      }
+    });
+
+    unifiedIntegration.registerTool('current_time', async () => {
+      return {
+        time: new Date().toISOString(),
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        formatted: new Date().toLocaleString()
+      };
+    });
+
+    unifiedIntegration.registerTool('weather', async (params: any) => {
+      const { location } = params;
+      // Mock weather data
+      return {
+        location,
+        temperature: Math.round(Math.random() * 30 + 10),
+        condition: ['sunny', 'cloudy', 'rainy', 'snowy'][Math.floor(Math.random() * 4)],
+        humidity: Math.round(Math.random() * 100),
+        windSpeed: Math.round(Math.random() * 20)
+      };
+    });
+
+    unifiedIntegration.registerTool('system_info', async () => {
+      return {
+        platform: navigator.platform,
+        userAgent: navigator.userAgent,
+        language: navigator.language,
+        cookieEnabled: navigator.cookieEnabled,
+        onLine: navigator.onLine,
+        timestamp: Date.now()
+      };
+    });
+
+    console.log('Demo tools registered for unified integration');
+  }, [unifiedIntegration.isReady()]);
 
   // Auto-connect to speech service on mount
   useEffect(() => {
@@ -1379,17 +1414,25 @@ export default function GlassChatPiP() {
                 showSpeechControls={showSpeechControls}
                 onSpeechToggle={() => setShowSpeechControls(!showSpeechControls)}
                 toolStatus={{
-                  isExecuting: toolCalling.state.isExecutingTools,
-                  activeToolCount: toolCalling.state.currentToolCalls.length,
-                  completedToolCount: toolCalling.state.currentToolResults.filter(r => !r.error).length,
-                  failedToolCount: toolCalling.state.currentToolResults.filter(r => r.error).length,
-                  totalExecutionTime: toolCalling.state.currentToolResults.reduce((sum, r) => sum + r.executionTime, 0),
-                  lastExecutionTime: toolCalling.state.executionHistory.length > 0 
-                    ? Date.now() - 60000 // Mock last execution time
-                    : undefined,
-                  availableToolCount: toolCalling.state.availableTools.length
+                  isExecuting: unifiedIntegration.state.activeExecutions > 0,
+                  activeToolCount: unifiedIntegration.state.activeExecutions,
+                  completedToolCount: 0, // TODO: Get from unified integration
+                  failedToolCount: 0, // TODO: Get from unified integration
+                  totalExecutionTime: 0, // TODO: Get from unified integration
+                  lastExecutionTime: undefined, // TODO: Get from unified integration
+                  availableToolCount: unifiedIntegration.state.availableTools.length
                 }}
                 onToolStatusClick={() => setShowToolManagement(!showToolManagement)}
+                showUnifiedIntegration={showUnifiedIntegration}
+                onUnifiedIntegrationToggle={() => setShowUnifiedIntegration(!showUnifiedIntegration)}
+                showToolAnalytics={showToolAnalytics}
+                onToolAnalyticsToggle={() => setShowToolAnalytics(!showToolAnalytics)}
+                unifiedIntegrationStatus={{
+                  isConnected: unifiedIntegration.state.isConnected,
+                  connectionStatus: unifiedIntegration.state.connectionStatus,
+                  availableTools: unifiedIntegration.state.availableTools.length,
+                  activeExecutions: unifiedIntegration.state.activeExecutions
+                }}
               />
             )}
           </div>
@@ -1711,6 +1754,83 @@ export default function GlassChatPiP() {
                   console.log('Refresh analytics');
                 }}
               />
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Unified Integration Interface Modal */}
+      <AnimatePresence>
+        {showUnifiedIntegration && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
+            onClick={() => setShowUnifiedIntegration(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="w-full max-w-6xl max-h-[90vh] m-4"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <UnifiedChatInterface
+                conversationId={activeChat?.id || `unified_${Date.now()}`}
+                className="h-[80vh] bg-white dark:bg-gray-900 rounded-lg shadow-2xl"
+              />
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Tool Analytics Dashboard Modal */}
+      <AnimatePresence>
+        {showToolAnalytics && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
+            onClick={() => setShowToolAnalytics(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="w-full max-w-5xl max-h-[80vh] m-4"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="bg-white dark:bg-gray-900 rounded-lg shadow-2xl p-6 max-h-[80vh] overflow-y-auto">
+                <div className="flex items-center justify-between mb-6">
+                  <h2 className="text-2xl font-bold text-gray-900 dark:text-white">
+                    Tool Analytics Dashboard
+                  </h2>
+                  <button
+                    onClick={() => setShowToolAnalytics(false)}
+                    className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+                
+                <ToolAnalyticsDashboard
+                  executionStats={{
+                    totalExecutions: 0, // TODO: Get from unified integration
+                    successfulExecutions: 0,
+                    failedExecutions: 0,
+                    averageExecutionTime: 0,
+                    toolUsageStats: {}
+                  }}
+                  performanceMetrics={{
+                    averageLatency: unifiedIntegration.getConnectionStats().latency || 0,
+                    throughput: 0,
+                    errorRate: 0,
+                    uptime: unifiedIntegration.state.isConnected ? 1.0 : 0.0
+                  }}
+                />
+              </div>
             </motion.div>
           </motion.div>
         )}

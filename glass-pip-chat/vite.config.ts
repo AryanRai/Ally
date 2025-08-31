@@ -27,4 +27,11 @@ export default defineConfig({
     port: 5173,
     strictPort: true,
   },
+  assetsInclude: ['**/*.json'],
+  define: {
+    global: 'globalThis',
+  },
+  optimizeDeps: {
+    include: ['uuid']
+  }
 });

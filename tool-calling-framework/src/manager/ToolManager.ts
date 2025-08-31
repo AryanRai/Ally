@@ -6,7 +6,36 @@
  * context passing, retry logic, and error recovery mechanisms
  */
 
-import { EventEmitter } from 'events';
+// Browser-compatible EventEmitter implementation
+class BrowserEventEmitter {
+  private listeners: Map<string, Function[]> = new Map();
+
+  emit(event: string, data?: any): boolean {
+    const eventListeners = this.listeners.get(event);
+    if (eventListeners) {
+      eventListeners.forEach(listener => listener(data));
+      return true;
+    }
+    return false;
+  }
+
+  on(event: string, listener: Function): this {
+    if (!this.listeners.has(event)) {
+      this.listeners.set(event, []);
+    }
+    this.listeners.get(event)!.push(listener);
+    return this;
+  }
+
+  removeAllListeners(event?: string): this {
+    if (event) {
+      this.listeners.delete(event);
+    } else {
+      this.listeners.clear();
+    }
+    return this;
+  }
+}
 import { v4 as uuidv4 } from 'uuid';
 import {
   WorkflowPlan,
@@ -45,7 +74,7 @@ export interface ManagerConfig {
   workflowTimeout: number;
 }
 
-export class ToolManager extends EventEmitter {
+export class ToolManager extends BrowserEventEmitter {
   private registry: ToolRegistry;
   private executor: ToolExecutor;
   private config: ManagerConfig;

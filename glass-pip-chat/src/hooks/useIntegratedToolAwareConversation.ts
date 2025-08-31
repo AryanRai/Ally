@@ -18,9 +18,7 @@ import {
   ToolAwareProcessingResult,
   ToolAwareProcessingProgress 
 } from '../services/toolAwareIntegrationService';
-import { ToolManager } from '../../tool-calling-framework/src/manager/ToolManager';
-import { ToolRegistry } from '../../tool-calling-framework/src/registry/ToolRegistry';
-import { ToolExecutor } from '../../tool-calling-framework/src/executor/ToolExecutor';
+import { ToolManager, ToolRegistry, ToolExecutor } from '../../tool-calling-framework/src/index';
 
 export interface IntegratedConversationState {
   isInitialized: boolean;

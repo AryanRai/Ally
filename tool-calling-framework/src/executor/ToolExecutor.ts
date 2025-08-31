@@ -6,10 +6,38 @@
  * execution context management, result formatting, error handling, and audit logging
  */
 
-import { EventEmitter } from 'events';
+// Browser-compatible EventEmitter implementation
+class BrowserEventEmitter {
+  private listeners: Map<string, Function[]> = new Map();
+
+  emit(event: string, data?: any): boolean {
+    const eventListeners = this.listeners.get(event);
+    if (eventListeners) {
+      eventListeners.forEach(listener => listener(data));
+      return true;
+    }
+    return false;
+  }
+
+  on(event: string, listener: Function): this {
+    if (!this.listeners.has(event)) {
+      this.listeners.set(event, []);
+    }
+    this.listeners.get(event)!.push(listener);
+    return this;
+  }
+
+  removeAllListeners(event?: string): this {
+    if (event) {
+      this.listeners.delete(event);
+    } else {
+      this.listeners.clear();
+    }
+    return this;
+  }
+}
 import { v4 as uuidv4 } from 'uuid';
-import Ajv from 'ajv';
-import addFormats from 'ajv-formats';
+import { SimpleValidator, ValidationResult } from '../utils/validation.js';
 import {
   ToolExecutionRequest,
   ToolExecutionResult,
@@ -22,9 +50,7 @@ import {
 } from '../types/index.js';
 import { ToolRegistry } from '../registry/ToolRegistry.js';
 
-// Import JSON schemas
-import executionRequestSchema from '../schemas/execution-request.schema.json' assert { type: 'json' };
-import executionResultSchema from '../schemas/execution-result.schema.json' assert { type: 'json' };
+// Simple validation instead of JSON schemas
 
 export interface ExecutorConfig {
   maxConcurrentExecutions: number;
@@ -34,9 +60,8 @@ export interface ExecutorConfig {
   parameterSanitization: boolean;
 }
 
-export class ToolExecutor extends EventEmitter {
+export class ToolExecutor extends BrowserEventEmitter {
   private registry: ToolRegistry;
-  private ajv: Ajv;
   private config: ExecutorConfig;
   private activeExecutions: Map<string, Promise<ToolExecutionResult>> = new Map();
   private auditLog: AuditLogEntry[] = [];
@@ -55,11 +80,7 @@ export class ToolExecutor extends EventEmitter {
       ...config
     };
 
-    // Initialize JSON schema validator
-    this.ajv = new Ajv({ allErrors: true, strict: false });
-    addFormats(this.ajv);
-    this.ajv.addSchema(executionRequestSchema, 'execution-request');
-    this.ajv.addSchema(executionResultSchema, 'execution-result');
+    // Simple validation setup
   }
 
   /**
@@ -282,10 +303,9 @@ export class ToolExecutor extends EventEmitter {
    * Validate execution request against schema
    */
   private validateExecutionRequest(request: ToolExecutionRequest): void {
-    const isValid = this.ajv.validate('execution-request', request);
-    if (!isValid) {
-      const errors = this.ajv.errors?.map(err => `${err.instancePath}: ${err.message}`).join(', ');
-      throw new Error(`Execution request validation failed: ${errors}`);
+    const validation = SimpleValidator.validateExecutionRequest(request);
+    if (!validation.valid) {
+      throw new Error(`Execution request validation failed: ${validation.errors.join(', ')}`);
     }
   }
 

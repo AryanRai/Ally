@@ -14,7 +14,10 @@ import {
   ChevronUp,
   Check,
   Mic,
-  MicOff
+  MicOff,
+  Zap,
+  BarChart3,
+  Link
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { ThemeUtils } from '../../utils/themeUtils';
@@ -59,6 +62,17 @@ interface ExpandedHeaderProps {
     availableToolCount: number;
   };
   onToolStatusClick?: () => void;
+  // Unified integration props
+  showUnifiedIntegration?: boolean;
+  onUnifiedIntegrationToggle?: () => void;
+  showToolAnalytics?: boolean;
+  onToolAnalyticsToggle?: () => void;
+  unifiedIntegrationStatus?: {
+    isConnected: boolean;
+    connectionStatus: string;
+    availableTools: number;
+    activeExecutions: number;
+  };
 }
 
 export default function ExpandedHeader({
@@ -90,7 +104,12 @@ export default function ExpandedHeader({
   showSpeechControls,
   onSpeechToggle,
   toolStatus,
-  onToolStatusClick
+  onToolStatusClick,
+  showUnifiedIntegration,
+  onUnifiedIntegrationToggle,
+  showToolAnalytics,
+  onToolAnalyticsToggle,
+  unifiedIntegrationStatus
 }: ExpandedHeaderProps) {
   const modelButtonRef = useRef<HTMLButtonElement>(null);
   const [dropdownPosition, setDropdownPosition] = useState({ top: 0, right: 0, maxHeight: 256 });
@@ -366,6 +385,47 @@ export default function ExpandedHeader({
             compact={true}
             onClick={onToolStatusClick}
           />
+        )}
+
+        {/* Unified Integration Button */}
+        {onUnifiedIntegrationToggle && (
+          <button
+            onClick={onUnifiedIntegrationToggle}
+            className={cn(
+              "p-1.5 rounded-lg transition-colors relative",
+              showUnifiedIntegration
+                ? "bg-purple-500/20 hover:bg-purple-500/30 text-purple-300"
+                : "hover:bg-white/10"
+            )}
+            title={`Unified Integration: ${showUnifiedIntegration ? 'ON' : 'OFF'} - Full tool integration with Stream Handler`}
+          >
+            <Zap className="w-3.5 h-3.5" />
+            {unifiedIntegrationStatus?.isConnected && (
+              <div className="absolute -bottom-0.5 -right-0.5 w-2 h-2 bg-green-400 rounded-full" />
+            )}
+            {!unifiedIntegrationStatus?.isConnected && unifiedIntegrationStatus && (
+              <div className="absolute -bottom-0.5 -right-0.5 w-2 h-2 bg-red-400 rounded-full" />
+            )}
+          </button>
+        )}
+
+        {/* Tool Analytics Button */}
+        {onToolAnalyticsToggle && (
+          <button
+            onClick={onToolAnalyticsToggle}
+            className={cn(
+              "p-1.5 rounded-lg transition-colors relative",
+              showToolAnalytics
+                ? "bg-green-500/20 hover:bg-green-500/30 text-green-300"
+                : "hover:bg-white/10"
+            )}
+            title={`Tool Analytics: ${showToolAnalytics ? 'ON' : 'OFF'} - Performance metrics and usage stats`}
+          >
+            <BarChart3 className="w-3.5 h-3.5" />
+            {showToolAnalytics && (
+              <div className="absolute -bottom-0.5 -right-0.5 w-2 h-2 bg-green-400 rounded-full" />
+            )}
+          </button>
         )}
 
         <button

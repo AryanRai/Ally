@@ -93,6 +93,22 @@ export function ToolAnalyticsDashboard({
   onRefresh,
   onExportData
 }: ToolAnalyticsDashboardProps) {
+  // Provide default values for props to prevent undefined errors
+  const safeToolMetrics = toolMetrics || [];
+  const safeSystemMetrics = systemMetrics || {
+    totalTools: 0,
+    activeTools: 0,
+    totalExecutions: 0,
+    successRate: 0,
+    averageResponseTime: 0,
+    peakUsageHour: 0,
+    mostReliableTool: 'N/A',
+    slowestTool: 'N/A',
+    mostUsedTool: 'N/A',
+    errorProneTool: 'N/A'
+  };
+  const safeTimeSeriesData = timeSeriesData || [];
+
   const [sortBy, setSortBy] = useState<MetricSort>('executions');
   const [sortAscending, setSortAscending] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
@@ -100,7 +116,10 @@ export function ToolAnalyticsDashboard({
 
   // Sort and filter tool metrics
   const sortedMetrics = useMemo(() => {
-    let filtered = [...toolMetrics];
+    if (!safeToolMetrics || !Array.isArray(safeToolMetrics)) {
+      return [];
+    }
+    let filtered = [...safeToolMetrics];
 
     // Filter by category
     if (selectedCategory !== 'all') {
@@ -136,13 +155,16 @@ export function ToolAnalyticsDashboard({
     });
 
     return filtered;
-  }, [toolMetrics, sortBy, sortAscending, selectedCategory]);
+  }, [safeToolMetrics, sortBy, sortAscending, selectedCategory]);
 
   // Get unique categories
   const categories = useMemo(() => {
-    const cats = new Set(toolMetrics.map(tool => tool.category));
+    if (!safeToolMetrics || !Array.isArray(safeToolMetrics)) {
+      return ['all'];
+    }
+    const cats = new Set(safeToolMetrics.map(tool => tool.category));
     return ['all', ...Array.from(cats)];
-  }, [toolMetrics]);
+  }, [safeToolMetrics]);
 
   const formatExecutionTime = (time: number) => {
     if (time < 1000) return `${time}ms`;
@@ -253,10 +275,10 @@ export function ToolAnalyticsDashboard({
             </span>
           </div>
           <div className={cn("text-2xl font-bold", ThemeUtils.getTextClass(platform, theme))}>
-            {systemMetrics.activeTools}
+            {safeSystemMetrics.activeTools}
           </div>
           <div className={cn("text-xs", ThemeUtils.getTextClass(platform, theme, 'secondary'))}>
-            of {systemMetrics.totalTools} total
+            of {safeSystemMetrics.totalTools} total
           </div>
         </div>
 
@@ -272,10 +294,10 @@ export function ToolAnalyticsDashboard({
             </span>
           </div>
           <div className={cn("text-2xl font-bold text-green-400")}>
-            {formatPercentage(systemMetrics.successRate)}
+            {formatPercentage(safeSystemMetrics.successRate)}
           </div>
           <div className={cn("text-xs", ThemeUtils.getTextClass(platform, theme, 'secondary'))}>
-            {systemMetrics.totalExecutions} executions
+            {safeSystemMetrics.totalExecutions} executions
           </div>
         </div>
 
@@ -291,10 +313,10 @@ export function ToolAnalyticsDashboard({
             </span>
           </div>
           <div className={cn("text-2xl font-bold", ThemeUtils.getTextClass(platform, theme))}>
-            {formatExecutionTime(systemMetrics.averageResponseTime)}
+            {formatExecutionTime(safeSystemMetrics.averageResponseTime)}
           </div>
           <div className={cn("text-xs", ThemeUtils.getTextClass(platform, theme, 'secondary'))}>
-            Peak: {systemMetrics.peakUsageHour}:00
+            Peak: {safeSystemMetrics.peakUsageHour}:00
           </div>
         </div>
 
@@ -310,7 +332,7 @@ export function ToolAnalyticsDashboard({
             </span>
           </div>
           <div className={cn("text-lg font-bold", ThemeUtils.getTextClass(platform, theme))}>
-            {systemMetrics.mostUsedTool.substring(0, 12)}
+            {safeSystemMetrics.mostUsedTool.substring(0, 12)}
           </div>
           <div className={cn("text-xs", ThemeUtils.getTextClass(platform, theme, 'secondary'))}>
             Top performer
@@ -335,7 +357,7 @@ export function ToolAnalyticsDashboard({
                 Most Reliable Tool
               </div>
               <div className={cn("text-sm", ThemeUtils.getTextClass(platform, theme, 'secondary'))}>
-                {systemMetrics.mostReliableTool} has the highest success rate
+                {safeSystemMetrics.mostReliableTool} has the highest success rate
               </div>
             </div>
           </div>
@@ -347,7 +369,7 @@ export function ToolAnalyticsDashboard({
                 Needs Attention
               </div>
               <div className={cn("text-sm", ThemeUtils.getTextClass(platform, theme, 'secondary'))}>
-                {systemMetrics.errorProneTool} has high error rate
+                {safeSystemMetrics.errorProneTool} has high error rate
               </div>
             </div>
           </div>
@@ -359,7 +381,7 @@ export function ToolAnalyticsDashboard({
                 Performance Issue
               </div>
               <div className={cn("text-sm", ThemeUtils.getTextClass(platform, theme, 'secondary'))}>
-                {systemMetrics.slowestTool} is slower than average
+                {safeSystemMetrics.slowestTool} is slower than average
               </div>
             </div>
           </div>

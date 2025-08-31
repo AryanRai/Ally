@@ -1,0 +1,85 @@
+export const executionResultSchema = {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Tool Execution Result Schema",
+  "description": "Schema for validating tool execution results",
+  "type": "object",
+  "required": ["executionId", "toolName", "status", "executionTime", "timestamp"],
+  "properties": {
+    "executionId": {
+      "type": "string",
+      "pattern": "^[a-zA-Z0-9_-]+$",
+      "minLength": 1,
+      "maxLength": 100,
+      "description": "Unique identifier for the execution"
+    },
+    "toolName": {
+      "type": "string",
+      "pattern": "^[a-zA-Z][a-zA-Z0-9_-]*$",
+      "minLength": 1,
+      "maxLength": 100,
+      "description": "Name of the executed tool"
+    },
+    "status": {
+      "type": "string",
+      "enum": ["pending", "running", "success", "failed", "cancelled", "timeout"],
+      "description": "Execution status"
+    },
+    "result": {
+      "description": "Tool execution result data"
+    },
+    "error": {
+      "$ref": "#/definitions/toolError"
+    },
+    "executionTime": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Execution time in milliseconds"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Result timestamp"
+    },
+    "metadata": {
+      "type": "object",
+      "description": "Additional metadata for the result"
+    }
+  },
+  "definitions": {
+    "toolError": {
+      "type": "object",
+      "required": ["code", "message"],
+      "properties": {
+        "code": {
+          "type": "string",
+          "pattern": "^[A-Z_][A-Z0-9_]*$",
+          "minLength": 1,
+          "maxLength": 50,
+          "description": "Error code"
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500,
+          "description": "Human-readable error message"
+        },
+        "details": {
+          "description": "Additional error details"
+        },
+        "recoverable": {
+          "type": "boolean",
+          "description": "Whether the error is recoverable"
+        },
+        "suggestedActions": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "description": "Suggested recovery actions"
+        }
+      }
+    }
+  }
+} as const;

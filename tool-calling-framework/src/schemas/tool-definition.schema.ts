@@ -1,0 +1,133 @@
+export const toolDefinitionSchema = {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Tool Definition Schema",
+  "description": "Schema for validating tool definitions in the Tool Calling Framework",
+  "type": "object",
+  "required": ["name", "description", "version", "category", "securityLevel", "parameters", "permissions"],
+  "properties": {
+    "name": {
+      "type": "string",
+      "pattern": "^[a-zA-Z][a-zA-Z0-9_-]*$",
+      "minLength": 1,
+      "maxLength": 100,
+      "description": "Unique tool name"
+    },
+    "description": {
+      "type": "string",
+      "minLength": 10,
+      "maxLength": 500,
+      "description": "Human-readable description of the tool"
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$",
+      "description": "Semantic version of the tool"
+    },
+    "category": {
+      "type": "string",
+      "enum": ["system", "robot", "communication", "web", "mcp", "custom"],
+      "description": "Tool category for organization"
+    },
+    "securityLevel": {
+      "type": "string",
+      "enum": ["low", "medium", "high", "critical"],
+      "description": "Security classification level"
+    },
+    "parameters": {
+      "type": "object",
+      "patternProperties": {
+        "^[a-zA-Z][a-zA-Z0-9_]*$": {
+          "$ref": "#/definitions/parameterSchema"
+        }
+      },
+      "additionalProperties": false,
+      "description": "Parameter definitions for the tool"
+    },
+    "permissions": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-zA-Z][a-zA-Z0-9_:.-]*$"
+      },
+      "uniqueItems": true,
+      "description": "Required permissions for tool execution"
+    },
+    "timeout": {
+      "type": "number",
+      "minimum": 1000,
+      "maximum": 300000,
+      "description": "Default timeout in milliseconds"
+    },
+    "retryable": {
+      "type": "boolean",
+      "description": "Whether the tool supports retry on failure"
+    },
+    "maxRetries": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 10,
+      "description": "Maximum number of retry attempts"
+    },
+    "tags": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 50
+      },
+      "uniqueItems": true,
+      "description": "Tags for tool categorization and discovery"
+    },
+    "metadata": {
+      "type": "object",
+      "description": "Additional metadata for the tool"
+    }
+  },
+  "definitions": {
+    "parameterSchema": {
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["string", "number", "boolean", "object", "array"]
+        },
+        "required": {
+          "type": "boolean",
+          "default": false
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "enum": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "minimum": {
+          "type": "number"
+        },
+        "maximum": {
+          "type": "number"
+        },
+        "pattern": {
+          "type": "string"
+        },
+        "items": {
+          "$ref": "#/definitions/parameterSchema"
+        },
+        "properties": {
+          "type": "object",
+          "patternProperties": {
+            "^[a-zA-Z][a-zA-Z0-9_]*$": {
+              "$ref": "#/definitions/parameterSchema"
+            }
+          }
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+} as const;
