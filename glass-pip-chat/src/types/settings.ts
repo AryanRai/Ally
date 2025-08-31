@@ -6,10 +6,17 @@ export interface UISettings {
   borderRadius: 'none' | 'sm' | 'md' | 'lg' | 'xl' | '2xl' | '3xl';
 }
 
+export interface ToolSettings {
+  enabled: boolean;
+  autoConnect: boolean;
+  streamHandlerUrl: string;
+}
+
 export interface AppSettings {
   ui: UISettings;
   theme: 'light' | 'dark';
   contextToggleEnabled: boolean;
+  tools?: ToolSettings;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -21,5 +28,10 @@ export const DEFAULT_SETTINGS: AppSettings = {
     borderRadius: '2xl'
   },
   theme: 'dark',
-  contextToggleEnabled: true
+  contextToggleEnabled: true,
+  tools: {
+    enabled: false,
+    autoConnect: true,
+    streamHandlerUrl: 'ws://localhost:3000'
+  }
 };

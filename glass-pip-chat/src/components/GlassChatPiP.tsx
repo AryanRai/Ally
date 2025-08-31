@@ -66,17 +66,20 @@ export default function GlassChatPiP() {
   const [chatManager] = useState(() => ChatManager.getInstance());
   const [chats, setChats] = useState<Chat[]>([]);
   const [activeChat, setActiveChat] = useState<Chat | null>(null);
+  
+  // Tools state - must be declared before hooks that use it
+  const [toolsEnabled, setToolsEnabled] = useState(false);
 
-  // Unified Tool Integration
+  // Unified Tool Integration (conditional based on toggle)
   const unifiedIntegration = useUnifiedToolIntegration(
     activeChat?.id || `chat_${Date.now()}`,
-    ollamaIntegration.service,
+    null, // ollamaIntegration doesn't have service property
     {
       streamHandlerUrl: 'ws://localhost:3000',
-      enableToolExecution: true,
+      enableToolExecution: toolsEnabled,
       enableConversationMemory: true,
-      autoConnect: true,
-      autoReconnect: true,
+      autoConnect: toolsEnabled,
+      autoReconnect: toolsEnabled,
       sourceIdentifier: 'ally_glass_pip_chat'
     }
   );
@@ -300,85 +303,143 @@ export default function GlassChatPiP() {
     setCurrentResponse('');
 
     try {
-      // Prepare messages for Ollama
-      const messages = activeChat?.messages.map(msg => ({
-        role: msg.role,
-        content: msg.content
-      })) || [];
+      let response: string;
 
-      // Add the current message
-      messages.push({
-        role: 'user',
-        content: contextualContent
-      });
-
-      // Stream response from Ollama with real-time thinking display
-      const response = await ollamaIntegration.sendMessageToOllama(
-        activeChat?.messages || [],
-        contextualContent,
-        (() => {
-          let lastSentenceIndex = 0;
-          let accumulatedResponse = '';
-
-          return (update) => {
-            let responseContent = '';
-
-            if (update.type === 'thinking') {
-              // Show thinking in real-time with typing indicator
-              responseContent = `💭 **Thinking...**\n\n${update.thinking}${update.thinking.endsWith('.') || update.thinking.endsWith('!') || update.thinking.endsWith('?') ? '' : '▋'}`;
-            } else if (update.type === 'response') {
-              // Show both thinking (if any) and response
-              if (update.thinking) {
-                responseContent = `💭 **Thought Process:**\n\n${update.thinking}\n\n---\n\n**Answer:**\n\n${update.response}${update.response.endsWith('.') || update.response.endsWith('!') || update.response.endsWith('?') ? '' : '▋'}`;
-              } else {
-                responseContent = `${update.response}${update.response.endsWith('.') || update.response.endsWith('!') || update.response.endsWith('?') ? '' : '▋'}`;
-              }
-
-              // Stream TTS for new sentences if voice mode is enabled
-              if (voiceModeEnabled && update.response) {
-                accumulatedResponse = update.response;
-                const sentences = accumulatedResponse.split(/(?<=[.!?])\s+/);
-
-                // Check if we have new complete sentences to speak
-                if (sentences.length > lastSentenceIndex + 1) {
-                  for (let i = lastSentenceIndex; i < sentences.length - 1; i++) {
-                    const sentence = sentences[i].trim();
-                    if (sentence && sentence.length > 3) {
-                      console.log('Streaming TTS for sentence:', sentence.substring(0, 30) + '...');
-                      speechService.synthesizeSpeechStreaming(sentence).catch(error => {
-                        console.error('Error in streaming TTS:', error);
-                      });
-                    }
-                  }
-                  lastSentenceIndex = sentences.length - 1;
+      if (toolsEnabled && unifiedIntegration.isReady()) {
+        // Use unified tool integration when tools are enabled
+        const allMessages = [...(activeChat?.messages || []), userMessage];
+        
+        const result = await unifiedIntegration.processMessage(
+          allMessages,
+          contextualContent,
+          {
+            model: ollamaIntegration.currentModel || 'llama3.2:3b',
+            onProgress: (progress) => {
+              let responseContent = '';
+              
+              if (progress.type === 'thinking') {
+                responseContent = `💭 **Thinking...**\n\n${progress.thinking || ''}${progress.thinking?.endsWith('.') || progress.thinking?.endsWith('!') || progress.thinking?.endsWith('?') ? '' : '▋'}`;
+              } else if (progress.type === 'tool_call') {
+                responseContent = `🔧 **Using Tools...**\n\n${progress.toolCalls?.map(tc => `• ${tc.name}`).join('\n') || ''}`;
+              } else if (progress.type === 'tool_execution') {
+                responseContent = `⚙️ **Executing Tools...**\n\n${progress.toolCalls?.map(tc => `• ${tc.name}: Running...`).join('\n') || ''}`;
+              } else if (progress.type === 'tool_result') {
+                responseContent = `✅ **Tool Results:**\n\n${progress.toolResults?.map(tr => `• ${tr.toolName}: ${tr.success ? 'Success' : 'Failed'}`).join('\n') || ''}`;
+              } else if (progress.type === 'response') {
+                if (progress.thinking) {
+                  responseContent = `💭 **Thought Process:**\n\n${progress.thinking}\n\n---\n\n**Answer:**\n\n${progress.response}${progress.response?.endsWith('.') || progress.response?.endsWith('!') || progress.response?.endsWith('?') ? '' : '▋'}`;
+                } else {
+                  responseContent = `${progress.response}${progress.response?.endsWith('.') || progress.response?.endsWith('!') || progress.response?.endsWith('?') ? '' : '▋'}`;
                 }
-              }
-            } else if (update.type === 'done') {
-              // Final response without typing indicator
-              if (update.thinking) {
-                responseContent = `💭 **Thought Process:**\n\n${update.thinking}\n\n---\n\n**Answer:**\n\n${update.response}`;
-              } else {
-                responseContent = update.response;
-              }
 
-              // Speak any remaining incomplete sentence
-              if (voiceModeEnabled && accumulatedResponse) {
-                const sentences = accumulatedResponse.split(/(?<=[.!?])\s+/);
-                const lastSentence = sentences[sentences.length - 1]?.trim();
-                if (lastSentence && lastSentence.length > 3 && !lastSentence.match(/[.!?]$/)) {
-                  console.log('Streaming TTS for final sentence:', lastSentence.substring(0, 30) + '...');
-                  speechService.synthesizeSpeechStreaming(lastSentence).catch(error => {
-                    console.error('Error in final streaming TTS:', error);
+                // Stream TTS for new sentences if voice mode is enabled
+                if (voiceModeEnabled && progress.response) {
+                  const sentences = progress.response.split(/(?<=[.!?])\s+/);
+                  sentences.forEach((sentence, index) => {
+                    if (sentence.trim() && sentence.length > 3) {
+                      setTimeout(() => {
+                        speechService.synthesizeSpeechStreaming(sentence.trim()).catch(error => {
+                          console.error('Error in streaming TTS:', error);
+                        });
+                      }, index * 100);
+                    }
                   });
                 }
+              } else if (progress.type === 'done') {
+                if (progress.thinking) {
+                  responseContent = `💭 **Thought Process:**\n\n${progress.thinking}\n\n---\n\n**Answer:**\n\n${progress.response}`;
+                } else {
+                  responseContent = progress.response || '';
+                }
               }
-            }
 
-            // Update current response for both collapsed and expanded modes
-            setCurrentResponse(responseContent);
-          };
-        })()
-      );
+              setCurrentResponse(responseContent);
+            },
+            onToolExecution: (executionId, toolName) => {
+              console.log(`🔧 Tool execution started: ${toolName} (${executionId})`);
+            },
+            onToolComplete: (executionId, result) => {
+              console.log(`✅ Tool execution completed: ${executionId}`, result);
+            },
+            onToolError: (executionId, error) => {
+              console.error(`❌ Tool execution failed: ${executionId}`, error);
+            }
+          }
+        );
+
+        response = result.response;
+      } else {
+        // Use standard Ollama integration when tools are disabled
+        const messages = activeChat?.messages.map(msg => ({
+          role: msg.role,
+          content: msg.content
+        })) || [];
+
+        messages.push({
+          role: 'user',
+          content: contextualContent
+        });
+
+        response = await ollamaIntegration.sendMessageToOllama(
+          activeChat?.messages || [],
+          contextualContent,
+          (() => {
+            let lastSentenceIndex = 0;
+            let accumulatedResponse = '';
+
+            return (update) => {
+              let responseContent = '';
+
+              if (update.type === 'thinking') {
+                responseContent = `💭 **Thinking...**\n\n${update.thinking}${update.thinking.endsWith('.') || update.thinking.endsWith('!') || update.thinking.endsWith('?') ? '' : '▋'}`;
+              } else if (update.type === 'response') {
+                if (update.thinking) {
+                  responseContent = `💭 **Thought Process:**\n\n${update.thinking}\n\n---\n\n**Answer:**\n\n${update.response}${update.response.endsWith('.') || update.response.endsWith('!') || update.response.endsWith('?') ? '' : '▋'}`;
+                } else {
+                  responseContent = `${update.response}${update.response.endsWith('.') || update.response.endsWith('!') || update.response.endsWith('?') ? '' : '▋'}`;
+                }
+
+                // Stream TTS for new sentences if voice mode is enabled
+                if (voiceModeEnabled && update.response) {
+                  accumulatedResponse = update.response;
+                  const sentences = accumulatedResponse.split(/(?<=[.!?])\s+/);
+
+                  if (sentences.length > lastSentenceIndex + 1) {
+                    for (let i = lastSentenceIndex; i < sentences.length - 1; i++) {
+                      const sentence = sentences[i].trim();
+                      if (sentence && sentence.length > 3) {
+                        speechService.synthesizeSpeechStreaming(sentence).catch(error => {
+                          console.error('Error in streaming TTS:', error);
+                        });
+                      }
+                    }
+                    lastSentenceIndex = sentences.length - 1;
+                  }
+                }
+              } else if (update.type === 'done') {
+                if (update.thinking) {
+                  responseContent = `💭 **Thought Process:**\n\n${update.thinking}\n\n---\n\n**Answer:**\n\n${update.response}`;
+                } else {
+                  responseContent = update.response;
+                }
+
+                // Speak any remaining incomplete sentence
+                if (voiceModeEnabled && accumulatedResponse) {
+                  const sentences = accumulatedResponse.split(/(?<=[.!?])\s+/);
+                  const lastSentence = sentences[sentences.length - 1]?.trim();
+                  if (lastSentence && lastSentence.length > 3 && !lastSentence.match(/[.!?]$/)) {
+                    speechService.synthesizeSpeechStreaming(lastSentence).catch(error => {
+                      console.error('Error in final streaming TTS:', error);
+                    });
+                  }
+                }
+              }
+
+              setCurrentResponse(responseContent);
+            };
+          })()
+        );
+      }
 
       if (response) {
         // Create assistant message only after streaming is complete
@@ -646,9 +707,18 @@ export default function GlassChatPiP() {
   useEffect(() => {
     const unsubscribe = settingsManager.subscribe((newSettings) => {
       setAppSettings(newSettings);
+      // Update tools enabled state when settings change
+      if (newSettings.tools?.enabled !== undefined) {
+        setToolsEnabled(newSettings.tools.enabled);
+      }
     });
     return unsubscribe;
   }, [settingsManager]);
+
+  // Initialize tools enabled state from settings
+  useEffect(() => {
+    setToolsEnabled(appSettings.tools?.enabled || false);
+  }, [appSettings.tools?.enabled]);
 
   // Handle incoming remote messages
   useEffect(() => {
@@ -1667,7 +1737,13 @@ export default function GlassChatPiP() {
         contextToggleEnabled={contextMonitoring.contextToggleEnabled}
         onContextToggleChange={contextMonitoring.setContextToggleEnabled}
         appSettings={appSettings}
-        onSettingsChange={(updates) => settingsManager.updateSettings(updates)}
+        onSettingsChange={(updates) => {
+          settingsManager.updateSettings(updates);
+          // Update tools enabled state when settings change
+          if (updates.tools?.enabled !== undefined) {
+            setToolsEnabled(updates.tools.enabled);
+          }
+        }}
       />
 
       {/* Unified Tool Dashboard Modal */}
@@ -1856,8 +1932,6 @@ export default function GlassChatPiP() {
                         usageTrend: 'up' as const
                       }
                     }}
-                    platform={platform}
-                    theme={theme}
                     timeRange="24h"
                     onToolToggle={(toolName, enabled) => {
                       console.log('Toggle tool:', toolName, enabled);

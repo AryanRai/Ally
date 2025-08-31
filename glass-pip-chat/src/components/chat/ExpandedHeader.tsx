@@ -73,6 +73,8 @@ interface ExpandedHeaderProps {
     availableTools: number;
     activeExecutions: number;
   };
+  toolsEnabled?: boolean;
+  onToolsToggle?: () => void;
 }
 
 export default function ExpandedHeader({

@@ -21,7 +21,6 @@ import { ToolAwareProcessingProgress } from '../services/toolAwareIntegrationSer
 
 // Components
 import { ToolExecutionStatus } from './chat/ToolExecutionStatus';
-import { ToolExecutionHistory } from './chat/ToolExecutionHistory';
 import { UnifiedToolDashboard } from './chat/UnifiedToolDashboard';
 
 // Types
@@ -127,7 +126,7 @@ const ProcessingIndicator: React.FC<ProcessingIndicatorProps> = ({ progress, isP
   );
 };
 
-export const ToolCallTest: React.FC<ToolCallTestProps> = ({
+export const UnifiedChatInterface: React.FC<ToolCallTestProps> = ({
   conversationId,
   className
 }) => {
@@ -137,7 +136,7 @@ export const ToolCallTest: React.FC<ToolCallTestProps> = ({
   // Unified tool integration
   const unifiedIntegration = useUnifiedToolIntegration(
     conversationId,
-    ollamaIntegration.service,
+    null, // ollamaIntegration doesn't have service property
     {
       streamHandlerUrl: 'ws://localhost:3000',
       enableToolExecution: true,
@@ -500,12 +499,11 @@ export const ToolCallTest: React.FC<ToolCallTestProps> = ({
                   : 'bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-white'
               )}
             >
-              <ReactMarkdown
-                remarkPlugins={[remarkGfm]}
-                className="prose prose-sm dark:prose-invert max-w-none"
-              >
-                {message.content}
-              </ReactMarkdown>
+              <div className="prose prose-sm dark:prose-invert max-w-none">
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                  {message.content}
+                </ReactMarkdown>
+              </div>
               
               <div className="text-xs opacity-70 mt-1">
                 {new Date(message.timestamp).toLocaleTimeString()}
@@ -529,7 +527,9 @@ export const ToolCallTest: React.FC<ToolCallTestProps> = ({
           <ToolExecutionStatus
             currentToolCalls={[]} // Would be populated from actual tool calls
             currentToolResults={[]} // Would be populated from actual results
-            isExecutingTools={connectionStats.activeExecutions > 0}
+            isExecuting={connectionStats.activeExecutions > 0}
+            platform="web"
+            theme="dark"
           />
         )}
 
@@ -544,7 +544,7 @@ export const ToolCallTest: React.FC<ToolCallTestProps> = ({
             type="text"
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            onKeyPress={handleKeyPress}
+            onKeyDown={handleKeyPress}
             placeholder={
               unifiedIntegration.isReady()
                 ? "Type a message... (try 'calculate 2+2' or 'what time is it?')"
@@ -582,3 +582,6 @@ export const ToolCallTest: React.FC<ToolCallTestProps> = ({
     </div>
   );
 };
+
+// Keep the old export for backward compatibility
+export const ToolCallTest = UnifiedChatInterface;

@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Sun, Moon, Monitor, Server, Wifi, WifiOff, RefreshCw, Keyboard, Volume2, Mic, Wrench } from 'lucide-react';
+import { X, Sun, Moon, Monitor, Server, Wifi, WifiOff, RefreshCw, Keyboard, Volume2, Mic, Wrench, Activity } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { useSpeechService } from '../hooks/useSpeechService';
 import { ToolCallTest } from './UnifiedChatInterface';
@@ -1273,6 +1273,84 @@ export default function SettingsModal({
                 </div>
               </div>
 
+              {/* Tool Integration Section */}
+              <div className="space-y-3">
+                <h3 className={cn(
+                  "text-sm font-medium flex items-center gap-2",
+                  platform === 'win32'
+                    ? "text-white/80"
+                    : theme === 'dark' ? "text-white/80" : "text-black/80"
+                )}>
+                  <Wrench className="w-4 h-4" />
+                  Tool Integration
+                </h3>
+                
+                <div className={cn(
+                  "p-3 rounded-lg border",
+                  platform === 'win32'
+                    ? "border-white/10 bg-white/5"
+                    : theme === 'dark' ? "border-white/10 bg-white/5" : "border-black/10 bg-black/5"
+                )}>
+                  <div className="flex items-center justify-between mb-3">
+                    <div>
+                      <p className={cn(
+                        "text-sm font-medium",
+                        platform === 'win32'
+                          ? "text-white/80"
+                          : theme === 'dark' ? "text-white/80" : "text-black/80"
+                      )}>
+                        Enable Tool Calling
+                      </p>
+                      <p className={cn(
+                        "text-xs",
+                        platform === 'win32'
+                          ? "text-white/60"
+                          : theme === 'dark' ? "text-white/60" : "text-black/60"
+                      )}>
+                        Allow AI to use tools like calculator, weather, etc.
+                      </p>
+                    </div>
+                    <label className="relative inline-flex items-center cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={appSettings.tools?.enabled || false}
+                        onChange={(e) => onSettingsChange({ 
+                          tools: { ...appSettings.tools, enabled: e.target.checked } 
+                        })}
+                        className="sr-only peer"
+                      />
+                      <div className={cn(
+                        "w-11 h-6 rounded-full peer transition-colors",
+                        "peer-checked:bg-blue-600 peer-focus:ring-2 peer-focus:ring-blue-300",
+                        platform === 'win32'
+                          ? "bg-white/20 peer-focus:ring-blue-300"
+                          : theme === 'dark' 
+                            ? "bg-gray-700 peer-focus:ring-blue-300"
+                            : "bg-gray-300 peer-focus:ring-blue-300"
+                      )}>
+                        <div className={cn(
+                          "w-5 h-5 bg-white rounded-full shadow transform transition-transform",
+                          "peer-checked:translate-x-5 translate-x-0"
+                        )}></div>
+                      </div>
+                    </label>
+                  </div>
+                  
+                  {appSettings.tools?.enabled && (
+                    <div className={cn(
+                      "text-xs p-2 rounded border",
+                      platform === 'win32'
+                        ? "border-blue-500/20 bg-blue-500/10 text-blue-300"
+                        : theme === 'dark' 
+                          ? "border-blue-500/20 bg-blue-500/10 text-blue-300"
+                          : "border-blue-500/20 bg-blue-500/10 text-blue-700"
+                    )}>
+                      ℹ️ Tools enabled: calculator, weather, time, and more
+                    </div>
+                  )}
+                </div>
+              </div>
+
               {/* Streaming Test Section */}
               <div className="space-y-3">
                 <h3 className={cn(
@@ -1300,20 +1378,7 @@ export default function SettingsModal({
                     Test real-time thinking and response streaming functionality with Ollama.
                   </p>
                   
-                  <button
-                    onClick={() => setShowStreamingTest(true)}
-                    className={cn(
-                      "w-full px-3 py-2 rounded-lg text-xs font-medium transition-colors border",
-                      platform === 'win32'
-                        ? "border-white/20 bg-white/10 hover:bg-white/20 text-white/90"
-                        : theme === 'dark' 
-                          ? "border-white/20 bg-white/10 hover:bg-white/20 text-white/90"
-                          : "border-black/20 bg-black/10 hover:bg-black/20 text-black/90"
-                    )}
-                  >
-                    <Activity className="w-3 h-3 inline mr-2" />
-                    Run Streaming Test
-                  </button>
+
                 </div>
               </div>
 
@@ -1369,14 +1434,7 @@ export default function SettingsModal({
         </>
       )}
       
-      {/* Streaming Test Modal */}
-      {showStreamingTest && (
-        <StreamingTest
-          onClose={() => setShowStreamingTest(false)}
-          platform={platform}
-          theme={theme}
-        />
-      )}
+
     </AnimatePresence>
   );
 }
