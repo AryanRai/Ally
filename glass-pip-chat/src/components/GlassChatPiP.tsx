@@ -34,6 +34,7 @@ import { useToolCalling } from '../hooks/useToolCalling';
 
 // Unified Tool Integration
 import { useUnifiedToolIntegration } from '../hooks/useUnifiedToolIntegration';
+import MessageFlowTest from './MessageFlowTest';
 
 // Utils & Types
 import { ChatManager } from '../utils/chatManager';
@@ -70,21 +71,7 @@ export default function GlassChatPiP() {
   // Tools state - must be declared before hooks that use it
   const [toolsEnabled, setToolsEnabled] = useState(false);
 
-  // Unified Tool Integration (conditional based on toggle)
-  const unifiedIntegration = useUnifiedToolIntegration(
-    activeChat?.id || `chat_${Date.now()}`,
-    null, // ollamaIntegration doesn't have service property
-    {
-      streamHandlerUrl: 'ws://localhost:3000',
-      enableToolExecution: toolsEnabled,
-      enableConversationMemory: true,
-      autoConnect: toolsEnabled,
-      autoReconnect: toolsEnabled,
-      sourceIdentifier: 'ally_glass_pip_chat'
-    }
-  );
-
-  // Create OllamaService instance for tool calling
+  // Create OllamaService instance for tool calling - must be before unified integration
   const ollamaService = useMemo(() => {
     if (!window.pip?.ollama) return null;
     return {
@@ -95,7 +82,7 @@ export default function GlassChatPiP() {
         }));
         
         let response = '';
-        await window.pip.ollama.streamChatWithThinking(chatHistory, model || ollamaIntegration.currentModel, (chunk: any) => {
+        await window.pip.ollama.streamChatWithThinking(chatHistory, model || 'llama3.2:3b', (chunk: any) => {
           if (chunk.type === 'response' || chunk.type === 'done') {
             response = chunk.content;
           }
@@ -103,7 +90,21 @@ export default function GlassChatPiP() {
         return response;
       }
     };
-  }, [ollamaIntegration.currentModel]);
+  }, []);
+
+  // Unified Tool Integration (conditional based on toggle)
+  const unifiedIntegration = useUnifiedToolIntegration(
+    activeChat?.id || `chat_${Date.now()}`,
+    ollamaService, // Now properly passing the OllamaService
+    {
+      streamHandlerUrl: 'ws://localhost:3000',
+      enableToolExecution: toolsEnabled,
+      enableConversationMemory: true,
+      autoConnect: toolsEnabled,
+      autoReconnect: toolsEnabled,
+      sourceIdentifier: 'ally_glass_pip_chat'
+    }
+  );
 
   // Command execution
   const { executeSystemCommand, runInTerminal } = useCommandExecution();
@@ -141,6 +142,7 @@ export default function GlassChatPiP() {
   const [historyIndex, setHistoryIndex] = useState(-1);
   const [showSpeechControls, setShowSpeechControls] = useState(false);
   const [showUnifiedToolDashboard, setShowUnifiedToolDashboard] = useState(false);
+  const [showMessageFlowTest, setShowMessageFlowTest] = useState(false);
   // Use voice mode state from speech service hook
   const { voiceModeEnabled, setVoiceModeEnabled, droidModeEnabled, setDroidModeEnabled } = speechService;
 
@@ -1539,6 +1541,10 @@ export default function GlassChatPiP() {
                   availableTools: unifiedIntegration.state.availableTools.length,
                   activeExecutions: unifiedIntegration.state.activeExecutions
                 }}
+                showMessageFlowTest={showMessageFlowTest}
+                onMessageFlowTestToggle={() => setShowMessageFlowTest(!showMessageFlowTest)}
+                toolsEnabled={toolsEnabled}
+                onToolsToggle={() => setToolsEnabled(!toolsEnabled)}
               />
             )}
           </div>
@@ -2027,6 +2033,12 @@ export default function GlassChatPiP() {
         )}
       </AnimatePresence>
 
+      {/* Message Flow Test Modal */}
+      <MessageFlowTest
+        isOpen={showMessageFlowTest}
+        onClose={() => setShowMessageFlowTest(false)}
+        integrationService={unifiedIntegration.service}
+      />
 
     </motion.div>
   );

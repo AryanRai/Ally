@@ -1,9 +1,9 @@
 import { useRef, useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { 
-  Grip, 
-  Maximize2, 
+import {
+  Grip,
+  Maximize2,
   Minus,
   X,
   Settings,
@@ -17,7 +17,9 @@ import {
   MicOff,
   Zap,
   BarChart3,
-  Link
+  Link,
+  TestTube,
+  Wrench
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { ThemeUtils } from '../../utils/themeUtils';
@@ -75,6 +77,9 @@ interface ExpandedHeaderProps {
   };
   toolsEnabled?: boolean;
   onToolsToggle?: () => void;
+  // Message flow test props
+  showMessageFlowTest?: boolean;
+  onMessageFlowTestToggle?: () => void;
 }
 
 export default function ExpandedHeader({
@@ -111,7 +116,11 @@ export default function ExpandedHeader({
   onUnifiedIntegrationToggle,
   showToolAnalytics,
   onToolAnalyticsToggle,
-  unifiedIntegrationStatus
+  unifiedIntegrationStatus,
+  showMessageFlowTest,
+  onMessageFlowTestToggle,
+  toolsEnabled,
+  onToolsToggle
 }: ExpandedHeaderProps) {
   const modelButtonRef = useRef<HTMLButtonElement>(null);
   const [dropdownPosition, setDropdownPosition] = useState({ top: 0, right: 0, maxHeight: 256 });
@@ -123,10 +132,10 @@ export default function ExpandedHeader({
       const viewportHeight = window.innerHeight;
       const spaceBelow = viewportHeight - rect.bottom - 8; // 8px margin
       const spaceAbove = rect.top - 8; // 8px margin
-      
+
       // Calculate optimal height - prefer showing below, but use above if more space
       const maxHeight = Math.max(120, Math.min(256, Math.max(spaceBelow, spaceAbove) - 20)); // Min 120px, max 256px, with 20px buffer
-      
+
       setDropdownPosition({
         top: rect.bottom + 8,
         right: window.innerWidth - rect.right,
@@ -290,55 +299,55 @@ export default function ExpandedHeader({
                       "fixed w-48",
                       ThemeUtils.getModalClass(platform, theme)
                     )}
-                    style={{ 
+                    style={{
                       top: dropdownPosition.top,
                       right: dropdownPosition.right,
                       zIndex: 999999,
                       pointerEvents: 'auto'
                     } as React.CSSProperties}
                   >
-                  <div className="p-2">
-                    <div className={cn(
-                      "text-xs font-medium mb-2 px-2",
-                      ThemeUtils.getTextClass(platform, theme, 'secondary')
-                    )}>
-                      Select Model
-                    </div>
-                    <div className={cn(
-                      "overflow-y-auto scrollbar-youtube",
-                      "scroll-smooth"
-                    )}
-                    style={{
-                      maxHeight: `${dropdownPosition.maxHeight}px`,
-                      scrollbarWidth: 'thin',
-                      scrollbarColor: 'rgba(255, 255, 255, 0.4) rgba(255, 255, 255, 0.1)'
-                    }}
-                    >
-                      {availableModels.map((model) => (
-                        <button
-                          key={model.name}
-                          onClick={() => {
-                            console.log('Model selected:', model.name);
-                            onModelSelect(model.name);
-                          }}
-                          className={cn(
-                            "w-full text-left px-2 py-1.5 text-xs rounded transition-colors cursor-pointer select-none",
-                            currentModel === model.name
-                              ? "bg-blue-500/20 text-blue-300"
-                              : cn(
+                    <div className="p-2">
+                      <div className={cn(
+                        "text-xs font-medium mb-2 px-2",
+                        ThemeUtils.getTextClass(platform, theme, 'secondary')
+                      )}>
+                        Select Model
+                      </div>
+                      <div className={cn(
+                        "overflow-y-auto scrollbar-youtube",
+                        "scroll-smooth"
+                      )}
+                        style={{
+                          maxHeight: `${dropdownPosition.maxHeight}px`,
+                          scrollbarWidth: 'thin',
+                          scrollbarColor: 'rgba(255, 255, 255, 0.4) rgba(255, 255, 255, 0.1)'
+                        }}
+                      >
+                        {availableModels.map((model) => (
+                          <button
+                            key={model.name}
+                            onClick={() => {
+                              console.log('Model selected:', model.name);
+                              onModelSelect(model.name);
+                            }}
+                            className={cn(
+                              "w-full text-left px-2 py-1.5 text-xs rounded transition-colors cursor-pointer select-none",
+                              currentModel === model.name
+                                ? "bg-blue-500/20 text-blue-300"
+                                : cn(
                                   ThemeUtils.getBackgroundClass(platform, theme, 'hover'),
                                   ThemeUtils.getTextClass(platform, theme, 'secondary')
                                 )
-                          )}
-                        >
-                          <div className="font-medium">{model.name}</div>
-                          <div className={cn("text-xs opacity-60")}>
-                            {(model.size / (1024 * 1024 * 1024)).toFixed(1)}GB
-                          </div>
-                        </button>
-                      ))}
+                            )}
+                          >
+                            <div className="font-medium">{model.name}</div>
+                            <div className={cn("text-xs opacity-60")}>
+                              {(model.size / (1024 * 1024 * 1024)).toFixed(1)}GB
+                            </div>
+                          </button>
+                        ))}
+                      </div>
                     </div>
-                  </div>
                   </motion.div>
                 </AnimatePresence>
               </>,
@@ -426,6 +435,44 @@ export default function ExpandedHeader({
             <BarChart3 className="w-3.5 h-3.5" />
             {showToolAnalytics && (
               <div className="absolute -bottom-0.5 -right-0.5 w-2 h-2 bg-green-400 rounded-full" />
+            )}
+          </button>
+        )}
+
+        {/* Message Flow Test Button */}
+        {onMessageFlowTestToggle && (
+          <button
+            onClick={onMessageFlowTestToggle}
+            className={cn(
+              "p-1.5 rounded-lg transition-colors relative",
+              showMessageFlowTest
+                ? "bg-orange-500/20 hover:bg-orange-500/30 text-orange-300"
+                : "hover:bg-white/10"
+            )}
+            title={`Message Flow Test: ${showMessageFlowTest ? 'ON' : 'OFF'} - Test Glass Chat → Stream Handler pipeline`}
+          >
+            <TestTube className="w-3.5 h-3.5" />
+            {showMessageFlowTest && (
+              <div className="absolute -bottom-0.5 -right-0.5 w-2 h-2 bg-orange-400 rounded-full" />
+            )}
+          </button>
+        )}
+
+        {/* Tools Toggle Button */}
+        {onToolsToggle && (
+          <button
+            onClick={onToolsToggle}
+            className={cn(
+              "p-1.5 rounded-lg transition-colors relative",
+              toolsEnabled
+                ? "bg-yellow-500/20 hover:bg-yellow-500/30 text-yellow-300"
+                : "hover:bg-white/10"
+            )}
+            title={`Tools: ${toolsEnabled ? 'ENABLED' : 'DISABLED'} - Enable tool calling and integration`}
+          >
+            <Wrench className="w-3.5 h-3.5" />
+            {toolsEnabled && (
+              <div className="absolute -bottom-0.5 -right-0.5 w-2 h-2 bg-yellow-400 rounded-full" />
             )}
           </button>
         )}

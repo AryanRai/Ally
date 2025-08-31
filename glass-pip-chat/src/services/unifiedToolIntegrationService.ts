@@ -475,6 +475,24 @@ export class UnifiedToolIntegrationService extends BrowserEventEmitter {
   }
 
   /**
+   * Get WebSocket connection for testing
+   */
+  getWebSocketConnection(): CommsWebSocket | null {
+    return this.ws;
+  }
+
+  /**
+   * Send a test message to Stream Handler
+   */
+  sendTestMessage(message: any): void {
+    this.sendMessage({
+      ...message,
+      source: this.config.sourceIdentifier,
+      'msg-sent-timestamp': new Date().toISOString()
+    });
+  }
+
+  /**
    * Register a tool executor
    */
   registerTool(toolName: string, executor: any): void {
