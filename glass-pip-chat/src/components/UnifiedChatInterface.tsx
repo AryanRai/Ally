@@ -1,11 +1,11 @@
 /**
- * Unified Chat Interface Component
- * Requirements: Task 13 - Integration of UI, Tool Framework, and Comms
+ * Tool Call Test Interface Component
  * 
+ * Test interface for tool calling functionality
  * Demonstrates the integration of:
- * - UI tool calling components (task 11)
- * - Tool calling framework (task 1 and 8)
- * - Stream handler and comms/chyappy (task 6)
+ * - UI tool calling components
+ * - Tool calling framework
+ * - Stream handler and comms integration
  */
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
@@ -22,14 +22,12 @@ import { ToolAwareProcessingProgress } from '../services/toolAwareIntegrationSer
 // Components
 import { ToolExecutionStatus } from './chat/ToolExecutionStatus';
 import { ToolExecutionHistory } from './chat/ToolExecutionHistory';
-import { ToolStatusIndicator } from './chat/ToolStatusIndicator';
-import { ToolManagementInterface } from './chat/ToolManagementInterface';
-import { ToolAnalyticsDashboard } from './chat/ToolAnalyticsDashboard';
+import { UnifiedToolDashboard } from './chat/UnifiedToolDashboard';
 
 // Types
 import { Message } from '../types/chat';
 
-interface UnifiedChatInterfaceProps {
+interface ToolCallTestProps {
   conversationId: string;
   className?: string;
 }
@@ -129,7 +127,7 @@ const ProcessingIndicator: React.FC<ProcessingIndicatorProps> = ({ progress, isP
   );
 };
 
-export const UnifiedChatInterface: React.FC<UnifiedChatInterfaceProps> = ({
+export const ToolCallTest: React.FC<ToolCallTestProps> = ({
   conversationId,
   className
 }) => {
@@ -154,8 +152,7 @@ export const UnifiedChatInterface: React.FC<UnifiedChatInterfaceProps> = ({
   const [input, setInput] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
   const [currentProgress, setCurrentProgress] = useState<ToolAwareProcessingProgress>();
-  const [showToolManagement, setShowToolManagement] = useState(false);
-  const [showAnalytics, setShowAnalytics] = useState(false);
+  const [showToolDashboard, setShowToolDashboard] = useState(false);
 
   // Refs
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -292,7 +289,7 @@ export const UnifiedChatInterface: React.FC<UnifiedChatInterfaceProps> = ({
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-lg font-semibold text-gray-900 dark:text-white">
-              Unified Tool Integration
+              Tool Call Test Interface
             </h1>
             <p className="text-sm text-gray-500 dark:text-gray-400">
               Conversation: {conversationId}
@@ -306,120 +303,108 @@ export const UnifiedChatInterface: React.FC<UnifiedChatInterfaceProps> = ({
               lastError={connectionStats.lastError}
             />
             
-            <ToolStatusIndicator
-              status={{
-                isExecuting: connectionStats.activeExecutions > 0,
-                activeToolCount: connectionStats.activeExecutions,
-                completedToolCount: 0, // Would need to track this
-                failedToolCount: 0, // Would need to track this
-                totalExecutionTime: 0, // Would need to track this
-                lastExecutionTime: undefined, // Would need to track this
-                availableToolCount: toolStats.availableTools?.length || toolStats.toolCount || 0
-              }}
-              platform="web"
-              theme="dark"
-              compact={true}
-            />
+            <button
+              onClick={() => setShowToolDashboard(!showToolDashboard)}
+              className="flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+            >
+              <span className="text-blue-400">🔧</span>
+              <span className="text-sm font-medium">
+                {connectionStats.activeExecutions > 0 
+                  ? `${connectionStats.activeExecutions} tools running`
+                  : `${toolStats.availableTools?.length || toolStats.toolCount || 0} tools available`
+                }
+              </span>
+            </button>
           </div>
         </div>
 
-        {/* Tool Management Controls */}
-        <div className="flex items-center gap-2 mt-3">
-          <button
-            onClick={() => setShowToolManagement(!showToolManagement)}
-            className="px-3 py-1 text-xs bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 rounded-md hover:bg-blue-200 dark:hover:bg-blue-800 transition-colors"
-          >
-            Tool Management
-          </button>
-          
-          <button
-            onClick={() => setShowAnalytics(!showAnalytics)}
-            className="px-3 py-1 text-xs bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300 rounded-md hover:bg-green-200 dark:hover:bg-green-800 transition-colors"
-          >
-            Analytics
-          </button>
-
+        {/* Tool Dashboard Toggle */}
+        <div className="flex items-center justify-between mt-3">
           <div className="text-xs text-gray-500 dark:text-gray-400">
-            {toolStats.toolCount} tools available
+            {toolStats.toolCount} tools available • Click tool status to manage
           </div>
         </div>
       </div>
 
-      {/* Tool Management Interface */}
+      {/* Unified Tool Dashboard */}
       <AnimatePresence>
-        {showToolManagement && (
+        {showToolDashboard && (
           <motion.div
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: 'auto', opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
             className="border-b border-gray-200 dark:border-gray-700 overflow-hidden"
           >
-            <ToolManagementInterface
-              availableTools={toolStats.availableTools}
-              activeExecutions={connectionStats.activeExecutions}
-              onToolToggle={(toolName, enabled) => {
-                console.log(`Tool ${toolName} ${enabled ? 'enabled' : 'disabled'}`);
-              }}
-              onToolConfigure={(toolName) => {
-                console.log(`Configure tool: ${toolName}`);
-              }}
-            />
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* Analytics Dashboard */}
-      <AnimatePresence>
-        {showAnalytics && (
-          <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: 'auto', opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            className="border-b border-gray-200 dark:border-gray-700 overflow-hidden"
-          >
-            <ToolAnalyticsDashboard
-              toolMetrics={[
+            <UnifiedToolDashboard
+              tools={[
                 {
                   name: 'calculator',
+                  description: 'Performs mathematical calculations',
+                  category: 'utility',
+                  version: '1.0.0',
+                  enabled: true,
+                  parameters: {},
+                  securityLevel: 'low',
+                  lastUsed: Date.now() - 300000,
+                  usageCount: 15,
+                  averageExecutionTime: 200,
+                  successRate: 1.0,
+                  errorCount: 0,
                   totalExecutions: 15,
                   successfulExecutions: 15,
                   failedExecutions: 0,
-                  averageExecutionTime: 200,
                   minExecutionTime: 150,
                   maxExecutionTime: 250,
                   usageFrequency: 5,
                   errorRate: 0,
                   performanceScore: 95,
-                  trend: 'stable' as const,
-                  category: 'utility'
+                  trend: 'stable'
                 },
                 {
                   name: 'weather',
+                  description: 'Provides weather information',
+                  category: 'data',
+                  version: '1.0.0',
+                  enabled: true,
+                  parameters: {},
+                  securityLevel: 'medium',
+                  lastUsed: Date.now() - 600000,
+                  usageCount: 12,
+                  averageExecutionTime: 800,
+                  successRate: 0.92,
+                  errorCount: 1,
                   totalExecutions: 12,
                   successfulExecutions: 11,
                   failedExecutions: 1,
-                  averageExecutionTime: 800,
                   minExecutionTime: 600,
                   maxExecutionTime: 1200,
                   usageFrequency: 3,
                   errorRate: 0.08,
                   performanceScore: 85,
-                  trend: 'up' as const,
-                  category: 'data'
+                  trend: 'up'
                 },
                 {
                   name: 'current_time',
+                  description: 'Returns current date and time',
+                  category: 'utility',
+                  version: '1.0.0',
+                  enabled: true,
+                  parameters: {},
+                  securityLevel: 'low',
+                  lastUsed: Date.now() - 120000,
+                  usageCount: 15,
+                  averageExecutionTime: 50,
+                  successRate: 1.0,
+                  errorCount: 0,
                   totalExecutions: 15,
                   successfulExecutions: 15,
                   failedExecutions: 0,
-                  averageExecutionTime: 50,
                   minExecutionTime: 30,
                   maxExecutionTime: 80,
                   usageFrequency: 8,
                   errorRate: 0,
                   performanceScore: 98,
-                  trend: 'stable' as const,
-                  category: 'utility'
+                  trend: 'stable'
                 }
               ]}
               systemMetrics={{
@@ -432,15 +417,66 @@ export const UnifiedChatInterface: React.FC<UnifiedChatInterfaceProps> = ({
                 mostReliableTool: 'current_time',
                 slowestTool: 'weather',
                 mostUsedTool: 'calculator',
-                errorProneTool: 'weather'
+                errorProneTool: 'weather',
+                isExecuting: connectionStats.activeExecutions > 0,
+                activeToolCount: connectionStats.activeExecutions,
+                completedToolCount: 38,
+                failedToolCount: 4,
+                totalExecutionTime: 52500,
+                lastExecutionTime: Date.now() - 120000,
+                availableToolCount: toolStats.availableTools?.length || toolStats.toolCount || 0
               }}
-              timeSeriesData={[]}
+              analytics={{
+                totalExecutions: 42,
+                successfulExecutions: 38,
+                failedExecutions: 4,
+                averageExecutionTime: 350,
+                mostUsedTools: [
+                  { name: 'calculator', count: 15, percentage: 35.7 },
+                  { name: 'current_time', count: 15, percentage: 35.7 },
+                  { name: 'weather', count: 12, percentage: 28.6 }
+                ],
+                recentActivity: [
+                  { timestamp: Date.now() - 120000, toolName: 'current_time', status: 'success', executionTime: 45 },
+                  { timestamp: Date.now() - 300000, toolName: 'calculator', status: 'success', executionTime: 180 },
+                  { timestamp: Date.now() - 600000, toolName: 'weather', status: 'error', executionTime: 1200 }
+                ],
+                performanceTrends: {
+                  executionTimesTrend: 'stable',
+                  successRateTrend: 'up',
+                  usageTrend: 'up'
+                }
+              }}
               platform="web"
               theme="dark"
               timeRange="24h"
-              onTimeRangeChange={() => {}}
-              onRefresh={() => {}}
-              onExportData={() => {}}
+              onToolToggle={(toolName, enabled) => {
+                console.log(`Tool ${toolName} ${enabled ? 'enabled' : 'disabled'}`);
+              }}
+              onToolConfigure={(toolName, config) => {
+                console.log(`Configure tool: ${toolName}`, config);
+              }}
+              onToolRefresh={(toolName) => {
+                console.log(`Refresh tool: ${toolName}`);
+              }}
+              onToolRemove={(toolName) => {
+                console.log(`Remove tool: ${toolName}`);
+              }}
+              onExportConfig={() => {
+                console.log('Export configuration');
+              }}
+              onImportConfig={(config) => {
+                console.log('Import configuration', config);
+              }}
+              onRefreshAnalytics={() => {
+                console.log('Refresh analytics');
+              }}
+              onTimeRangeChange={(range) => {
+                console.log('Time range changed:', range);
+              }}
+              onExportData={() => {
+                console.log('Export data');
+              }}
             />
           </motion.div>
         )}

@@ -24,19 +24,16 @@ import ChatInput from './chat/ChatInput';
 import { RemoteSettings } from './RemoteSettings';
 import { SpeechControls } from './SpeechControls';
 import { useSpeechService } from '../hooks/useSpeechService';
-import { StreamingTest } from './StreamingTest';
+
 
 // Tool Execution UI Components
 import { ToolExecutionStatus } from './chat/ToolExecutionStatus';
 import { ToolExecutionHistory } from './chat/ToolExecutionHistory';
-import { ToolStatusIndicator } from './chat/ToolStatusIndicator';
-import { ToolManagementInterface } from './chat/ToolManagementInterface';
-import { ToolAnalyticsDashboard } from './chat/ToolAnalyticsDashboard';
+import { UnifiedToolDashboard } from './chat/UnifiedToolDashboard';
 import { useToolCalling } from '../hooks/useToolCalling';
 
 // Unified Tool Integration
 import { useUnifiedToolIntegration } from '../hooks/useUnifiedToolIntegration';
-import { UnifiedChatInterface } from './UnifiedChatInterface';
 
 // Utils & Types
 import { ChatManager } from '../utils/chatManager';
@@ -115,10 +112,7 @@ export default function GlassChatPiP() {
   const [historyIndex, setHistoryIndex] = useState(-1);
   const [showSpeechControls, setShowSpeechControls] = useState(false);
   const [showStreamingTest, setShowStreamingTest] = useState(false);
-  const [showToolManagement, setShowToolManagement] = useState(false);
-  const [showToolExecutionHistory, setShowToolExecutionHistory] = useState(false);
-  const [showUnifiedIntegration, setShowUnifiedIntegration] = useState(false);
-  const [showToolAnalytics, setShowToolAnalytics] = useState(false);
+  const [showUnifiedToolDashboard, setShowUnifiedToolDashboard] = useState(false);
   // Use voice mode state from speech service hook
   const { voiceModeEnabled, setVoiceModeEnabled, droidModeEnabled, setDroidModeEnabled } = speechService;
 
@@ -1422,11 +1416,7 @@ export default function GlassChatPiP() {
                   lastExecutionTime: undefined, // TODO: Get from unified integration
                   availableToolCount: unifiedIntegration.state.availableTools.length
                 }}
-                onToolStatusClick={() => setShowToolManagement(!showToolManagement)}
-                showUnifiedIntegration={showUnifiedIntegration}
-                onUnifiedIntegrationToggle={() => setShowUnifiedIntegration(!showUnifiedIntegration)}
-                showToolAnalytics={showToolAnalytics}
-                onToolAnalyticsToggle={() => setShowToolAnalytics(!showToolAnalytics)}
+                onToolStatusClick={() => setShowUnifiedToolDashboard(!showUnifiedToolDashboard)}
                 unifiedIntegrationStatus={{
                   isConnected: unifiedIntegration.state.isConnected,
                   connectionStatus: unifiedIntegration.state.connectionStatus,
@@ -1684,90 +1674,15 @@ export default function GlassChatPiP() {
         onSettingsChange={(updates) => settingsManager.updateSettings(updates)}
       />
 
-      {/* Tool Management Interface Modal */}
+      {/* Unified Tool Dashboard Modal */}
       <AnimatePresence>
-        {showToolManagement && (
+        {showUnifiedToolDashboard && (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             className="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
-            onClick={() => setShowToolManagement(false)}
-          >
-            <motion.div
-              initial={{ scale: 0.9, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.9, opacity: 0 }}
-              className="w-full max-w-4xl max-h-[80vh] m-4"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <ToolManagementInterface
-                tools={[]} // TODO: Get actual tools from toolCalling.getAvailableTools()
-                analytics={{
-                  totalExecutions: toolCalling.state.executionHistory.length,
-                  successfulExecutions: toolCalling.state.executionHistory.filter(h => !h.error).length,
-                  failedExecutions: toolCalling.state.executionHistory.filter(h => h.error).length,
-                  averageExecutionTime: toolCalling.state.executionHistory.length > 0 
-                    ? toolCalling.state.executionHistory.reduce((sum, h) => sum + h.executionTime, 0) / toolCalling.state.executionHistory.length
-                    : 0,
-                  mostUsedTools: [], // TODO: Calculate from execution history
-                  recentActivity: toolCalling.state.executionHistory.slice(-10).map((h, index) => ({
-                    timestamp: Date.now() - (index * 60000), // Mock timestamps
-                    toolName: h.name,
-                    status: h.error ? 'error' as const : 'success' as const,
-                    executionTime: h.executionTime
-                  })),
-                  performanceTrends: {
-                    executionTimesTrend: 'stable' as const,
-                    successRateTrend: 'stable' as const,
-                    usageTrend: 'stable' as const
-                  }
-                }}
-                platform={platform}
-                theme={theme}
-                onToolToggle={(toolName, enabled) => {
-                  // TODO: Implement tool toggle
-                  console.log('Toggle tool:', toolName, enabled);
-                }}
-                onToolConfigure={(toolName, config) => {
-                  // TODO: Implement tool configuration
-                  console.log('Configure tool:', toolName, config);
-                }}
-                onToolRefresh={(toolName) => {
-                  // TODO: Implement tool refresh
-                  console.log('Refresh tool:', toolName);
-                }}
-                onToolRemove={(toolName) => {
-                  // TODO: Implement tool removal
-                  console.log('Remove tool:', toolName);
-                }}
-                onExportConfig={() => {
-                  // TODO: Implement config export
-                  console.log('Export config');
-                }}
-                onImportConfig={(config) => {
-                  // TODO: Implement config import
-                  console.log('Import config:', config);
-                }}
-                onRefreshAnalytics={() => {
-                  // TODO: Implement analytics refresh
-                  console.log('Refresh analytics');
-                }}
-              />
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* Unified Integration Interface Modal */}
-      <AnimatePresence>
-        {showUnifiedIntegration && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
-            onClick={() => setShowUnifiedIntegration(false)}
+            onClick={() => setShowUnifiedToolDashboard(false)}
           >
             <motion.div
               initial={{ scale: 0.9, opacity: 0 }}
@@ -1776,60 +1691,183 @@ export default function GlassChatPiP() {
               className="w-full max-w-6xl max-h-[90vh] m-4"
               onClick={(e) => e.stopPropagation()}
             >
-              <UnifiedChatInterface
-                conversationId={activeChat?.id || `unified_${Date.now()}`}
-                className="h-[80vh] bg-white dark:bg-gray-900 rounded-lg shadow-2xl"
-              />
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* Tool Analytics Dashboard Modal */}
-      <AnimatePresence>
-        {showToolAnalytics && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
-            onClick={() => setShowToolAnalytics(false)}
-          >
-            <motion.div
-              initial={{ scale: 0.9, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.9, opacity: 0 }}
-              className="w-full max-w-5xl max-h-[80vh] m-4"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className="bg-white dark:bg-gray-900 rounded-lg shadow-2xl p-6 max-h-[80vh] overflow-y-auto">
-                <div className="flex items-center justify-between mb-6">
-                  <h2 className="text-2xl font-bold text-gray-900 dark:text-white">
-                    Tool Analytics Dashboard
+              <div className="bg-white dark:bg-gray-900 rounded-lg shadow-2xl max-h-[90vh] overflow-hidden">
+                <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
+                  <h2 className="text-xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                    <span className="text-blue-400">🔧</span>
+                    Unified Tool Dashboard
                   </h2>
                   <button
-                    onClick={() => setShowToolAnalytics(false)}
+                    onClick={() => setShowUnifiedToolDashboard(false)}
                     className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
                   >
                     <X className="w-5 h-5" />
                   </button>
                 </div>
                 
-                <ToolAnalyticsDashboard
-                  executionStats={{
-                    totalExecutions: 0, // TODO: Get from unified integration
-                    successfulExecutions: 0,
-                    failedExecutions: 0,
-                    averageExecutionTime: 0,
-                    toolUsageStats: {}
-                  }}
-                  performanceMetrics={{
-                    averageLatency: unifiedIntegration.getConnectionStats().latency || 0,
-                    throughput: 0,
-                    errorRate: 0,
-                    uptime: unifiedIntegration.state.isConnected ? 1.0 : 0.0
-                  }}
-                />
+                <div className="max-h-[calc(90vh-80px)] overflow-y-auto">
+                  <UnifiedToolDashboard
+                    tools={[
+                      {
+                        name: 'calculator',
+                        description: 'Performs mathematical calculations',
+                        category: 'utility',
+                        version: '1.0.0',
+                        enabled: true,
+                        parameters: {},
+                        securityLevel: 'low',
+                        lastUsed: Date.now() - 300000,
+                        usageCount: toolCalling.state?.executionHistory?.filter(h => h.name === 'calculator')?.length || 0,
+                        averageExecutionTime: 200,
+                        successRate: 1.0,
+                        errorCount: 0,
+                        totalExecutions: toolCalling.state?.executionHistory?.filter(h => h.name === 'calculator')?.length || 0,
+                        successfulExecutions: toolCalling.state?.executionHistory?.filter(h => h.name === 'calculator' && !h.error)?.length || 0,
+                        failedExecutions: toolCalling.state?.executionHistory?.filter(h => h.name === 'calculator' && h.error)?.length || 0,
+                        minExecutionTime: 150,
+                        maxExecutionTime: 250,
+                        usageFrequency: 5,
+                        errorRate: 0,
+                        performanceScore: 95,
+                        trend: 'stable'
+                      },
+                      {
+                        name: 'weather',
+                        description: 'Provides weather information',
+                        category: 'data',
+                        version: '1.0.0',
+                        enabled: true,
+                        parameters: {},
+                        securityLevel: 'medium',
+                        lastUsed: Date.now() - 600000,
+                        usageCount: toolCalling.state?.executionHistory?.filter(h => h.name === 'weather')?.length || 0,
+                        averageExecutionTime: 800,
+                        successRate: 0.92,
+                        errorCount: 1,
+                        totalExecutions: toolCalling.state?.executionHistory?.filter(h => h.name === 'weather')?.length || 0,
+                        successfulExecutions: toolCalling.state?.executionHistory?.filter(h => h.name === 'weather' && !h.error)?.length || 0,
+                        failedExecutions: toolCalling.state?.executionHistory?.filter(h => h.name === 'weather' && h.error)?.length || 0,
+                        minExecutionTime: 600,
+                        maxExecutionTime: 1200,
+                        usageFrequency: 3,
+                        errorRate: 0.08,
+                        performanceScore: 85,
+                        trend: 'up'
+                      },
+                      {
+                        name: 'current_time',
+                        description: 'Returns current date and time',
+                        category: 'utility',
+                        version: '1.0.0',
+                        enabled: true,
+                        parameters: {},
+                        securityLevel: 'low',
+                        lastUsed: Date.now() - 120000,
+                        usageCount: toolCalling.state?.executionHistory?.filter(h => h.name === 'current_time')?.length || 0,
+                        averageExecutionTime: 50,
+                        successRate: 1.0,
+                        errorCount: 0,
+                        totalExecutions: toolCalling.state?.executionHistory?.filter(h => h.name === 'current_time')?.length || 0,
+                        successfulExecutions: toolCalling.state?.executionHistory?.filter(h => h.name === 'current_time' && !h.error)?.length || 0,
+                        failedExecutions: toolCalling.state?.executionHistory?.filter(h => h.name === 'current_time' && h.error)?.length || 0,
+                        minExecutionTime: 30,
+                        maxExecutionTime: 80,
+                        usageFrequency: 8,
+                        errorRate: 0,
+                        performanceScore: 98,
+                        trend: 'stable'
+                      }
+                    ]}
+                    systemMetrics={{
+                      totalTools: unifiedIntegration.state?.availableTools?.length || 0,
+                      activeTools: unifiedIntegration.state?.availableTools?.filter(t => t.enabled)?.length || 0,
+                      totalExecutions: toolCalling.state?.executionHistory?.length || 0,
+                      successRate: toolCalling.state?.executionHistory?.length > 0 
+                        ? (toolCalling.state.executionHistory.filter(h => !h.error)?.length || 0) / toolCalling.state.executionHistory.length
+                        : 0,
+                      averageResponseTime: toolCalling.state?.executionHistory?.length > 0 
+                        ? (toolCalling.state.executionHistory.reduce((sum, h) => sum + (h.executionTime || 0), 0) || 0) / toolCalling.state.executionHistory.length
+                        : 0,
+                      peakUsageHour: 14,
+                      mostReliableTool: 'current_time',
+                      slowestTool: 'weather',
+                      mostUsedTool: 'calculator',
+                      errorProneTool: 'weather',
+                      isExecuting: toolCalling.state?.isExecuting || false,
+                      activeToolCount: toolCalling.state?.activeExecutions?.length || 0,
+                      completedToolCount: toolCalling.state?.executionHistory?.filter(h => !h.error)?.length || 0,
+                      failedToolCount: toolCalling.state?.executionHistory?.filter(h => h.error)?.length || 0,
+                      totalExecutionTime: toolCalling.state?.executionHistory?.reduce((sum, h) => sum + (h.executionTime || 0), 0) || 0,
+                      lastExecutionTime: toolCalling.state?.executionHistory?.length > 0 
+                        ? Math.max(...toolCalling.state.executionHistory.map(h => h.timestamp || 0))
+                        : undefined,
+                      availableToolCount: unifiedIntegration.state?.availableTools?.length || 0
+                    }}
+                    analytics={{
+                      totalExecutions: toolCalling.state?.executionHistory?.length || 0,
+                      successfulExecutions: toolCalling.state?.executionHistory?.filter(h => !h.error)?.length || 0,
+                      failedExecutions: toolCalling.state?.executionHistory?.filter(h => h.error)?.length || 0,
+                      averageExecutionTime: toolCalling.state?.executionHistory?.length > 0 
+                        ? (toolCalling.state.executionHistory.reduce((sum, h) => sum + (h.executionTime || 0), 0) || 0) / toolCalling.state.executionHistory.length
+                        : 0,
+                      mostUsedTools: [
+                        { name: 'calculator', count: toolCalling.state?.executionHistory?.filter(h => h.name === 'calculator')?.length || 0, percentage: 35.7 },
+                        { name: 'current_time', count: toolCalling.state?.executionHistory?.filter(h => h.name === 'current_time')?.length || 0, percentage: 35.7 },
+                        { name: 'weather', count: toolCalling.state?.executionHistory?.filter(h => h.name === 'weather')?.length || 0, percentage: 28.6 }
+                      ],
+                      recentActivity: toolCalling.state?.executionHistory?.slice(-10)?.map((h, index) => ({
+                        timestamp: h.timestamp || Date.now(),
+                        toolName: h.name || 'unknown',
+                        status: h.error ? 'error' as const : 'success' as const,
+                        executionTime: h.executionTime || 0
+                      })) || [],
+                      performanceTrends: {
+                        executionTimesTrend: 'stable' as const,
+                        successRateTrend: 'up' as const,
+                        usageTrend: 'up' as const
+                      }
+                    }}
+                    platform={platform}
+                    theme={theme}
+                    timeRange="24h"
+                    onToolToggle={(toolName, enabled) => {
+                      console.log('Toggle tool:', toolName, enabled);
+                      // TODO: Implement actual tool toggle functionality
+                    }}
+                    onToolConfigure={(toolName, config) => {
+                      console.log('Configure tool:', toolName, config);
+                      // TODO: Implement tool configuration
+                    }}
+                    onToolRefresh={(toolName) => {
+                      console.log('Refresh tool:', toolName);
+                      // TODO: Implement tool refresh
+                    }}
+                    onToolRemove={(toolName) => {
+                      console.log('Remove tool:', toolName);
+                      // TODO: Implement tool removal
+                    }}
+                    onExportConfig={() => {
+                      console.log('Export configuration');
+                      // TODO: Implement config export
+                    }}
+                    onImportConfig={(config) => {
+                      console.log('Import configuration', config);
+                      // TODO: Implement config import
+                    }}
+                    onRefreshAnalytics={() => {
+                      console.log('Refresh analytics');
+                      // TODO: Refresh analytics data
+                    }}
+                    onTimeRangeChange={(range) => {
+                      console.log('Time range changed:', range);
+                      // TODO: Update analytics time range
+                    }}
+                    onExportData={() => {
+                      console.log('Export data');
+                      // TODO: Export analytics data
+                    }}
+                  />
+                </div>
               </div>
             </motion.div>
           </motion.div>

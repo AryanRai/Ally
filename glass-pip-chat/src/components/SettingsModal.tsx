@@ -1,8 +1,9 @@
 import { useEffect, useState, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Sun, Moon, Monitor, Server, Wifi, WifiOff, RefreshCw, Keyboard, Volume2, Mic } from 'lucide-react';
+import { X, Sun, Moon, Monitor, Server, Wifi, WifiOff, RefreshCw, Keyboard, Volume2, Mic, Wrench } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { useSpeechService } from '../hooks/useSpeechService';
+import { ToolCallTest } from './UnifiedChatInterface';
 
 import { AppSettings, UISettings } from '../types/settings';
 
@@ -1266,6 +1267,33 @@ export default function SettingsModal({
                         </label>
                       </div>
                     </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Tool Call Test Section */}
+              <div className="space-y-3">
+                <h3 className={cn(
+                  "text-sm font-medium flex items-center gap-2",
+                  platform === 'win32'
+                    ? "text-white/80"
+                    : theme === 'dark' ? "text-white/80" : "text-black/80"
+                )}>
+                  <Wrench className="w-4 h-4" />
+                  Tool Call Test
+                </h3>
+                
+                <div className={cn(
+                  "rounded-lg border overflow-hidden",
+                  platform === 'win32'
+                    ? "border-white/10 bg-white/5"
+                    : theme === 'dark' ? "border-white/10 bg-white/5" : "border-black/10 bg-black/5"
+                )}>
+                  <div className="h-96">
+                    <ToolCallTest
+                      conversationId={`settings_test_${Date.now()}`}
+                      className="h-full"
+                    />
                   </div>
                 </div>
               </div>
