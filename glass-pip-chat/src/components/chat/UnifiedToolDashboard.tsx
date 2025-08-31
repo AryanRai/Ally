@@ -917,14 +917,25 @@ export function UnifiedToolDashboard({
   );
 
   return (
-    <div className={cn(
-      "rounded-lg border",
-      platform === 'win32'
-        ? "border-white/10 bg-black/60"
-        : theme === 'dark' 
-          ? "border-white/10 bg-gradient-to-b from-gray-900/95 to-gray-800/95"
-          : "border-black/10 bg-gradient-to-b from-gray-100/95 to-gray-200/95"
-    )}>
+    <div 
+      className={cn(
+        "rounded-2xl border shadow-[0_12px_60px_rgba(0,0,0,0.6)]",
+        // Theme-aware styling with less transparency
+        theme === 'dark' 
+          ? "border-white/30 text-white/95" 
+          : "border-black/30 text-black/95",
+        // Platform-specific backgrounds with reduced transparency
+        platform === 'win32' 
+          ? "bg-black/60" // More opaque for Windows acrylic
+          : theme === 'dark'
+            ? "bg-gradient-to-b from-gray-900/95 to-gray-800/95"
+            : "bg-gradient-to-b from-gray-100/95 to-gray-200/95"
+      )}
+      style={{
+        backdropFilter: 'blur(20px) saturate(180%)',
+        WebkitBackdropFilter: 'blur(20px) saturate(180%)'
+      }}
+    >
       {/* Header with Navigation */}
       <div className={cn(
         "flex items-center justify-between p-4 border-b",

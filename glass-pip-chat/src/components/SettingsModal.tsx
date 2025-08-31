@@ -4,6 +4,7 @@ import { X, Sun, Moon, Monitor, Server, Wifi, WifiOff, RefreshCw, Keyboard, Volu
 import { cn } from '../lib/utils';
 import { useSpeechService } from '../hooks/useSpeechService';
 import { ToolCallTest } from './UnifiedChatInterface';
+import { StreamingTest } from './StreamingTest';
 
 import { AppSettings, UISettings } from '../types/settings';
 
@@ -36,6 +37,7 @@ export default function SettingsModal({
   const [blurAmount, setBlurAmount] = useState(20); // Default blur amount
   const [blurType, setBlurType] = useState<'acrylic' | 'mica' | 'standard'>('acrylic'); // Blur type
   const [showShortcuts, setShowShortcuts] = useState(false);
+  const [showStreamingTest, setShowStreamingTest] = useState(false);
   const modalRef = useRef<HTMLDivElement>(null);
   
   // Speech service integration
@@ -1271,6 +1273,50 @@ export default function SettingsModal({
                 </div>
               </div>
 
+              {/* Streaming Test Section */}
+              <div className="space-y-3">
+                <h3 className={cn(
+                  "text-sm font-medium flex items-center gap-2",
+                  platform === 'win32'
+                    ? "text-white/80"
+                    : theme === 'dark' ? "text-white/80" : "text-black/80"
+                )}>
+                  <Activity className="w-4 h-4" />
+                  Streaming Test
+                </h3>
+                
+                <div className={cn(
+                  "p-3 rounded-lg border",
+                  platform === 'win32'
+                    ? "border-white/10 bg-white/5"
+                    : theme === 'dark' ? "border-white/10 bg-white/5" : "border-black/10 bg-black/5"
+                )}>
+                  <p className={cn(
+                    "text-xs mb-3",
+                    platform === 'win32'
+                      ? "text-white/60"
+                      : theme === 'dark' ? "text-white/60" : "text-black/60"
+                  )}>
+                    Test real-time thinking and response streaming functionality with Ollama.
+                  </p>
+                  
+                  <button
+                    onClick={() => setShowStreamingTest(true)}
+                    className={cn(
+                      "w-full px-3 py-2 rounded-lg text-xs font-medium transition-colors border",
+                      platform === 'win32'
+                        ? "border-white/20 bg-white/10 hover:bg-white/20 text-white/90"
+                        : theme === 'dark' 
+                          ? "border-white/20 bg-white/10 hover:bg-white/20 text-white/90"
+                          : "border-black/20 bg-black/10 hover:bg-black/20 text-black/90"
+                    )}
+                  >
+                    <Activity className="w-3 h-3 inline mr-2" />
+                    Run Streaming Test
+                  </button>
+                </div>
+              </div>
+
               {/* Tool Call Test Section */}
               <div className="space-y-3">
                 <h3 className={cn(
@@ -1321,6 +1367,15 @@ export default function SettingsModal({
             </motion.div>
           </div>
         </>
+      )}
+      
+      {/* Streaming Test Modal */}
+      {showStreamingTest && (
+        <StreamingTest
+          onClose={() => setShowStreamingTest(false)}
+          platform={platform}
+          theme={theme}
+        />
       )}
     </AnimatePresence>
   );

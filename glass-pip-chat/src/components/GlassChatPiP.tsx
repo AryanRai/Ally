@@ -111,7 +111,6 @@ export default function GlassChatPiP() {
   const [inputHistory, setInputHistory] = useState<string[]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
   const [showSpeechControls, setShowSpeechControls] = useState(false);
-  const [showStreamingTest, setShowStreamingTest] = useState(false);
   const [showUnifiedToolDashboard, setShowUnifiedToolDashboard] = useState(false);
   // Use voice mode state from speech service hook
   const { voiceModeEnabled, setVoiceModeEnabled, droidModeEnabled, setDroidModeEnabled } = speechService;
@@ -947,10 +946,7 @@ export default function GlassChatPiP() {
             event.preventDefault();
             handleSizeChange();
             return;
-          case 'T':
-            event.preventDefault();
-            setShowStreamingTest(true);
-            return;
+
 
         }
       }
@@ -1677,36 +1673,69 @@ export default function GlassChatPiP() {
       {/* Unified Tool Dashboard Modal */}
       <AnimatePresence>
         {showUnifiedToolDashboard && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
-            onClick={() => setShowUnifiedToolDashboard(false)}
-          >
+          <>
+            {/* Backdrop */}
             <motion.div
-              initial={{ scale: 0.9, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.9, opacity: 0 }}
-              className="w-full max-w-6xl max-h-[90vh] m-4"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className="bg-white dark:bg-gray-900 rounded-lg shadow-2xl max-h-[90vh] overflow-hidden">
-                <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
-                  <h2 className="text-xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 bg-black/70 backdrop-blur-md z-50"
+              onClick={() => setShowUnifiedToolDashboard(false)}
+            />
+            
+            {/* Modal */}
+            <div className="fixed inset-0 flex items-center justify-center p-4 z-50" onClick={(e) => e.stopPropagation()}>
+              <motion.div
+                initial={{ opacity: 0, scale: 0.9, y: 20 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.9, y: 20 }}
+                onClick={(e) => e.stopPropagation()}
+                style={{
+                  backdropFilter: 'blur(20px) saturate(180%)',
+                  WebkitBackdropFilter: 'blur(20px) saturate(180%)'
+                }}
+                className={cn(
+                  "w-full max-w-6xl max-h-[85vh] overflow-hidden",
+                  "rounded-2xl border shadow-[0_12px_60px_rgba(0,0,0,0.6)]",
+                  // Theme-aware styling with less transparency
+                  theme === 'dark' 
+                    ? "border-white/30 text-white/95" 
+                    : "border-black/30 text-black/95",
+                  // Platform-specific backgrounds with reduced transparency
+                  platform === 'win32' 
+                    ? "bg-black/60" // More opaque for Windows acrylic
+                    : theme === 'dark'
+                      ? "bg-gradient-to-b from-gray-900/95 to-gray-800/95"
+                      : "bg-gradient-to-b from-gray-100/95 to-gray-200/95"
+                )}
+              >
+                <div className={cn(
+                  "flex items-center justify-between p-4 border-b",
+                  platform === 'win32'
+                    ? "border-white/10"
+                    : theme === 'dark' ? "border-white/10" : "border-black/10"
+                )}>
+                  <h2 className="text-xl font-bold flex items-center gap-2">
                     <span className="text-blue-400">🔧</span>
                     Unified Tool Dashboard
                   </h2>
                   <button
                     onClick={() => setShowUnifiedToolDashboard(false)}
-                    className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
+                    className={cn(
+                      "p-2 rounded-lg transition-colors",
+                      platform === 'win32' 
+                        ? "hover:bg-white/10"
+                        : theme === 'dark' ? "hover:bg-white/10" : "hover:bg-black/10"
+                    )}
                   >
                     <X className="w-5 h-5" />
                   </button>
                 </div>
                 
-                <div className="max-h-[calc(90vh-80px)] overflow-y-auto">
+                <div className="max-h-[calc(85vh-80px)] overflow-y-auto p-4">
                   <UnifiedToolDashboard
+                    platform={platform}
+                    theme={theme}
                     tools={[
                       {
                         name: 'calculator',
@@ -1868,20 +1897,13 @@ export default function GlassChatPiP() {
                     }}
                   />
                 </div>
-              </div>
-            </motion.div>
-          </motion.div>
+              </motion.div>
+            </div>
+          </>
         )}
       </AnimatePresence>
 
-      {/* Streaming Test Modal */}
-      <AnimatePresence>
-        {showStreamingTest && (
-          <StreamingTest
-            onClose={() => setShowStreamingTest(false)}
-          />
-        )}
-      </AnimatePresence>
+
     </motion.div>
   );
 }
