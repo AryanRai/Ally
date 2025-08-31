@@ -66,16 +66,7 @@ export default function App() {
     <div className="min-h-screen bg-transparent">
       {visible && <GlassChatPiP />}
       
-      {/* Integration Test Toggle Button */}
-      <div className="fixed bottom-4 right-4 z-50">
-        <button
-          onClick={() => setShowIntegrationTest(true)}
-          className="px-3 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 transition-colors text-sm shadow-lg"
-          title="Open Unified Integration Test (Ctrl+Shift+I)"
-        >
-          🚀 Test Integration
-        </button>
-      </div>
+
     </div>
   );
 }

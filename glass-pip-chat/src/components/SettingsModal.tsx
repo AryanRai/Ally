@@ -1286,15 +1286,15 @@ export default function SettingsModal({
                 </h3>
                 
                 <div className={cn(
-                  "p-3 rounded-lg border",
+                  "p-4 rounded-lg border space-y-4",
                   platform === 'win32'
                     ? "border-white/10 bg-white/5"
                     : theme === 'dark' ? "border-white/10 bg-white/5" : "border-black/10 bg-black/5"
                 )}>
-                  <div className="flex items-center justify-between mb-3">
-                    <div>
+                  <div className="flex items-start justify-between">
+                    <div className="flex-1 pr-4">
                       <p className={cn(
-                        "text-sm font-medium",
+                        "text-sm font-medium mb-1",
                         platform === 'win32'
                           ? "text-white/80"
                           : theme === 'dark' ? "text-white/80" : "text-black/80"
@@ -1302,7 +1302,7 @@ export default function SettingsModal({
                         Enable Tool Calling
                       </p>
                       <p className={cn(
-                        "text-xs",
+                        "text-xs leading-relaxed",
                         platform === 'win32'
                           ? "text-white/60"
                           : theme === 'dark' ? "text-white/60" : "text-black/60"
@@ -1310,7 +1310,7 @@ export default function SettingsModal({
                         Allow AI to use tools like calculator, weather, etc.
                       </p>
                     </div>
-                    <label className="relative inline-flex items-center cursor-pointer">
+                    <label className="relative inline-flex items-center cursor-pointer flex-shrink-0">
                       <input
                         type="checkbox"
                         checked={appSettings.tools?.enabled || false}
@@ -1338,7 +1338,7 @@ export default function SettingsModal({
                   
                   {appSettings.tools?.enabled && (
                     <div className={cn(
-                      "text-xs p-2 rounded border",
+                      "text-xs p-3 rounded border",
                       platform === 'win32'
                         ? "border-blue-500/20 bg-blue-500/10 text-blue-300"
                         : theme === 'dark' 
@@ -1364,13 +1364,13 @@ export default function SettingsModal({
                 </h3>
                 
                 <div className={cn(
-                  "p-3 rounded-lg border",
+                  "p-4 rounded-lg border",
                   platform === 'win32'
                     ? "border-white/10 bg-white/5"
                     : theme === 'dark' ? "border-white/10 bg-white/5" : "border-black/10 bg-black/5"
                 )}>
                   <p className={cn(
-                    "text-xs mb-3",
+                    "text-xs leading-relaxed mb-4",
                     platform === 'win32'
                       ? "text-white/60"
                       : theme === 'dark' ? "text-white/60" : "text-black/60"
@@ -1378,7 +1378,27 @@ export default function SettingsModal({
                     Test real-time thinking and response streaming functionality with Ollama.
                   </p>
                   
-
+                  <button
+                    onClick={() => setShowStreamingTest(!showStreamingTest)}
+                    className={cn(
+                      "w-full px-3 py-2 text-sm rounded-lg transition-colors border",
+                      showStreamingTest
+                        ? "bg-blue-500/20 border-blue-500/40 text-blue-300"
+                        : platform === 'win32'
+                          ? "border-white/20 bg-white/10 hover:bg-white/20 text-white/80"
+                          : theme === 'dark' 
+                            ? "border-white/20 bg-white/10 hover:bg-white/20 text-white/80"
+                            : "border-black/20 bg-black/10 hover:bg-black/20 text-black/80"
+                    )}
+                  >
+                    {showStreamingTest ? 'Hide Streaming Test' : 'Show Streaming Test'}
+                  </button>
+                  
+                  {showStreamingTest && (
+                    <div className="mt-4 border-t pt-4">
+                      <StreamingTest />
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -1391,7 +1411,7 @@ export default function SettingsModal({
                     : theme === 'dark' ? "text-white/80" : "text-black/80"
                 )}>
                   <Wrench className="w-4 h-4" />
-                  Tool Call Test
+                  Tool Call Test Interface
                 </h3>
                 
                 <div className={cn(
@@ -1400,7 +1420,7 @@ export default function SettingsModal({
                     ? "border-white/10 bg-white/5"
                     : theme === 'dark' ? "border-white/10 bg-white/5" : "border-black/10 bg-black/5"
                 )}>
-                  <div className="h-96">
+                  <div className="h-80">
                     <ToolCallTest
                       conversationId={`settings_test_${Date.now()}`}
                       className="h-full"
