@@ -41,6 +41,8 @@ import {
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { ThemeUtils } from '../../utils/themeUtils';
+import { ToolCallTest } from '../UnifiedChatInterface';
+import { StreamingTest } from '../StreamingTest';
 
 // Combined interfaces from all three components
 export interface UnifiedToolDefinition {
@@ -124,7 +126,7 @@ interface UnifiedToolDashboardProps {
   onExportData?: () => void;
 }
 
-type ViewMode = 'overview' | 'tools' | 'analytics' | 'status';
+type ViewMode = 'overview' | 'tools' | 'analytics' | 'status' | 'testing';
 type ToolFilter = 'all' | 'enabled' | 'disabled' | 'errors' | 'unused';
 type MetricSort = 'name' | 'executions' | 'successRate' | 'avgTime' | 'errorRate' | 'performance';
 
@@ -185,6 +187,8 @@ export function UnifiedToolDashboard({
   const [sortBy, setSortBy] = useState<MetricSort>('executions');
   const [sortAscending, setSortAscending] = useState(false);
   const [showDetails, setShowDetails] = useState<Record<string, boolean>>({});
+  const [showStreamingTest, setShowStreamingTest] = useState(false);
+  const [showToolCallTest, setShowToolCallTest] = useState(false);
 
   // Filter and sort tools
   const filteredTools = useMemo(() => {
@@ -916,6 +920,131 @@ export function UnifiedToolDashboard({
     </div>
   );
 
+  const renderTesting = () => (
+    <div className="space-y-6">
+      {/* Testing Header */}
+      <div className={cn(
+        "p-4 rounded-lg border",
+        ThemeUtils.getBackgroundClass(platform, theme, 'secondary'),
+        ThemeUtils.getBorderClass(platform, theme)
+      )}>
+        <h3 className={cn("text-lg font-semibold mb-2", ThemeUtils.getTextClass(platform, theme))}>
+          Tool Testing Interface
+        </h3>
+        <p className={cn("text-sm", ThemeUtils.getTextClass(platform, theme, 'secondary'))}>
+          Test and validate tool functionality with real-time streaming and tool calling interfaces.
+        </p>
+      </div>
+
+      {/* Streaming Test Section */}
+      <div className="space-y-3">
+        <h4 className={cn(
+          "text-md font-medium flex items-center gap-2",
+          ThemeUtils.getTextClass(platform, theme)
+        )}>
+          <Activity className="w-4 h-4" />
+          Streaming Test
+        </h4>
+        
+        <div className={cn(
+          "p-4 rounded-lg border",
+          ThemeUtils.getBackgroundClass(platform, theme, 'secondary'),
+          ThemeUtils.getBorderClass(platform, theme)
+        )}>
+          <p className={cn(
+            "text-sm mb-4",
+            ThemeUtils.getTextClass(platform, theme, 'secondary')
+          )}>
+            Test real-time thinking and response streaming functionality with Ollama.
+          </p>
+          
+          <button
+            onClick={() => setShowStreamingTest(!showStreamingTest)}
+            className={cn(
+              "w-full px-4 py-2 text-sm rounded-lg transition-colors border font-medium",
+              showStreamingTest
+                ? "bg-blue-500/20 border-blue-500/40 text-blue-300"
+                : platform === 'win32'
+                  ? "border-white/20 bg-white/10 hover:bg-white/20 text-white/80"
+                  : theme === 'dark' 
+                    ? "border-white/20 bg-white/10 hover:bg-white/20 text-white/80"
+                    : "border-black/20 bg-black/10 hover:bg-black/20 text-black/80"
+            )}
+          >
+            {showStreamingTest ? 'Hide Streaming Test' : 'Show Streaming Test'}
+          </button>
+          
+          {showStreamingTest && (
+            <motion.div
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 'auto' }}
+              exit={{ opacity: 0, height: 0 }}
+              className="mt-4 border-t pt-4"
+            >
+              <StreamingTest />
+            </motion.div>
+          )}
+        </div>
+      </div>
+
+      {/* Tool Call Test Section */}
+      <div className="space-y-3">
+        <h4 className={cn(
+          "text-md font-medium flex items-center gap-2",
+          ThemeUtils.getTextClass(platform, theme)
+        )}>
+          <Wrench className="w-4 h-4" />
+          Tool Call Test Interface
+        </h4>
+        
+        <div className={cn(
+          "rounded-lg border overflow-hidden",
+          ThemeUtils.getBackgroundClass(platform, theme, 'secondary'),
+          ThemeUtils.getBorderClass(platform, theme)
+        )}>
+          <div className="p-4 border-b">
+            <p className={cn(
+              "text-sm mb-3",
+              ThemeUtils.getTextClass(platform, theme, 'secondary')
+            )}>
+              Interactive tool calling interface for testing AI tool integration.
+            </p>
+            
+            <button
+              onClick={() => setShowToolCallTest(!showToolCallTest)}
+              className={cn(
+                "w-full px-4 py-2 text-sm rounded-lg transition-colors border font-medium",
+                showToolCallTest
+                  ? "bg-blue-500/20 border-blue-500/40 text-blue-300"
+                  : platform === 'win32'
+                    ? "border-white/20 bg-white/10 hover:bg-white/20 text-white/80"
+                    : theme === 'dark' 
+                      ? "border-white/20 bg-white/10 hover:bg-white/20 text-white/80"
+                      : "border-black/20 bg-black/10 hover:bg-black/20 text-black/80"
+              )}
+            >
+              {showToolCallTest ? 'Hide Tool Call Test' : 'Show Tool Call Test'}
+            </button>
+          </div>
+          
+          {showToolCallTest && (
+            <motion.div
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 'auto' }}
+              exit={{ opacity: 0, height: 0 }}
+              className="h-80"
+            >
+              <ToolCallTest
+                conversationId={`dashboard_test_${Date.now()}`}
+                className="h-full"
+              />
+            </motion.div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+
   return (
     <div 
       className={cn(
@@ -994,7 +1123,8 @@ export function UnifiedToolDashboard({
           { key: 'overview', label: 'Overview', icon: BarChart3 },
           { key: 'tools', label: 'Tools', icon: Settings },
           { key: 'analytics', label: 'Analytics', icon: TrendingUp },
-          { key: 'status', label: 'Status', icon: Activity }
+          { key: 'status', label: 'Status', icon: Activity },
+          { key: 'testing', label: 'Testing', icon: Wrench }
         ].map(({ key, label, icon: Icon }) => (
           <button
             key={key}
@@ -1034,6 +1164,7 @@ export function UnifiedToolDashboard({
             {viewMode === 'tools' && renderToolsList()}
             {viewMode === 'analytics' && renderAnalytics()}
             {viewMode === 'status' && renderStatus()}
+            {viewMode === 'testing' && renderTesting()}
           </motion.div>
         </AnimatePresence>
       </div>

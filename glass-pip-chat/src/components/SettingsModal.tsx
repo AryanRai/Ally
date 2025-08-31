@@ -3,8 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { X, Sun, Moon, Monitor, Server, Wifi, WifiOff, RefreshCw, Keyboard, Volume2, Mic, Wrench, Activity } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { useSpeechService } from '../hooks/useSpeechService';
-import { ToolCallTest } from './UnifiedChatInterface';
-import { StreamingTest } from './StreamingTest';
+
 
 import { AppSettings, UISettings } from '../types/settings';
 
@@ -37,7 +36,7 @@ export default function SettingsModal({
   const [blurAmount, setBlurAmount] = useState(20); // Default blur amount
   const [blurType, setBlurType] = useState<'acrylic' | 'mica' | 'standard'>('acrylic'); // Blur type
   const [showShortcuts, setShowShortcuts] = useState(false);
-  const [showStreamingTest, setShowStreamingTest] = useState(false);
+
   const modalRef = useRef<HTMLDivElement>(null);
   
   // Speech service integration
@@ -1286,13 +1285,13 @@ export default function SettingsModal({
                 </h3>
                 
                 <div className={cn(
-                  "p-4 rounded-lg border space-y-4",
+                  "p-4 rounded-lg border",
                   platform === 'win32'
                     ? "border-white/10 bg-white/5"
                     : theme === 'dark' ? "border-white/10 bg-white/5" : "border-black/10 bg-black/5"
                 )}>
-                  <div className="flex items-start justify-between">
-                    <div className="flex-1 pr-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex-1">
                       <p className={cn(
                         "text-sm font-medium mb-1",
                         platform === 'win32'
@@ -1310,7 +1309,7 @@ export default function SettingsModal({
                         Allow AI to use tools like calculator, weather, etc.
                       </p>
                     </div>
-                    <label className="relative inline-flex items-center cursor-pointer flex-shrink-0">
+                    <label className="relative inline-flex items-center cursor-pointer ml-4">
                       <input
                         type="checkbox"
                         checked={appSettings.tools?.enabled || false}
@@ -1320,17 +1319,19 @@ export default function SettingsModal({
                         className="sr-only peer"
                       />
                       <div className={cn(
-                        "w-11 h-6 rounded-full peer transition-colors",
-                        "peer-checked:bg-blue-600 peer-focus:ring-2 peer-focus:ring-blue-300",
-                        platform === 'win32'
-                          ? "bg-white/20 peer-focus:ring-blue-300"
-                          : theme === 'dark' 
-                            ? "bg-gray-700 peer-focus:ring-blue-300"
-                            : "bg-gray-300 peer-focus:ring-blue-300"
+                        "relative w-11 h-6 rounded-full peer transition-all duration-200",
+                        "peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-offset-2",
+                        appSettings.tools?.enabled 
+                          ? "bg-blue-600 peer-focus:ring-blue-300" 
+                          : platform === 'win32'
+                            ? "bg-white/20 peer-focus:ring-blue-300"
+                            : theme === 'dark' 
+                              ? "bg-gray-600 peer-focus:ring-blue-300"
+                              : "bg-gray-300 peer-focus:ring-blue-300"
                       )}>
                         <div className={cn(
-                          "w-5 h-5 bg-white rounded-full shadow transform transition-transform",
-                          "peer-checked:translate-x-5 translate-x-0"
+                          "absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow-lg transform transition-transform duration-200 ease-in-out",
+                          appSettings.tools?.enabled ? "translate-x-5" : "translate-x-0"
                         )}></div>
                       </div>
                     </label>
@@ -1338,7 +1339,7 @@ export default function SettingsModal({
                   
                   {appSettings.tools?.enabled && (
                     <div className={cn(
-                      "text-xs p-3 rounded border",
+                      "text-xs p-3 mt-3 rounded border",
                       platform === 'win32'
                         ? "border-blue-500/20 bg-blue-500/10 text-blue-300"
                         : theme === 'dark' 
@@ -1351,83 +1352,7 @@ export default function SettingsModal({
                 </div>
               </div>
 
-              {/* Streaming Test Section */}
-              <div className="space-y-3">
-                <h3 className={cn(
-                  "text-sm font-medium flex items-center gap-2",
-                  platform === 'win32'
-                    ? "text-white/80"
-                    : theme === 'dark' ? "text-white/80" : "text-black/80"
-                )}>
-                  <Activity className="w-4 h-4" />
-                  Streaming Test
-                </h3>
-                
-                <div className={cn(
-                  "p-4 rounded-lg border",
-                  platform === 'win32'
-                    ? "border-white/10 bg-white/5"
-                    : theme === 'dark' ? "border-white/10 bg-white/5" : "border-black/10 bg-black/5"
-                )}>
-                  <p className={cn(
-                    "text-xs leading-relaxed mb-4",
-                    platform === 'win32'
-                      ? "text-white/60"
-                      : theme === 'dark' ? "text-white/60" : "text-black/60"
-                  )}>
-                    Test real-time thinking and response streaming functionality with Ollama.
-                  </p>
-                  
-                  <button
-                    onClick={() => setShowStreamingTest(!showStreamingTest)}
-                    className={cn(
-                      "w-full px-3 py-2 text-sm rounded-lg transition-colors border",
-                      showStreamingTest
-                        ? "bg-blue-500/20 border-blue-500/40 text-blue-300"
-                        : platform === 'win32'
-                          ? "border-white/20 bg-white/10 hover:bg-white/20 text-white/80"
-                          : theme === 'dark' 
-                            ? "border-white/20 bg-white/10 hover:bg-white/20 text-white/80"
-                            : "border-black/20 bg-black/10 hover:bg-black/20 text-black/80"
-                    )}
-                  >
-                    {showStreamingTest ? 'Hide Streaming Test' : 'Show Streaming Test'}
-                  </button>
-                  
-                  {showStreamingTest && (
-                    <div className="mt-4 border-t pt-4">
-                      <StreamingTest />
-                    </div>
-                  )}
-                </div>
-              </div>
 
-              {/* Tool Call Test Section */}
-              <div className="space-y-3">
-                <h3 className={cn(
-                  "text-sm font-medium flex items-center gap-2",
-                  platform === 'win32'
-                    ? "text-white/80"
-                    : theme === 'dark' ? "text-white/80" : "text-black/80"
-                )}>
-                  <Wrench className="w-4 h-4" />
-                  Tool Call Test Interface
-                </h3>
-                
-                <div className={cn(
-                  "rounded-lg border overflow-hidden",
-                  platform === 'win32'
-                    ? "border-white/10 bg-white/5"
-                    : theme === 'dark' ? "border-white/10 bg-white/5" : "border-black/10 bg-black/5"
-                )}>
-                  <div className="h-80">
-                    <ToolCallTest
-                      conversationId={`settings_test_${Date.now()}`}
-                      className="h-full"
-                    />
-                  </div>
-                </div>
-              </div>
 
               {/* Info Section */}
               <div className="space-y-2">

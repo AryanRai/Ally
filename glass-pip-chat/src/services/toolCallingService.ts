@@ -319,7 +319,7 @@ export class ToolCallingService {
    * Get available tools for the current context
    */
   private getAvailableTools(context: ConversationContext): ToolDefinition[] {
-    const allTools = this.toolRegistry.getAllTools();
+    const allTools = this.toolRegistry.listTools();
     
     // Filter tools based on context and permissions
     return allTools.filter(tool => {

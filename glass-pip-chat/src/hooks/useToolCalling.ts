@@ -126,7 +126,7 @@ export function useToolCalling(
         setState(prev => ({
           ...prev,
           conversationContext: context,
-          availableTools: registry.getAllTools().map((tool: any) => tool.name)
+          availableTools: registry.listTools().map((tool: any) => tool.name)
         }));
 
         console.log('Tool calling services initialized successfully');
@@ -293,7 +293,7 @@ export function useToolCalling(
    */
   const getAvailableTools = useCallback(() => {
     if (!toolRegistry) return [];
-    return toolRegistry.getAllTools();
+    return toolRegistry.listTools();
   }, [toolRegistry]);
 
   /**
@@ -311,7 +311,7 @@ export function useToolCalling(
       // Update available tools list
       setState(prev => ({
         ...prev,
-        availableTools: toolRegistry.getAllTools().map((tool: any) => tool.name)
+        availableTools: toolRegistry.listTools().map((tool: any) => tool.name)
       }));
 
       return true;

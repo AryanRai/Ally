@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -84,8 +84,26 @@ export default function GlassChatPiP() {
     }
   );
 
-  // Legacy tool calling integration (for backward compatibility)
-  const toolCalling = useToolCalling();
+  // Create OllamaService instance for tool calling
+  const ollamaService = useMemo(() => {
+    if (!window.pip?.ollama) return null;
+    return {
+      chat: async (messages: any[], model?: string) => {
+        const chatHistory = messages.map(msg => ({
+          role: msg.role as 'user' | 'assistant',
+          content: msg.content
+        }));
+        
+        let response = '';
+        await window.pip.ollama.streamChatWithThinking(chatHistory, model || ollamaIntegration.currentModel, (chunk: any) => {
+          if (chunk.type === 'response' || chunk.type === 'done') {
+            response = chunk.content;
+          }
+        });
+        return response;
+      }
+    };
+  }, [ollamaIntegration.currentModel]);
 
   // Command execution
   const { executeSystemCommand, runInTerminal } = useCommandExecution();
@@ -103,6 +121,14 @@ export default function GlassChatPiP() {
   // Settings management
   const [settingsManager] = useState(() => SettingsManager.getInstance());
   const [appSettings, setAppSettings] = useState<AppSettings>(() => settingsManager.getSettings());
+
+  // Tool calling integration (after appSettings is initialized)
+  const toolCalling = useToolCalling(ollamaService, {
+    enableToolCalling: appSettings.tools?.enabled || false,
+    maxToolCalls: 5,
+    toolCallTimeout: 30000,
+    enableMultiStepReasoning: true
+  });
 
   // UI state
   const [input, setInput] = useState('');
@@ -380,65 +406,89 @@ export default function GlassChatPiP() {
           content: contextualContent
         });
 
-        response = await ollamaIntegration.sendMessageToOllama(
-          activeChat?.messages || [],
-          contextualContent,
-          (() => {
-            let lastSentenceIndex = 0;
-            let accumulatedResponse = '';
-
-            return (update) => {
+        // Use tool calling if enabled, otherwise fall back to regular Ollama
+        if (appSettings.tools?.enabled && toolCalling.state.isEnabled) {
+          const toolResult = await toolCalling.sendMessageWithTools(
+            activeChat?.messages || [],
+            contextualContent,
+            (progress) => {
               let responseContent = '';
-
-              if (update.type === 'thinking') {
-                responseContent = `💭 **Thinking...**\n\n${update.thinking}${update.thinking.endsWith('.') || update.thinking.endsWith('!') || update.thinking.endsWith('?') ? '' : '▋'}`;
-              } else if (update.type === 'response') {
-                if (update.thinking) {
-                  responseContent = `💭 **Thought Process:**\n\n${update.thinking}\n\n---\n\n**Answer:**\n\n${update.response}${update.response.endsWith('.') || update.response.endsWith('!') || update.response.endsWith('?') ? '' : '▋'}`;
-                } else {
-                  responseContent = `${update.response}${update.response.endsWith('.') || update.response.endsWith('!') || update.response.endsWith('?') ? '' : '▋'}`;
-                }
-
-                // Stream TTS for new sentences if voice mode is enabled
-                if (voiceModeEnabled && update.response) {
-                  accumulatedResponse = update.response;
-                  const sentences = accumulatedResponse.split(/(?<=[.!?])\s+/);
-
-                  if (sentences.length > lastSentenceIndex + 1) {
-                    for (let i = lastSentenceIndex; i < sentences.length - 1; i++) {
-                      const sentence = sentences[i].trim();
-                      if (sentence && sentence.length > 3) {
-                        speechService.synthesizeSpeechStreaming(sentence).catch(error => {
-                          console.error('Error in streaming TTS:', error);
-                        });
-                      }
-                    }
-                    lastSentenceIndex = sentences.length - 1;
-                  }
-                }
-              } else if (update.type === 'done') {
-                if (update.thinking) {
-                  responseContent = `💭 **Thought Process:**\n\n${update.thinking}\n\n---\n\n**Answer:**\n\n${update.response}`;
-                } else {
-                  responseContent = update.response;
-                }
-
-                // Speak any remaining incomplete sentence
-                if (voiceModeEnabled && accumulatedResponse) {
-                  const sentences = accumulatedResponse.split(/(?<=[.!?])\s+/);
-                  const lastSentence = sentences[sentences.length - 1]?.trim();
-                  if (lastSentence && lastSentence.length > 3 && !lastSentence.match(/[.!?]$/)) {
-                    speechService.synthesizeSpeechStreaming(lastSentence).catch(error => {
-                      console.error('Error in final streaming TTS:', error);
-                    });
-                  }
-                }
+              
+              if (progress.type === 'thinking') {
+                responseContent = `💭 **Thinking...**\n\n${progress.content || ''}${progress.content?.endsWith('.') || progress.content?.endsWith('!') || progress.content?.endsWith('?') ? '' : '▋'}`;
+              } else if (progress.type === 'tool_call') {
+                responseContent = `🔧 **Using Tools...**\n\n${progress.toolCalls?.map(tc => `• ${tc.name}`).join('\n') || ''}`;
+              } else if (progress.type === 'tool_result') {
+                responseContent = `✅ **Tool Results:**\n\n${progress.toolResults?.map(tr => `• ${tr.name}: ${tr.error ? 'Failed' : 'Success'}`).join('\n') || ''}`;
+              } else if (progress.type === 'response') {
+                responseContent = progress.content || '';
               }
 
               setCurrentResponse(responseContent);
-            };
-          })()
-        );
+            }
+          );
+          response = toolResult.response;
+        } else {
+          response = await ollamaIntegration.sendMessageToOllama(
+            activeChat?.messages || [],
+            contextualContent,
+            (() => {
+              let lastSentenceIndex = 0;
+              let accumulatedResponse = '';
+
+              return (update) => {
+                let responseContent = '';
+
+                if (update.type === 'thinking') {
+                  responseContent = `💭 **Thinking...**\n\n${update.thinking}${update.thinking.endsWith('.') || update.thinking.endsWith('!') || update.thinking.endsWith('?') ? '' : '▋'}`;
+                } else if (update.type === 'response') {
+                  if (update.thinking) {
+                    responseContent = `💭 **Thought Process:**\n\n${update.thinking}\n\n---\n\n**Answer:**\n\n${update.response}${update.response.endsWith('.') || update.response.endsWith('!') || update.response.endsWith('?') ? '' : '▋'}`;
+                  } else {
+                    responseContent = `${update.response}${update.response.endsWith('.') || update.response.endsWith('!') || update.response.endsWith('?') ? '' : '▋'}`;
+                  }
+
+                  // Stream TTS for new sentences if voice mode is enabled
+                  if (voiceModeEnabled && update.response) {
+                    accumulatedResponse = update.response;
+                    const sentences = accumulatedResponse.split(/(?<=[.!?])\s+/);
+
+                    if (sentences.length > lastSentenceIndex + 1) {
+                      for (let i = lastSentenceIndex; i < sentences.length - 1; i++) {
+                        const sentence = sentences[i].trim();
+                        if (sentence && sentence.length > 3) {
+                          speechService.synthesizeSpeechStreaming(sentence).catch(error => {
+                            console.error('Error in streaming TTS:', error);
+                          });
+                        }
+                      }
+                      lastSentenceIndex = sentences.length - 1;
+                    }
+                  }
+                } else if (update.type === 'done') {
+                  if (update.thinking) {
+                    responseContent = `💭 **Thought Process:**\n\n${update.thinking}\n\n---\n\n**Answer:**\n\n${update.response}`;
+                  } else {
+                    responseContent = update.response;
+                  }
+
+                  // Speak any remaining incomplete sentence
+                  if (voiceModeEnabled && accumulatedResponse) {
+                    const sentences = accumulatedResponse.split(/(?<=[.!?])\s+/);
+                    const lastSentence = sentences[sentences.length - 1]?.trim();
+                    if (lastSentence && lastSentence.length > 3 && !lastSentence.match(/[.!?]$/)) {
+                      speechService.synthesizeSpeechStreaming(lastSentence).catch(error => {
+                        console.error('Error in final streaming TTS:', error);
+                      });
+                    }
+                  }
+                }
+
+                setCurrentResponse(responseContent);
+              };
+            })()
+          );
+        }
       }
 
       if (response) {

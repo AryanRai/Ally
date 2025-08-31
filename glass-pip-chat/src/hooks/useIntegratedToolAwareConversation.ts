@@ -140,7 +140,7 @@ export function useIntegratedToolAwareConversation(
           ...prev,
           isInitialized: true,
           currentContext: context,
-          availableTools: toolRegistry.getAllTools().map(tool => tool.name)
+          availableTools: toolRegistry.listTools().map(tool => tool.name)
         }));
 
         console.log('Integrated tool-aware conversation services initialized successfully');

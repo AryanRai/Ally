@@ -350,7 +350,7 @@ describe('useToolCalling', () => {
 
       // Mock the registry
       const mockRegistry = {
-        getAllTools: vi.fn().mockReturnValue(mockTools)
+        listTools: vi.fn().mockReturnValue(mockTools)
       };
 
       // Set the registry in the hook
@@ -367,7 +367,7 @@ describe('useToolCalling', () => {
 
       const mockRegistry = {
         registerTool: vi.fn().mockResolvedValue(true),
-        getAllTools: vi.fn().mockReturnValue([
+        listTools: vi.fn().mockReturnValue([
           { name: 'new_tool', description: 'New tool' }
         ])
       };
@@ -394,7 +394,7 @@ describe('useToolCalling', () => {
 
       const mockRegistry = {
         registerTool: vi.fn().mockRejectedValue(new Error('Registration failed')),
-        getAllTools: vi.fn().mockReturnValue([])
+        listTools: vi.fn().mockReturnValue([])
       };
 
       act(() => {

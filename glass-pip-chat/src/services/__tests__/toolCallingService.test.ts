@@ -63,7 +63,7 @@ describe('ToolCallingService', () => {
     } as any;
 
     mockToolRegistry = {
-      getAllTools: vi.fn(),
+      listTools: vi.fn(),
       getTool: vi.fn(),
       registerTool: vi.fn(),
       unregisterTool: vi.fn(),
@@ -294,7 +294,7 @@ describe('ToolCallingService', () => {
       ];
 
       mockOllamaService.chat.mockResolvedValue('I am doing well, thank you!');
-      mockToolRegistry.getAllTools.mockReturnValue([mockToolDefinition]);
+      mockToolRegistry.listTools.mockReturnValue([mockToolDefinition]);
 
       const result = await toolCallingService.chatWithTools(messages, mockContext);
 
@@ -323,7 +323,7 @@ describe('ToolCallingService', () => {
         \`\`\``)
         .mockResolvedValueOnce('The tool returned: Tool executed successfully');
 
-      mockToolRegistry.getAllTools.mockReturnValue([mockToolDefinition]);
+      mockToolRegistry.listTools.mockReturnValue([mockToolDefinition]);
       mockToolExecutor.executeToolSafe.mockResolvedValue({
         executionId: 'test_execution',
         toolName: 'test_tool',
@@ -359,7 +359,7 @@ describe('ToolCallingService', () => {
         \`\`\``)
         .mockResolvedValueOnce('All tools completed successfully');
 
-      mockToolRegistry.getAllTools.mockReturnValue([mockToolDefinition]);
+      mockToolRegistry.listTools.mockReturnValue([mockToolDefinition]);
       mockToolExecutor.executeToolSafe
         .mockResolvedValueOnce({
           executionId: 'exec_1',
@@ -400,7 +400,7 @@ describe('ToolCallingService', () => {
         \`\`\`
       `);
 
-      mockToolRegistry.getAllTools.mockReturnValue([mockToolDefinition]);
+      mockToolRegistry.listTools.mockReturnValue([mockToolDefinition]);
       mockToolExecutor.executeToolSafe.mockResolvedValue({
         executionId: 'test_exec',
         toolName: 'test_tool',
@@ -420,7 +420,7 @@ describe('ToolCallingService', () => {
 
   describe('Tool Context Management', () => {
     it('should build proper tool context prompt', () => {
-      mockToolRegistry.getAllTools.mockReturnValue([mockToolDefinition]);
+      mockToolRegistry.listTools.mockReturnValue([mockToolDefinition]);
 
       const buildToolContextPrompt = (toolCallingService as any).buildToolContextPrompt.bind(toolCallingService);
       const prompt = buildToolContextPrompt([mockToolDefinition], mockContext);
@@ -525,7 +525,7 @@ describe('ToolCallingService', () => {
       ];
 
       mockOllamaService.chat.mockRejectedValue(new Error('LLM service error'));
-      mockToolRegistry.getAllTools.mockReturnValue([mockToolDefinition]);
+      mockToolRegistry.listTools.mockReturnValue([mockToolDefinition]);
 
       await expect(toolCallingService.chatWithTools(messages, mockContext))
         .rejects.toThrow('LLM service error');
@@ -544,7 +544,7 @@ describe('ToolCallingService', () => {
         `)
         .mockResolvedValueOnce('Continuing despite tool failure');
 
-      mockToolRegistry.getAllTools.mockReturnValue([mockToolDefinition]);
+      mockToolRegistry.listTools.mockReturnValue([mockToolDefinition]);
       mockToolExecutor.executeToolSafe.mockResolvedValue({
         executionId: 'test_exec',
         toolName: 'test_tool',
