@@ -1,8 +1,8 @@
-# Ally – DroidCore Desktop Overlay
+# Ally – Unified Robot Cognitive Overlay
 
-**Ally** is a **glassmorphic, picture-in-picture desktop overlay** that provides advanced access to local and remote LLMs, convenience tools for instant actions, and a bridge to the **DroidCore** robotic platform.
+**Ally** is a **glassmorphic, picture-in-picture desktop overlay** that provides advanced access to local and remote LLMs, comprehensive tool calling framework, and seamless integration with the **Comms v4.0 Unified Robot Cognitive Overlay Platform**.
 
-It runs as a floating, always-on-top Electron app with Apple-style glass UI, animated interactions, and seamless integration with **Ollama (local models like gpt-oss-20b)**. All chats are logged to a **Vercel-hosted API** with an exposed external domain, enabling persistent conversation history, analytics, and remote control signals for the robot. The API uses Supabase for database storage and integrates with the PC LLM via public IP exposure.
+It runs as a floating, always-on-top Electron app with Apple-style glass UI, animated interactions, and seamless integration with **Ollama (local models like gpt-oss-20b)** and the **Chyappy v4.0 Unified Protocol**. All chats are logged to a **Vercel-hosted API** with an exposed external domain, enabling persistent conversation history, analytics, and direct robot control through the unified tool calling framework. The API uses Supabase for database storage and integrates with the Comms v4.0 platform for real-time robot cognitive processing.
 
 ---
 
@@ -46,11 +46,22 @@ It is ideal for:
 - **WebSocket Service:** Separate Python service for speech processing with GPU acceleration.
 - **Voice Commands:** Hands-free interaction with Ally and LLM conversations.
 
-### Robot Hooks (DroidCore)
-- **HighLvl integration:** Ally can send structured commands to the DroidCore robot.
-- **Vision/Speech:** hooks for Kinect v2 (via libfreenect2), Whisper STT, Piper TTS, YOLO object detection.
-- **Actuation:** transmit movement commands to LowLvl (motor control, FOC, sensor polling).
-- **Multi-modal coordination:** combine vision, speech, and LLM reasoning for complex tasks.
+### Tool Calling Framework
+- **Complete Tool System:** Built-in TypeScript tool calling framework with validation
+- **Tool Registry:** Dynamic tool registration and discovery system
+- **Tool Execution:** Async tool execution with timeout and error handling
+- **Tool Manager:** Centralized tool lifecycle management
+- **Schema Validation:** JSON schema validation for all tool definitions and executions
+- **Integration Testing:** Comprehensive test suite for tool execution workflows
+
+### Unified Robot Integration (Comms v4.0)
+- **Tool Calling Framework:** Direct integration with Comms v4.0 tool execution system
+- **Chyappy v4.0 Protocol:** Seamless communication through unified protocol
+- **Cognitive Processing:** AI-driven decision making and intent recognition
+- **Real-time Control:** Send structured tool calls and robot commands
+- **Multi-modal Coordination:** Combine vision, speech, and LLM reasoning for complex tasks
+- **Memory Management:** Persistent conversation and decision history
+- **Physics Integration:** Real-time physics simulation data and control
 
 ---
 
@@ -61,6 +72,7 @@ It is ideal for:
             +-----------------------+
             |    Ally Overlay UI    |
             |  (Electron + React)   |
+            |   Tool Framework      |
             +----------+------------+
                        |
               Preload IPC (safe)
@@ -76,12 +88,12 @@ Local Ollama (LLM)               Vercel API (via Public IP)
 +------+-------+                        ^
 |                                       |
 v                                       |
-DroidCore HighLvl Modules        PC LLM (local integration)
-(Vision, Language, Speech, Sound)       |
+Comms v4.0 Stream Handler        PC LLM (local integration)
+(Tool Calling, Physics, Ally)           |
 |                                       |
 v                                       |
-DroidCore LowLvl Modules         Back to Vercel/Supabase
-(Motor, FOC, Radar, Fans, Bluetooth)
+Unified Robot Platform           Back to Vercel/Supabase
+(Hardware, Physics, Cognitive)
 
 ```
 
@@ -101,6 +113,14 @@ DroidCore LowLvl Modules         Back to Vercel/Supabase
 │   ├── start_service.py     # Service startup script
 │   ├── requirements.txt     # Python dependencies
 │   └── start.bat/sh/ps1     # Platform-specific startup scripts
+├── tool-calling-framework/ # TypeScript tool calling framework
+│   ├── src/
+│   │   ├── types/           # TypeScript type definitions
+│   │   ├── registry/        # Tool registry system
+│   │   ├── executor/        # Tool execution engine
+│   │   ├── manager/         # Tool lifecycle management
+│   │   └── schemas/         # JSON schemas for validation
+│   └── __tests__/           # Comprehensive test suite
 ├── HighLvl/           # DroidCore AI & perception modules (future)
 │   ├── Vision/        # SLAM, object detection, face recognition
 │   ├── Language/      # LLM reasoning, prompt building
@@ -152,10 +172,11 @@ DroidCore LowLvl Modules         Back to Vercel/Supabase
 - [X] **M1 – Electron Shell**: window vibrancy, bounds persistence, shortcut toggle.
 - [X] **M2 – Ollama Integration**: local LLM streaming.
 - [X] **M3 – Speech Integration**: STT (Whisper), TTS, and ggwave communication via WebSocket service.
-- [ ] **M4 – Vercel/Supabase Chat API**: log storage & retrieval.
-- [ ] **M5 – Robot Hooks**: send structured commands to DroidCore LowLvl.
-- [ ] **M6 – Multi-modal**: merge vision, speech, and LLM reasoning for autonomous tasks.
-- [ ] **M7 – Packaging**: cross-platform builds, code signing, autoupdate.
+- [X] **M4 – Tool Calling Framework**: complete TypeScript tool execution system with validation.
+- [X] **M5 – Comms v4.0 Integration**: seamless integration with unified robot platform.
+- [ ] **M6 – Vercel/Supabase Chat API**: log storage & retrieval.
+- [ ] **M7 – Multi-modal**: merge vision, speech, and LLM reasoning for autonomous tasks.
+- [ ] **M8 – Packaging**: cross-platform builds, code signing, autoupdate.
 
 ---
 
