@@ -25,6 +25,13 @@ import { SpeechControls } from './SpeechControls';
 import { useSpeechService } from '../hooks/useSpeechService';
 import { StreamingTest } from './StreamingTest';
 
+// Tool Execution UI Components
+import { ToolExecutionStatus } from './chat/ToolExecutionStatus';
+import { ToolExecutionHistory } from './chat/ToolExecutionHistory';
+import { ToolStatusIndicator } from './chat/ToolStatusIndicator';
+import { ToolManagementInterface } from './chat/ToolManagementInterface';
+import { useToolCalling } from '../hooks/useToolCalling';
+
 // Utils & Types
 import { ChatManager } from '../utils/chatManager';
 import { SettingsManager } from '../utils/settingsManager';
@@ -51,6 +58,46 @@ export default function GlassChatPiP() {
 
   // Ollama integration
   const ollamaIntegration = useOllamaIntegration();
+
+  // Tool calling integration (mock data for demonstration)
+  const toolCalling = {
+    state: {
+      isEnabled: true,
+      isExecutingTools: false,
+      currentToolCalls: [
+        {
+          id: 'demo-tool-1',
+          name: 'web_search',
+          parameters: { query: 'latest AI developments', limit: 5 }
+        }
+      ],
+      currentToolResults: [
+        {
+          id: 'demo-tool-1',
+          name: 'web_search',
+          result: { results: ['AI breakthrough in language models', 'New robotics advances'] },
+          executionTime: 1200
+        }
+      ],
+      executionHistory: [
+        {
+          id: 'history-1',
+          name: 'web_search',
+          result: { success: true },
+          executionTime: 800
+        },
+        {
+          id: 'history-2',
+          name: 'file_manager',
+          result: null,
+          error: 'Permission denied',
+          executionTime: 300
+        }
+      ],
+      availableTools: ['web_search', 'file_manager', 'calculator', 'weather_api'],
+      conversationContext: null
+    }
+  };
 
   // Command execution
   const { executeSystemCommand, runInTerminal } = useCommandExecution();
@@ -85,6 +132,8 @@ export default function GlassChatPiP() {
   const [historyIndex, setHistoryIndex] = useState(-1);
   const [showSpeechControls, setShowSpeechControls] = useState(false);
   const [showStreamingTest, setShowStreamingTest] = useState(false);
+  const [showToolManagement, setShowToolManagement] = useState(false);
+  const [showToolExecutionHistory, setShowToolExecutionHistory] = useState(false);
   // Use voice mode state from speech service hook
   const { voiceModeEnabled, setVoiceModeEnabled, droidModeEnabled, setDroidModeEnabled } = speechService;
 
@@ -1329,6 +1378,18 @@ export default function GlassChatPiP() {
                 size={state.size}
                 showSpeechControls={showSpeechControls}
                 onSpeechToggle={() => setShowSpeechControls(!showSpeechControls)}
+                toolStatus={{
+                  isExecuting: toolCalling.state.isExecutingTools,
+                  activeToolCount: toolCalling.state.currentToolCalls.length,
+                  completedToolCount: toolCalling.state.currentToolResults.filter(r => !r.error).length,
+                  failedToolCount: toolCalling.state.currentToolResults.filter(r => r.error).length,
+                  totalExecutionTime: toolCalling.state.currentToolResults.reduce((sum, r) => sum + r.executionTime, 0),
+                  lastExecutionTime: toolCalling.state.executionHistory.length > 0 
+                    ? Date.now() - 60000 // Mock last execution time
+                    : undefined,
+                  availableToolCount: toolCalling.state.availableTools.length
+                }}
+                onToolStatusClick={() => setShowToolManagement(!showToolManagement)}
               />
             )}
           </div>
@@ -1387,6 +1448,20 @@ export default function GlassChatPiP() {
                       uiSettings={appSettings.ui}
                     />
                   ))}
+                  
+                  {/* Tool Execution Status Display */}
+                  {(toolCalling.state.isExecutingTools || toolCalling.state.currentToolCalls.length > 0 || toolCalling.state.currentToolResults.length > 0) && (
+                    <ToolExecutionStatus
+                      isExecuting={toolCalling.state.isExecutingTools}
+                      currentToolCalls={toolCalling.state.currentToolCalls}
+                      currentToolResults={toolCalling.state.currentToolResults}
+                      platform={platform}
+                      theme={theme}
+                      compact={false}
+                      showDetails={true}
+                    />
+                  )}
+                  
                   {/* Show streaming response in expanded mode */}
                   {isTyping && currentResponse && (
                     <motion.div
@@ -1566,7 +1641,80 @@ export default function GlassChatPiP() {
         onSettingsChange={(updates) => settingsManager.updateSettings(updates)}
       />
 
-
+      {/* Tool Management Interface Modal */}
+      <AnimatePresence>
+        {showToolManagement && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
+            onClick={() => setShowToolManagement(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="w-full max-w-4xl max-h-[80vh] m-4"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <ToolManagementInterface
+                tools={[]} // TODO: Get actual tools from toolCalling.getAvailableTools()
+                analytics={{
+                  totalExecutions: toolCalling.state.executionHistory.length,
+                  successfulExecutions: toolCalling.state.executionHistory.filter(h => !h.error).length,
+                  failedExecutions: toolCalling.state.executionHistory.filter(h => h.error).length,
+                  averageExecutionTime: toolCalling.state.executionHistory.length > 0 
+                    ? toolCalling.state.executionHistory.reduce((sum, h) => sum + h.executionTime, 0) / toolCalling.state.executionHistory.length
+                    : 0,
+                  mostUsedTools: [], // TODO: Calculate from execution history
+                  recentActivity: toolCalling.state.executionHistory.slice(-10).map((h, index) => ({
+                    timestamp: Date.now() - (index * 60000), // Mock timestamps
+                    toolName: h.name,
+                    status: h.error ? 'error' as const : 'success' as const,
+                    executionTime: h.executionTime
+                  })),
+                  performanceTrends: {
+                    executionTimesTrend: 'stable' as const,
+                    successRateTrend: 'stable' as const,
+                    usageTrend: 'stable' as const
+                  }
+                }}
+                platform={platform}
+                theme={theme}
+                onToolToggle={(toolName, enabled) => {
+                  // TODO: Implement tool toggle
+                  console.log('Toggle tool:', toolName, enabled);
+                }}
+                onToolConfigure={(toolName, config) => {
+                  // TODO: Implement tool configuration
+                  console.log('Configure tool:', toolName, config);
+                }}
+                onToolRefresh={(toolName) => {
+                  // TODO: Implement tool refresh
+                  console.log('Refresh tool:', toolName);
+                }}
+                onToolRemove={(toolName) => {
+                  // TODO: Implement tool removal
+                  console.log('Remove tool:', toolName);
+                }}
+                onExportConfig={() => {
+                  // TODO: Implement config export
+                  console.log('Export config');
+                }}
+                onImportConfig={(config) => {
+                  // TODO: Implement config import
+                  console.log('Import config:', config);
+                }}
+                onRefreshAnalytics={() => {
+                  // TODO: Implement analytics refresh
+                  console.log('Refresh analytics');
+                }}
+              />
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Streaming Test Modal */}
       <AnimatePresence>

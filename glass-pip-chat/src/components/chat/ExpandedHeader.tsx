@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { ThemeUtils } from '../../utils/themeUtils';
+import { ToolStatusIndicator } from './ToolStatusIndicator';
 
 interface ExpandedHeaderProps {
   platform: string;
@@ -47,6 +48,17 @@ interface ExpandedHeaderProps {
   size: string;
   showSpeechControls: boolean;
   onSpeechToggle: () => void;
+  // Tool status props
+  toolStatus?: {
+    isExecuting: boolean;
+    activeToolCount: number;
+    completedToolCount: number;
+    failedToolCount: number;
+    totalExecutionTime: number;
+    lastExecutionTime?: number;
+    availableToolCount: number;
+  };
+  onToolStatusClick?: () => void;
 }
 
 export default function ExpandedHeader({
@@ -76,7 +88,9 @@ export default function ExpandedHeader({
   onHide,
   size,
   showSpeechControls,
-  onSpeechToggle
+  onSpeechToggle,
+  toolStatus,
+  onToolStatusClick
 }: ExpandedHeaderProps) {
   const modelButtonRef = useRef<HTMLButtonElement>(null);
   const [dropdownPosition, setDropdownPosition] = useState({ top: 0, right: 0, maxHeight: 256 });
@@ -343,6 +357,16 @@ export default function ExpandedHeader({
             contextToggleEnabled ? "bg-green-400" : "bg-red-400"
           )} />
         </button>
+
+        {toolStatus && (
+          <ToolStatusIndicator
+            status={toolStatus}
+            platform={platform}
+            theme={theme}
+            compact={true}
+            onClick={onToolStatusClick}
+          />
+        )}
 
         <button
           onClick={onSpeechToggle}

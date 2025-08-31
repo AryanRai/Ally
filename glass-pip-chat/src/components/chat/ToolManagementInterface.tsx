@@ -568,11 +568,21 @@ export function ToolManagementInterface({
   );
 
   return (
-    <div className={cn(
-      "border rounded-lg overflow-hidden",
-      ThemeUtils.getBackgroundClass(platform, theme, 'secondary'),
-      ThemeUtils.getBorderClass(platform, theme)
-    )}>
+    <div 
+      className={cn(
+        "border rounded-lg overflow-hidden",
+        // Match SettingsModal styling exactly
+        platform === 'win32' 
+          ? "bg-black/60" // More opaque for Windows acrylic
+          : theme === 'dark'
+            ? "bg-gradient-to-b from-gray-900/95 to-gray-800/95"
+            : "bg-gradient-to-b from-gray-100/95 to-gray-200/95"
+      )}
+      style={{
+        backdropFilter: `blur(20px) saturate(180%)`,
+        WebkitBackdropFilter: `blur(20px) saturate(180%)`
+      }}
+    >
       {/* Header */}
       <div className="flex items-center justify-between p-4 border-b border-white/10">
         <div className="flex items-center gap-2">
