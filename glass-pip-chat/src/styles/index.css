@@ -528,3 +528,38 @@
     background-position: 100% 50%;
   }
 }
+
+/* Layout constraints to prevent overflow */
+.chat-container {
+  max-width: 100%;
+  overflow: hidden;
+  box-sizing: border-box;
+}
+
+.chat-main-area {
+  flex: 1;
+  min-width: 0; /* Allows flex item to shrink below content size */
+  max-width: 100%;
+  overflow: hidden;
+  box-sizing: border-box;
+}
+
+/* Ensure sidebar respects container bounds */
+.chat-sidebar {
+  flex-shrink: 0;
+  max-width: 280px;
+  overflow: hidden;
+  box-sizing: border-box;
+}
+
+.chat-sidebar.collapsed {
+  max-width: 48px;
+}
+
+/* Prevent content overflow in acrylic background */
+.acrylic-container {
+  max-width: 900px; /* Conservative max to prevent acrylic overflow */
+  max-height: 800px;
+  overflow: hidden;
+  box-sizing: border-box;
+}

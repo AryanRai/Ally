@@ -1340,14 +1340,37 @@ export default function GlassChatPiP() {
   if (isPreviewExpanded) {
     collapsedHeight = collapsedDims.expandedHeight;
   }
-  // Add extra space if context is present (whether expanded or not, it takes some space)
+  // Add minimal space for context header when context is present (just the collapsed header, not full content)
   if (contextMonitoring.hasNewContext && (contextMonitoring.contextData.clipboard || contextMonitoring.contextData.selectedText)) {
-    collapsedHeight += collapsedDims.contextHeight;
+    collapsedHeight += 40; // Reduced from 80px to 40px - just enough for the collapsed context header
   }
   // Add space for response preview when active
   if (currentResponse || isTyping) {
     collapsedHeight += collapsedDims.responseHeight;
   }
+
+  // Smart sidebar management - auto-collapse when window would be too wide
+  useEffect(() => {
+    if (state.collapsed) return; // Don't manage sidebar when window is collapsed
+    
+    const dims = sizePx[state.size];
+    const expandedSidebarWidth = 280;
+    const maxReasonableWidth = 850 - (padding * 2); // Max content width before overflow
+    
+    // Check if current size + expanded sidebar would exceed reasonable bounds
+    const wouldExceedBounds = (dims.w + expandedSidebarWidth) > maxReasonableWidth;
+    
+    // Auto-collapse sidebar if it would cause overflow and it's currently expanded
+    if (wouldExceedBounds && !sidebarCollapsed) {
+      console.log('Auto-collapsing sidebar to prevent window overflow at size', state.size);
+      setSidebarCollapsed(true);
+    }
+    // Auto-expand sidebar if there's enough space and it's currently collapsed (but only for smaller sizes)
+    else if (!wouldExceedBounds && sidebarCollapsed && state.size !== 'L') {
+      console.log('Auto-expanding sidebar as there is sufficient space at size', state.size);
+      setSidebarCollapsed(false);
+    }
+  }, [state.size, state.collapsed, padding]);
 
   // Sync window size when size state changes
   useEffect(() => {
@@ -1404,7 +1427,7 @@ export default function GlassChatPiP() {
       <motion.div
         layout
         className={cn(
-          "overflow-hidden relative flex transition-all duration-300",
+          "overflow-hidden relative flex transition-all duration-300 chat-container acrylic-container",
           ThemeUtils.getBorderRadiusClass(appSettings.ui.borderRadius, platform),
           "border border-white/20 shadow-[0_8px_40px_rgba(0,0,0,0.4)]",
           isResizing && "shadow-lg scale-[1.01]",
@@ -1427,22 +1450,24 @@ export default function GlassChatPiP() {
       >
         {/* Chat Sidebar */}
         {!state.collapsed && (
-          <ChatSidebar
-            chats={chats}
-            activeChat={activeChat?.id || null}
-            onChatSelect={handleChatSelect}
-            onChatCreate={handleChatCreate}
-            onChatDelete={handleChatDelete}
-            onChatRename={handleChatRename}
-            isCollapsed={sidebarCollapsed}
-            onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
-            theme={theme}
-            platform={platform}
-          />
+          <div className={cn("chat-sidebar", sidebarCollapsed && "collapsed")}>
+            <ChatSidebar
+              chats={chats}
+              activeChat={activeChat?.id || null}
+              onChatSelect={handleChatSelect}
+              onChatCreate={handleChatCreate}
+              onChatDelete={handleChatDelete}
+              onChatRename={handleChatRename}
+              isCollapsed={sidebarCollapsed}
+              onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
+              theme={theme}
+              platform={platform}
+            />
+          </div>
         )}
 
         {/* Main Chat Area */}
-        <div className="flex-1 flex flex-col min-w-0">
+        <div className="flex-1 flex flex-col min-w-0 chat-main-area">
           {/* Header */}
           <div
             className={cn(

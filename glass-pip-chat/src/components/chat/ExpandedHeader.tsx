@@ -181,7 +181,7 @@ export default function ExpandedHeader({
         <button
           onClick={onSidebarToggle}
           className={cn(
-            "flex items-center justify-center p-1 rounded transition-colors",
+            "flex items-center justify-center p-1 rounded transition-colors relative",
             ThemeUtils.getBackgroundClass(platform, theme, 'hover')
           )}
           title={sidebarCollapsed ? "Show chats" : "Hide chats"}
@@ -191,6 +191,11 @@ export default function ExpandedHeader({
             alt="Allay"
             className="w-4 h-4 flex-shrink-0"
           />
+          {/* Indicator for auto-collapsed sidebar at large sizes */}
+          {sidebarCollapsed && size === 'L' && (
+            <div className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-orange-400 rounded-full" 
+                 title="Sidebar auto-collapsed to prevent overflow" />
+          )}
         </button>
 
         {/* Editable chat title */}
