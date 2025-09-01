@@ -62,6 +62,10 @@ interface CollapsedHeaderProps {
   onVoiceModeToggle?: () => void;
   onSpeechSettingsOpen?: () => void;
   speechServiceConnected?: boolean;
+  isContextExpanded?: boolean;
+  onContextExpandedChange?: (expanded: boolean) => void;
+  isSpeaking?: boolean;
+  isListening?: boolean;
 }
 
 export default function CollapsedHeader({
@@ -104,10 +108,14 @@ export default function CollapsedHeader({
   voiceModeEnabled,
   onVoiceModeToggle,
   onSpeechSettingsOpen,
-  speechServiceConnected
+  speechServiceConnected,
+  isContextExpanded,
+  onContextExpandedChange,
+  isSpeaking,
+  isListening
 }: CollapsedHeaderProps) {
-  const [isContextExpanded, setIsContextExpanded] = useState(false);
   const modelButtonRef = useRef<HTMLButtonElement>(null);
+  const contextExpanded = isContextExpanded ?? false;
   const [dropdownPosition, setDropdownPosition] = useState({ top: 0, right: 0, maxHeight: 256 });
 
   // Update dropdown position and calculate available height when it opens
@@ -143,7 +151,17 @@ export default function CollapsedHeader({
           } as React.CSSProperties}
         >
           <Grip className="w-3 h-3 opacity-50 flex-shrink-0" />
-          <AnimatedOrb isActive={isTyping} size="sm" />
+          <AnimatedOrb 
+            isActive={isTyping || voiceModeEnabled || isSpeaking || isListening} 
+            size="sm" 
+            state={
+              isTyping ? 'thinking' : 
+              isSpeaking ? 'speaking' :
+              isListening ? 'listening' :
+              voiceModeEnabled && speechServiceConnected ? 'listening' : 
+              'idle'
+            }
+          />
 
           {/* Status indicators */}
           <div className="flex items-center gap-1 flex-shrink-0">
@@ -432,6 +450,7 @@ export default function CollapsedHeader({
         response={currentResponse || ''}
         isTyping={isTyping}
         onStop={onStop}
+        onExpand={onCollapseToggle}
       />
 
       {/* Unified Context Element */}
@@ -446,7 +465,7 @@ export default function CollapsedHeader({
           )}>
             {/* Context Header - Collapsible */}
             <button
-              onClick={() => setIsContextExpanded(!isContextExpanded)}
+              onClick={() => onContextExpandedChange?.(!contextExpanded)}
               className={cn(
                 "w-full flex items-center justify-between p-2 text-left transition-colors",
                 "hover:bg-white/5 rounded-lg"
@@ -465,13 +484,13 @@ export default function CollapsedHeader({
               </div>
               <ChevronDown className={cn(
                 "w-3 h-3 opacity-60 transition-transform duration-200",
-                isContextExpanded && "rotate-180"
+                contextExpanded && "rotate-180"
               )} />
             </button>
 
             {/* Context Content - Expandable */}
             <AnimatePresence>
-              {isContextExpanded && (
+              {contextExpanded && (
                 <motion.div
                   initial={{ opacity: 0, height: 0 }}
                   animate={{ opacity: 1, height: 'auto' }}

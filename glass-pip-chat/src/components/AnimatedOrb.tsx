@@ -5,12 +5,14 @@ interface AnimatedOrbProps {
   isActive?: boolean;
   size?: 'sm' | 'md' | 'lg';
   className?: string;
+  state?: 'idle' | 'listening' | 'thinking' | 'speaking' | 'processing' | 'ggwave';
 }
 
 export default function AnimatedOrb({ 
   isActive = false, 
   size = 'sm',
-  className 
+  className,
+  state = 'idle'
 }: AnimatedOrbProps) {
   const sizeClasses = {
     sm: 'w-2 h-2',
@@ -30,14 +32,98 @@ export default function AnimatedOrb({
     lg: 4
   };
 
+  // Animation configurations for different states
+  const stateConfig = {
+    idle: {
+      colors: {
+        glow: 'from-gray-400/10 via-gray-400/20 to-gray-500/10',
+        core: 'from-slate-100 via-gray-200 to-gray-400',
+        inner: 'from-gray-300/40 via-gray-400/30 to-gray-500/60'
+      },
+      animation: {
+        duration: 4,
+        glowOpacity: [0.1, 0.3, 0.1],
+        scale: [1, 1.02, 1],
+        particleSpeed: 0.5
+      }
+    },
+    listening: {
+      colors: {
+        glow: 'from-blue-400/20 via-cyan-400/30 to-blue-500/20',
+        core: 'from-blue-100 via-blue-200 to-blue-400',
+        inner: 'from-blue-300/60 via-blue-400/40 to-blue-500/80'
+      },
+      animation: {
+        duration: 2,
+        glowOpacity: [0.3, 0.8, 0.3],
+        scale: [0.95, 1.15, 0.95],
+        particleSpeed: 2
+      }
+    },
+    thinking: {
+      colors: {
+        glow: 'from-purple-400/20 via-violet-400/30 to-purple-500/20',
+        core: 'from-purple-100 via-purple-200 to-purple-400',
+        inner: 'from-purple-300/60 via-purple-400/40 to-purple-500/80'
+      },
+      animation: {
+        duration: 3,
+        glowOpacity: [0.4, 0.9, 0.4],
+        scale: [1, 1.25, 1],
+        particleSpeed: 1.5
+      }
+    },
+    speaking: {
+      colors: {
+        glow: 'from-green-400/20 via-emerald-400/30 to-green-500/20',
+        core: 'from-green-100 via-green-200 to-green-400',
+        inner: 'from-green-300/60 via-green-400/40 to-green-500/80'
+      },
+      animation: {
+        duration: 1.5,
+        glowOpacity: [0.5, 1.0, 0.5],
+        scale: [0.9, 1.1, 0.9],
+        particleSpeed: 3
+      }
+    },
+    processing: {
+      colors: {
+        glow: 'from-orange-400/20 via-yellow-400/30 to-orange-500/20',
+        core: 'from-orange-100 via-orange-200 to-orange-400',
+        inner: 'from-orange-300/60 via-orange-400/40 to-orange-500/80'
+      },
+      animation: {
+        duration: 2.5,
+        glowOpacity: [0.6, 1.1, 0.6],
+        scale: [1, 1.3, 1],
+        particleSpeed: 2.5
+      }
+    },
+    ggwave: {
+      colors: {
+        glow: 'from-red-400/20 via-pink-400/30 to-red-500/20',
+        core: 'from-red-100 via-red-200 to-red-400',
+        inner: 'from-red-300/60 via-red-400/40 to-red-500/80'
+      },
+      animation: {
+        duration: 1,
+        glowOpacity: [0.7, 1.2, 0.7],
+        scale: [0.8, 1.4, 0.8],
+        particleSpeed: 4
+      }
+    }
+  };
+
+  const currentConfig = stateConfig[state] || stateConfig.idle;
+  const shouldAnimate = isActive || state !== 'idle';
+
   return (
     <div className={cn("relative flex-shrink-0", className)}>
       {/* Ambient glow */}
       <motion.div
         className={cn(
-          "absolute inset-0 rounded-full",
-          "bg-gradient-to-r from-blue-400/20 via-cyan-400/30 to-blue-500/20",
-          "blur-md"
+          "absolute inset-0 rounded-full blur-md",
+          `bg-gradient-to-r ${currentConfig.colors.glow}`
         )}
         style={{
           width: glowSizeClasses[size],
@@ -45,12 +131,12 @@ export default function AnimatedOrb({
           margin: `calc(-${glowSizeClasses[size].split(' ')[0]}/4)`
         }}
         animate={{
-          opacity: isActive ? [0.3, 0.6, 0.3] : 0.2,
-          scale: isActive ? [1, 1.1, 1] : 1,
+          opacity: shouldAnimate ? currentConfig.animation.glowOpacity : 0.2,
+          scale: shouldAnimate ? currentConfig.animation.scale : 1,
         }}
         transition={{
-          duration: isActive ? 4 : 0.5,
-          repeat: isActive ? Infinity : 0,
+          duration: shouldAnimate ? currentConfig.animation.duration : 0.5,
+          repeat: shouldAnimate ? Infinity : 0,
           ease: "easeInOut"
         }}
       />
@@ -59,13 +145,13 @@ export default function AnimatedOrb({
       <motion.div
         className={cn(
           "relative rounded-full",
-          "bg-gradient-to-br from-slate-100 via-blue-200 to-blue-400",
+          `bg-gradient-to-br ${currentConfig.colors.core}`,
           "shadow-[inset_0_1px_2px_rgba(255,255,255,0.8),inset_0_-1px_2px_rgba(0,0,0,0.1),0_0_8px_rgba(59,130,246,0.3)]",
           sizeClasses[size]
         )}
         animate={{
-          scale: isActive ? [1, 1.05, 1] : 1,
-          boxShadow: isActive 
+          scale: shouldAnimate ? currentConfig.animation.scale : 1,
+          boxShadow: shouldAnimate 
             ? [
                 "inset 0 1px 2px rgba(255,255,255,0.8), inset 0 -1px 2px rgba(0,0,0,0.1), 0 0 8px rgba(59,130,246,0.3)",
                 "inset 0 1px 2px rgba(255,255,255,0.9), inset 0 -1px 2px rgba(0,0,0,0.05), 0 0 12px rgba(59,130,246,0.5), 0 0 20px rgba(147,51,234,0.2)",
@@ -74,8 +160,8 @@ export default function AnimatedOrb({
             : "inset 0 1px 2px rgba(255,255,255,0.8), inset 0 -1px 2px rgba(0,0,0,0.1), 0 0 8px rgba(59,130,246,0.3)",
         }}
         transition={{
-          duration: isActive ? 3 : 0.3,
-          repeat: isActive ? Infinity : 0,
+          duration: shouldAnimate ? currentConfig.animation.duration : 0.3,
+          repeat: shouldAnimate ? Infinity : 0,
           ease: "easeInOut"
         }}
       >
@@ -86,31 +172,34 @@ export default function AnimatedOrb({
             filter: 'blur(0.5px)',
           }}
           animate={{
-            opacity: isActive ? [0.7, 1, 0.7] : 0.8,
-            scale: isActive ? [0.8, 1.2, 0.8] : 1,
+            opacity: shouldAnimate ? [0.7, 1, 0.7] : 0.8,
+            scale: shouldAnimate ? [0.8, 1.2, 0.8] : 1,
           }}
           transition={{
-            duration: isActive ? 2 : 0.3,
-            repeat: isActive ? Infinity : 0,
+            duration: shouldAnimate ? currentConfig.animation.duration * 0.7 : 0.3,
+            repeat: shouldAnimate ? Infinity : 0,
             ease: "easeInOut"
           }}
         />
 
         {/* Inner depth and volume */}
         <motion.div
-          className="absolute inset-0.5 rounded-full bg-gradient-to-br from-blue-300/60 via-blue-400/40 to-blue-500/80"
+          className={cn(
+            "absolute inset-0.5 rounded-full",
+            `bg-gradient-to-br ${currentConfig.colors.inner}`
+          )}
           animate={{
-            opacity: isActive ? [0.4, 0.7, 0.4] : 0.3,
+            opacity: shouldAnimate ? [0.4, 0.7, 0.4] : 0.3,
           }}
           transition={{
-            duration: isActive ? 2.5 : 0.3,
-            repeat: isActive ? Infinity : 0,
+            duration: shouldAnimate ? currentConfig.animation.duration * 0.8 : 0.3,
+            repeat: shouldAnimate ? Infinity : 0,
             ease: "easeInOut"
           }}
         />
 
         {/* Subtle energy particles */}
-        {isActive && Array.from({ length: particleCount[size] }).map((_, i) => (
+        {shouldAnimate && Array.from({ length: particleCount[size] }).map((_, i) => (
           <motion.div
             key={i}
             className="absolute w-0.5 h-0.5 bg-white/60 rounded-full"
@@ -136,16 +225,16 @@ export default function AnimatedOrb({
               scale: [0, 1, 0],
             }}
             transition={{
-              duration: 3,
+              duration: currentConfig.animation.duration,
               repeat: Infinity,
-              delay: (i * 0.8),
+              delay: (i * 0.8) / currentConfig.animation.particleSpeed,
               ease: "easeInOut"
             }}
           />
         ))}
 
         {/* Subtle energy field */}
-        {isActive && (
+        {shouldAnimate && (
           <motion.div
             className="absolute inset-0 rounded-full border border-blue-300/30"
             animate={{
@@ -153,7 +242,7 @@ export default function AnimatedOrb({
               opacity: [0.3, 0, 0.3],
             }}
             transition={{
-              duration: 3,
+              duration: currentConfig.animation.duration,
               repeat: Infinity,
               ease: "easeOut"
             }}
@@ -162,7 +251,7 @@ export default function AnimatedOrb({
       </motion.div>
 
       {/* Subtle floating energy */}
-      {isActive && (
+      {shouldAnimate && (
         <motion.div
           className="absolute -top-0.5 -right-0.5 w-0.5 h-0.5 bg-blue-300/70 rounded-full"
           style={{
@@ -173,7 +262,7 @@ export default function AnimatedOrb({
             opacity: [0.4, 0.8, 0.4],
           }}
           transition={{
-            duration: 2,
+            duration: currentConfig.animation.duration * 0.6,
             repeat: Infinity,
             ease: "easeInOut"
           }}

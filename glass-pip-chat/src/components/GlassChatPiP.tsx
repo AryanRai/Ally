@@ -143,6 +143,7 @@ export default function GlassChatPiP() {
   const [showSpeechControls, setShowSpeechControls] = useState(false);
   const [showUnifiedToolDashboard, setShowUnifiedToolDashboard] = useState(false);
   const [showMessageFlowTest, setShowMessageFlowTest] = useState(false);
+  const [isContextExpanded, setIsContextExpanded] = useState(false);
   // Use voice mode state from speech service hook
   const { voiceModeEnabled, setVoiceModeEnabled, droidModeEnabled, setDroidModeEnabled } = speechService;
 
@@ -1340,9 +1341,14 @@ export default function GlassChatPiP() {
   if (isPreviewExpanded) {
     collapsedHeight = collapsedDims.expandedHeight;
   }
-  // Add minimal space for context header when context is present (just the collapsed header, not full content)
+  // Add space for context only when it's present and properly account for expansion state
   if (contextMonitoring.hasNewContext && (contextMonitoring.contextData.clipboard || contextMonitoring.contextData.selectedText)) {
-    collapsedHeight += 40; // Reduced from 80px to 40px - just enough for the collapsed context header
+    // Always add space for the context header (collapsed state)
+    collapsedHeight += 36; // Just enough for the collapsed context header
+    // Add additional space only if context is expanded
+    if (isContextExpanded) {
+      collapsedHeight += 60; // Additional space for expanded context content
+    }
   }
   // Add space for response preview when active
   if (currentResponse || isTyping) {
@@ -1406,7 +1412,7 @@ export default function GlassChatPiP() {
       clearTimeout(resizeTimeout);
       clearTimeout(resetTimeout);
     };
-  }, [state.size, state.collapsed, sidebarCollapsed, appSettings.ui.windowPadding, isPreviewExpanded, contextMonitoring.hasNewContext, contextMonitoring.contextData, currentResponse, isTyping, collapsedHeight]);
+  }, [state.size, state.collapsed, sidebarCollapsed, appSettings.ui.windowPadding, isPreviewExpanded, contextMonitoring.hasNewContext, contextMonitoring.contextData, currentResponse, isTyping, collapsedHeight, isContextExpanded]);
 
   return (
     <motion.div
@@ -1548,6 +1554,10 @@ export default function GlassChatPiP() {
                 }}
                 onSpeechSettingsOpen={() => setShowSettings(true)}
                 speechServiceConnected={speechService.isConnected}
+                isContextExpanded={isContextExpanded}
+                onContextExpandedChange={setIsContextExpanded}
+                isSpeaking={false} // TODO: Track TTS state
+                isListening={speechService.isListening}
               />
             ) : (
               <ExpandedHeader

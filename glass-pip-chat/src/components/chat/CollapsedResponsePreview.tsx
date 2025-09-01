@@ -1,6 +1,6 @@
-import { useRef, useEffect } from 'react';
+import { useRef, useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Bot, Square } from 'lucide-react';
+import { Bot, Square, Maximize2 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { ThemeUtils } from '../../utils/themeUtils';
 import MarkdownRenderer from '../MarkdownRenderer';
@@ -11,6 +11,7 @@ interface CollapsedResponsePreviewProps {
   response: string;
   isTyping: boolean;
   onStop?: () => void;
+  onExpand?: () => void;
 }
 
 export default function CollapsedResponsePreview({
@@ -18,9 +19,12 @@ export default function CollapsedResponsePreview({
   theme,
   response,
   isTyping,
-  onStop
+  onStop,
+  onExpand
 }: CollapsedResponsePreviewProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
+  const [showFinalResponse, setShowFinalResponse] = useState(false);
+  const [autoHideTimer, setAutoHideTimer] = useState<NodeJS.Timeout | null>(null);
   
   // Auto-scroll to bottom when response updates (reader mode)
   useEffect(() => {
@@ -29,7 +33,41 @@ export default function CollapsedResponsePreview({
     }
   }, [response]);
 
-  if (!response && !isTyping) {
+  // Handle final response display and auto-hide
+  useEffect(() => {
+    if (!isTyping && response) {
+      // Response just finished - show final response
+      setShowFinalResponse(true);
+      
+      // Clear any existing timer
+      if (autoHideTimer) {
+        clearTimeout(autoHideTimer);
+      }
+      
+      // Set timer to hide after 5 seconds
+      const timer = setTimeout(() => {
+        setShowFinalResponse(false);
+      }, 5000);
+      
+      setAutoHideTimer(timer);
+    } else if (isTyping) {
+      // Currently typing - clear any hide timer and show response
+      if (autoHideTimer) {
+        clearTimeout(autoHideTimer);
+        setAutoHideTimer(null);
+      }
+      setShowFinalResponse(false);
+    }
+    
+    return () => {
+      if (autoHideTimer) {
+        clearTimeout(autoHideTimer);
+      }
+    };
+  }, [isTyping, response]);
+
+  // Show if typing, has response, or showing final response
+  if (!response && !isTyping && !showFinalResponse) {
     return null;
   }
 
@@ -52,21 +90,35 @@ export default function CollapsedResponsePreview({
             <div className="flex items-center gap-2">
               <Bot className="w-3 h-3 opacity-60" />
               <span className="text-xs font-medium opacity-80">
-                {isTyping ? 'Thinking...' : 'Response'}
+                {isTyping ? 'Thinking...' : showFinalResponse ? 'Final Response' : 'Response'}
               </span>
               {isTyping && (
                 <div className="w-1.5 h-1.5 bg-green-400 rounded-full animate-pulse" />
               )}
+              {showFinalResponse && (
+                <div className="w-1.5 h-1.5 bg-blue-400 rounded-full animate-pulse" />
+              )}
             </div>
-            {isTyping && onStop && (
-              <button
-                onClick={onStop}
-                className="p-1 rounded hover:bg-red-500/20 transition-colors"
-                title="Stop generation"
-              >
-                <Square className="w-3 h-3 text-red-400" />
-              </button>
-            )}
+            <div className="flex items-center gap-1">
+              {onExpand && (
+                <button
+                  onClick={onExpand}
+                  className="p-1 rounded hover:bg-blue-500/20 transition-colors"
+                  title="Expand to full chat"
+                >
+                  <Maximize2 className="w-3 h-3 text-blue-400" />
+                </button>
+              )}
+              {isTyping && onStop && (
+                <button
+                  onClick={onStop}
+                  className="p-1 rounded hover:bg-red-500/20 transition-colors"
+                  title="Stop generation"
+                >
+                  <Square className="w-3 h-3 text-red-400" />
+                </button>
+              )}
+            </div>
           </div>
 
           {/* Response Content - Auto-scrolling reader */}
