@@ -1462,6 +1462,9 @@ export default function GlassChatPiP() {
                 hasNewContext={contextMonitoring.hasNewContext}
                 contextData={contextMonitoring.contextData}
                 contextToggleEnabled={contextMonitoring.contextToggleEnabled}
+                showContext={contextMonitoring.showContext}
+                onContextToggle={() => contextMonitoring.setShowContext(!contextMonitoring.showContext)}
+                onContextToggleChange={contextMonitoring.setContextToggleEnabled}
                 uiSettings={appSettings.ui}
                 currentResponse={currentResponse}
                 availableModels={ollamaIntegration.availableModels}

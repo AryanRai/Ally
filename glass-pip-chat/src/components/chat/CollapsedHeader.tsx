@@ -11,7 +11,8 @@ import {
   ChevronDown,
   Volume2,
   VolumeX,
-  Settings
+  Eye,
+  EyeOff
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { ThemeUtils } from '../../utils/themeUtils';
@@ -47,6 +48,9 @@ interface CollapsedHeaderProps {
   hasNewContext: boolean;
   contextData: any;
   contextToggleEnabled: boolean;
+  showContext?: boolean;
+  onContextToggle?: () => void;
+  onContextToggleChange?: (enabled: boolean) => void;
   uiSettings?: any;
   currentResponse?: string;
   availableModels: any[];
@@ -87,6 +91,9 @@ export default function CollapsedHeader({
   hasNewContext,
   contextData,
   contextToggleEnabled,
+  showContext,
+  onContextToggle,
+  onContextToggleChange,
   uiSettings,
   currentResponse,
   availableModels,
@@ -159,14 +166,7 @@ export default function CollapsedHeader({
             )}
           </div>
 
-          {/* Context indicator */}
-          {hasNewContext && (contextData.clipboard || contextData.selectedText) && (
-            <div className="flex items-center gap-1 px-2 py-0.5 bg-blue-500/20 rounded-full flex-shrink-0">
-              <Clipboard className="w-2.5 h-2.5" />
-              <span className="text-xs">Context</span>
-              <div className="w-1.5 h-1.5 bg-blue-400 rounded-full animate-pulse" />
-            </div>
-          )}
+          {/* Optimized context indicator - removed separate indicator, will be combined with eye icon */}
         </div>
 
         {/* Control buttons - no-drag region */}
@@ -300,6 +300,40 @@ export default function CollapsedHeader({
                 document.body
               )}
             </>
+          )}
+
+          {/* Combined Context Control - Eye + Clipboard with smart indicators */}
+          {onContextToggle && (
+            <button
+              onClick={onContextToggle}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                onContextToggleChange?.(!contextToggleEnabled);
+              }}
+              className={cn(
+                "p-1.5 rounded-lg hover:bg-white/10 transition-colors relative",
+                showContext && hasNewContext && (contextData.clipboard || contextData.selectedText) && "bg-blue-500/20",
+                contextToggleEnabled && "ring-1 ring-green-400/30"
+              )}
+              title={`Context: ${showContext ? 'Visible' : 'Hidden'} | Monitoring: ${contextToggleEnabled ? 'ON' : 'OFF'} | Click: toggle view, Right-click: toggle monitoring`}
+            >
+              {/* Main icon - Eye for visibility, Clipboard overlay for monitoring */}
+              <div className="relative">
+                {showContext ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                {/* Clipboard overlay indicator */}
+                <Clipboard className={cn(
+                  "w-2 h-2 absolute -bottom-0.5 -right-0.5",
+                  contextToggleEnabled ? "text-green-400" : "text-red-400 opacity-60"
+                )} />
+              </div>
+              
+              {/* New context notification */}
+              {hasNewContext && (contextData.clipboard || contextData.selectedText) && (
+                <div className="absolute -top-1 -left-1 w-2.5 h-2.5 bg-blue-400 rounded-full animate-pulse">
+                  <span className="absolute inset-0 text-[8px] font-bold text-white flex items-center justify-center">N</span>
+                </div>
+              )}
+            </button>
           )}
 
           <button
