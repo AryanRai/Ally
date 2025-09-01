@@ -5,7 +5,7 @@ type Size = 'S' | 'M' | 'L';
 const sizePx: Record<Size, { w: number; h: number }> = {
   S: { w: 320, h: 420 },
   M: { w: 400, h: 560 },
-  L: { w: 520, h: 680 },
+  L: { w: 480, h: 680 }, // Reduced from 520 to 480 to better accommodate sidebar
 };
 
 const STORAGE_KEY = 'glass_pip_state';
@@ -132,11 +132,26 @@ export function useWindowManagement() {
 
     setIsResizing(true);
     const dims = sizePx[state.size];
+    
+    // Calculate sidebar width based on actual sidebar state
+    // When window is collapsed, sidebar is hidden (0px)
+    // When window is expanded, sidebar can be collapsed (48px) or expanded (280px)
     const sidebarWidth = state.collapsed ? 0 : (sidebarCollapsed ? 48 : 280);
-    const width = dims.w + sidebarWidth;
+    
+    // For size L with expanded sidebar, we need to ensure the total width doesn't exceed reasonable bounds
+    // Let's cap the maximum total width to prevent overflow
+    const maxTotalWidth = 900; // Reasonable maximum to prevent overflow
+    let width = dims.w + sidebarWidth;
+    
+    // If the calculated width exceeds our maximum, adjust the chat area width
+    if (width > maxTotalWidth) {
+      width = maxTotalWidth;
+      console.log('Capping window width to prevent overflow:', width);
+    }
+    
     const height = state.collapsed ? 120 : dims.h;
 
-    console.log('Resizing window to:', width, 'x', height, 'collapsed:', state.collapsed, 'sidebar:', sidebarWidth);
+    console.log('Resizing window to:', width, 'x', height, 'collapsed:', state.collapsed, 'sidebar:', sidebarWidth, 'chat area:', width - sidebarWidth);
 
     // Use a small delay to ensure state has settled
     const resizeTimeout = setTimeout(() => {

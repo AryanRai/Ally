@@ -1289,6 +1289,38 @@ export default function GlassChatPiP() {
   const dims = sizePx[state.size];
   const padding = appSettings.ui.windowPadding; // Single padding value
 
+  // Helper function to calculate consistent dimensions
+  const calculateDimensions = () => {
+    const sidebarWidth = state.collapsed ? 0 : (sidebarCollapsed ? 48 : 280);
+    
+    let width = state.collapsed
+      ? collapsedDims.width
+      : dims.w + sidebarWidth;
+    let height = state.collapsed
+      ? collapsedHeight
+      : dims.h;
+
+    // Ensure content doesn't exceed reasonable bounds for acrylic background
+    // The acrylic background has limitations, so we need to be more conservative
+    const maxTotalWidth = 850; // Conservative max to prevent overflow from acrylic background
+    const maxTotalHeight = 800; // Conservative max height
+    
+    // Account for padding in our calculations
+    const maxContentWidth = maxTotalWidth - (padding * 2);
+    const maxContentHeight = maxTotalHeight - (padding * 2);
+    
+    if (width > maxContentWidth) {
+      width = maxContentWidth;
+      console.log('Capping window width to prevent acrylic overflow:', width);
+    }
+    if (height > maxContentHeight) {
+      height = maxContentHeight;
+      console.log('Capping window height to prevent acrylic overflow:', height);
+    }
+
+    return { width, height, sidebarWidth };
+  };
+
   // Optimized collapsed dimensions - much smaller and content-fitted
   const collapsedWidthBySize: Record<string, number> = {
     S: 320,
@@ -1325,17 +1357,13 @@ export default function GlassChatPiP() {
     }
 
     setIsResizing(true);
-    const sidebarWidth = state.collapsed ? 0 : (sidebarCollapsed ? 48 : 280);
+    
+    // Calculate dimensions using helper function
+    const { width: contentWidth, height: contentHeight, sidebarWidth } = calculateDimensions();
+    const width = contentWidth + (padding * 2);
+    const height = contentHeight + (padding * 2);
 
-    // Use optimized dimensions for collapsed mode
-    const width = state.collapsed
-      ? (collapsedWidthBySize[state.size] ?? collapsedDims.width) + (padding * 2)
-      : dims.w + sidebarWidth + (padding * 2);
-    const height = state.collapsed
-      ? collapsedHeight + (padding * 2)
-      : dims.h + (padding * 2);
-
-    console.log('Resizing window to:', width, 'x', height, 'collapsed:', state.collapsed, 'preview expanded:', isPreviewExpanded, 'current response:', !!currentResponse, 'sidebar:', sidebarWidth, 'context present:', contextMonitoring.hasNewContext);
+    console.log('Resizing window to:', width, 'x', height, 'collapsed:', state.collapsed, 'preview expanded:', isPreviewExpanded, 'current response:', !!currentResponse, 'sidebar:', sidebarWidth, 'context present:', contextMonitoring.hasNewContext, 'screen:', window.screen.availWidth, 'x', window.screen.availHeight);
 
     // Use a longer delay for collapse transitions to ensure state cleanup has completed
     const resizeDelay = state.collapsed ? 200 : 50; // Increased delay for collapsed mode
@@ -1365,8 +1393,8 @@ export default function GlassChatPiP() {
         platform === 'linux' && "linux-glass-effect"
       )}
       style={{
-        width: state.collapsed ? collapsedDims.width + (padding * 2) : (sidebarCollapsed ? dims.w + 48 + (padding * 2) : dims.w + 280 + (padding * 2)),
-        height: state.collapsed ? collapsedHeight + (padding * 2) : dims.h + (padding * 2),
+        width: calculateDimensions().width + (padding * 2),
+        height: calculateDimensions().height + (padding * 2),
         zIndex: 50
       } as React.CSSProperties}
       initial={{ opacity: 0, scale: 0.9 }}
@@ -1392,8 +1420,8 @@ export default function GlassChatPiP() {
           theme === 'dark' ? "text-white/90" : "text-black/90"
         )}
         style={{
-          width: state.collapsed ? (collapsedWidthBySize[state.size] ?? collapsedDims.width) : (sidebarCollapsed ? dims.w + 48 : dims.w + 280),
-          height: state.collapsed ? collapsedHeight : dims.h,
+          width: calculateDimensions().width,
+          height: calculateDimensions().height,
           margin: `${padding}px`
         } as React.CSSProperties}
       >
