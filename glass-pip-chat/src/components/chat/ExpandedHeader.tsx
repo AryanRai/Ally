@@ -139,7 +139,20 @@ export default function ExpandedHeader({
     if (showUnifiedIntegration) features.push('Integration');
     if (showToolAnalytics) features.push('Analytics');
     if (showMessageFlowTest) features.push('Testing');
-    return features.length > 0 ? features.join(', ') : 'Disabled';
+    
+    const statusText = features.length > 0 ? features.join(', ') : 'Disabled';
+    
+    // Add tool execution status if available
+    if (toolStatus) {
+      const toolInfo = [];
+      if (toolStatus.isExecuting) toolInfo.push('Executing');
+      if (toolStatus.activeToolCount > 0) toolInfo.push(`${toolStatus.activeToolCount} active`);
+      if (toolStatus.failedToolCount > 0) toolInfo.push(`${toolStatus.failedToolCount} failed`);
+      
+      return toolInfo.length > 0 ? `${statusText} (${toolInfo.join(', ')})` : statusText;
+    }
+    
+    return statusText;
   };
 
   // Update dropdown position and calculate available height when it opens
@@ -401,17 +414,7 @@ export default function ExpandedHeader({
           )}
         </button>
 
-        {toolStatus && (
-          <ToolStatusIndicator
-            status={toolStatus}
-            platform={platform}
-            theme={theme}
-            compact={true}
-            onClick={onToolStatusClick}
-          />
-        )}
-
-        {/* Smart Combined Tool Control */}
+        {/* Combined Tool Control - Wrench + Tool Status */}
         {(onUnifiedIntegrationToggle || onToolAnalyticsToggle || onMessageFlowTestToggle || onToolsToggle) && (
           <div className="relative">
             <button
@@ -422,8 +425,8 @@ export default function ExpandedHeader({
               }}
               onContextMenu={(e) => {
                 e.preventDefault();
-                // Secondary action: open settings
-                onSettings();
+                // Secondary action: show tool status details
+                if (onToolStatusClick) onToolStatusClick();
               }}
               onDoubleClick={() => {
                 // Double-click: cycle through tool features
@@ -441,9 +444,11 @@ export default function ExpandedHeader({
                 "p-1.5 rounded-lg transition-colors relative",
                 (toolsEnabled || showUnifiedIntegration || showToolAnalytics || showMessageFlowTest)
                   ? "bg-purple-500/20 hover:bg-purple-500/30 text-purple-300"
-                  : "hover:bg-white/10"
+                  : "hover:bg-white/10",
+                toolStatus?.isExecuting && "ring-1 ring-yellow-400/50",
+                toolStatus?.failedToolCount > 0 && "ring-1 ring-red-400/50"
               )}
-              title={`Tools Hub - Click: ${toolsEnabled ? 'Disable' : 'Enable'} tools | Right-click: Settings | Double-click: Cycle features | Status: ${getToolHubStatus()}`}
+              title={`Tools Hub - Click: ${toolsEnabled ? 'Disable' : 'Enable'} tools | Right-click: Tool Status | Double-click: Cycle features | Status: ${getToolHubStatus()}${toolStatus ? ` | Active: ${toolStatus.activeToolCount}, Completed: ${toolStatus.completedToolCount}` : ''}`}
             >
               {/* Main tool icon with overlays */}
               <div className="relative">
@@ -459,8 +464,17 @@ export default function ExpandedHeader({
                 {showMessageFlowTest && (
                   <TestTube className="w-1.5 h-1.5 absolute -bottom-0.5 -right-0.5 text-orange-400" />
                 )}
-                {/* Settings indicator - always visible as small gear */}
-                <Settings className="w-1.5 h-1.5 absolute -top-0.5 -left-0.5 text-gray-400 opacity-60" />
+                {/* Tool status indicator */}
+                {toolStatus?.isExecuting && (
+                  <div className="absolute -top-0.5 -left-0.5 w-2 h-2">
+                    <div className="w-2 h-2 bg-yellow-400 rounded-full animate-pulse" />
+                  </div>
+                )}
+                {toolStatus?.failedToolCount > 0 && (
+                  <div className="absolute -top-0.5 -left-0.5 w-2 h-2">
+                    <div className="w-2 h-2 bg-red-400 rounded-full" />
+                  </div>
+                )}
               </div>
               
               {/* Connection status indicator */}
@@ -472,9 +486,11 @@ export default function ExpandedHeader({
               )}
               
               {/* Active features count */}
-              {getActiveToolFeaturesCount() > 0 && (
+              {(getActiveToolFeaturesCount() > 0 || (toolStatus?.activeToolCount > 0)) && (
                 <div className="absolute -top-1 -left-1 w-3 h-3 bg-blue-500 rounded-full flex items-center justify-center">
-                  <span className="text-[8px] font-bold text-white">{getActiveToolFeaturesCount()}</span>
+                  <span className="text-[8px] font-bold text-white">
+                    {toolStatus?.activeToolCount > 0 ? toolStatus.activeToolCount : getActiveToolFeaturesCount()}
+                  </span>
                 </div>
               )}
             </button>
@@ -495,6 +511,17 @@ export default function ExpandedHeader({
           {showSpeechControls && (
             <div className="absolute -bottom-0.5 -right-0.5 w-2 h-2 bg-blue-400 rounded-full" />
           )}
+        </button>
+
+        <button
+          onClick={onSettings}
+          className={cn(
+            "p-1.5 rounded-lg transition-colors",
+            ThemeUtils.getBackgroundClass(platform, theme, 'hover')
+          )}
+          title="Settings"
+        >
+          <Settings className="w-3.5 h-3.5" />
         </button>
 
         <button
