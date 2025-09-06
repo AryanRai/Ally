@@ -474,7 +474,7 @@ export class UnifiedToolIntegrationService extends BrowserEventEmitter {
         
         chatMessages.push({
           role: 'user',
-          content: `Tool results:\n${toolResultsText}\n\nPlease continue your response incorporating these results.`
+          content: `Here are the tool results:\n${toolResultsText}\n\nNow provide a natural, complete response to the user's original question using this information. Be concise and direct.`
         });
 
         // Continue the conversation with tool results
@@ -496,7 +496,7 @@ export class UnifiedToolIntegrationService extends BrowserEventEmitter {
       isComplete: true
     });
 
-    const result = {
+    return {
       response: fullResponse,
       thinking: thinkingContent,
       toolCalls: allToolCalls,
@@ -504,15 +504,6 @@ export class UnifiedToolIntegrationService extends BrowserEventEmitter {
       conversationTurn: { turnId: `turn_${Date.now()}` },
       toolExecutions: []
     };
-    
-    console.log('🔄 Unified integration returning:', { 
-      responseLength: fullResponse?.length, 
-      toolCallsCount: allToolCalls.length, 
-      toolResultsCount: allToolResults.length,
-      response: fullResponse?.substring(0, 100) + '...'
-    });
-    
-    return result;
   }
 
   /**
@@ -543,13 +534,15 @@ export class UnifiedToolIntegrationService extends BrowserEventEmitter {
     return `You are an AI assistant with access to these tools:
 ${toolDescriptions}
 
-When responding to the user, if you need to use any tools, mention it naturally in your response. For example:
-- "Let me calculate that for you..." (for math)
-- "I'll check the current time..." (for time)
-- "Let me get the weather information..." (for weather)
-- "I'll check your system information..." (for system info)
+IMPORTANT: When you need to use a tool, simply mention that you'll use it and then STOP your response. Do not provide fallback information or continue talking. Just say you'll use the tool and wait.
 
-After mentioning you'll use a tool, I will execute it and provide the results, then you can continue your response with the actual information.
+Examples:
+- For time questions: "Let me check the current time for you."
+- For math questions: "Let me calculate that for you."
+- For weather questions: "Let me get the weather information for you."
+- For system questions: "Let me check your system information."
+
+After I execute the tool and provide results, you can then give a complete response with the actual information.
 
 User: ${message}`;
   }
@@ -594,12 +587,12 @@ User: ${message}`;
     }
 
     // Time tool - look for intention phrases
-    if ((lowerResponse.includes('let me check the time') || 
-         lowerResponse.includes('i\'ll check the time') ||
+    if ((lowerResponse.includes('let me check the current time') || 
+         lowerResponse.includes('i\'ll check the current time') ||
          lowerResponse.includes('let me get the current time') ||
          lowerResponse.includes('i\'ll get the current time') ||
-         lowerResponse.includes('checking the time') ||
-         (lowerResponse.includes('check') && lowerResponse.includes('time'))) && 
+         lowerResponse.includes('let me check the time') ||
+         lowerResponse.includes('i\'ll check the time')) && 
         !toolCalls.some(tc => tc.name === 'current_time')) {
       toolCalls.push({
         name: 'current_time',

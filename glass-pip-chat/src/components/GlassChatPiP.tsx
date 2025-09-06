@@ -427,7 +427,6 @@ export default function GlassChatPiP() {
         );
 
         response = result.response;
-        console.log('🎯 Unified integration result:', { response: result.response, toolCalls: result.toolCalls?.length, toolResults: result.toolResults?.length });
       } else {
         // Use standard Ollama integration when tools are disabled
         const messages = activeChat?.messages.map(msg => ({
@@ -525,7 +524,6 @@ export default function GlassChatPiP() {
         }
       }
 
-      console.log('💾 Final response check:', { hasResponse: !!response, responseLength: response?.length });
       if (response) {
         // Create assistant message only after streaming is complete
         const assistantMessage: Message = {
