@@ -18,7 +18,14 @@ export function UserProfile({ user, onSignOut }: UserProfileProps) {
     setLoading(true)
     try {
       await supabase.auth.signOut()
+      // Clear any local storage
+      if (typeof window !== 'undefined') {
+        localStorage.clear()
+        sessionStorage.clear()
+      }
       onSignOut()
+      // Force page reload to ensure clean state
+      window.location.reload()
     } catch (error) {
       console.error('Error signing out:', error)
     } finally {

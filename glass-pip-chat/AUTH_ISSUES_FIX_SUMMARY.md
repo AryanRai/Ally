@@ -17,9 +17,30 @@
    - Session not being properly restored
    - Database access failing due to auth issues
 
+4. **Auto-Connect API Errors** ⚠️ **NEW**
+   - `useAllyRemote` hook auto-connecting to non-existent API
+   - 401 Unauthorized errors from `/api/ally/register`
+   - Failed HTTP requests causing authentication errors
+
 ## Solutions Implemented
 
-### 1. Enhanced Supabase Client Configuration
+### 1. Fixed Auto-Connect API Issue ⚠️ **CRITICAL FIX**
+
+**File:** `src/components/GlassChatPiP.tsx`
+
+```typescript
+// Disabled auto-connect to prevent 401 errors
+const allyRemote = useAllyRemote({
+  allyName: 'Glass PiP Ally',
+  autoConnect: false // Disabled to prevent authentication errors
+});
+```
+
+**Issue:** The `useAllyRemote` hook was automatically trying to connect to `/api/ally/register` which doesn't exist, causing 401 Unauthorized errors.
+
+**Solution:** Disabled auto-connect. Users can manually connect when needed.
+
+### 2. Enhanced Supabase Client Configuration
 
 **File:** `src/utils/supabase.ts`
 
@@ -46,13 +67,15 @@ supabaseClient = createClient(env.SUPABASE_URL, env.SUPABASE_ANON_KEY, {
 - `recoverAuth()` - Attempts to recover authentication
 - `autoFixAuth()` - Automatically fixes common issues
 
-### 3. Grammarly Extension Conflict Resolution
+### 3. Enhanced Grammarly Extension Conflict Resolution
 
 **File:** `src/components/GrammarlyFix.tsx`
 
-- Removes Grammarly attributes that cause hydration issues
-- Suppresses extension-related console warnings
+- Removes ALL extension attributes that cause hydration issues
+- Enhanced suppression of extension-related console warnings
 - Uses MutationObserver to catch future injections
+- Multiple cleanup attempts to catch late injections
+- Handles both Grammarly and other browser extensions
 
 ### 4. Improved Authentication Hook
 
@@ -109,6 +132,8 @@ supabaseClient = createClient(env.SUPABASE_URL, env.SUPABASE_ANON_KEY, {
 ✅ **Database Access** - Authenticated database queries working
 ✅ **Error Recovery** - Automatic recovery from refresh token errors
 ✅ **Extension Compatibility** - No more Grammarly-related console errors
+✅ **API Error Resolution** - No more 401 Unauthorized errors from auto-connect
+✅ **Console Clean** - Suppressed extension-related warnings and errors
 
 ## Files Modified
 

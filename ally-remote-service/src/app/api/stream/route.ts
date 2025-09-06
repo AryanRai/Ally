@@ -6,10 +6,40 @@ export const runtime = 'edge'
 export async function GET(request: NextRequest) {
   const supabase = createServerSupabaseClientFromRequest(request)
   
-  // Check if user is authenticated
-  const { data: { user }, error: authError } = await supabase.auth.getUser()
-  if (authError || !user) {
-    return new Response('Authentication required', { status: 401 })
+  // Check if user is authenticated with better error handling
+  try {
+    const { data: { user }, error: authError } = await supabase.auth.getUser()
+    
+    if (authError) {
+      console.error('Auth error in stream:', authError)
+      return new Response(JSON.stringify({ 
+        error: 'Authentication failed', 
+        details: authError.message 
+      }), { 
+        status: 401,
+        headers: { 'Content-Type': 'application/json' }
+      })
+    }
+    
+    if (!user) {
+      console.warn('No user found in stream request')
+      return new Response(JSON.stringify({ 
+        error: 'User not authenticated', 
+        details: 'No valid session found' 
+      }), { 
+        status: 401,
+        headers: { 'Content-Type': 'application/json' }
+      })
+    }
+  } catch (error) {
+    console.error('Unexpected auth error in stream:', error)
+    return new Response(JSON.stringify({ 
+      error: 'Authentication check failed', 
+      details: (error as Error).message 
+    }), { 
+      status: 500,
+      headers: { 'Content-Type': 'application/json' }
+    })
   }
 
   // Set up Server-Sent Events headers

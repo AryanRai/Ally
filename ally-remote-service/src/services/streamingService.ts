@@ -83,6 +83,32 @@ export class StreamingService {
     this.eventSource.onerror = (error) => {
       console.error('EventSource error:', error)
       
+      // Check if this is an authentication error
+      if (this.eventSource?.readyState === EventSource.CLOSED) {
+        // Try to get more details about the error
+        fetch(`${this.baseUrl}/stream`, { method: 'HEAD' })
+          .then(response => {
+            if (response.status === 401) {
+              console.error('Authentication error in stream - user may need to re-login')
+              // Emit auth error event to listeners
+              this.listeners.forEach(callback => {
+                callback({
+                  type: 'error',
+                  messageId: 'auth-error',
+                  data: {
+                    error: 'Authentication required - please refresh the page and log in again'
+                  },
+                  timestamp: new Date().toISOString()
+                })
+              })
+              return
+            }
+          })
+          .catch(() => {
+            // Network error, proceed with normal reconnection
+          })
+      }
+      
       if (!this.isReconnecting && this.reconnectAttempts < this.maxReconnectAttempts) {
         this.attemptReconnect()
       }

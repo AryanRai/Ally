@@ -58,6 +58,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           user_id: userId,
           name: 'Web Interface',
           status: 'online',
+          last_heartbeat: new Date().toISOString(),
           capabilities: {
             models: [],
             tools: [],
@@ -65,13 +66,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           },
           metadata: {
             userAgent: navigator.userAgent,
-            platform: navigator.platform,
-            language: navigator.language
+            language: navigator.language,
+            type: 'web'
           }
         })
 
       if (error) {
         console.error('Error registering local system:', error)
+        
+        // If it's an auth error, try to refresh the session
+        if (error.message.includes('JWT') || error.message.includes('expired')) {
+          console.log('Attempting to refresh session due to auth error')
+          const { error: refreshError } = await supabase.auth.refreshSession()
+          if (refreshError) {
+            console.error('Session refresh failed:', refreshError)
+          }
+        }
+      } else {
+        console.log('Local system registered successfully:', systemId)
       }
     } catch (error) {
       console.error('Error registering local system:', error)

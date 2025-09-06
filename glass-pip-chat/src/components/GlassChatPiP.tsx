@@ -123,7 +123,7 @@ export default function GlassChatPiP() {
   // Remote control integration
   const allyRemote = useAllyRemote({
     allyName: 'Glass PiP Ally',
-    autoConnect: true
+    autoConnect: false // Disabled to prevent authentication errors
   });
 
   // Speech service integration

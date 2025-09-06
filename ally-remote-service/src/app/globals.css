@@ -95,6 +95,35 @@ body {
   background: rgba(59, 130, 246, 0.5);
 }
 
+/* Grammarly compatibility fixes */
+body[data-new-gr-c-s-check-loaded],
+html[data-new-gr-c-s-check-loaded],
+body[data-gr-ext-installed],
+html[data-gr-ext-installed] {
+  /* Prevent Grammarly from interfering with our styles */
+  background: linear-gradient(135deg, #0f0f23 0%, #1a1a2e 50%, #16213e 100%) !important;
+}
+
+/* Hide Grammarly elements that might interfere */
+grammarly-extension,
+grammarly-popups,
+[data-grammarly-shadow-root] {
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+/* Ensure our input fields work properly with Grammarly */
+.glass-input {
+  position: relative;
+  z-index: 1;
+}
+
+.glass-input:focus {
+  z-index: 2;
+}
+
 /* Animation classes */
 .animate-fade-in {
   animation: fadeIn 0.5s ease-in-out;
