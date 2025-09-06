@@ -3,6 +3,24 @@ export interface Message {
   role: 'user' | 'assistant';
   content: string;
   timestamp: number;
+  metadata?: {
+    source?: 'speech' | 'text';
+    context?: string;
+    toolCalls?: ToolCall[];
+    toolResults?: ToolResult[];
+  };
+}
+
+export interface ToolCall {
+  name: string;
+  parameters: Record<string, any>;
+}
+
+export interface ToolResult {
+  name: string;
+  result?: any;
+  error?: string;
+  success: boolean;
 }
 
 export interface Chat {
