@@ -22,6 +22,7 @@ import ExpandedHeader from './chat/ExpandedHeader';
 import ContextDisplay from './chat/ContextDisplay';
 import ChatInput from './chat/ChatInput';
 import { RemoteSettings } from './RemoteSettings';
+import { RemoteActivityIndicator } from './RemoteActivityIndicator';
 import { SpeechControls } from './SpeechControls';
 import { useSpeechService } from '../hooks/useSpeechService';
 
@@ -35,6 +36,8 @@ import { useToolCalling } from '../hooks/useToolCalling';
 // Unified Tool Integration
 import { useUnifiedToolIntegration } from '../hooks/useUnifiedToolIntegration';
 import MessageFlowTest from './MessageFlowTest';
+import { createRemoteChatIntegration } from '../services/remoteChatIntegration';
+import { useRemoteConnection } from '../hooks/useRemoteConnection';
 
 // Utils & Types
 import { ChatManager } from '../utils/chatManager';
@@ -138,6 +141,9 @@ export default function GlassChatPiP() {
     toolCallTimeout: 30000,
     enableMultiStepReasoning: true
   });
+
+  // Remote connection integration
+  const remoteConnection = useRemoteConnection();
 
   // UI state
   const [input, setInput] = useState('');
@@ -861,6 +867,31 @@ export default function GlassChatPiP() {
       allyRemote.clearMessages();
     }
   }, [allyRemote.incomingMessages, addMessageToActiveChat, allyRemote]);
+
+  // Remote chat integration - handle new remote polling system
+  useEffect(() => {
+    if (remoteConnection.mode !== 'remote' || !remoteConnection.isAuthenticated) {
+      return;
+    }
+
+    const integration = createRemoteChatIntegration({
+      onRemoteMessage: (message) => {
+        addMessageToActiveChat(message);
+      },
+      onRemoteResponse: (response) => {
+        addMessageToActiveChat(response);
+      },
+      onStatusChange: (status) => {
+        console.log('Remote chat status:', status);
+      }
+    });
+
+    integration.start();
+
+    return () => {
+      integration.stop();
+    };
+  }, [remoteConnection.mode, remoteConnection.isAuthenticated, addMessageToActiveChat]);
 
   // Handle speech recognition results - automatically send as messages when voice mode is enabled
   const lastProcessedSpeechRef = useRef<string | null>(null);
@@ -1717,6 +1748,9 @@ export default function GlassChatPiP() {
                     ? "scrollbar-thin scrollbar-thumb-white/10"
                     : theme === 'dark' ? "scrollbar-thin scrollbar-thumb-white/10" : "scrollbar-thin scrollbar-thumb-black/10"
                 )}>
+                  {/* Remote Activity Indicator */}
+                  <RemoteActivityIndicator className="mb-2" />
+                  
                   {messages.map((message, index) => (
                     <EditableMessage
                       key={message.id}
@@ -1904,15 +1938,7 @@ export default function GlassChatPiP() {
           ? "top-4 -right-32" // Position to the right of the control buttons when collapsed
           : "top-16 right-4"   // Position below the header buttons when expanded
       )}>
-        <RemoteSettings
-          connected={allyRemote.connected}
-          status={allyRemote.status}
-          token={allyRemote.token}
-          error={allyRemote.error}
-          onConnect={allyRemote.connect}
-          onDisconnect={allyRemote.disconnect}
-          onUpdateServerUrl={allyRemote.updateServerUrl}
-        />
+        <RemoteSettings />
       </div>
 
       {/* Settings Modal */}
