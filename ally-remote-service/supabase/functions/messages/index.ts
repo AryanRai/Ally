@@ -6,6 +6,36 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
+// Rate limiting configuration
+const RATE_LIMITS = {
+  messagesPerMinute: 30,
+  messagesPerHour: 500
+}
+
+// In-memory rate limiting store (in production, use Redis or similar)
+const rateLimitStore = new Map<string, { count: number, resetTime: number }>()
+
+function checkRateLimit(userId: string, limitType: 'minute' | 'hour'): boolean {
+  const now = Date.now()
+  const key = `${userId}:${limitType}`
+  const windowMs = limitType === 'minute' ? 60 * 1000 : 60 * 60 * 1000
+  const limit = limitType === 'minute' ? RATE_LIMITS.messagesPerMinute : RATE_LIMITS.messagesPerHour
+  
+  const current = rateLimitStore.get(key)
+  
+  if (!current || now > current.resetTime) {
+    rateLimitStore.set(key, { count: 1, resetTime: now + windowMs })
+    return true
+  }
+  
+  if (current.count >= limit) {
+    return false
+  }
+  
+  current.count++
+  return true
+}
+
 serve(async (req) => {
   // Handle CORS preflight requests
   if (req.method === 'OPTIONS') {
@@ -48,12 +78,44 @@ serve(async (req) => {
 
     switch (method) {
       case 'POST': {
+        // Check rate limits
+        if (!checkRateLimit(user.id, 'minute')) {
+          return new Response(
+            JSON.stringify({ error: 'Rate limit exceeded: too many messages per minute' }),
+            { 
+              status: 429, 
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+            }
+          )
+        }
+        
+        if (!checkRateLimit(user.id, 'hour')) {
+          return new Response(
+            JSON.stringify({ error: 'Rate limit exceeded: too many messages per hour' }),
+            { 
+              status: 429, 
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+            }
+          )
+        }
+
         const { content, sessionId, metadata, localSystemId } = await req.json()
 
         // Validate input
         if (!content || content.trim().length === 0) {
           return new Response(
             JSON.stringify({ error: 'Message content is required' }),
+            { 
+              status: 400, 
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+            }
+          )
+        }
+
+        // Additional input validation
+        if (content.length > 10000) {
+          return new Response(
+            JSON.stringify({ error: 'Message content too long (max 10000 characters)' }),
             { 
               status: 400, 
               headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
