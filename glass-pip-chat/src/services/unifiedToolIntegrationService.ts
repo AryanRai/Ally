@@ -325,7 +325,7 @@ export class UnifiedToolIntegrationService extends BrowserEventEmitter {
     model?: string,
     onProgress?: (progress: ToolAwareProcessingProgress) => void
   ): Promise<any> {
-    if (!this.state.isInitialized || !this.toolAwareIntegrationService) {
+    if (!this.state.isInitialized) {
       throw new Error('Service not initialized');
     }
 
@@ -336,35 +336,343 @@ export class UnifiedToolIntegrationService extends BrowserEventEmitter {
       // Send ally_intent message to stream handler
       await this.sendAllyIntent(conversationId, newMessage);
       
-      // For now, use a simplified processing approach
-      // In a full implementation, this would use the tool-aware integration service
-      const result = {
-        response: `Processed: ${newMessage}`,
-        toolCalls: [],
-        toolResults: [],
-        conversationTurn: { turnId: `turn_${Date.now()}` },
-        toolExecutions: []
-      };
-      
-      // Execute any registered tools if the message matches
-      const toolResult = await this.executeRegisteredTools(newMessage);
-      if (toolResult) {
-        result.response = toolResult.response;
-        result.toolCalls = toolResult.toolCalls;
-        result.toolResults = toolResult.toolResults;
-      }
-      
-      this.state.systemStatus = 'idle';
-      this.emit('systemStatusChanged', 'idle');
-      
-      return result;
+      // Start with multi-turn conversation approach
+      return await this.processWithToolAwareConversation(
+        messages,
+        newMessage,
+        model || 'llama3.2:3b',
+        onProgress
+      );
       
     } catch (error) {
       this.state.systemStatus = 'error';
       this.state.lastError = error instanceof Error ? error.message : 'Processing error';
       this.emit('systemStatusChanged', 'error');
       throw error;
+    } finally {
+      this.state.systemStatus = 'idle';
+      this.emit('systemStatusChanged', 'idle');
     }
+  }
+
+  /**
+   * Process message with tool-aware conversation flow
+   */
+  private async processWithToolAwareConversation(
+    messages: Message[],
+    newMessage: string,
+    model: string,
+    onProgress?: (progress: ToolAwareProcessingProgress) => void
+  ): Promise<any> {
+    // Convert messages to ChatMessage format
+    let chatMessages = messages.map(msg => ({
+      role: msg.role as 'user' | 'assistant',
+      content: msg.content
+    }));
+    
+    // Add the new message with tool context
+    const toolPrompt = this.buildToolAwarePrompt(newMessage);
+    chatMessages.push({
+      role: 'user',
+      content: toolPrompt
+    });
+
+    let fullResponse = '';
+    let thinkingContent = '';
+    let allToolCalls: any[] = [];
+    let allToolResults: any[] = [];
+    let conversationComplete = false;
+    let turnCount = 0;
+    const maxTurns = 5; // Prevent infinite loops
+    let conversationParts: string[] = []; // Track conversation parts
+
+    while (!conversationComplete && turnCount < maxTurns) {
+      turnCount++;
+      
+      // Stream the AI's response
+      let currentResponse = '';
+      let currentThinking = '';
+      
+      await this.ollamaService.streamChatWithThinking(
+        chatMessages,
+        model,
+        async (chunk) => {
+          if (chunk.type === 'thinking') {
+            currentThinking = chunk.content;
+            thinkingContent = chunk.content;
+            onProgress?.({
+              type: 'thinking',
+              content: chunk.content,
+              thinking: chunk.content,
+              response: fullResponse,
+              isComplete: false
+            });
+          } else if (chunk.type === 'response') {
+            currentResponse = chunk.content;
+            
+            // Build the current turn response
+            currentResponse = chunk.content;
+            
+            onProgress?.({
+              type: 'response',
+              content: chunk.content,
+              thinking: thinkingContent,
+              response: chunk.content,
+              toolCalls: allToolCalls,
+              toolResults: allToolResults,
+              isComplete: false
+            });
+          } else if (chunk.type === 'done') {
+            currentResponse = chunk.content;
+          }
+        }
+      );
+
+      // After streaming completes, check if tools need to be called
+      const detectedToolCalls = this.detectToolCallsInResponse(currentResponse, newMessage);
+      
+      if (detectedToolCalls.length > 0) {
+        // Add current response to conversation parts
+        conversationParts.push(currentResponse);
+        fullResponse = conversationParts.join('\n\n');
+        
+        // Tools detected - execute them
+        onProgress?.({
+          type: 'tool_call',
+          content: 'Executing tools...',
+          thinking: thinkingContent,
+          response: fullResponse,
+          toolCalls: detectedToolCalls,
+          isComplete: false
+        });
+
+        // Execute tools
+        const toolResults = await this.executeToolsAsync(detectedToolCalls);
+        allToolCalls.push(...detectedToolCalls);
+        allToolResults.push(...toolResults);
+
+        onProgress?.({
+          type: 'tool_result',
+          content: 'Tool execution completed',
+          thinking: thinkingContent,
+          response: fullResponse,
+          toolCalls: allToolCalls,
+          toolResults: allToolResults,
+          isComplete: false
+        });
+
+        // Add the AI's response and tool results to conversation
+        chatMessages.push({
+          role: 'assistant',
+          content: currentResponse
+        });
+
+        // Add tool results as system message
+        const toolResultsText = toolResults.map(tr => 
+          `Tool ${tr.name} result: ${JSON.stringify(tr.result || tr.error)}`
+        ).join('\n');
+        
+        chatMessages.push({
+          role: 'user',
+          content: `Tool results:\n${toolResultsText}\n\nPlease continue your response incorporating these results.`
+        });
+
+        // Continue the conversation with tool results
+      } else {
+        // No tools detected - add final response and complete
+        conversationParts.push(currentResponse);
+        fullResponse = conversationParts.join('\n\n');
+        conversationComplete = true;
+      }
+    }
+
+    onProgress?.({
+      type: 'done',
+      content: fullResponse,
+      thinking: thinkingContent,
+      response: fullResponse,
+      toolCalls: allToolCalls,
+      toolResults: allToolResults,
+      isComplete: true
+    });
+
+    const result = {
+      response: fullResponse,
+      thinking: thinkingContent,
+      toolCalls: allToolCalls,
+      toolResults: allToolResults,
+      conversationTurn: { turnId: `turn_${Date.now()}` },
+      toolExecutions: []
+    };
+    
+    console.log('🔄 Unified integration returning:', { 
+      responseLength: fullResponse?.length, 
+      toolCallsCount: allToolCalls.length, 
+      toolResultsCount: allToolResults.length,
+      response: fullResponse?.substring(0, 100) + '...'
+    });
+    
+    return result;
+  }
+
+  /**
+   * Build tool-aware prompt that includes available tools
+   */
+  private buildToolAwarePrompt(message: string): string {
+    const availableTools = Array.from(this.registeredTools.keys());
+    
+    if (availableTools.length === 0) {
+      return message;
+    }
+
+    const toolDescriptions = availableTools.map(toolName => {
+      switch (toolName) {
+        case 'calculator':
+          return '- calculator: For mathematical calculations and expressions';
+        case 'current_time':
+          return '- current_time: For getting current date and time';
+        case 'weather':
+          return '- weather: For getting weather information for locations';
+        case 'system_info':
+          return '- system_info: For getting system and browser information';
+        default:
+          return `- ${toolName}: Available tool`;
+      }
+    }).join('\n');
+
+    return `You are an AI assistant with access to these tools:
+${toolDescriptions}
+
+When responding to the user, if you need to use any tools, mention it naturally in your response. For example:
+- "Let me calculate that for you..." (for math)
+- "I'll check the current time..." (for time)
+- "Let me get the weather information..." (for weather)
+- "I'll check your system information..." (for system info)
+
+After mentioning you'll use a tool, I will execute it and provide the results, then you can continue your response with the actual information.
+
+User: ${message}`;
+  }
+
+  /**
+   * Detect tool calls in streaming response
+   */
+  private detectToolCallsInResponse(response: string, originalMessage?: string): any[] {
+    const toolCalls: any[] = [];
+    const lowerResponse = response.toLowerCase();
+
+    // Look for specific phrases that indicate the AI wants to use tools
+    
+    // Calculator tool - look for intention phrases
+    if ((lowerResponse.includes('let me calculate') || 
+         lowerResponse.includes('i\'ll calculate') ||
+         lowerResponse.includes('let me compute') ||
+         lowerResponse.includes('i\'ll compute') ||
+         lowerResponse.includes('let me work out') ||
+         lowerResponse.includes('calculating') ||
+         (lowerResponse.includes('calculate') && lowerResponse.includes('for you'))) && 
+        !toolCalls.some(tc => tc.name === 'calculator')) {
+      
+      // Try to extract expression from the original message
+      const match = originalMessage?.match(/(\d+[\+\-\*\/\d\s\(\)\.]+)/) ||
+                   response.match(/(\d+[\+\-\*\/\d\s\(\)\.]+)/);
+      if (match) {
+        toolCalls.push({
+          name: 'calculator',
+          parameters: { expression: match[1].trim() }
+        });
+      } else {
+        // If no specific expression found, use a general one from the message
+        const simpleMatch = originalMessage?.match(/(\d+\s*[\+\-\*\/]\s*\d+)/);
+        if (simpleMatch) {
+          toolCalls.push({
+            name: 'calculator',
+            parameters: { expression: simpleMatch[1].trim() }
+          });
+        }
+      }
+    }
+
+    // Time tool - look for intention phrases
+    if ((lowerResponse.includes('let me check the time') || 
+         lowerResponse.includes('i\'ll check the time') ||
+         lowerResponse.includes('let me get the current time') ||
+         lowerResponse.includes('i\'ll get the current time') ||
+         lowerResponse.includes('checking the time') ||
+         (lowerResponse.includes('check') && lowerResponse.includes('time'))) && 
+        !toolCalls.some(tc => tc.name === 'current_time')) {
+      toolCalls.push({
+        name: 'current_time',
+        parameters: {}
+      });
+    }
+
+    // Weather tool - look for intention phrases
+    if ((lowerResponse.includes('let me get the weather') || 
+         lowerResponse.includes('i\'ll get the weather') ||
+         lowerResponse.includes('let me check the weather') ||
+         lowerResponse.includes('i\'ll check the weather') ||
+         lowerResponse.includes('getting weather information') ||
+         (lowerResponse.includes('get') && lowerResponse.includes('weather'))) && 
+        !toolCalls.some(tc => tc.name === 'weather')) {
+      
+      const locationMatch = response.match(/weather.*?(?:in|for)\s+([a-zA-Z\s]+)/i) ||
+                           originalMessage?.match(/weather.*?(?:in|for)\s+([a-zA-Z\s]+)/i) ||
+                           originalMessage?.match(/(?:in|for)\s+([a-zA-Z\s]+)/i);
+      const location = locationMatch ? locationMatch[1].trim() : 'current location';
+      toolCalls.push({
+        name: 'weather',
+        parameters: { location }
+      });
+    }
+
+    // System info tool - look for intention phrases
+    if ((lowerResponse.includes('let me check your system') || 
+         lowerResponse.includes('i\'ll check your system') ||
+         lowerResponse.includes('let me get system information') ||
+         lowerResponse.includes('i\'ll get system information') ||
+         lowerResponse.includes('checking system information') ||
+         (lowerResponse.includes('check') && lowerResponse.includes('system'))) && 
+        !toolCalls.some(tc => tc.name === 'system_info')) {
+      toolCalls.push({
+        name: 'system_info',
+        parameters: {}
+      });
+    }
+
+    return toolCalls;
+  }
+
+  /**
+   * Execute tools asynchronously without blocking
+   */
+  private async executeToolsAsync(toolCalls: any[]): Promise<any[]> {
+    return Promise.all(
+      toolCalls.map(async (toolCall) => {
+        const tool = this.registeredTools.get(toolCall.name);
+        if (tool) {
+          try {
+            const result = await tool(toolCall.parameters);
+            return {
+              name: toolCall.name,
+              result,
+              success: true
+            };
+          } catch (error) {
+            return {
+              name: toolCall.name,
+              error: error instanceof Error ? error.message : 'Unknown error',
+              success: false
+            };
+          }
+        }
+        return {
+          name: toolCall.name,
+          error: 'Tool not found',
+          success: false
+        };
+      })
+    );
   }
 
   /**

@@ -88,6 +88,14 @@ export default function GlassChatPiP() {
           }
         });
         return response;
+      },
+      streamChatWithThinking: async (messages: any[], model: string, onProgress: (chunk: any) => void) => {
+        const chatHistory = messages.map(msg => ({
+          role: msg.role as 'user' | 'assistant',
+          content: msg.content
+        }));
+        
+        return await window.pip.ollama.streamChatWithThinking(chatHistory, model, onProgress);
       }
     };
   }, []);
@@ -343,47 +351,69 @@ export default function GlassChatPiP() {
           contextualContent,
           {
             model: ollamaIntegration.currentModel || 'llama3.2:3b',
-            onProgress: (progress) => {
-              let responseContent = '';
-              
-              if (progress.type === 'thinking') {
-                responseContent = `💭 **Thinking...**\n\n${progress.thinking || ''}${progress.thinking?.endsWith('.') || progress.thinking?.endsWith('!') || progress.thinking?.endsWith('?') ? '' : '▋'}`;
-              } else if (progress.type === 'tool_call') {
-                responseContent = `🔧 **Using Tools...**\n\n${progress.toolCalls?.map(tc => `• ${tc.name}`).join('\n') || ''}`;
-              } else if (progress.type === 'tool_execution') {
-                responseContent = `⚙️ **Executing Tools...**\n\n${progress.toolCalls?.map(tc => `• ${tc.name}: Running...`).join('\n') || ''}`;
-              } else if (progress.type === 'tool_result') {
-                responseContent = `✅ **Tool Results:**\n\n${progress.toolResults?.map(tr => `• ${tr.toolName}: ${tr.success ? 'Success' : 'Failed'}`).join('\n') || ''}`;
-              } else if (progress.type === 'response') {
-                if (progress.thinking) {
-                  responseContent = `💭 **Thought Process:**\n\n${progress.thinking}\n\n---\n\n**Answer:**\n\n${progress.response}${progress.response?.endsWith('.') || progress.response?.endsWith('!') || progress.response?.endsWith('?') ? '' : '▋'}`;
-                } else {
-                  responseContent = `${progress.response}${progress.response?.endsWith('.') || progress.response?.endsWith('!') || progress.response?.endsWith('?') ? '' : '▋'}`;
-                }
+            onProgress: (() => {
+              let lastSentenceIndex = 0;
+              let accumulatedResponse = '';
 
-                // Stream TTS for new sentences if voice mode is enabled
-                if (voiceModeEnabled && progress.response) {
-                  const sentences = progress.response.split(/(?<=[.!?])\s+/);
-                  sentences.forEach((sentence, index) => {
-                    if (sentence.trim() && sentence.length > 3) {
-                      setTimeout(() => {
-                        speechService.synthesizeSpeechStreaming(sentence.trim()).catch(error => {
-                          console.error('Error in streaming TTS:', error);
-                        });
-                      }, index * 100);
+              return (progress) => {
+                let responseContent = '';
+                
+                if (progress.type === 'thinking') {
+                  responseContent = `💭 **Thinking...**\n\n${progress.thinking || ''}${progress.thinking?.endsWith('.') || progress.thinking?.endsWith('!') || progress.thinking?.endsWith('?') ? '' : '▋'}`;
+                } else if (progress.type === 'tool_call') {
+                  responseContent = `🔧 **Using Tools...**\n\n${progress.toolCalls?.map(tc => `• ${tc.name}`).join('\n') || ''}`;
+                } else if (progress.type === 'tool_execution') {
+                  responseContent = `⚙️ **Executing Tools...**\n\n${progress.toolCalls?.map(tc => `• ${tc.name}: Running...`).join('\n') || ''}`;
+                } else if (progress.type === 'tool_result') {
+                  responseContent = `✅ **Tool Results:**\n\n${progress.toolResults?.map(tr => `• ${tr.toolName}: ${tr.success ? 'Success' : 'Failed'}`).join('\n') || ''}`;
+                } else if (progress.type === 'response') {
+                  if (progress.thinking) {
+                    responseContent = `💭 **Thought Process:**\n\n${progress.thinking}\n\n---\n\n**Answer:**\n\n${progress.response}${progress.response?.endsWith('.') || progress.response?.endsWith('!') || progress.response?.endsWith('?') ? '' : '▋'}`;
+                  } else {
+                    responseContent = `${progress.response}${progress.response?.endsWith('.') || progress.response?.endsWith('!') || progress.response?.endsWith('?') ? '' : '▋'}`;
+                  }
+
+                  // Stream TTS for new sentences if voice mode is enabled
+                  // Use the same logic as the working Ollama integration
+                  if (voiceModeEnabled && progress.response) {
+                    accumulatedResponse = progress.response;
+                    const sentences = accumulatedResponse.split(/(?<=[.!?])\s+/);
+
+                    // Check if we have new complete sentences to speak
+                    if (sentences.length > lastSentenceIndex + 1) {
+                      for (let i = lastSentenceIndex; i < sentences.length - 1; i++) {
+                        const sentence = sentences[i].trim();
+                        if (sentence && sentence.length > 3) {
+                          speechService.synthesizeSpeechStreaming(sentence).catch(error => {
+                            console.error('Error in unified integration streaming TTS:', error);
+                          });
+                        }
+                      }
+                      lastSentenceIndex = sentences.length - 1;
                     }
-                  });
-                }
-              } else if (progress.type === 'done') {
-                if (progress.thinking) {
-                  responseContent = `💭 **Thought Process:**\n\n${progress.thinking}\n\n---\n\n**Answer:**\n\n${progress.response}`;
-                } else {
-                  responseContent = progress.response || '';
-                }
-              }
+                  }
+                } else if (progress.type === 'done') {
+                  if (progress.thinking) {
+                    responseContent = `💭 **Thought Process:**\n\n${progress.thinking}\n\n---\n\n**Answer:**\n\n${progress.response}`;
+                  } else {
+                    responseContent = progress.response || '';
+                  }
 
-              setCurrentResponse(responseContent);
-            },
+                  // Speak any remaining incomplete sentence
+                  if (voiceModeEnabled && accumulatedResponse) {
+                    const sentences = accumulatedResponse.split(/(?<=[.!?])\s+/);
+                    const lastSentence = sentences[sentences.length - 1]?.trim();
+                    if (lastSentence && lastSentence.length > 3 && !lastSentence.match(/[.!?]$/)) {
+                      speechService.synthesizeSpeechStreaming(lastSentence).catch(error => {
+                        console.error('Error in final unified integration streaming TTS:', error);
+                      });
+                    }
+                  }
+                }
+
+                setCurrentResponse(responseContent);
+              };
+            })(),
             onToolExecution: (executionId, toolName) => {
               console.log(`🔧 Tool execution started: ${toolName} (${executionId})`);
             },
@@ -397,6 +427,7 @@ export default function GlassChatPiP() {
         );
 
         response = result.response;
+        console.log('🎯 Unified integration result:', { response: result.response, toolCalls: result.toolCalls?.length, toolResults: result.toolResults?.length });
       } else {
         // Use standard Ollama integration when tools are disabled
         const messages = activeChat?.messages.map(msg => ({
@@ -494,6 +525,7 @@ export default function GlassChatPiP() {
         }
       }
 
+      console.log('💾 Final response check:', { hasResponse: !!response, responseLength: response?.length });
       if (response) {
         // Create assistant message only after streaming is complete
         const assistantMessage: Message = {

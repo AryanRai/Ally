@@ -138,6 +138,8 @@ export function useUnifiedToolIntegration(
         console.log('Ally status received:', status);
       });
 
+
+
       // Initialize the service
       await service.initialize();
 

@@ -37,6 +37,8 @@ export interface ToolAwareProcessingResult {
 export interface ToolAwareProcessingProgress {
   type: 'thinking' | 'tool_call' | 'tool_execution' | 'tool_result' | 'response' | 'done';
   content: string;
+  thinking?: string;
+  response?: string;
   toolCalls?: ToolCall[];
   toolResults?: ToolCallResult[];
   turn?: ConversationTurn;
