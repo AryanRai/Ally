@@ -1,10 +1,16 @@
 import { useEffect, useState } from 'react';
 import GlassChatPiP from './components/GlassChatPiP';
 import { UnifiedIntegrationTest } from './components/UnifiedIntegrationTest';
+import { GrammarlyFix, suppressExtensionWarnings } from './components/GrammarlyFix';
 
 export default function App() {
   const [visible, setVisible] = useState(true);
   const [showIntegrationTest, setShowIntegrationTest] = useState(false);
+
+  // Suppress extension warnings on app start
+  useEffect(() => {
+    suppressExtensionWarnings();
+  }, []);
 
   useEffect(() => {
     // Handle Escape key to hide window
@@ -64,9 +70,8 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-transparent">
+      <GrammarlyFix />
       {visible && <GlassChatPiP />}
-      
-
     </div>
   );
 }

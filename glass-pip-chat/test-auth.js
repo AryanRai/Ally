@@ -1,6 +1,6 @@
 /**
- * Simple authentication test script
- * Run this to test Supabase authentication and create a test user
+ * Comprehensive authentication test script
+ * Run this to test Supabase authentication and fix common issues
  */
 
 import { createClient } from '@supabase/supabase-js';
@@ -8,56 +8,100 @@ import { createClient } from '@supabase/supabase-js';
 const supabaseUrl = 'https://delzfrzfwhycdzozxwgp.supabase.co';
 const supabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRlbHpmcnpmd2h5Y2R6b3p4d2dwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTcxNjE2NjQsImV4cCI6MjA3MjczNzY2NH0.aWqbefKFuWZHXbmgjp-a0_QoD17PBrxlIDH_hoIYd9g';
 
-const supabase = createClient(supabaseUrl, supabaseAnonKey);
+// Create client with improved configuration
+const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+  auth: {
+    autoRefreshToken: true,
+    persistSession: true,
+    detectSessionInUrl: true,
+    flowType: 'pkce'
+  }
+});
+
+async function clearCorruptedSession() {
+  console.log('🧹 Clearing potentially corrupted session data...');
+  
+  try {
+    // Sign out to clear any corrupted session
+    await supabase.auth.signOut({ scope: 'local' });
+    console.log('✅ Session cleared');
+    return true;
+  } catch (error) {
+    console.warn('⚠️ Error clearing session:', error.message);
+    return false;
+  }
+}
 
 async function testAuth() {
-  console.log('🔐 Testing Supabase Authentication...');
+  console.log('🔐 Starting comprehensive authentication test...');
 
   const testEmail = 'buzzaryanrai@gmail.com';
   const testPassword = 'Aryanrai@2000';
 
   try {
-    // Try to sign up first
-    console.log('📝 Attempting to create test user...');
-    const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
+    // Step 1: Clear any corrupted session
+    await clearCorruptedSession();
+
+    // Step 2: Check current session status
+    console.log('🔍 Checking current session status...');
+    const { data: { session: currentSession }, error: sessionError } = await supabase.auth.getSession();
+    
+    if (sessionError) {
+      console.warn('⚠️ Session check error:', sessionError.message);
+      
+      if (sessionError.message.includes('refresh_token_not_found') || 
+          sessionError.message.includes('Invalid Refresh Token')) {
+        console.log('🔄 Detected refresh token issue, clearing session...');
+        await supabase.auth.signOut({ scope: 'local' });
+      }
+    } else if (currentSession) {
+      console.log('✅ Found existing valid session');
+      console.log('User ID:', currentSession.user?.id);
+      console.log('Expires at:', new Date(currentSession.expires_at * 1000));
+    }
+
+    // Step 3: Try to sign in
+    console.log('� Attemptaing to sign in...');
+    const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
       email: testEmail,
       password: testPassword
     });
 
-    if (signUpError) {
-      if (signUpError.message.includes('already registered')) {
-        console.log('✅ User already exists, trying to sign in...');
-
-        // Try to sign in
-        const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
+    if (signInError) {
+      if (signInError.message.includes('Invalid login credentials')) {
+        console.log('📝 User may not exist, attempting to create...');
+        
+        const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
           email: testEmail,
           password: testPassword
         });
 
-        if (signInError) {
-          console.error('❌ Sign in failed:', signInError.message);
-          return;
+        if (signUpError) {
+          console.error('❌ Sign up failed:', signUpError.message);
+          return false;
         }
 
-        console.log('✅ Sign in successful!');
-        console.log('User ID:', signInData.user?.id);
-        console.log('Email:', signInData.user?.email);
-
+        console.log('✅ User created successfully!');
+        console.log('User ID:', signUpData.user?.id);
+        
+        if (signUpData.user && !signUpData.session) {
+          console.log('📧 Please check your email to confirm your account');
+          console.log('💡 You may need to confirm your email before signing in');
+        }
+        
+        return true;
       } else {
-        console.error('❌ Sign up failed:', signUpError.message);
-        return;
-      }
-    } else {
-      console.log('✅ Sign up successful!');
-      console.log('User ID:', signUpData.user?.id);
-      console.log('Email:', signUpData.user?.email);
-
-      if (signUpData.user && !signUpData.session) {
-        console.log('📧 Please check your email to confirm your account');
+        console.error('❌ Sign in failed:', signInError.message);
+        return false;
       }
     }
 
-    // Test connection to database
+    console.log('✅ Sign in successful!');
+    console.log('User ID:', signInData.user?.id);
+    console.log('Email:', signInData.user?.email);
+    console.log('Session expires at:', new Date(signInData.session?.expires_at * 1000));
+
+    // Step 4: Test database connection
     console.log('🗄️ Testing database connection...');
     const { data: systems, error: dbError } = await supabase
       .from('local_systems')
@@ -66,13 +110,34 @@ async function testAuth() {
 
     if (dbError) {
       console.error('❌ Database connection failed:', dbError.message);
-    } else {
-      console.log('✅ Database connection successful!');
-      console.log('Found systems:', systems?.length || 0);
+      console.log('💡 This might be a Row Level Security (RLS) issue');
+      return false;
     }
 
+    console.log('✅ Database connection successful!');
+    console.log('Found systems:', systems?.length || 0);
+
+    // Step 5: Test session persistence
+    console.log('🔄 Testing session persistence...');
+    const { data: { session: persistedSession }, error: persistError } = await supabase.auth.getSession();
+    
+    if (persistError) {
+      console.error('❌ Session persistence failed:', persistError.message);
+      return false;
+    }
+
+    if (!persistedSession) {
+      console.error('❌ Session not persisted');
+      return false;
+    }
+
+    console.log('✅ Session persistence working correctly');
+    
+    return true;
+
   } catch (error) {
-    console.error('❌ Test failed:', error.message);
+    console.error('💥 Test failed with exception:', error.message);
+    return false;
   }
 }
 

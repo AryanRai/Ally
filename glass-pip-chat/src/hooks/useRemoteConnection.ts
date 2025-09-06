@@ -7,8 +7,8 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { remoteServiceManager, RemoteServiceStatus } from '../services/remoteServiceManager';
-import { createClient, SupabaseClient, User } from '@supabase/supabase-js';
-import { env } from '../utils/env';
+import { SupabaseClient, User } from '@supabase/supabase-js';
+import { getSupabaseClient } from '../utils/supabase';
 
 export interface RemoteConnectionState {
   mode: 'local' | 'remote';
@@ -45,36 +45,70 @@ export function useRemoteConnection(): RemoteConnectionState & RemoteConnectionA
 
   // Initialize Supabase client
   useEffect(() => {
-    const supabaseUrl = env.SUPABASE_URL;
-    const supabaseAnonKey = env.SUPABASE_ANON_KEY;
+    const client = getSupabaseClient();
+    setSupabaseClient(client);
 
-    if (supabaseUrl && supabaseAnonKey) {
-      const client = createClient(supabaseUrl, supabaseAnonKey);
-      setSupabaseClient(client);
-
-      // Check for existing session
-      client.auth.getSession().then(({ data: { session } }) => {
+    // Check for existing session with error handling
+    const checkSession = async () => {
+      try {
+        const { data: { session }, error } = await client.auth.getSession();
+        
+        if (error) {
+          console.warn('Session check error:', error.message);
+          
+          // Handle refresh token errors
+          if (error.message.includes('refresh_token_not_found') || 
+              error.message.includes('Invalid Refresh Token')) {
+            console.log('Clearing invalid session...');
+            await client.auth.signOut({ scope: 'local' });
+            setState(prev => ({
+              ...prev,
+              isAuthenticated: false,
+              user: null,
+              connectionError: 'Session expired. Please sign in again.'
+            }));
+            return;
+          }
+        }
+        
         if (session?.user) {
           setState(prev => ({
             ...prev,
             isAuthenticated: true,
-            user: session.user
+            user: session.user,
+            connectionError: null
           }));
         }
-      });
-
-      // Listen for auth changes
-      const { data: { subscription } } = client.auth.onAuthStateChange((event, session) => {
+      } catch (error) {
+        console.error('Session check failed:', error);
         setState(prev => ({
           ...prev,
-          isAuthenticated: !!session?.user,
-          user: session?.user || null,
-          connectionError: event === 'SIGNED_OUT' ? null : prev.connectionError
+          connectionError: 'Failed to check authentication status'
         }));
-      });
+      }
+    };
 
-      return () => subscription.unsubscribe();
-    }
+    checkSession();
+
+    // Listen for auth changes
+    const { data: { subscription } } = client.auth.onAuthStateChange(async (event, session) => {
+      console.log('Auth state changed:', event);
+      
+      setState(prev => ({
+        ...prev,
+        isAuthenticated: !!session?.user,
+        user: session?.user || null,
+        connectionError: event === 'SIGNED_OUT' ? null : prev.connectionError
+      }));
+      
+      // Handle token refresh errors
+      if (event === 'TOKEN_REFRESHED' && !session) {
+        console.warn('Token refresh failed, signing out...');
+        await client.auth.signOut({ scope: 'local' });
+      }
+    });
+
+    return () => subscription.unsubscribe();
   }, []);
 
   // Monitor service status when in remote mode

@@ -7,7 +7,8 @@
  * Provides error handling and recovery mechanisms
  */
 
-import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import { SupabaseClient } from '@supabase/supabase-js';
+import { getSupabaseServiceClient } from '../utils/supabase';
 
 export interface StreamingConfig {
   supabaseUrl: string;
@@ -44,16 +45,7 @@ export class ResponseStreamer {
 
   constructor(config: StreamingConfig) {
     this.config = config;
-    this.supabaseClient = createClient(
-      config.supabaseUrl,
-      config.supabaseServiceKey,
-      {
-        auth: {
-          autoRefreshToken: false,
-          persistSession: false
-        }
-      }
-    );
+    this.supabaseClient = getSupabaseServiceClient();
   }
 
   /**

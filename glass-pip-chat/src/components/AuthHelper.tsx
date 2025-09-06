@@ -4,17 +4,31 @@
  * Provides easy authentication setup for development and testing
  */
 
-import React, { useState } from 'react';
-import { createClient } from '@supabase/supabase-js';
-import { env } from '../utils/env';
+import React, { useState, useEffect } from 'react';
+import { getSupabaseClient } from '../utils/supabase';
+import { testAuthHealth, clearCorruptedAuth, recoverAuth, autoFixAuth } from '../utils/authFixer';
 
 export const AuthHelper: React.FC = () => {
-  const [email, setEmail] = useState('test@example.com');
-  const [password, setPassword] = useState('test123456');
+  const [email, setEmail] = useState('test@ally-demo.local');
+  const [password, setPassword] = useState('demo123456');
   const [result, setResult] = useState<string>('');
   const [isLoading, setIsLoading] = useState(false);
+  const [healthStatus, setHealthStatus] = useState<string>('');
 
-  const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_ANON_KEY);
+  const supabase = getSupabaseClient();
+
+  // Check auth health on component mount
+  useEffect(() => {
+    const checkHealth = async () => {
+      const health = await testAuthHealth();
+      setHealthStatus(health.success ? 
+        (health.details?.authenticated ? '✅ Authenticated' : '⚪ Ready for login') :
+        `❌ ${health.message}`
+      );
+    };
+    
+    checkHealth();
+  }, []);
 
   const handleSignUp = async () => {
     setIsLoading(true);
@@ -43,15 +57,19 @@ export const AuthHelper: React.FC = () => {
     setResult('Signing in...');
 
     try {
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email,
-        password
-      });
-
-      if (error) {
-        setResult(`❌ Sign in failed: ${error.message}`);
+      const result = await recoverAuth(email, password);
+      
+      if (result.success) {
+        setResult(`✅ ${result.message}\n${result.details?.userId ? `User ID: ${result.details.userId}` : ''}\n🎉 You can now use remote mode!`);
+        
+        // Update health status
+        const health = await testAuthHealth();
+        setHealthStatus(health.success ? 
+          (health.details?.authenticated ? '✅ Authenticated' : '⚪ Ready for login') :
+          `❌ ${health.message}`
+        );
       } else {
-        setResult(`✅ Signed in successfully! User ID: ${data.user?.id}\n🎉 You can now use remote mode!`);
+        setResult(`❌ ${result.message}`);
       }
     } catch (error) {
       setResult(`❌ Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
@@ -62,19 +80,57 @@ export const AuthHelper: React.FC = () => {
 
   const handleTestConnection = async () => {
     setIsLoading(true);
-    setResult('Testing database connection...');
+    setResult('Testing authentication health...');
 
     try {
-      const { data, error } = await supabase
-        .from('local_systems')
-        .select('*')
-        .limit(1);
+      const health = await testAuthHealth();
+      setResult(`${health.success ? '✅' : '❌'} ${health.message}\n${JSON.stringify(health.details, null, 2)}`);
+      setHealthStatus(health.success ? 
+        (health.details?.authenticated ? '✅ Authenticated' : '⚪ Ready for login') :
+        `❌ ${health.message}`
+      );
+    } catch (error) {
+      setResult(`❌ Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
-      if (error) {
-        setResult(`❌ Database test failed: ${error.message}`);
-      } else {
-        setResult(`✅ Database connection successful!\nFound ${data?.length || 0} systems`);
-      }
+  const handleAutoFix = async () => {
+    setIsLoading(true);
+    setResult('Running auto-fix...');
+
+    try {
+      const fixResult = await autoFixAuth();
+      setResult(`${fixResult.success ? '✅' : '❌'} ${fixResult.message}\n${JSON.stringify(fixResult.details, null, 2)}`);
+      
+      // Update health status
+      const health = await testAuthHealth();
+      setHealthStatus(health.success ? 
+        (health.details?.authenticated ? '✅ Authenticated' : '⚪ Ready for login') :
+        `❌ ${health.message}`
+      );
+    } catch (error) {
+      setResult(`❌ Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleClearAuth = async () => {
+    setIsLoading(true);
+    setResult('Clearing authentication data...');
+
+    try {
+      const clearResult = await clearCorruptedAuth();
+      setResult(`${clearResult.success ? '✅' : '❌'} ${clearResult.message}`);
+      
+      // Update health status
+      const health = await testAuthHealth();
+      setHealthStatus(health.success ? 
+        (health.details?.authenticated ? '✅ Authenticated' : '⚪ Ready for login') :
+        `❌ ${health.message}`
+      );
     } catch (error) {
       setResult(`❌ Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
     } finally {
@@ -84,7 +140,12 @@ export const AuthHelper: React.FC = () => {
 
   return (
     <div className="p-4 bg-gray-800 rounded-lg space-y-4">
-      <h3 className="text-white font-bold">Authentication Helper</h3>
+      <div className="flex justify-between items-center">
+        <h3 className="text-white font-bold">Authentication Helper</h3>
+        <div className="text-sm px-2 py-1 rounded bg-gray-700">
+          {healthStatus}
+        </div>
+      </div>
       
       <div className="space-y-2">
         <input
@@ -103,27 +164,41 @@ export const AuthHelper: React.FC = () => {
         />
       </div>
 
-      <div className="flex gap-2">
+      <div className="grid grid-cols-2 gap-2">
         <button
           onClick={handleSignUp}
           disabled={isLoading}
-          className="px-3 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
+          className="px-3 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 text-sm"
         >
           Sign Up
         </button>
         <button
           onClick={handleSignIn}
           disabled={isLoading}
-          className="px-3 py-2 bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-50"
+          className="px-3 py-2 bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-50 text-sm"
         >
           Sign In
         </button>
         <button
+          onClick={handleAutoFix}
+          disabled={isLoading}
+          className="px-3 py-2 bg-orange-600 text-white rounded hover:bg-orange-700 disabled:opacity-50 text-sm"
+        >
+          Auto Fix
+        </button>
+        <button
           onClick={handleTestConnection}
           disabled={isLoading}
-          className="px-3 py-2 bg-purple-600 text-white rounded hover:bg-purple-700 disabled:opacity-50"
+          className="px-3 py-2 bg-purple-600 text-white rounded hover:bg-purple-700 disabled:opacity-50 text-sm"
         >
-          Test DB
+          Test Health
+        </button>
+        <button
+          onClick={handleClearAuth}
+          disabled={isLoading}
+          className="px-3 py-2 bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-50 text-sm col-span-2"
+        >
+          Clear Auth Data
         </button>
       </div>
 
@@ -135,10 +210,10 @@ export const AuthHelper: React.FC = () => {
 
       <div className="text-xs text-gray-400">
         <p><strong>Quick Setup:</strong></p>
-        <p>1. Use the default credentials or enter your own</p>
-        <p>2. Click "Sign Up" to create an account</p>
-        <p>3. Click "Sign In" to authenticate</p>
-        <p>4. Use "Test DB" to verify database connection</p>
+        <p>1. Click "Auto Fix" to resolve common issues</p>
+        <p>2. Use "Sign In" to authenticate (creates account if needed)</p>
+        <p>3. Use "Test Health" to verify everything works</p>
+        <p>4. Use "Clear Auth Data" if you have persistent issues</p>
       </div>
     </div>
   );

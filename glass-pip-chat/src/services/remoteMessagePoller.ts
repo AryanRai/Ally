@@ -7,10 +7,11 @@
  * Handles message fetching with proper filtering and error handling
  */
 
-import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import { SupabaseClient } from '@supabase/supabase-js';
 import { OllamaService, ChatMessage } from './ollamaService';
 import { ToolCallingService } from './toolCallingService';
 import { RemoteMessageProcessor, ProcessMessageRequest } from './remoteMessageProcessor';
+import { getSupabaseServiceClient } from '../utils/supabase';
 
 export interface RemoteMessage {
   id: string;
@@ -81,17 +82,7 @@ export class RemoteMessagePoller {
   ) {
     this.config = config;
     this.messageProcessor = new RemoteMessageProcessor(ollamaService, toolCallingService);
-    
-    this.supabaseClient = createClient(
-      config.supabaseUrl,
-      config.supabaseServiceKey,
-      {
-        auth: {
-          autoRefreshToken: false,
-          persistSession: false
-        }
-      }
-    );
+    this.supabaseClient = getSupabaseServiceClient();
   }
 
   /**
@@ -168,8 +159,8 @@ export class RemoteMessagePoller {
       },
       metadata: {
         version: '1.0.0',
-        platform: process.platform,
-        nodeVersion: process.version
+        platform: 'browser',
+        nodeVersion: 'browser'
       },
       last_heartbeat: new Date().toISOString()
     };
