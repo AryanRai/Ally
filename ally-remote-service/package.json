@@ -1,0 +1,38 @@
+{
+  "name": "ally-remote-service",
+  "version": "1.0.0",
+  "description": "Remote Chat API service for Ally - enables web-based interaction with local Ally system",
+  "main": "index.js",
+  "scripts": {
+    "test": "node test-setup.js",
+    "db:push": "npx supabase db push",
+    "db:pull": "npx supabase db pull",
+    "functions:deploy": "npx supabase functions deploy",
+    "functions:deploy:auth": "npx supabase functions deploy auth",
+    "functions:deploy:messages": "npx supabase functions deploy messages",
+    "functions:deploy:stream": "npx supabase functions deploy stream",
+    "functions:deploy:systems": "npx supabase functions deploy systems",
+    "dev": "npx supabase start",
+    "stop": "npx supabase stop"
+  },
+  "keywords": [
+    "ally",
+    "remote",
+    "chat",
+    "api",
+    "supabase",
+    "ai",
+    "assistant"
+  ],
+  "author": "Ally Team",
+  "license": "MIT",
+  "dependencies": {
+    "@supabase/supabase-js": "^2.39.0"
+  },
+  "devDependencies": {
+    "supabase": "^1.200.3"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
