@@ -317,30 +317,36 @@ export default function GlassChatPiP() {
       setHistoryIndex(-1);
     }
 
+    // Get context if enabled
+    let contextualContent = textToSend;
+    let contextData: string | undefined;
+    if (contextMonitoring.includeContextInMessage && contextMonitoring.contextData.clipboard) {
+      contextData = contextMonitoring.contextData.clipboard;
+      contextualContent = `Context: ${contextData}\n\nUser: ${textToSend}`;
+      contextMonitoring.clearNewContextFlag();
+    }
+
     // Create user message
     const userMessage: Message = {
       id: `user-${Date.now()}`,
       role: 'user',
       content: textToSend,
       timestamp: Date.now(),
-      metadata: messageText ? { source: 'speech' } : undefined
+      metadata: {
+        source: messageText ? 'speech' : 'text',
+        context: contextData
+      }
     };
 
     // Add user message to chat
     addMessageToActiveChat(userMessage);
-
-    // Get context if enabled
-    let contextualContent = textToSend;
-    if (contextMonitoring.includeContextInMessage && contextMonitoring.contextData.clipboard) {
-      contextualContent = `Context: ${contextMonitoring.contextData.clipboard}\n\nUser: ${textToSend}`;
-      contextMonitoring.clearNewContextFlag();
-    }
 
     setIsTyping(true);
     setCurrentResponse('');
 
     try {
       let response: string;
+      let toolMetadata: any = undefined;
 
       if (toolsEnabled && unifiedIntegration.isReady()) {
         // Use unified tool integration when tools are enabled
@@ -427,6 +433,20 @@ export default function GlassChatPiP() {
         );
 
         response = result.response;
+        
+        // Store tool metadata for the assistant message
+        toolMetadata = {
+          toolCalls: result.toolCalls?.map((tc: any) => ({
+            name: tc.name,
+            parameters: tc.parameters || {}
+          })) || [],
+          toolResults: result.toolResults?.map((tr: any) => ({
+            name: tr.name,
+            result: tr.result,
+            error: tr.error,
+            success: tr.success !== false
+          })) || []
+        };
       } else {
         // Use standard Ollama integration when tools are disabled
         const messages = activeChat?.messages.map(msg => ({
@@ -461,6 +481,20 @@ export default function GlassChatPiP() {
             }
           );
           response = toolResult.response;
+          
+          // Store tool metadata for the assistant message (legacy tool calling)
+          toolMetadata = {
+            toolCalls: toolResult.toolCalls?.map((tc: any) => ({
+              name: tc.name,
+              parameters: tc.parameters || {}
+            })) || [],
+            toolResults: toolResult.toolResults?.map((tr: any) => ({
+              name: tr.name,
+              result: tr.result,
+              error: tr.error,
+              success: !tr.error
+            })) || []
+          };
         } else {
           response = await ollamaIntegration.sendMessageToOllama(
             activeChat?.messages || [],
@@ -530,7 +564,8 @@ export default function GlassChatPiP() {
           id: `assistant-${Date.now()}`,
           role: 'assistant',
           content: response,
-          timestamp: Date.now()
+          timestamp: Date.now(),
+          metadata: toolMetadata && (toolMetadata.toolCalls.length > 0 || toolMetadata.toolResults.length > 0) ? toolMetadata : undefined
         };
 
         addMessageToActiveChat(assistantMessage);

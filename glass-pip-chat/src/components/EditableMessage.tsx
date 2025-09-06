@@ -18,6 +18,7 @@ import {
 import { cn } from '../lib/utils';
 import { Message } from '../types/chat';
 import { UISettings } from '../types/settings';
+import MessageMetadata from './chat/MessageMetadata';
 
 interface EditableMessageProps {
   message: Message;
@@ -514,6 +515,15 @@ export default function EditableMessage({
               )}
             >
               {renderMessageContent(message.content)}
+              
+              {/* Message Metadata (Tool Calls and Context) */}
+              <MessageMetadata
+                platform={platform}
+                theme={theme}
+                context={message.metadata?.context}
+                toolCalls={message.metadata?.toolCalls}
+                toolResults={message.metadata?.toolResults}
+              />
             </motion.div>
           )}
         </AnimatePresence>
