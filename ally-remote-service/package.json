@@ -2,8 +2,12 @@
   "name": "ally-remote-service",
   "version": "1.0.0",
   "description": "Remote Chat API service for Ally - enables web-based interaction with local Ally system",
-  "main": "index.js",
+  "private": true,
   "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
     "test": "node test-setup.js",
     "db:push": "npx supabase db push",
     "db:pull": "npx supabase db pull",
@@ -12,8 +16,8 @@
     "functions:deploy:messages": "npx supabase functions deploy messages",
     "functions:deploy:stream": "npx supabase functions deploy stream",
     "functions:deploy:systems": "npx supabase functions deploy systems",
-    "dev": "npx supabase start",
-    "stop": "npx supabase stop"
+    "supabase:start": "npx supabase start",
+    "supabase:stop": "npx supabase stop"
   },
   "keywords": [
     "ally",
@@ -22,16 +26,33 @@
     "api",
     "supabase",
     "ai",
-    "assistant"
+    "assistant",
+    "nextjs",
+    "react"
   ],
   "author": "Ally Team",
   "license": "MIT",
   "dependencies": {
+    "@supabase/ssr": "^0.7.0",
     "@supabase/supabase-js": "^2.57.2",
-    "dotenv": "^17.2.2"
+    "dotenv": "^17.2.2",
+    "framer-motion": "^11.11.7",
+    "lucide-react": "^0.451.0",
+    "next": "14.2.15",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
   },
   "devDependencies": {
-    "supabase": "^1.200.3"
+    "@types/node": "^22.7.4",
+    "@types/react": "^18.3.11",
+    "@types/react-dom": "^18.3.0",
+    "autoprefixer": "^10.4.20",
+    "eslint": "^8.57.1",
+    "eslint-config-next": "14.2.15",
+    "postcss": "^8.4.47",
+    "supabase": "^1.200.3",
+    "tailwindcss": "^3.4.13",
+    "typescript": "^5.6.2"
   },
   "engines": {
     "node": ">=18.0.0"
