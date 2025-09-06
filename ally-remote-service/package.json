@@ -27,7 +27,8 @@
   "author": "Ally Team",
   "license": "MIT",
   "dependencies": {
-    "@supabase/supabase-js": "^2.39.0"
+    "@supabase/supabase-js": "^2.57.2",
+    "dotenv": "^17.2.2"
   },
   "devDependencies": {
     "supabase": "^1.200.3"
