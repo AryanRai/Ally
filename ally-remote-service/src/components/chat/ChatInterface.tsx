@@ -36,22 +36,29 @@ export function ChatInterface() {
   }, [messages]);
 
   const handleSendMessage = async (content: string) => {
+    console.log('🚀 ChatInterface: handleSendMessage called with content:', content);
+    
     try {
       setIsTyping(true);
       
       let sessionId = currentSession?.id;
+      console.log('📋 ChatInterface: Current session ID:', sessionId);
       
       // Create new session if none exists
       if (!sessionId) {
+        console.log('➕ ChatInterface: Creating new session...');
         const newSession = await createSession(
           content.length > 50 ? content.substring(0, 50) + '...' : content
         );
         sessionId = newSession.id;
+        console.log('✅ ChatInterface: New session created:', sessionId);
       }
 
-      await sendMessage(content, sessionId);
+      console.log('📤 ChatInterface: Sending message to session:', sessionId);
+      const result = await sendMessage(content, sessionId);
+      console.log('✅ ChatInterface: Message sent successfully:', result);
     } catch (error) {
-      console.error('Failed to send message:', error);
+      console.error('❌ ChatInterface: Failed to send message:', error);
     } finally {
       setIsTyping(false);
     }

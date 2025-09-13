@@ -118,27 +118,39 @@ export function useMessages() {
       throw new Error('User not authenticated');
     }
 
+    console.log('📤 useMessages: Sending message:', { content, sessionId, metadata });
+
     try {
+      const requestBody = {
+        content,
+        session_id: sessionId,
+        metadata,
+      };
+
+      console.log('📡 useMessages: Making API request to /api/messages with body:', requestBody);
+
       const response = await fetch('/api/messages', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          content,
-          session_id: sessionId,
-          metadata,
-        }),
+        body: JSON.stringify(requestBody),
       });
 
+      console.log('📡 useMessages: API response status:', response.status, response.ok);
+
       const data = await response.json();
+      console.log('📊 useMessages: API response data:', data);
 
       if (!response.ok) {
+        console.error('❌ useMessages: API request failed:', data);
         throw new Error(data.error || 'Failed to send message');
       }
 
       // Add message to local state immediately
       const newMessage: Message = data.message;
+      console.log('✅ useMessages: Adding message to local state:', newMessage);
+      
       setState(prev => ({
         ...prev,
         messages: [...prev.messages, newMessage],
@@ -147,11 +159,15 @@ export function useMessages() {
       // Reload sessions to update counts
       loadSessions();
 
-      return {
+      const result = {
         messageId: data.message.id,
         sessionId: data.session_id,
       };
+
+      console.log('🎉 useMessages: Message sent successfully:', result);
+      return result;
     } catch (error) {
+      console.error('❌ useMessages: Error sending message:', error);
       throw error;
     }
   }, [user, loadSessions]);
