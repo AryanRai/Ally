@@ -32,6 +32,8 @@ export const RemoteSettings: React.FC<RemoteSettingsProps> = ({ className = '' }
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [isSignUp, setIsSignUp] = useState(false);
+  const [systemId, setSystemId] = useState(localStorage.getItem('ally-system-id') || 'ally-local-system');
+  const [systemName, setSystemName] = useState(localStorage.getItem('ally-system-name') || 'Ally Local System');
 
   const {
     mode,
@@ -84,6 +86,17 @@ export const RemoteSettings: React.FC<RemoteSettingsProps> = ({ className = '' }
     setMode(newMode);
     if (newMode === 'remote' && !isAuthenticated) {
       setShowAuthForm(true);
+    }
+  };
+
+  const handleSystemConfigSave = () => {
+    localStorage.setItem('ally-system-id', systemId);
+    localStorage.setItem('ally-system-name', systemName);
+    // Restart remote service to apply new config
+    if (isConnected) {
+      stopRemoteService().then(() => {
+        setTimeout(() => startRemoteService(), 1000);
+      });
     }
   };
 
@@ -179,6 +192,60 @@ export const RemoteSettings: React.FC<RemoteSettingsProps> = ({ className = '' }
                   <p className="text-xs text-red-400">{connectionError}</p>
                 </div>
               )}
+
+              {/* System Configuration */}
+              <div className="space-y-3">
+                <div className="flex items-center gap-2 pb-2 border-b border-gray-600/30">
+                  <Key className="w-4 h-4 text-yellow-400" />
+                  <h4 className="text-sm font-semibold text-gray-100">System Configuration</h4>
+                </div>
+                
+                <div className="space-y-2">
+                  <div>
+                    <label className="text-xs text-gray-400">System ID:</label>
+                    <input
+                      type="text"
+                      value={systemId}
+                      onChange={(e) => setSystemId(e.target.value)}
+                      className="
+                        w-full px-2 py-1 text-xs
+                        bg-gray-800/50 border border-gray-600/30 rounded
+                        text-gray-100 placeholder-gray-500
+                        focus:outline-none focus:border-blue-400/50
+                      "
+                      placeholder="ally-local-system"
+                    />
+                  </div>
+                  
+                  <div>
+                    <label className="text-xs text-gray-400">System Name:</label>
+                    <input
+                      type="text"
+                      value={systemName}
+                      onChange={(e) => setSystemName(e.target.value)}
+                      className="
+                        w-full px-2 py-1 text-xs
+                        bg-gray-800/50 border border-gray-600/30 rounded
+                        text-gray-100 placeholder-gray-500
+                        focus:outline-none focus:border-blue-400/50
+                      "
+                      placeholder="Ally Local System"
+                    />
+                  </div>
+                  
+                  <button
+                    onClick={handleSystemConfigSave}
+                    className="
+                      w-full px-2 py-1 text-xs font-medium
+                      bg-yellow-600/20 border border-yellow-600/30 rounded
+                      text-yellow-400 hover:bg-yellow-600/30
+                      transition-colors duration-200
+                    "
+                  >
+                    Save Configuration
+                  </button>
+                </div>
+              </div>
 
               {/* Remote mode content */}
               {mode === 'remote' && (

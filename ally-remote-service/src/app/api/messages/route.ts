@@ -76,26 +76,57 @@ export async function POST(request: NextRequest) {
     }
 
     console.log('📊 Messages API: Found systems:', systems);
+    console.log('🔍 Messages API: Request metadata:', metadata);
 
-    // Find the most recently active system
-    const now = new Date();
-    const activeSystems = (systems || []).filter((system: any) => {
-      const lastHeartbeat = new Date(system.last_heartbeat);
+    let targetSystem;
+
+    // Check if a specific system was requested
+    if (metadata.target_system_id) {
+      console.log('🎯 Messages API: Looking for specific system:', metadata.target_system_id);
+      targetSystem = (systems || []).find((s: any) => s.id === metadata.target_system_id);
+      
+      if (!targetSystem) {
+        console.log('❌ Messages API: Requested system not found:', metadata.target_system_id);
+        return NextResponse.json({ 
+          error: `Requested system '${metadata.target_system_id}' not found or not accessible.` 
+        }, { status: 400 });
+      }
+
+      // Check if the system is active
+      const now = new Date();
+      const lastHeartbeat = new Date(targetSystem.last_heartbeat);
       const timeDiff = now.getTime() - lastHeartbeat.getTime();
-      return timeDiff < 60000; // Active within last minute
-    });
+      const isActive = timeDiff < 60000; // Active within last minute
 
-    console.log('🟢 Messages API: Active systems:', activeSystems);
+      if (!isActive) {
+        console.log('❌ Messages API: Requested system is offline:', metadata.target_system_id);
+        return NextResponse.json({ 
+          error: `Requested system '${targetSystem.name}' is currently offline.` 
+        }, { status: 400 });
+      }
 
-    if (activeSystems.length === 0) {
-      console.log('❌ Messages API: No active local systems found');
-      return NextResponse.json({ 
-        error: 'No active local systems found. Please ensure your local Ally system is running and connected.' 
-      }, { status: 400 });
+      console.log('✅ Messages API: Using requested system:', targetSystem);
+    } else {
+      // Auto-select the most recently active system
+      const now = new Date();
+      const activeSystems = (systems || []).filter((system: any) => {
+        const lastHeartbeat = new Date(system.last_heartbeat);
+        const timeDiff = now.getTime() - lastHeartbeat.getTime();
+        return timeDiff < 60000; // Active within last minute
+      });
+
+      console.log('🟢 Messages API: Active systems:', activeSystems);
+
+      if (activeSystems.length === 0) {
+        console.log('❌ Messages API: No active local systems found');
+        return NextResponse.json({ 
+          error: 'No active local systems found. Please ensure your local Ally system is running and connected.' 
+        }, { status: 400 });
+      }
+
+      targetSystem = activeSystems[0]; // Use the most recently active system
+      console.log('🎯 Messages API: Auto-selected target system:', targetSystem);
     }
-
-    const targetSystem = activeSystems[0]; // Use the most recently active system
-    console.log('🎯 Messages API: Using target system:', targetSystem);
 
     // Create message record
     const messageData = {

@@ -25,6 +25,8 @@ export function ChatInterface() {
 
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [isTyping, setIsTyping] = useState(false);
+  const [selectedSystemId, setSelectedSystemId] = useState<string | null>(null);
+  const [availableSystems, setAvailableSystems] = useState<any[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = () => {
@@ -34,6 +36,30 @@ export function ChatInterface() {
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
+
+  // Load available systems
+  useEffect(() => {
+    const loadSystems = async () => {
+      try {
+        const response = await fetch('/api/systems');
+        const data = await response.json();
+        if (response.ok) {
+          setAvailableSystems(data.systems || []);
+          // Auto-select the first online system
+          const onlineSystems = (data.systems || []).filter((s: any) => s.computed_status === 'online');
+          if (onlineSystems.length > 0 && !selectedSystemId) {
+            setSelectedSystemId(onlineSystems[0].id);
+          }
+        }
+      } catch (error) {
+        console.error('Failed to load systems:', error);
+      }
+    };
+
+    loadSystems();
+    const interval = setInterval(loadSystems, 10000); // Refresh every 10 seconds
+    return () => clearInterval(interval);
+  }, [selectedSystemId]);
 
   const handleSendMessage = async (content: string) => {
     console.log('🚀 ChatInterface: handleSendMessage called with content:', content);
@@ -55,7 +81,9 @@ export function ChatInterface() {
       }
 
       console.log('📤 ChatInterface: Sending message to session:', sessionId);
-      const result = await sendMessage(content, sessionId);
+      const result = await sendMessage(content, sessionId, { 
+        target_system_id: selectedSystemId 
+      });
       console.log('✅ ChatInterface: Message sent successfully:', result);
     } catch (error) {
       console.error('❌ ChatInterface: Failed to send message:', error);
@@ -140,11 +168,34 @@ export function ChatInterface() {
               </div>
             </div>
 
-            {!currentSession && (
-              <Button onClick={handleNewChat} disabled={loading}>
-                New Chat
-              </Button>
-            )}
+            <div className="flex items-center space-x-3">
+              {/* System Selector */}
+              <div className="flex items-center space-x-2">
+                <label className="text-sm text-muted-foreground">Target:</label>
+                <select
+                  value={selectedSystemId || ''}
+                  onChange={(e) => setSelectedSystemId(e.target.value)}
+                  className="
+                    px-2 py-1 text-sm rounded border
+                    bg-background border-input
+                    focus:outline-none focus:ring-1 focus:ring-ring
+                  "
+                >
+                  <option value="">Auto-select</option>
+                  {availableSystems.map((system) => (
+                    <option key={system.id} value={system.id}>
+                      {system.name} ({system.computed_status})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {!currentSession && (
+                <Button onClick={handleNewChat} disabled={loading}>
+                  New Chat
+                </Button>
+              )}
+            </div>
           </div>
         </div>
 

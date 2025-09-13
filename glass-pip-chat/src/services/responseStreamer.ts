@@ -271,17 +271,43 @@ export class ResponseStreamer {
   }
 
   /**
-   * Append content to message response using atomic operation
+   * Append content to message response using direct table update
    */
   private async appendToMessageResponse(messageId: string, content: string): Promise<void> {
-    const { error } = await this.supabaseClient.rpc('append_message_response', {
-      message_id: messageId,
-      new_content: content
-    });
+    console.log('📝 ResponseStreamer: Appending content to message:', messageId, content.substring(0, 50));
+    
+    // First, get the current response content
+    const { data: currentMessage, error: fetchError } = await this.supabaseClient
+      .from('chat_messages')
+      .select('response')
+      .eq('id', messageId)
+      .single();
 
-    if (error) {
-      throw new Error(`Failed to append response content: ${error.message}`);
+    if (fetchError) {
+      console.error('❌ ResponseStreamer: Failed to fetch current message:', fetchError);
+      throw new Error(`Failed to fetch current message: ${fetchError.message}`);
     }
+
+    // Append the new content to the existing response
+    const newResponse = (currentMessage.response || '') + content;
+    
+    console.log('💾 ResponseStreamer: Updating message response, new length:', newResponse.length);
+
+    // Update the message with the new response content
+    const { error: updateError } = await this.supabaseClient
+      .from('chat_messages')
+      .update({ 
+        response: newResponse,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', messageId);
+
+    if (updateError) {
+      console.error('❌ ResponseStreamer: Failed to update message response:', updateError);
+      throw new Error(`Failed to update response content: ${updateError.message}`);
+    }
+
+    console.log('✅ ResponseStreamer: Successfully appended content to message:', messageId);
   }
 
   /**

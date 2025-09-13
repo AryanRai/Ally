@@ -94,7 +94,8 @@ export class RemoteMessagePoller {
       return;
     }
 
-    console.log(`Starting remote message poller for system: ${this.config.systemId}`);
+    console.log(`🚀 RemoteMessagePoller: Starting remote message poller for system: ${this.config.systemId}`);
+    console.log('⚙️ RemoteMessagePoller: Full config:', this.config);
     
     try {
       // Register the local system
@@ -109,9 +110,9 @@ export class RemoteMessagePoller {
       // Start heartbeat
       this.startHeartbeat();
       
-      console.log('Remote message poller started successfully');
+      console.log('✅ RemoteMessagePoller: Remote message poller started successfully');
     } catch (error) {
-      console.error('Failed to start message poller:', error);
+      console.error('❌ RemoteMessagePoller: Failed to start message poller:', error);
       throw error;
     }
   }
@@ -302,6 +303,24 @@ export class RemoteMessagePoller {
   private async fetchPendingMessages(): Promise<RemoteMessage[]> {
     console.log('🔍 RemoteMessagePoller: Fetching pending messages for system:', this.config.systemId);
     
+    // First, let's see ALL pending messages to debug the issue
+    const { data: allMessages, error: allError } = await this.supabaseClient
+      .from('chat_messages')
+      .select('id, local_system_id, status, is_remote, content, created_at')
+      .eq('status', 'pending')
+      .eq('is_remote', true)
+      .order('created_at', { ascending: true })
+      .limit(10);
+
+    if (!allError && allMessages) {
+      console.log('🔍 RemoteMessagePoller: ALL pending remote messages:', allMessages);
+      console.log('🎯 RemoteMessagePoller: Looking for system_id:', this.config.systemId);
+      
+      allMessages.forEach(msg => {
+        console.log(`📋 Message ${msg.id}: local_system_id="${msg.local_system_id}", matches=${msg.local_system_id === this.config.systemId}`);
+      });
+    }
+
     const { data, error } = await this.supabaseClient
       .from('chat_messages')
       .select('*')
@@ -316,7 +335,7 @@ export class RemoteMessagePoller {
       throw new Error(`Failed to fetch messages: ${error.message}`);
     }
 
-    console.log('📊 RemoteMessagePoller: Fetched messages:', data?.length || 0, data);
+    console.log('📊 RemoteMessagePoller: Fetched messages for our system:', data?.length || 0, data);
     return data || [];
   }
 

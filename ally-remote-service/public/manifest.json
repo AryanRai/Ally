@@ -1,16 +1,16 @@
 {
-  "name": "Ally Remote Service",
-  "short_name": "Ally Remote",
-  "description": "Remote web interface for Ally - Unified Robot Cognitive Overlay",
-  "start_url": "/",
-  "display": "standalone",
-  "background_color": "#000000",
-  "theme_color": "#3b82f6",
-  "icons": [
-    {
-      "src": "/favicon.ico",
-      "sizes": "any",
-      "type": "image/x-icon"
-    }
-  ]
+    "name": "Ally Remote Service",
+    "short_name": "Ally Remote",
+    "description": "Remote web interface for Ally - Unified Robot Cognitive Overlay",
+    "start_url": "/",
+    "display": "standalone",
+    "background_color": "#000000",
+    "theme_color": "#3b82f6",
+    "icons": [
+        {
+            "src": "/favicon.ico",
+            "sizes": "any",
+            "type": "image/x-icon"
+        }
+    ]
 }
