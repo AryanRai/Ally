@@ -1,0 +1,50 @@
+{
+  "agents": {
+    "research-assistant": {
+      "id": "research-assistant",
+      "name": "Research Assistant",
+      "description": "Specialized agent for research tasks and information gathering",
+      "endpoint": "http://localhost:8001/api/agents/research",
+      "capabilities": ["research", "analysis", "summarization"],
+      "autoConnect": true,
+      "timeout": 30000,
+      "retryAttempts": 3,
+      "metadata": {
+        "version": "1.0.0",
+        "specialization": "academic_research"
+      }
+    },
+    "code-assistant": {
+      "id": "code-assistant", 
+      "name": "Code Assistant",
+      "description": "Specialized agent for code analysis, debugging, and programming help",
+      "endpoint": "http://localhost:8002/api/agents/code",
+      "capabilities": ["code_analysis", "debugging", "code_generation", "refactoring"],
+      "autoConnect": true,
+      "timeout": 45000,
+      "retryAttempts": 2,
+      "metadata": {
+        "version": "1.0.0",
+        "languages": ["javascript", "typescript", "python", "java", "c#"]
+      }
+    },
+    "data-analyst": {
+      "id": "data-analyst",
+      "name": "Data Analyst",
+      "description": "Specialized agent for data analysis, visualization, and statistical insights",
+      "endpoint": "http://localhost:8003/api/agents/data",
+      "capabilities": ["data_analysis", "visualization", "statistics", "machine_learning"],
+      "autoConnect": false,
+      "timeout": 60000,
+      "retryAttempts": 1,
+      "metadata": {
+        "version": "1.0.0",
+        "tools": ["pandas", "numpy", "matplotlib", "scikit-learn"]
+      }
+    }
+  },
+  "defaultTimeout": 30000,
+  "maxConcurrentQueries": 3,
+  "enableHeartbeat": true,
+  "heartbeatInterval": 60000
+}

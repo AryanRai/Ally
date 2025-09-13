@@ -916,6 +916,143 @@ function setupSpeechServiceEvents() {
   });
 }
 
+// MCP/ACP Integration handlers
+ipcMain.handle('mcp:readConfig', async () => {
+  try {
+    const userConfigPath = path.join(app.getPath('home'), '.ally', 'settings', 'mcp.json');
+    const workspaceConfigPath = path.join(process.cwd(), '.ally', 'settings', 'mcp.json');
+    
+    // Try user config first, then workspace config
+    let configPath = userConfigPath;
+    if (!fs.existsSync(userConfigPath) && fs.existsSync(workspaceConfigPath)) {
+      configPath = workspaceConfigPath;
+    }
+    
+    if (fs.existsSync(configPath)) {
+      const configData = fs.readFileSync(configPath, 'utf8');
+      return JSON.parse(configData);
+    }
+    
+    return null;
+  } catch (error: any) {
+    console.error('Failed to read MCP config:', error);
+    return null;
+  }
+});
+
+ipcMain.handle('mcp:spawnServer', async (_, config: any) => {
+  try {
+    const { spawn } = await import('child_process');
+    const process = spawn(config.command, config.args, {
+      env: { ...process.env, ...config.env },
+      stdio: ['pipe', 'pipe', 'pipe']
+    });
+    
+    return {
+      pid: process.pid,
+      stdin: process.stdin,
+      stdout: process.stdout,
+      stderr: process.stderr
+    };
+  } catch (error: any) {
+    console.error('Failed to spawn MCP server:', error);
+    throw error;
+  }
+});
+
+ipcMain.handle('mcp:getServerStatus', () => {
+  // Return mock status for now - would be implemented with actual server tracking
+  return [];
+});
+
+ipcMain.handle('mcp:writeConfig', async (_, config: any) => {
+  try {
+    const workspaceConfigPath = path.join(process.cwd(), '.ally', 'settings', 'mcp.json');
+    const configDir = path.dirname(workspaceConfigPath);
+    
+    // Ensure directory exists
+    if (!fs.existsSync(configDir)) {
+      fs.mkdirSync(configDir, { recursive: true });
+    }
+    
+    fs.writeFileSync(workspaceConfigPath, JSON.stringify(config, null, 2));
+    return { success: true };
+  } catch (error: any) {
+    console.error('Failed to write MCP config:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('mcp:restartServer', async (_, serverName: string) => {
+  // Mock implementation - would restart actual server
+  console.log(`Restarting MCP server: ${serverName}`);
+  return { success: true };
+});
+
+ipcMain.handle('mcp:executeTool', async (_, toolName: string, parameters: any) => {
+  // Mock implementation - would execute actual tool
+  console.log(`Executing MCP tool: ${toolName}`, parameters);
+  return { result: 'Mock MCP tool result' };
+});
+
+ipcMain.handle('acp:readConfig', async () => {
+  try {
+    const userConfigPath = path.join(app.getPath('home'), '.ally', 'settings', 'acp.json');
+    const workspaceConfigPath = path.join(process.cwd(), '.ally', 'settings', 'acp.json');
+    
+    // Try user config first, then workspace config
+    let configPath = userConfigPath;
+    if (!fs.existsSync(userConfigPath) && fs.existsSync(workspaceConfigPath)) {
+      configPath = workspaceConfigPath;
+    }
+    
+    if (fs.existsSync(configPath)) {
+      const configData = fs.readFileSync(configPath, 'utf8');
+      return JSON.parse(configData);
+    }
+    
+    return null;
+  } catch (error: any) {
+    console.error('Failed to read ACP config:', error);
+    return null;
+  }
+});
+
+ipcMain.handle('acp:getAgentStatus', () => {
+  // Return mock status for now - would be implemented with actual agent tracking
+  return [];
+});
+
+ipcMain.handle('acp:queryAgent', async (_, agentId: string, query: string, context?: any) => {
+  // Mock implementation - would query actual agent
+  console.log(`Querying ACP agent: ${agentId}`, query, context);
+  return { response: 'Mock ACP agent response' };
+});
+
+ipcMain.handle('acp:writeConfig', async (_, config: any) => {
+  try {
+    const workspaceConfigPath = path.join(process.cwd(), '.ally', 'settings', 'acp.json');
+    const configDir = path.dirname(workspaceConfigPath);
+    
+    // Ensure directory exists
+    if (!fs.existsSync(configDir)) {
+      fs.mkdirSync(configDir, { recursive: true });
+    }
+    
+    fs.writeFileSync(workspaceConfigPath, JSON.stringify(config, null, 2));
+    return { success: true };
+  } catch (error: any) {
+    console.error('Failed to write ACP config:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('acp:reconnectAgent', async (_, agentId: string) => {
+  // Mock implementation - would reconnect actual agent
+  console.log(`Reconnecting ACP agent: ${agentId}`);
+  return { success: true };
+});
+
 // App event handlers
 app.whenReady().then(async () => {
   await createWindow();

@@ -43,6 +43,8 @@ import { ToolAwareIntegrationService, ToolAwareProcessingProgress } from './tool
 import { ToolAwareConversationManager } from '../utils/toolAwareConversationManager';
 import { ToolCallingService } from './toolCallingService';
 import { Message } from '../types/chat';
+import { getMCPIntegrationService, MCPIntegrationService } from './mcpIntegrationService';
+import { getACPIntegrationService, ACPIntegrationService } from './acpIntegrationService';
 
 // WebSocket connection for Comms integration
 interface CommsWebSocket {
@@ -128,6 +130,18 @@ export interface UnifiedIntegrationConfig {
   sourceIdentifier: string;
   enableHeartbeat: boolean;
   heartbeatInterval: number;
+
+  // MCP/ACP integration settings
+  mcpAcp?: UnifiedToolConfig;
+}
+
+interface UnifiedToolConfig {
+  enableMCP: boolean;
+  enableACP: boolean;
+  mcpServers?: Record<string, any>;
+  acpAgents?: Record<string, any>;
+  autoConnect: boolean;
+  toolTimeout: number;
 }
 
 export interface UnifiedIntegrationState {
@@ -162,6 +176,10 @@ export class UnifiedToolIntegrationService extends BrowserEventEmitter {
   private conversationManager: ToolAwareConversationManager | null = null;
   private toolCallingService: ToolCallingService | null = null;
   private registeredTools: Map<string, any> = new Map();
+  
+  // MCP/ACP services
+  private mcpService: MCPIntegrationService | null = null;
+  private acpService: ACPIntegrationService | null = null;
   
   // WebSocket connection
   private ws: CommsWebSocket | null = null;
@@ -244,6 +262,9 @@ export class UnifiedToolIntegrationService extends BrowserEventEmitter {
         this.toolCallingService,
         this.conversationManager
       );
+      
+      // Initialize MCP/ACP integration if enabled
+      await this.initializeMCPACP();
       
       this.state.isInitialized = true;
       console.log('Unified Tool Integration Service initialized successfully');
@@ -510,25 +531,16 @@ export class UnifiedToolIntegrationService extends BrowserEventEmitter {
    * Build tool-aware prompt that includes available tools
    */
   private buildToolAwarePrompt(message: string): string {
-    const availableTools = Array.from(this.registeredTools.keys());
+    const unifiedTools = this.getUnifiedToolList();
     
-    if (availableTools.length === 0) {
+    if (unifiedTools.length === 0) {
       return message;
     }
 
-    const toolDescriptions = availableTools.map(toolName => {
-      switch (toolName) {
-        case 'calculator':
-          return '- calculator: For mathematical calculations and expressions';
-        case 'current_time':
-          return '- current_time: For getting current date and time';
-        case 'weather':
-          return '- weather: For getting weather information for locations';
-        case 'system_info':
-          return '- system_info: For getting system and browser information';
-        default:
-          return `- ${toolName}: Available tool`;
-      }
+    const toolDescriptions = unifiedTools.map(tool => {
+      const typePrefix = tool.type === 'mcp' ? '[MCP]' : 
+                        tool.type === 'acp' ? '[ACP]' : '[Internal]';
+      return `- ${tool.name}: ${typePrefix} ${tool.description}`;
     }).join('\n');
 
     return `You are an AI assistant with access to these tools:
@@ -553,8 +565,41 @@ User: ${message}`;
   private detectToolCallsInResponse(response: string, originalMessage?: string): any[] {
     const toolCalls: any[] = [];
     const lowerResponse = response.toLowerCase();
+    const unifiedTools = this.getUnifiedToolList();
 
     // Look for specific phrases that indicate the AI wants to use tools
+    
+    // Check for MCP and ACP tool mentions
+    for (const tool of unifiedTools) {
+      const toolNameLower = tool.name.toLowerCase();
+      
+      // Look for direct tool mentions
+      if (lowerResponse.includes(`use ${toolNameLower}`) ||
+          lowerResponse.includes(`using ${toolNameLower}`) ||
+          lowerResponse.includes(`call ${toolNameLower}`) ||
+          lowerResponse.includes(`i'll use ${toolNameLower}`) ||
+          lowerResponse.includes(`let me use ${toolNameLower}`)) {
+        
+        // Extract parameters based on tool type
+        let parameters = {};
+        
+        if (tool.type === 'acp') {
+          // For ACP agents, use the original message as the query
+          parameters = {
+            query: originalMessage || response,
+            context: { source: 'chat', timestamp: new Date().toISOString() }
+          };
+        } else if (tool.type === 'mcp') {
+          // For MCP tools, try to extract parameters from context
+          parameters = this.extractMCPParameters(tool.name, originalMessage || response);
+        }
+        
+        toolCalls.push({
+          name: tool.name,
+          parameters
+        });
+      }
+    }
     
     // Calculator tool - look for intention phrases
     if ((lowerResponse.includes('let me calculate') || 
@@ -637,33 +682,94 @@ User: ${message}`;
   }
 
   /**
+   * Extract parameters for MCP tools from message content
+   */
+  private extractMCPParameters(toolName: string, message: string): Record<string, any> {
+    const parameters: Record<string, any> = {};
+    
+    // Get the MCP tool definition to understand expected parameters
+    if (this.mcpService) {
+      const mcpTools = this.mcpService.getAvailableTools();
+      const tool = mcpTools.find(t => t.name === toolName);
+      
+      if (tool && tool.inputSchema && tool.inputSchema.properties) {
+        // Try to extract parameters based on the schema
+        for (const [paramName, paramSchema] of Object.entries(tool.inputSchema.properties)) {
+          const schema = paramSchema as any;
+          
+          if (schema.type === 'string') {
+            // For string parameters, try to extract relevant text
+            if (paramName.toLowerCase().includes('query') || 
+                paramName.toLowerCase().includes('question') ||
+                paramName.toLowerCase().includes('text')) {
+              parameters[paramName] = message;
+            } else if (paramName.toLowerCase().includes('location') ||
+                      paramName.toLowerCase().includes('place')) {
+              // Try to extract location from message
+              const locationMatch = message.match(/(?:in|at|for)\s+([A-Za-z\s,]+)/i);
+              if (locationMatch) {
+                parameters[paramName] = locationMatch[1].trim();
+              }
+            }
+          } else if (schema.type === 'number') {
+            // Try to extract numbers
+            const numberMatch = message.match(/(\d+(?:\.\d+)?)/);
+            if (numberMatch) {
+              parameters[paramName] = parseFloat(numberMatch[1]);
+            }
+          }
+        }
+      }
+    }
+    
+    // If no specific parameters extracted, use the message as a general input
+    if (Object.keys(parameters).length === 0) {
+      parameters.input = message;
+    }
+    
+    return parameters;
+  }
+
+  /**
    * Execute tools asynchronously without blocking
    */
   private async executeToolsAsync(toolCalls: any[]): Promise<any[]> {
     return Promise.all(
       toolCalls.map(async (toolCall) => {
-        const tool = this.registeredTools.get(toolCall.name);
-        if (tool) {
-          try {
-            const result = await tool(toolCall.parameters);
-            return {
-              name: toolCall.name,
-              result,
-              success: true
-            };
-          } catch (error) {
-            return {
-              name: toolCall.name,
-              error: error instanceof Error ? error.message : 'Unknown error',
-              success: false
-            };
+        try {
+          // Try unified tool execution first (handles MCP, ACP, and internal)
+          const result = await this.executeUnifiedTool(toolCall.name, toolCall.parameters);
+          return {
+            name: toolCall.name,
+            result,
+            success: true
+          };
+        } catch (error) {
+          // Fall back to registered tools
+          const tool = this.registeredTools.get(toolCall.name);
+          if (tool) {
+            try {
+              const result = await tool(toolCall.parameters);
+              return {
+                name: toolCall.name,
+                result,
+                success: true
+              };
+            } catch (toolError) {
+              return {
+                name: toolCall.name,
+                error: toolError instanceof Error ? toolError.message : 'Unknown error',
+                success: false
+              };
+            }
           }
+          
+          return {
+            name: toolCall.name,
+            error: error instanceof Error ? error.message : 'Tool not found',
+            success: false
+          };
         }
-        return {
-          name: toolCall.name,
-          error: 'Tool not found',
-          success: false
-        };
       })
     );
   }
@@ -1004,9 +1110,226 @@ User: ${message}`;
   }
 
   /**
+   * Initialize MCP/ACP integration
+   */
+  private async initializeMCPACP(): Promise<void> {
+    const mcpAcpConfig = this.config.mcpAcp;
+    if (!mcpAcpConfig) {
+      console.log('MCP/ACP integration not configured');
+      return;
+    }
+
+    try {
+      // Initialize MCP service
+      if (mcpAcpConfig.enableMCP) {
+        this.mcpService = getMCPIntegrationService();
+        await this.mcpService.initialize({
+          mcpServers: mcpAcpConfig.mcpServers || {}
+        });
+        
+        // Listen for MCP events
+        this.mcpService.on('toolsUpdated', (data) => {
+          console.log(`MCP tools updated for server ${data.serverName}:`, data.tools.length);
+          this.emit('mcpToolsUpdated', data);
+        });
+        
+        this.mcpService.on('serverError', (data) => {
+          console.error(`MCP server error for ${data.serverName}:`, data.error);
+          this.emit('mcpServerError', data);
+        });
+        
+        console.log('MCP integration initialized');
+      }
+
+      // Initialize ACP service
+      if (mcpAcpConfig.enableACP) {
+        this.acpService = getACPIntegrationService();
+        await this.acpService.initialize({
+          agents: mcpAcpConfig.acpAgents || {},
+          defaultTimeout: mcpAcpConfig.toolTimeout || 30000,
+          maxConcurrentQueries: this.config.maxConcurrentTools,
+          enableHeartbeat: true,
+          heartbeatInterval: 60000
+        });
+        
+        // Listen for ACP events
+        this.acpService.on('agentConnected', (data) => {
+          console.log(`ACP agent connected: ${data.agentId}`);
+          this.emit('acpAgentConnected', data);
+        });
+        
+        this.acpService.on('agentError', (data) => {
+          console.error(`ACP agent error for ${data.agentId}:`, data.error);
+          this.emit('acpAgentError', data);
+        });
+        
+        console.log('ACP integration initialized');
+      }
+
+    } catch (error) {
+      console.error('Failed to initialize MCP/ACP integration:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get MCP/ACP service status
+   */
+  getMCPACPStatus(): {
+    mcp: { enabled: boolean; servers: any[]; tools: any[] };
+    acp: { enabled: boolean; agents: any[]; };
+  } {
+    return {
+      mcp: {
+        enabled: !!this.mcpService,
+        servers: this.mcpService?.getServerStatus() || [],
+        tools: this.mcpService?.getAvailableTools() || []
+      },
+      acp: {
+        enabled: !!this.acpService,
+        agents: this.acpService?.getAllAgents() || []
+      }
+    };
+  }
+
+  /**
+   * Get available MCP tools
+   */
+  getMCPTools(): Array<any> {
+    return this.mcpService?.getAvailableTools() || [];
+  }
+
+  /**
+   * Get available ACP agents
+   */
+  getACPAgents(): Array<any> {
+    return this.acpService?.getAvailableAgents() || [];
+  }
+
+  /**
+   * Execute an MCP tool
+   */
+  async executeMCPTool(toolName: string, parameters: Record<string, any>): Promise<any> {
+    if (!this.mcpService) {
+      throw new Error('MCP service not initialized');
+    }
+
+    try {
+      const result = await this.mcpService.executeTool(toolName, parameters);
+      return result;
+    } catch (error) {
+      console.error(`Failed to execute MCP tool ${toolName}:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Query an ACP agent
+   */
+  async queryACPAgent(agentId: string, query: string, context?: Record<string, any>): Promise<any> {
+    if (!this.acpService) {
+      throw new Error('ACP service not initialized');
+    }
+
+    try {
+      const result = await this.acpService.queryAgent({
+        agentId,
+        query,
+        context,
+        timeout: this.config.mcpAcp?.toolTimeout || 30000
+      });
+      return result;
+    } catch (error) {
+      console.error(`Failed to query ACP agent ${agentId}:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Execute a unified tool (MCP, ACP, or internal)
+   */
+  async executeUnifiedTool(toolName: string, parameters: Record<string, any>): Promise<any> {
+    // Check if it's an MCP tool
+    if (this.mcpService) {
+      const mcpTools = this.mcpService.getAvailableTools();
+      const mcpTool = mcpTools.find(tool => tool.name === toolName);
+      if (mcpTool) {
+        return await this.executeMCPTool(toolName, parameters);
+      }
+    }
+
+    // Check if it's an ACP agent query
+    if (this.acpService && toolName.startsWith('acp:')) {
+      const agentId = toolName.substring(4); // Remove 'acp:' prefix
+      const query = parameters.query || parameters.message || '';
+      return await this.queryACPAgent(agentId, query, parameters.context);
+    }
+
+    // Fall back to existing tool execution
+    return await this.executeRegisteredTools(toolName);
+  }
+
+  /**
+   * Get unified tool list (MCP + ACP + existing tools)
+   */
+  getUnifiedToolList(): Array<{
+    name: string;
+    description: string;
+    type: 'mcp' | 'acp' | 'internal';
+    source?: string;
+  }> {
+    const tools: Array<any> = [];
+
+    // Add MCP tools
+    if (this.mcpService) {
+      const mcpTools = this.mcpService.getAvailableTools();
+      tools.push(...mcpTools.map(tool => ({
+        name: tool.name,
+        description: tool.description,
+        type: 'mcp' as const,
+        source: tool.serverName
+      })));
+    }
+
+    // Add ACP agents as tools
+    if (this.acpService) {
+      const acpAgents = this.acpService.getAvailableAgents();
+      tools.push(...acpAgents.map(agent => ({
+        name: `acp:${agent.id}`,
+        description: `Query ${agent.name}: ${agent.description}`,
+        type: 'acp' as const,
+        source: agent.id
+      })));
+    }
+
+    // Add existing registered tools
+    for (const [toolName, tool] of this.registeredTools) {
+      tools.push({
+        name: toolName,
+        description: tool.description || `Internal tool: ${toolName}`,
+        type: 'internal' as const,
+        source: 'internal'
+      });
+    }
+
+    return tools;
+  }
+
+  /**
    * Cleanup resources
    */
   async destroy(): Promise<void> {
+    // Shutdown MCP/ACP services
+    if (this.mcpService) {
+      await this.mcpService.shutdown();
+      this.mcpService = null;
+    }
+    
+    if (this.acpService) {
+      await this.acpService.shutdown();
+      this.acpService = null;
+    }
+
     await this.disconnect();
     this.removeAllListeners();
   }

@@ -6,6 +6,7 @@ import { useSpeechService } from '../hooks/useSpeechService';
 
 
 import { AppSettings, UISettings } from '../types/settings';
+import { MCPACPDashboard } from './chat/MCPACPDashboard';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -1352,7 +1353,67 @@ export default function SettingsModal({
                 </div>
               </div>
 
-
+              {/* MCP/ACP Integration Section */}
+              <div className="space-y-3">
+                <h3 className={cn(
+                  "text-sm font-medium flex items-center gap-2",
+                  platform === 'win32'
+                    ? "text-white/80"
+                    : theme === 'dark' ? "text-white/80" : "text-black/80"
+                )}>
+                  <Activity className="w-4 h-4" />
+                  MCP/ACP Integration
+                </h3>
+                
+                <div className={cn(
+                  "rounded-lg border overflow-hidden",
+                  platform === 'win32'
+                    ? "border-white/10 bg-white/5"
+                    : theme === 'dark' ? "border-white/10 bg-white/5" : "border-black/10 bg-black/5"
+                )}>
+                  <MCPACPDashboard 
+                    className="bg-transparent border-0" 
+                    theme={theme}
+                    platform={platform}
+                  />
+                </div>
+                
+                {/* Quick Test Button */}
+                <div className="mt-2">
+                  <button
+                    onClick={async () => {
+                      console.log('Testing MCP/ACP integration...');
+                      try {
+                        const { getMCPIntegrationService } = await import('../services/mcpIntegrationService');
+                        const { getACPIntegrationService } = await import('../services/acpIntegrationService');
+                        
+                        const mcpService = getMCPIntegrationService();
+                        const acpService = getACPIntegrationService();
+                        
+                        console.log('Services created, attempting initialization...');
+                        await Promise.all([
+                          mcpService.initialize(),
+                          acpService.initialize()
+                        ]);
+                        
+                        console.log('MCP/ACP services initialized successfully');
+                      } catch (error) {
+                        console.error('MCP/ACP test failed:', error);
+                      }
+                    }}
+                    className={cn(
+                      "px-3 py-1 text-xs rounded border",
+                      platform === 'win32'
+                        ? "border-white/20 text-white/70 hover:bg-white/10"
+                        : theme === 'dark' 
+                          ? "border-white/20 text-white/70 hover:bg-white/10"
+                          : "border-black/20 text-black/70 hover:bg-black/10"
+                    )}
+                  >
+                    Test Integration
+                  </button>
+                </div>
+              </div>
 
               {/* Info Section */}
               <div className="space-y-2">

@@ -177,6 +177,25 @@ const pipAPI = {
     ipcRenderer.on('toggle-speech', callback);
     return () => ipcRenderer.removeListener('toggle-speech', callback);
   }
+  },
+
+  // MCP/ACP Integration
+  mcp: {
+    readConfig: () => ipcRenderer.invoke('mcp:readConfig'),
+    writeConfig: (config: any) => ipcRenderer.invoke('mcp:writeConfig', config),
+    spawnServer: (config: any) => ipcRenderer.invoke('mcp:spawnServer', config),
+    getServerStatus: () => ipcRenderer.invoke('mcp:getServerStatus'),
+    restartServer: (serverName: string) => ipcRenderer.invoke('mcp:restartServer', serverName),
+    executeTool: (toolName: string, parameters: any) => ipcRenderer.invoke('mcp:executeTool', toolName, parameters)
+  },
+
+  acp: {
+    readConfig: () => ipcRenderer.invoke('acp:readConfig'),
+    writeConfig: (config: any) => ipcRenderer.invoke('acp:writeConfig', config),
+    getAgentStatus: () => ipcRenderer.invoke('acp:getAgentStatus'),
+    queryAgent: (agentId: string, query: string, context?: any) => ipcRenderer.invoke('acp:queryAgent', agentId, query, context),
+    reconnectAgent: (agentId: string) => ipcRenderer.invoke('acp:reconnectAgent', agentId)
+  }
 };
 
 // Expose the API to the renderer process
