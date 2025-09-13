@@ -17,10 +17,7 @@ export async function GET(request: NextRequest) {
 
     const { data, error } = await supabase
       .from('chat_sessions')
-      .select(`
-        *,
-        message_count:chat_messages(count)
-      `)
+      .select('*')
       .eq('user_id', session.user.id)
       .order('updated_at', { ascending: false })
       .limit(limit);
@@ -30,7 +27,22 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Failed to fetch sessions' }, { status: 500 });
     }
 
-    return NextResponse.json({ sessions: data || [] });
+    // Get message counts separately to avoid the object issue
+    const sessionsWithCounts = await Promise.all(
+      (data || []).map(async (session) => {
+        const { count } = await supabase
+          .from('chat_messages')
+          .select('*', { count: 'exact', head: true })
+          .eq('session_id', session.id);
+        
+        return {
+          ...session,
+          message_count: count || 0
+        };
+      })
+    );
+
+    return NextResponse.json({ sessions: sessionsWithCounts });
   } catch (error) {
     console.error('API error:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
