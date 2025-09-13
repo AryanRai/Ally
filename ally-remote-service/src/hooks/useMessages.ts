@@ -250,7 +250,7 @@ export function useMessages() {
     console.log('🔄 useMessages: Setting up real-time subscription for user:', user.id);
 
     const channel = supabase
-      .channel('messages')
+      .channel(`messages-${user.id}`) // Use unique channel name
       .on(
         'postgres_changes',
         {
@@ -266,7 +266,7 @@ export function useMessages() {
           if (eventType === 'INSERT' && newRecord) {
             console.log('➕ useMessages: INSERT event for message:', newRecord.id);
             setState(prev => {
-              // Only add if it's for the current session
+              // Only add if it's for the current session and doesn't already exist
               if (prev.currentSession?.id === newRecord.session_id) {
                 const exists = prev.messages.some(m => m.id === newRecord.id);
                 if (!exists) {
@@ -288,14 +288,23 @@ export function useMessages() {
           if (eventType === 'UPDATE' && newRecord) {
             console.log('🔄 useMessages: UPDATE event for message:', newRecord.id);
             setState(prev => {
-              const updated = prev.messages.map(m =>
-                m.id === newRecord.id ? (newRecord as Message) : m
-              );
-              console.log('✅ useMessages: Updated message in state:', newRecord.id);
-              return {
-                ...prev,
-                messages: updated,
-              };
+              // Only update if message exists in current session
+              if (prev.currentSession?.id === newRecord.session_id) {
+                const messageExists = prev.messages.some(m => m.id === newRecord.id);
+                if (messageExists) {
+                  const updated = prev.messages.map(m =>
+                    m.id === newRecord.id ? (newRecord as Message) : m
+                  );
+                  console.log('✅ useMessages: Updated message in state:', newRecord.id);
+                  return {
+                    ...prev,
+                    messages: updated,
+                  };
+                } else {
+                  console.log('⚠️ useMessages: Message not in current session messages, skipping update:', newRecord.id);
+                }
+              }
+              return prev;
             });
           }
           
@@ -314,7 +323,7 @@ export function useMessages() {
       console.log('🔌 useMessages: Cleaning up real-time subscription');
       supabase.removeChannel(channel);
     };
-  }, [user, supabase]);
+  }, [user?.id]); // Only depend on user.id, not the entire supabase client
 
   // Add polling for processing messages to ensure updates are received
   useEffect(() => {

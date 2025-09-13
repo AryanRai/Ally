@@ -182,9 +182,10 @@ export class RemoteMessageProcessor {
         context,
         'llama3.2', // Default model
         async (chunk: string, toolCalls?: ToolCall[], currentToolResults?: ToolCallResult[]) => {
-          fullResponse += chunk;
+          // The chunk from Ollama is already cumulative, don't accumulate again
+          fullResponse = chunk;
           
-          // Stream the cumulative response (not just the chunk)
+          // Stream the response content directly
           await this.responseStreamer.streamChunk(request.messageId, fullResponse);
           
           // Update tool results if provided
