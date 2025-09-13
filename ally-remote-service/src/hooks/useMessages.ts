@@ -247,6 +247,8 @@ export function useMessages() {
   useEffect(() => {
     if (!user) return;
 
+    console.log('🔄 useMessages: Setting up real-time subscription for user:', user.id);
+
     const channel = supabase
       .channel('messages')
       .on(
@@ -258,34 +260,47 @@ export function useMessages() {
           filter: `user_id=eq.${user.id}`,
         },
         (payload: any) => {
+          console.log('📡 useMessages: Real-time update received:', payload);
           const { eventType, new: newRecord, old: oldRecord } = payload;
           
           if (eventType === 'INSERT' && newRecord) {
+            console.log('➕ useMessages: INSERT event for message:', newRecord.id);
             setState(prev => {
               // Only add if it's for the current session
               if (prev.currentSession?.id === newRecord.session_id) {
                 const exists = prev.messages.some(m => m.id === newRecord.id);
                 if (!exists) {
+                  console.log('✅ useMessages: Adding new message to state:', newRecord.id);
                   return {
                     ...prev,
                     messages: [...prev.messages, newRecord as Message],
                   };
+                } else {
+                  console.log('⚠️ useMessages: Message already exists, skipping:', newRecord.id);
                 }
+              } else {
+                console.log('⚠️ useMessages: Message not for current session, skipping:', newRecord.session_id);
               }
               return prev;
             });
           }
           
           if (eventType === 'UPDATE' && newRecord) {
-            setState(prev => ({
-              ...prev,
-              messages: prev.messages.map(m =>
+            console.log('🔄 useMessages: UPDATE event for message:', newRecord.id);
+            setState(prev => {
+              const updated = prev.messages.map(m =>
                 m.id === newRecord.id ? (newRecord as Message) : m
-              ),
-            }));
+              );
+              console.log('✅ useMessages: Updated message in state:', newRecord.id);
+              return {
+                ...prev,
+                messages: updated,
+              };
+            });
           }
           
           if (eventType === 'DELETE' && oldRecord) {
+            console.log('🗑️ useMessages: DELETE event for message:', oldRecord.id);
             setState(prev => ({
               ...prev,
               messages: prev.messages.filter(m => m.id !== oldRecord.id),
@@ -296,9 +311,47 @@ export function useMessages() {
       .subscribe();
 
     return () => {
+      console.log('🔌 useMessages: Cleaning up real-time subscription');
       supabase.removeChannel(channel);
     };
   }, [user, supabase]);
+
+  // Add polling for processing messages to ensure updates are received
+  useEffect(() => {
+    if (!user || !state.currentSession) return;
+
+    const pollForUpdates = async () => {
+      try {
+        // Check for any processing messages that might need updates
+        const processingMessages = state.messages.filter(m => 
+          m.status === 'processing' || m.status === 'pending'
+        );
+
+        if (processingMessages.length > 0) {
+          console.log('🔄 useMessages: Polling for updates on processing messages:', processingMessages.length);
+          
+          // Reload messages to get latest updates
+          const response = await fetch(`/api/messages?session_id=${state.currentSession.id}`);
+          if (response.ok) {
+            const data = await response.json();
+            setState(prev => ({
+              ...prev,
+              messages: data.messages,
+            }));
+          }
+        }
+      } catch (error) {
+        console.error('❌ useMessages: Error polling for updates:', error);
+      }
+    };
+
+    // Poll every 2 seconds when there are processing messages
+    const interval = setInterval(pollForUpdates, 2000);
+
+    return () => {
+      clearInterval(interval);
+    };
+  }, [user, state.currentSession, state.messages]);
 
   // Load initial data
   useEffect(() => {

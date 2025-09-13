@@ -80,6 +80,8 @@ export class RemoteMessageProcessor {
         userId: request.userId,
         sessionId: request.sessionId,
         conversationId: request.messageId,
+        toolExecutionHistory: [], // Initialize empty history
+        availableTools: [], // Initialize empty tools list
         environment: {
           isRemote: true,
           messageId: request.messageId,
@@ -101,7 +103,7 @@ export class RemoteMessageProcessor {
 
       // Create streaming progress handler
       const streamingProgressHandler = async (chunk: string) => {
-        console.log(`📤 RemoteMessageProcessor: Streaming chunk for ${request.messageId}:`, chunk.substring(0, 50));
+        console.log(`📤 RemoteMessageProcessor: Streaming chunk for ${request.messageId}:`, chunk);
         // Stream to Supabase
         await this.responseStreamer.streamChunk(request.messageId, chunk);
         
@@ -169,32 +171,47 @@ export class RemoteMessageProcessor {
     const toolResults: ToolCallResult[] = [];
 
     try {
-      // Use the tool calling service's conversation processing
-      const result = await this.toolCallingService.processToolAwareConversation(
-        messages,
+      // Convert ChatMessage[] to ToolAwareMessage[] for the tool calling service
+      const toolAwareMessages = messages.map(msg => ({
+        ...msg,
+        toolCalls: undefined,
+        toolResults: undefined
+      }));
+
+      // Use the tool calling service's chatWithTools method
+      const result = await this.toolCallingService.chatWithTools(
+        toolAwareMessages,
         context,
-        {
-          onProgress: async (chunk: string) => {
-            fullResponse += chunk;
-            if (request.onProgress) {
-              await request.onProgress(chunk);
-            }
-          },
-          onToolExecution: async (toolCall: ToolCall, result: ToolCallResult) => {
-            toolResults.push(result);
-            
-            if (request.onToolExecution) {
-              const update: ToolExecutionUpdate = {
-                id: result.id,
-                toolName: result.name,
-                status: result.error ? 'failed' : 'completed',
-                result: result.result,
-                error: result.error,
-                executionTime: result.executionTime
-              };
-              
-              await request.onToolExecution(update);
-            }
+        'llama3.2', // Default model
+        async (chunk: string, toolCalls?: ToolCall[], currentToolResults?: ToolCallResult[]) => {
+          fullResponse += chunk;
+          
+          // Update tool results if provided
+          if (currentToolResults) {
+            // Add new tool results
+            currentToolResults.forEach(result => {
+              if (!toolResults.find(existing => existing.id === result.id)) {
+                toolResults.push(result);
+                
+                // Notify about tool execution
+                if (request.onToolExecution) {
+                  const update: ToolExecutionUpdate = {
+                    id: result.id,
+                    toolName: result.name,
+                    status: result.error ? 'failed' : 'completed',
+                    result: result.result,
+                    error: result.error,
+                    executionTime: result.executionTime
+                  };
+                  
+                  request.onToolExecution(update).catch(console.error);
+                }
+              }
+            });
+          }
+          
+          if (request.onProgress) {
+            await request.onProgress(chunk);
           }
         }
       );

@@ -42,6 +42,7 @@ export class ResponseStreamer {
   private flushTimers: Map<string, NodeJS.Timeout> = new Map();
   private sequenceCounters: Map<string, number> = new Map();
   private streamingMetrics: Map<string, StreamingMetrics> = new Map();
+  private messageAccumulators: Map<string, string> = new Map();
 
   constructor(config: StreamingConfig) {
     this.config = config;
@@ -57,6 +58,7 @@ export class ResponseStreamer {
     // Initialize tracking
     this.pendingChunks.set(messageId, []);
     this.sequenceCounters.set(messageId, 0);
+    this.messageAccumulators.set(messageId, ''); // Initialize accumulator
     this.streamingMetrics.set(messageId, {
       totalChunks: 0,
       totalCharacters: 0,
@@ -271,29 +273,24 @@ export class ResponseStreamer {
   }
 
   /**
-   * Append content to message response using direct table update
+   * Append content to message response using local accumulation
    */
   private async appendToMessageResponse(messageId: string, content: string): Promise<void> {
-    console.log('📝 ResponseStreamer: Appending content to message:', messageId, content.substring(0, 50));
+    console.log('📝 ResponseStreamer: Appending content to message:', messageId, content);
     
-    // First, get the current response content
-    const { data: currentMessage, error: fetchError } = await this.supabaseClient
-      .from('chat_messages')
-      .select('response')
-      .eq('id', messageId)
-      .single();
-
-    if (fetchError) {
-      console.error('❌ ResponseStreamer: Failed to fetch current message:', fetchError);
-      throw new Error(`Failed to fetch current message: ${fetchError.message}`);
+    // Get or initialize the accumulated response for this message
+    if (!this.messageAccumulators.has(messageId)) {
+      this.messageAccumulators.set(messageId, '');
     }
-
-    // Append the new content to the existing response
-    const newResponse = (currentMessage.response || '') + content;
+    
+    // Append the new content to our local accumulator
+    const currentAccumulated = this.messageAccumulators.get(messageId) || '';
+    const newResponse = currentAccumulated + content;
+    this.messageAccumulators.set(messageId, newResponse);
     
     console.log('💾 ResponseStreamer: Updating message response, new length:', newResponse.length);
 
-    // Update the message with the new response content
+    // Update the message with the accumulated response content
     const { error: updateError } = await this.supabaseClient
       .from('chat_messages')
       .update({ 
@@ -308,6 +305,9 @@ export class ResponseStreamer {
     }
 
     console.log('✅ ResponseStreamer: Successfully appended content to message:', messageId);
+    
+    // Force a small delay to ensure the database update is committed
+    await new Promise(resolve => setTimeout(resolve, 10));
   }
 
   /**
@@ -382,6 +382,9 @@ export class ResponseStreamer {
     
     // Clear sequence counter
     this.sequenceCounters.delete(messageId);
+    
+    // Clear message accumulator
+    this.messageAccumulators.delete(messageId);
     
     // Keep metrics for a while for debugging
     setTimeout(() => {
