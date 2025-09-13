@@ -273,21 +273,25 @@ export class RemoteMessagePoller {
    */
   private async pollForMessages(): Promise<void> {
     try {
+      console.log('🔍 RemoteMessagePoller: Polling for messages...');
       const messages = await this.fetchPendingMessages();
       
       if (messages.length > 0) {
-        console.log(`Found ${messages.length} pending messages`);
+        console.log(`📨 RemoteMessagePoller: Found ${messages.length} pending messages:`, messages);
         
         for (const message of messages) {
+          console.log(`🔄 RemoteMessagePoller: Processing message ${message.id}:`, message);
           await this.processMessage(message);
         }
+      } else {
+        console.log('📭 RemoteMessagePoller: No pending messages found');
       }
       
       // Reset retry count on successful poll
       this.retryCount = 0;
       
     } catch (error) {
-      console.error('Polling error:', error);
+      console.error('❌ RemoteMessagePoller: Polling error:', error);
       this.handlePollingError(error as Error);
     }
   }
@@ -296,6 +300,8 @@ export class RemoteMessagePoller {
    * Fetch pending messages from Supabase
    */
   private async fetchPendingMessages(): Promise<RemoteMessage[]> {
+    console.log('🔍 RemoteMessagePoller: Fetching pending messages for system:', this.config.systemId);
+    
     const { data, error } = await this.supabaseClient
       .from('chat_messages')
       .select('*')
@@ -306,9 +312,11 @@ export class RemoteMessagePoller {
       .limit(this.config.batchSize);
 
     if (error) {
+      console.error('❌ RemoteMessagePoller: Failed to fetch messages:', error);
       throw new Error(`Failed to fetch messages: ${error.message}`);
     }
 
+    console.log('📊 RemoteMessagePoller: Fetched messages:', data?.length || 0, data);
     return data || [];
   }
 
@@ -316,10 +324,11 @@ export class RemoteMessagePoller {
    * Process a single message using the integrated message processor
    */
   private async processMessage(message: RemoteMessage): Promise<void> {
-    console.log(`Processing message ${message.id}: ${message.content.substring(0, 100)}...`);
+    console.log(`🔄 RemoteMessagePoller: Processing message ${message.id}: ${message.content.substring(0, 100)}...`);
     
     try {
       // Update status to processing
+      console.log(`📝 RemoteMessagePoller: Updating message ${message.id} status to processing`);
       await this.updateMessageStatus(message.id, 'processing');
       
       // Create processing request
@@ -329,26 +338,33 @@ export class RemoteMessagePoller {
         sessionId: message.session_id,
         userId: message.user_id,
         onToolExecution: async (execution) => {
+          console.log(`🔧 RemoteMessagePoller: Tool execution for message ${message.id}:`, execution);
           await this.logToolExecution(message.id, execution);
         }
       };
 
+      console.log(`🤖 RemoteMessagePoller: Sending to message processor:`, request);
+      
       // Process through the integrated message processor
       const result = await this.messageProcessor.processMessage(request);
       
+      console.log(`📊 RemoteMessagePoller: Message processor result:`, result);
+      
       if (result.error) {
+        console.error(`❌ RemoteMessagePoller: Message processor returned error:`, result.error);
         throw new Error(result.error);
       }
 
       // Tool results are now handled by the message processor's streaming
 
       // Mark as completed
+      console.log(`✅ RemoteMessagePoller: Marking message ${message.id} as completed`);
       await this.updateMessageStatus(message.id, 'completed');
       
-      console.log(`Successfully processed message ${message.id} in ${result.processingTime}ms`);
+      console.log(`🎉 RemoteMessagePoller: Successfully processed message ${message.id} in ${result.processingTime}ms`);
       
     } catch (error) {
-      console.error(`Failed to process message ${message.id}:`, error);
+      console.error(`❌ RemoteMessagePoller: Failed to process message ${message.id}:`, error);
       await this.updateMessageStatus(message.id, 'error');
       await this.logMessageError(message.id, error as Error);
     }

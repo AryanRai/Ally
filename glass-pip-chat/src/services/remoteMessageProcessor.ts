@@ -69,9 +69,10 @@ export class RemoteMessageProcessor {
     const startTime = Date.now();
     
     try {
-      console.log(`Processing remote message ${request.messageId}: ${request.content.substring(0, 100)}...`);
+      console.log(`🔄 RemoteMessageProcessor: Processing remote message ${request.messageId}: ${request.content.substring(0, 100)}...`);
       
       // Start streaming for this message
+      console.log(`📡 RemoteMessageProcessor: Starting streaming for message ${request.messageId}`);
       this.responseStreamer.startStreaming(request.messageId);
       
       // Build conversation context for tool calling service
@@ -86,6 +87,8 @@ export class RemoteMessageProcessor {
         }
       };
 
+      console.log(`🎯 RemoteMessageProcessor: Built conversation context:`, conversationContext);
+
       // Create message array for Ollama
       const messages: ChatMessage[] = [
         {
@@ -94,8 +97,11 @@ export class RemoteMessageProcessor {
         }
       ];
 
+      console.log(`💬 RemoteMessageProcessor: Created messages array:`, messages);
+
       // Create streaming progress handler
       const streamingProgressHandler = async (chunk: string) => {
+        console.log(`📤 RemoteMessageProcessor: Streaming chunk for ${request.messageId}:`, chunk.substring(0, 50));
         // Stream to Supabase
         await this.responseStreamer.streamChunk(request.messageId, chunk);
         
@@ -109,6 +115,7 @@ export class RemoteMessageProcessor {
 
       // Process through tool-aware conversation if tool calling is enabled
       if (this.toolCallingService) {
+        console.log(`🔧 RemoteMessageProcessor: Using tool calling service for message ${request.messageId}`);
         result = await this.processWithToolCalling(
           messages,
           conversationContext,
@@ -116,6 +123,7 @@ export class RemoteMessageProcessor {
           startTime
         );
       } else {
+        console.log(`🤖 RemoteMessageProcessor: Using direct Ollama processing for message ${request.messageId}`);
         // Fallback to direct Ollama processing
         result = await this.processDirectOllama(
           messages,
@@ -124,15 +132,19 @@ export class RemoteMessageProcessor {
         );
       }
 
+      console.log(`✅ RemoteMessageProcessor: Processing completed for message ${request.messageId}:`, result);
+
       // Complete streaming
+      console.log(`📡 RemoteMessageProcessor: Completing streaming for message ${request.messageId}`);
       await this.responseStreamer.completeStreaming(request.messageId);
       
       return result;
 
     } catch (error) {
-      console.error(`Failed to process remote message ${request.messageId}:`, error);
+      console.error(`❌ RemoteMessageProcessor: Failed to process remote message ${request.messageId}:`, error);
       
       // Handle streaming error
+      console.log(`📡 RemoteMessageProcessor: Handling streaming error for message ${request.messageId}`);
       await this.responseStreamer.errorStreaming(request.messageId, error as Error);
       
       return {

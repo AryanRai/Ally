@@ -61,6 +61,42 @@ export async function POST(request: NextRequest) {
     const messageId = uuidv4();
     const sessionId = session_id || `session_${Date.now()}`;
 
+    // Find an available local system for this user
+    console.log('🔍 Messages API: Finding available local system for user:', session.user.id);
+    
+    const { data: systems, error: systemsError } = await supabase
+      .from('local_systems')
+      .select('id, name, status, last_heartbeat')
+      .eq('user_id', session.user.id)
+      .order('last_heartbeat', { ascending: false });
+
+    if (systemsError) {
+      console.error('❌ Messages API: Failed to fetch local systems:', systemsError);
+      return NextResponse.json({ error: 'Failed to find local systems' }, { status: 500 });
+    }
+
+    console.log('📊 Messages API: Found systems:', systems);
+
+    // Find the most recently active system
+    const now = new Date();
+    const activeSystems = (systems || []).filter((system: any) => {
+      const lastHeartbeat = new Date(system.last_heartbeat);
+      const timeDiff = now.getTime() - lastHeartbeat.getTime();
+      return timeDiff < 60000; // Active within last minute
+    });
+
+    console.log('🟢 Messages API: Active systems:', activeSystems);
+
+    if (activeSystems.length === 0) {
+      console.log('❌ Messages API: No active local systems found');
+      return NextResponse.json({ 
+        error: 'No active local systems found. Please ensure your local Ally system is running and connected.' 
+      }, { status: 400 });
+    }
+
+    const targetSystem = activeSystems[0]; // Use the most recently active system
+    console.log('🎯 Messages API: Using target system:', targetSystem);
+
     // Create message record
     const messageData = {
       id: messageId,
@@ -71,13 +107,16 @@ export async function POST(request: NextRequest) {
       status: 'pending' as const,
       metadata: {
         source: 'web',
+        target_system: targetSystem.name,
         ...metadata
       },
       is_remote: true,
-      local_system_id: process.env.LOCAL_SYSTEM_ID || 'ally-web-system',
+      local_system_id: targetSystem.id,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString()
     };
+
+    console.log('📝 Messages API: Creating message with data:', messageData);
 
     const { data, error } = await supabase
       .from('chat_messages')
@@ -86,9 +125,11 @@ export async function POST(request: NextRequest) {
       .single();
 
     if (error) {
-      console.error('Database error:', error);
+      console.error('❌ Messages API: Database error creating message:', error);
       return NextResponse.json({ error: 'Failed to create message' }, { status: 500 });
     }
+
+    console.log('✅ Messages API: Message created successfully:', data);
 
     // Create or update session record
     const sessionData = {
@@ -107,11 +148,15 @@ export async function POST(request: NextRequest) {
       .from('chat_sessions')
       .upsert(sessionData, { onConflict: 'id' });
 
-    return NextResponse.json({
+    const response = {
       message: data,
       session_id: sessionId,
-      status: 'pending'
-    });
+      status: 'pending',
+      target_system: targetSystem.name
+    };
+
+    console.log('📤 Messages API: Returning response:', response);
+    return NextResponse.json(response);
   } catch (error) {
     console.error('API error:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
