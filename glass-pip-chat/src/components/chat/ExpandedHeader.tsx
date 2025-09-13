@@ -538,7 +538,7 @@ export default function ExpandedHeader({
             {langChainEnabled ? (
               <Wrench className="w-3.5 h-3.5" />
             ) : (
-              <span className="text-xs">🧠</span>
+              <Zap className="w-3.5 h-3.5" />
             )}
             {langChainEnabled && (
               <div className="absolute -bottom-0.5 -right-0.5 w-2 h-2 bg-purple-400 rounded-full" />

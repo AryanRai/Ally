@@ -135,7 +135,7 @@ export default function GlassChatPiP() {
 
   // Speech service integration
   const speechService = useSpeechService();
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
 
   // Settings management
   const [settingsManager] = useState(() => SettingsManager.getInstance());

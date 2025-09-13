@@ -6,7 +6,7 @@
  */
 
 import React from 'react';
-import { Wrench, Bot } from 'lucide-react';
+import { Wrench, Zap } from 'lucide-react';
 
 interface LangChainToggleProps {
   enabled: boolean;
@@ -40,7 +40,7 @@ export const LangChainToggle: React.FC<LangChainToggleProps> = ({
         </>
       ) : (
         <>
-          <Bot className="w-4 h-4" />
+          <Zap className="w-4 h-4" />
           <span>Basic</span>
         </>
       )}
