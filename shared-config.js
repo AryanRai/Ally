@@ -57,10 +57,10 @@ function getEnvVar(key) {
     }
   }
   
-  // Fallback defaults
+  // Fallback defaults - use environment variables in production
   const defaults = {
-    SUPABASE_URL: 'https://delzfrzfwhycdzozxwgp.supabase.co',
-    SUPABASE_ANON_KEY: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRlbHpmcnpmd2h5Y2R6b3p4d2dwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTcxNjE2NjQsImV4cCI6MjA3MjczNzY2NH0.aWqbefKFuWZHXbmgjp-a0_QoD17PBrxlIDH_hoIYd9g',
+    SUPABASE_URL: process.env.SUPABASE_URL || '',
+    SUPABASE_ANON_KEY: process.env.SUPABASE_ANON_KEY || '',
     LOCAL_SYSTEM_ID: 'ally-system',
     LOCAL_SYSTEM_NAME: 'Ally System',
     POLL_INTERVAL: 2000,
