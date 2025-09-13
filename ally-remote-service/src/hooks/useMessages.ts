@@ -241,7 +241,7 @@ export function useMessages() {
           table: 'chat_messages',
           filter: `user_id=eq.${user.id}`,
         },
-        (payload) => {
+        (payload: any) => {
           const { eventType, new: newRecord, old: oldRecord } = payload;
           
           if (eventType === 'INSERT' && newRecord) {

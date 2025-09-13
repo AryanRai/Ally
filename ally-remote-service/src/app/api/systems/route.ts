@@ -24,7 +24,7 @@ export async function GET(request: NextRequest) {
 
     // Calculate system status based on last heartbeat
     const now = new Date();
-    const systems = (data || []).map(system => {
+    const systems = (data || []).map((system: any) => {
       const lastHeartbeat = new Date(system.last_heartbeat);
       const timeDiff = now.getTime() - lastHeartbeat.getTime();
       const isOnline = timeDiff < 60000; // Consider offline if no heartbeat for 1 minute
