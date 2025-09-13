@@ -13,16 +13,6 @@ export function MessageBubble({ message }: MessageBubbleProps) {
   const isUser = !!message.content;
   const isAssistant = !!message.response;
   
-  // Debug logging
-  console.log('🎨 MessageBubble: Rendering message:', {
-    id: message.id,
-    hasContent: !!message.content,
-    hasResponse: !!message.response,
-    status: message.status,
-    isUser,
-    isAssistant
-  });
-  
   const getStatusIcon = (status: string) => {
     switch (status) {
       case 'pending':

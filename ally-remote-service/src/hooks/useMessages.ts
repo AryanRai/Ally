@@ -320,6 +320,8 @@ export function useMessages() {
   useEffect(() => {
     if (!user || !state.currentSession) return;
 
+    const currentSessionId = state.currentSession.id; // Capture the session ID
+
     const pollForUpdates = async () => {
       try {
         // Check for any processing messages that might need updates
@@ -331,7 +333,7 @@ export function useMessages() {
           console.log('🔄 useMessages: Polling for updates on processing messages:', processingMessages.length);
           
           // Reload messages to get latest updates
-          const response = await fetch(`/api/messages?session_id=${state.currentSession.id}`);
+          const response = await fetch(`/api/messages?session_id=${currentSessionId}`);
           if (response.ok) {
             const data = await response.json();
             setState(prev => ({
