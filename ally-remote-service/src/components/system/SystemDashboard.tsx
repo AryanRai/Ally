@@ -43,16 +43,25 @@ export function SystemDashboard() {
     if (showRefreshing) setRefreshing(true);
     
     try {
+      console.log('🔄 SystemDashboard: Fetching systems...');
       const response = await fetch('/api/systems');
       const data = await response.json();
+
+      console.log('📡 SystemDashboard: API response:', { 
+        ok: response.ok, 
+        status: response.status, 
+        data 
+      });
 
       if (!response.ok) {
         throw new Error(data.error || 'Failed to fetch systems');
       }
 
+      console.log('📊 SystemDashboard: Setting systems:', data.systems);
       setSystems(data.systems);
       setError(null);
     } catch (error) {
+      console.error('❌ SystemDashboard: Error fetching systems:', error);
       setError(error instanceof Error ? error.message : 'Failed to fetch systems');
     } finally {
       setLoading(false);

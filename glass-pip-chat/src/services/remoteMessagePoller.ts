@@ -11,7 +11,7 @@ import { SupabaseClient } from '@supabase/supabase-js';
 import { OllamaService, ChatMessage } from './ollamaService';
 import { ToolCallingService } from './toolCallingService';
 import { RemoteMessageProcessor, ProcessMessageRequest } from './remoteMessageProcessor';
-import { getSupabaseServiceClient } from '../utils/supabase';
+import { getSupabaseServiceClient, getSupabaseClient } from '../utils/supabase';
 
 export interface RemoteMessage {
   id: string;
@@ -148,8 +148,20 @@ export class RemoteMessagePoller {
    * Register the local system in Supabase
    */
   private async registerLocalSystem(): Promise<void> {
+    // Get the current user from the regular client (not service client)
+    const regularClient = getSupabaseClient();
+    const { data: { session }, error: sessionError } = await regularClient.auth.getSession();
+    
+    if (sessionError || !session?.user) {
+      console.error('❌ RemoteMessagePoller: No authenticated user found:', sessionError);
+      throw new Error('Must be authenticated to register local system');
+    }
+
+    console.log('👤 RemoteMessagePoller: Authenticated user:', session.user.id, session.user.email);
+
     const systemData = {
       id: this.config.systemId,
+      user_id: session.user.id, // Use the authenticated user's ID
       name: this.config.systemName,
       status: 'online',
       capabilities: {
@@ -165,15 +177,19 @@ export class RemoteMessagePoller {
       last_heartbeat: new Date().toISOString()
     };
 
+    console.log('🔧 RemoteMessagePoller: Registering local system with data:', systemData);
+
+    // Use service client for the actual upsert (to bypass RLS)
     const { error } = await this.supabaseClient
       .from('local_systems')
       .upsert(systemData, { onConflict: 'id' });
 
     if (error) {
+      console.error('❌ RemoteMessagePoller: Failed to register system:', error);
       throw new Error(`Failed to register local system: ${error.message}`);
     }
 
-    console.log(`Local system registered: ${this.config.systemId}`);
+    console.log(`✅ RemoteMessagePoller: Local system registered successfully: ${this.config.systemId} for user: ${session.user.id}`);
   }
 
   /**
@@ -193,16 +209,34 @@ export class RemoteMessagePoller {
    * Send heartbeat to update system status
    */
   private async sendHeartbeat(): Promise<void> {
-    await this.supabaseClient.rpc('update_system_heartbeat', {
-      system_id: this.config.systemId,
-      new_status: 'online'
-    });
+    console.log('💓 RemoteMessagePoller: Sending heartbeat for system:', this.config.systemId);
+    
+    try {
+      const { error } = await this.supabaseClient.rpc('update_system_heartbeat', {
+        system_id: this.config.systemId,
+        new_status: 'online'
+      });
+
+      if (error) {
+        console.error('❌ RemoteMessagePoller: Heartbeat failed:', error);
+        // Fallback to direct update if RPC fails
+        await this.updateSystemStatus('online');
+      } else {
+        console.log('✅ RemoteMessagePoller: Heartbeat sent successfully');
+      }
+    } catch (error) {
+      console.error('❌ RemoteMessagePoller: Heartbeat error:', error);
+      // Fallback to direct update
+      await this.updateSystemStatus('online');
+    }
   }
 
   /**
    * Update system status
    */
   private async updateSystemStatus(status: 'online' | 'offline' | 'busy'): Promise<void> {
+    console.log(`🔄 RemoteMessagePoller: Updating system status to ${status} for system:`, this.config.systemId);
+    
     const { error } = await this.supabaseClient
       .from('local_systems')
       .update({ 
@@ -212,7 +246,9 @@ export class RemoteMessagePoller {
       .eq('id', this.config.systemId);
 
     if (error) {
-      console.error('Failed to update system status:', error);
+      console.error('❌ RemoteMessagePoller: Failed to update system status:', error);
+    } else {
+      console.log(`✅ RemoteMessagePoller: System status updated to ${status}`);
     }
   }
 
