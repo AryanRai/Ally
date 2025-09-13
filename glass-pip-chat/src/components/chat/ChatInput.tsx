@@ -20,6 +20,7 @@ interface ChatInputProps {
   onExplainClipboard: () => void;
   onHelpSelected: () => void;
   onRunCommand: () => void;
+  placeholder?: string;
 }
 
 const ChatInput = forwardRef<HTMLInputElement, ChatInputProps>(({
@@ -33,7 +34,8 @@ const ChatInput = forwardRef<HTMLInputElement, ChatInputProps>(({
   contextData,
   onExplainClipboard,
   onHelpSelected,
-  onRunCommand
+  onRunCommand,
+  placeholder = 'Balalalala'
 }, ref) => {
   return (
     <div className={cn(
@@ -103,7 +105,7 @@ const ChatInput = forwardRef<HTMLInputElement, ChatInputProps>(({
           type="text"
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          placeholder="Type a message..."
+          placeholder={placeholder}
           className={cn(
             "flex-1 px-3 py-2 rounded-xl text-sm",
             platform !== 'win32' && "backdrop-blur-md",

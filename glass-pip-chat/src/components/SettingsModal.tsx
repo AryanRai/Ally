@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { X, Sun, Moon, Monitor, Server, Wifi, WifiOff, RefreshCw, Keyboard, Volume2, Mic, Wrench, Activity } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { useSpeechService } from '../hooks/useSpeechService';
+import { GreetingUtils } from '../utils/greetingUtils';
 
 
 import { AppSettings, UISettings } from '../types/settings';
@@ -18,6 +19,8 @@ interface SettingsModalProps {
   onContextToggleChange?: (enabled: boolean) => void;
   appSettings: AppSettings;
   onSettingsChange: (settings: Partial<AppSettings>) => void;
+  ollamaIntegration?: any;
+  ollamaService?: any;
 }
 
 export default function SettingsModal({ 
@@ -28,7 +31,9 @@ export default function SettingsModal({
   contextToggleEnabled = true,
   onContextToggleChange,
   appSettings,
-  onSettingsChange
+  onSettingsChange,
+  ollamaIntegration,
+  ollamaService
 }: SettingsModalProps) {
   const [theme, setTheme] = useState<'light' | 'dark'>(initialTheme);
   const [serverStatus, setServerStatus] = useState<any>(null);
@@ -1270,6 +1275,145 @@ export default function SettingsModal({
                         </label>
                       </div>
                     </div>
+                  </div>
+                </div>
+
+                {/* Greeting Settings */}
+                <div className={cn(
+                  "p-3 rounded-lg border",
+                  platform === 'win32'
+                    ? "bg-white/5 border-white/10"
+                    : theme === 'dark' 
+                      ? "bg-white/5 border-white/10"
+                      : "bg-black/5 border-black/10"
+                )}>
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-medium">Chat Greeting</span>
+                      <button
+                        onClick={async () => {
+                          if (ollamaIntegration.ollamaAvailable) {
+                            try {
+                              const newGreeting = await GreetingUtils.generateRandomGreeting(ollamaService);
+                              const updatedSettings = {
+                                ...appSettings,
+                                greeting: {
+                                  ...appSettings.greeting,
+                                  customGreeting: newGreeting
+                                }
+                              };
+                              onSettingsChange(updatedSettings);
+                            } catch (error) {
+                              console.error('Failed to generate greeting:', error);
+                            }
+                          }
+                        }}
+                        disabled={!ollamaIntegration.ollamaAvailable}
+                        className={cn(
+                          "px-2 py-1 text-xs rounded border transition-colors disabled:opacity-50",
+                          platform === 'win32'
+                            ? "bg-blue-500/20 border-blue-500/30 text-blue-400 hover:bg-blue-500/30"
+                            : theme === 'dark' 
+                              ? "bg-blue-500/20 border-blue-500/30 text-blue-400 hover:bg-blue-500/30"
+                              : "bg-blue-500/20 border-blue-500/30 text-blue-400 hover:bg-blue-500/30"
+                        )}
+                        title={!ollamaIntegration.ollamaAvailable ? "Ollama required for AI-generated greetings" : "Generate random greeting with AI"}
+                      >
+                        🎲 Generate
+                      </button>
+                    </div>
+                    
+                    <div>
+                      <label className={cn(
+                        "text-xs block mb-1",
+                        platform === 'win32'
+                          ? "text-white/60"
+                          : theme === 'dark' ? "text-white/60" : "text-black/60"
+                      )}>Custom Greeting</label>
+                      <input
+                        type="text"
+                        value={appSettings.greeting?.customGreeting || 'Balalalala'}
+                        onChange={(e) => {
+                          const updatedSettings = {
+                            ...appSettings,
+                            greeting: {
+                              ...appSettings.greeting,
+                              customGreeting: e.target.value,
+                              useRandomGreeting: false
+                            }
+                          };
+                          onSettingsChange(updatedSettings);
+                        }}
+                        className={cn(
+                          "w-full px-2 py-1 text-xs rounded border",
+                          platform === 'win32'
+                            ? "bg-white/5 border-white/10 text-white"
+                            : theme === 'dark' 
+                              ? "bg-white/5 border-white/10 text-white"
+                              : "bg-black/5 border-black/10 text-black"
+                        )}
+                        placeholder="Enter your custom greeting..."
+                      />
+                    </div>
+
+                    <div className="flex items-center justify-between text-xs">
+                      <label className="flex items-center gap-2">
+                        <input 
+                          type="checkbox" 
+                          checked={appSettings.greeting?.useRandomGreeting || false}
+                          onChange={(e) => {
+                            const updatedSettings = {
+                              ...appSettings,
+                              greeting: {
+                                ...appSettings.greeting,
+                                useRandomGreeting: e.target.checked
+                              }
+                            };
+                            onSettingsChange(updatedSettings);
+                          }}
+                          className="w-3 h-3" 
+                        />
+                        <span className={cn(
+                          platform === 'win32'
+                            ? "text-white/60"
+                            : theme === 'dark' ? "text-white/60" : "text-black/60"
+                        )}>Use Random Greetings</span>
+                      </label>
+                    </div>
+
+                    {appSettings.greeting?.useRandomGreeting && (
+                      <div>
+                        <label className={cn(
+                          "text-xs block mb-1",
+                          platform === 'win32'
+                            ? "text-white/60"
+                            : theme === 'dark' ? "text-white/60" : "text-black/60"
+                        )}>Random Greetings (one per line)</label>
+                        <textarea
+                          value={appSettings.greeting?.randomGreetings?.join('\n') || ''}
+                          onChange={(e) => {
+                            const greetings = e.target.value.split('\n').filter(g => g.trim());
+                            const updatedSettings = {
+                              ...appSettings,
+                              greeting: {
+                                ...appSettings.greeting,
+                                randomGreetings: greetings
+                              }
+                            };
+                            onSettingsChange(updatedSettings);
+                          }}
+                          className={cn(
+                            "w-full px-2 py-1 text-xs rounded border h-20 resize-none",
+                            platform === 'win32'
+                              ? "bg-white/5 border-white/10 text-white"
+                              : theme === 'dark' 
+                                ? "bg-white/5 border-white/10 text-white"
+                                : "bg-black/5 border-black/10 text-black"
+                          )}
+                          placeholder="Balalalala&#10;Beep boop!&#10;Ready to chat!&#10;What's on your mind?"
+                        />
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>

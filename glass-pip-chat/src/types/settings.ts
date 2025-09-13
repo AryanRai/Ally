@@ -12,11 +12,18 @@ export interface ToolSettings {
   streamHandlerUrl: string;
 }
 
+export interface GreetingSettings {
+  customGreeting: string;
+  useRandomGreeting: boolean;
+  randomGreetings: string[];
+}
+
 export interface AppSettings {
   ui: UISettings;
   theme: 'light' | 'dark';
   contextToggleEnabled: boolean;
   tools?: ToolSettings;
+  greeting?: GreetingSettings;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -33,5 +40,18 @@ export const DEFAULT_SETTINGS: AppSettings = {
     enabled: false,
     autoConnect: true,
     streamHandlerUrl: 'ws://localhost:3000'
+  },
+  greeting: {
+    customGreeting: 'Balalalala',
+    useRandomGreeting: false,
+    randomGreetings: [
+      'Balalalala',
+      'Beep boop!',
+      'Ready to chat!',
+      'What\'s on your mind?',
+      'Hello there!',
+      'Let\'s talk!',
+      'How can I help?'
+    ]
   }
 };

@@ -5,6 +5,7 @@ import remarkGfm from 'remark-gfm';
 import { X } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { ThemeUtils } from '../utils/themeUtils';
+import { GreetingUtils } from '../utils/greetingUtils';
 import { useEditState } from '../hooks/useEditState';
 import { useWindowManagement } from '../hooks/useWindowManagement';
 import { useContextMonitoring } from '../hooks/useContextMonitoring';
@@ -164,6 +165,18 @@ export default function GlassChatPiP() {
   const [showUnifiedToolDashboard, setShowUnifiedToolDashboard] = useState(false);
   const [showMessageFlowTest, setShowMessageFlowTest] = useState(false);
   const [isContextExpanded, setIsContextExpanded] = useState(false);
+  const [currentGreeting, setCurrentGreeting] = useState(() => GreetingUtils.getCurrentGreeting(appSettings));
+
+  // Refresh greeting periodically when random mode is enabled
+  useEffect(() => {
+    if (appSettings.greeting?.useRandomGreeting) {
+      const interval = setInterval(() => {
+        setCurrentGreeting(GreetingUtils.getCurrentGreeting(appSettings));
+      }, 30000); // Refresh every 30 seconds
+      
+      return () => clearInterval(interval);
+    }
+  }, [appSettings.greeting?.useRandomGreeting, appSettings.greeting?.randomGreetings]);
   // Use voice mode state from speech service hook
   const { voiceModeEnabled, setVoiceModeEnabled, droidModeEnabled, setDroidModeEnabled } = speechService;
 
@@ -811,24 +824,8 @@ export default function GlassChatPiP() {
     console.log('Demo tools registered for unified integration');
   }, [unifiedIntegration.isReady()]);
 
-  // Auto-connect to speech service on mount
-  useEffect(() => {
-    const autoConnectSpeech = async () => {
-      if (!speechService.isConnected && window.pip?.speech) {
-        console.log('🔌 Auto-connecting to speech service on mount...');
-        try {
-          await speechService.connect();
-          console.log('✅ Speech service auto-connected successfully');
-        } catch (error) {
-          console.log('⚠️ Speech service auto-connect failed (this is normal if service is not running):', error);
-        }
-      }
-    };
-
-    // Delay auto-connect slightly to ensure everything is initialized
-    const timer = setTimeout(autoConnectSpeech, 1000);
-    return () => clearTimeout(timer);
-  }, [speechService.connect, speechService.isConnected]);
+  // Speech service is now manually connected via button press only
+  // No auto-connect behavior
 
   // Get messages early for use in effects
   const messages = activeChat?.messages || [];
@@ -841,6 +838,8 @@ export default function GlassChatPiP() {
       if (newSettings.tools?.enabled !== undefined) {
         setToolsEnabled(newSettings.tools.enabled);
       }
+      // Update greeting when settings change
+      setCurrentGreeting(GreetingUtils.getCurrentGreeting(newSettings));
     });
     return unsubscribe;
   }, [settingsManager]);
@@ -1665,6 +1664,7 @@ export default function GlassChatPiP() {
                 onContextExpandedChange={setIsContextExpanded}
                 isSpeaking={false} // TODO: Track TTS state
                 isListening={speechService.isListening}
+                placeholder={currentGreeting}
               />
             ) : (
               <ExpandedHeader
@@ -1895,6 +1895,7 @@ export default function GlassChatPiP() {
                     contextMonitoring.clearNewContextFlag();
                   }}
                   onRunCommand={() => setInput('/run ')}
+                  placeholder={currentGreeting}
                 />
 
                 {/* Speech Controls */}
@@ -1975,6 +1976,8 @@ export default function GlassChatPiP() {
             setToolsEnabled(updates.tools.enabled);
           }
         }}
+        ollamaIntegration={ollamaIntegration}
+        ollamaService={ollamaService}
       />
 
       {/* Unified Tool Dashboard Modal */}

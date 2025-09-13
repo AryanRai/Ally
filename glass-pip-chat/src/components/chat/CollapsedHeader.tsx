@@ -66,6 +66,7 @@ interface CollapsedHeaderProps {
   onContextExpandedChange?: (expanded: boolean) => void;
   isSpeaking?: boolean;
   isListening?: boolean;
+  placeholder?: string;
 }
 
 export default function CollapsedHeader({
@@ -112,7 +113,8 @@ export default function CollapsedHeader({
   isContextExpanded,
   onContextExpandedChange,
   isSpeaking,
-  isListening
+  isListening,
+  placeholder = 'Balalalala'
 }: CollapsedHeaderProps) {
   const modelButtonRef = useRef<HTMLButtonElement>(null);
   const contextExpanded = isContextExpanded ?? false;
@@ -409,7 +411,7 @@ export default function CollapsedHeader({
             type="text"
             value={quickInput}
             onChange={(e) => setQuickInput(e.target.value)}
-            placeholder="Type your message..."
+            placeholder={placeholder}
             className={cn(
               "flex-1 px-3 py-2 text-sm rounded-xl",
               platform !== 'win32' && "backdrop-blur-md",
