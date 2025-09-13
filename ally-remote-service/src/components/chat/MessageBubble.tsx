@@ -67,6 +67,14 @@ export function MessageBubble({ message }: MessageBubbleProps) {
           <div className="max-w-xs lg:max-w-md">
             <div className="bg-muted rounded-lg p-3">
               <p className="text-sm whitespace-pre-wrap">{message.response}</p>
+              {/* Show typing indicator when processing */}
+              {message.status === 'processing' && message.response === '' && (
+                <div className="flex items-center space-x-1 text-muted-foreground">
+                  <div className="w-2 h-2 bg-current rounded-full animate-bounce" />
+                  <div className="w-2 h-2 bg-current rounded-full animate-bounce" style={{ animationDelay: '0.1s' }} />
+                  <div className="w-2 h-2 bg-current rounded-full animate-bounce" style={{ animationDelay: '0.2s' }} />
+                </div>
+              )}
             </div>
             <div className="flex items-center mt-1 space-x-2">
               <span className="text-xs text-muted-foreground">
@@ -74,6 +82,9 @@ export function MessageBubble({ message }: MessageBubbleProps) {
               </span>
               {message.metadata?.source === 'remote' && (
                 <span className="text-xs text-blue-500">Remote</span>
+              )}
+              {message.status === 'processing' && (
+                <span className="text-xs text-orange-500 animate-pulse">Streaming...</span>
               )}
             </div>
           </div>
