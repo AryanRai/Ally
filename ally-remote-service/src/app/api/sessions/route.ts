@@ -29,7 +29,7 @@ export async function GET(request: NextRequest) {
 
     // Get message counts separately to avoid the object issue
     const sessionsWithCounts = await Promise.all(
-      (data || []).map(async (session) => {
+      (data || []).map(async (session: any) => {
         const { count } = await supabase
           .from('chat_messages')
           .select('*', { count: 'exact', head: true })
