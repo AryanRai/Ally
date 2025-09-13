@@ -1,0 +1,15 @@
+# Windows Accessibility Service Requirements
+
+# Windows API access
+pywin32>=306
+comtypes>=1.1.14
+
+# Process information
+psutil>=5.9.0
+
+# WebSocket communication
+websockets>=11.0.3
+
+# Optional: For advanced screen reading
+# pyttsx3>=2.90  # Text-to-speech
+# speech_recognition>=3.10.0  # Speech recognition

@@ -22,6 +22,7 @@ import CollapsedHeader from './chat/CollapsedHeader';
 import ExpandedHeader from './chat/ExpandedHeader';
 import ContextDisplay from './chat/ContextDisplay';
 import ChatInput from './chat/ChatInput';
+import { AccessibilityContextMonitor } from './AccessibilityContextMonitor';
 import { RemoteSettings } from './RemoteSettings';
 import { RemoteActivityIndicator } from './RemoteActivityIndicator';
 import { SpeechControls } from './SpeechControls';
@@ -1740,7 +1741,14 @@ export default function GlassChatPiP() {
                 exit={{ opacity: 0 }}
                 transition={{ duration: 0.2 }}
               >
-                {/* Context Display */}
+                {/* Enhanced Accessibility Context Display */}
+                <AccessibilityContextMonitor
+                  platform={platform}
+                  theme={theme}
+                  className="mb-3"
+                />
+
+                {/* Legacy Context Display (for backward compatibility) */}
                 <ContextDisplay
                   platform={platform}
                   theme={theme}

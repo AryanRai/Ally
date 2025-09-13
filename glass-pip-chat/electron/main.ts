@@ -6,6 +6,7 @@ import { exec } from 'node:child_process';
 import { promisify } from 'node:util';
 import { OllamaService, ChatMessage } from '../src/services/ollamaService.js';
 import { getSpeechService, SpeechServiceClient } from '../src/services/speechService.js';
+import WebSocket from 'ws';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -35,6 +36,92 @@ const ollamaService = new OllamaService();
 
 // Speech service
 const speechService = getSpeechService();
+
+// Accessibility service integration
+class AccessibilityServiceClient {
+  private ws: WebSocket | null = null;
+  private reconnectTimer: NodeJS.Timeout | null = null;
+  private isConnecting = false;
+
+  constructor(private url: string = 'ws://localhost:8766') {}
+
+  async connect(): Promise<void> {
+    if (this.isConnecting || (this.ws && this.ws.readyState === WebSocket.OPEN)) {
+      return;
+    }
+
+    this.isConnecting = true;
+    
+    try {
+      this.ws = new WebSocket(this.url);
+      
+      this.ws.on('open', () => {
+        console.log('✅ Connected to accessibility service');
+        this.isConnecting = false;
+        if (this.reconnectTimer) {
+          clearTimeout(this.reconnectTimer);
+          this.reconnectTimer = null;
+        }
+      });
+
+      this.ws.on('message', (data) => {
+        try {
+          const message = JSON.parse(data.toString());
+          if (message.type === 'context_update') {
+            // Forward accessibility context to renderer
+            win?.webContents.send('accessibility-context-update', message.data);
+          }
+        } catch (error) {
+          console.error('Error parsing accessibility message:', error);
+        }
+      });
+
+      this.ws.on('close', () => {
+        console.log('🔌 Accessibility service disconnected');
+        this.isConnecting = false;
+        this.scheduleReconnect();
+      });
+
+      this.ws.on('error', (error) => {
+        console.log('⚠️ Accessibility service connection error:', error.message);
+        this.isConnecting = false;
+        this.scheduleReconnect();
+      });
+
+    } catch (error) {
+      console.error('Failed to connect to accessibility service:', error);
+      this.isConnecting = false;
+      this.scheduleReconnect();
+    }
+  }
+
+  private scheduleReconnect(): void {
+    if (this.reconnectTimer) return;
+    
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      this.connect();
+    }, 5000); // Retry every 5 seconds
+  }
+
+  disconnect(): void {
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    
+    if (this.ws) {
+      this.ws.close();
+      this.ws = null;
+    }
+  }
+
+  isConnected(): boolean {
+    return this.ws?.readyState === WebSocket.OPEN;
+  }
+}
+
+const accessibilityService = new AccessibilityServiceClient();
 
 // Server status (Digital Ocean droplet)
 interface ServerStatus {
@@ -828,6 +915,47 @@ ipcMain.handle('speech:skipCurrentTTS', () => {
   }
 });
 
+// Accessibility service handlers
+ipcMain.handle('accessibility:connect', async () => {
+  try {
+    await accessibilityService.connect();
+    return { success: true };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('accessibility:disconnect', () => {
+  accessibilityService.disconnect();
+  return { success: true };
+});
+
+ipcMain.handle('accessibility:isConnected', () => {
+  return accessibilityService.isConnected();
+});
+
+ipcMain.handle('accessibility:getSelectedText', async () => {
+  // This would be handled by the accessibility service
+  // For now, return clipboard as fallback
+  return clipboard.readText();
+});
+
+ipcMain.handle('accessibility:getCursorPosition', async () => {
+  const point = screen.getCursorScreenPoint();
+  return { x: point.x, y: point.y };
+});
+
+ipcMain.handle('accessibility:getActiveWindow', async () => {
+  // This would be provided by the accessibility service
+  // For now, return basic info
+  return {
+    title: 'Unknown Window',
+    application: 'Unknown Application',
+    processName: 'unknown.exe',
+    isActive: true
+  };
+});
+
 // Setup speech service event forwarding to renderer
 function setupSpeechServiceEvents() {
   speechService.on('connected', () => {
@@ -1137,6 +1265,11 @@ ipcMain.handle('acp:reconnectAgent', async (_, agentId: string) => {
 app.whenReady().then(async () => {
   await createWindow();
   createTray(); // Create tray after window is ready
+  
+  // Start accessibility service connection
+  setTimeout(() => {
+    accessibilityService.connect();
+  }, 2000); // Delay to allow window to fully load
 
   // Register global shortcut for show/hide
   const shortcut = 'CommandOrControl+Shift+C';
