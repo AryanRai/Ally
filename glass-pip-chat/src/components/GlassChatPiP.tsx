@@ -23,8 +23,6 @@ import ContextDisplay from './chat/ContextDisplay';
 import ChatInput from './chat/ChatInput';
 import { RemoteSettings } from './RemoteSettings';
 import { RemoteActivityIndicator } from './RemoteActivityIndicator';
-import { ChatSyncDashboard } from './ChatSyncDashboard';
-import { RealTimeStreamingIndicator } from './RealTimeStreamingIndicator';
 import { SpeechControls } from './SpeechControls';
 import { useSpeechService } from '../hooks/useSpeechService';
 
@@ -37,7 +35,6 @@ import { useToolCalling } from '../hooks/useToolCalling';
 
 // Unified Tool Integration
 import { useUnifiedToolIntegration } from '../hooks/useUnifiedToolIntegration';
-import { useUnifiedChatSync } from '../hooks/useUnifiedChatSync';
 import MessageFlowTest from './MessageFlowTest';
 import { createRemoteChatIntegration } from '../services/remoteChatIntegration';
 import { useRemoteConnection } from '../hooks/useRemoteConnection';
@@ -148,16 +145,6 @@ export default function GlassChatPiP() {
   // Remote connection integration
   const remoteConnection = useRemoteConnection();
 
-  // Unified Chat Sync integration
-  const chatSync = useUnifiedChatSync({
-    systemId: `glass-pip-chat-${Date.now()}`,
-    systemName: 'Glass PiP Chat Desktop',
-    syncInterval: 30000, // 30 seconds
-    realTimeEnabled: true,
-    batchSize: 50,
-    streamingEnabled: true
-  });
-
   // UI state
   const [input, setInput] = useState('');
   const [quickInput, setQuickInput] = useState('');
@@ -170,32 +157,9 @@ export default function GlassChatPiP() {
   const [showSpeechControls, setShowSpeechControls] = useState(false);
   const [showUnifiedToolDashboard, setShowUnifiedToolDashboard] = useState(false);
   const [showMessageFlowTest, setShowMessageFlowTest] = useState(false);
-  const [showChatSyncDashboard, setShowChatSyncDashboard] = useState(false);
   const [isContextExpanded, setIsContextExpanded] = useState(false);
   // Use voice mode state from speech service hook
   const { voiceModeEnabled, setVoiceModeEnabled, droidModeEnabled, setDroidModeEnabled } = speechService;
-
-  // Sync local chats to remote when in remote mode
-  useEffect(() => {
-    if (remoteConnection.mode === 'remote' && chatSync.canSync && activeChat) {
-      console.log('🔄 Syncing active chat to remote:', activeChat.id);
-      
-      // Convert glass-pip-chat format to sync format
-      const syncSession = chatSync.convertGlassPipChatSession(
-        activeChat.id,
-        activeChat.title,
-        activeChat.messages.map(msg => ({
-          id: msg.id,
-          role: msg.role,
-          content: msg.content,
-          timestamp: msg.timestamp,
-          metadata: msg.metadata
-        }))
-      );
-      
-      console.log('✅ Chat converted and added to sync:', syncSession);
-    }
-  }, [activeChat, remoteConnection.mode, chatSync.canSync]);
 
   // Handle voice mode changes - start/stop listening automatically
   useEffect(() => {
@@ -1201,10 +1165,7 @@ export default function GlassChatPiP() {
             event.preventDefault();
             handleSizeChange();
             return;
-          case 'Y':
-            event.preventDefault();
-            setShowChatSyncDashboard(!showChatSyncDashboard);
-            return;
+
 
         }
       }
@@ -1790,15 +1751,6 @@ export default function GlassChatPiP() {
                   {/* Remote Activity Indicator */}
                   <RemoteActivityIndicator className="mb-2" />
                   
-                  {/* Real-Time Streaming Indicator */}
-                  {chatSync.streamingMessages.length > 0 && (
-                    <RealTimeStreamingIndicator
-                      streamingMessages={chatSync.streamingMessages}
-                      isActive={chatSync.status?.streaming.isConnected || false}
-                      className="mb-2"
-                    />
-                  )}
-                  
                   {messages.map((message, index) => (
                     <EditableMessage
                       key={message.id}
@@ -2244,90 +2196,6 @@ export default function GlassChatPiP() {
         onClose={() => setShowMessageFlowTest(false)}
         integrationService={unifiedIntegration.service}
       />
-
-      {/* Chat Sync Dashboard Modal */}
-      <AnimatePresence>
-        {showChatSyncDashboard && (
-          <>
-            {/* Backdrop */}
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="fixed inset-0 bg-black/70 backdrop-blur-md z-50"
-              onClick={() => setShowChatSyncDashboard(false)}
-            />
-            
-            {/* Modal */}
-            <div className="fixed inset-0 flex items-center justify-center p-4 z-50" onClick={(e) => e.stopPropagation()}>
-              <motion.div
-                initial={{ opacity: 0, scale: 0.9, y: 20 }}
-                animate={{ opacity: 1, scale: 1, y: 0 }}
-                exit={{ opacity: 0, scale: 0.9, y: 20 }}
-                onClick={(e) => e.stopPropagation()}
-                style={{
-                  backdropFilter: 'blur(20px) saturate(180%)',
-                  WebkitBackdropFilter: 'blur(20px) saturate(180%)'
-                }}
-                className={cn(
-                  "w-full max-w-6xl max-h-[85vh] overflow-hidden",
-                  "rounded-2xl border shadow-[0_12px_60px_rgba(0,0,0,0.6)]",
-                  theme === 'dark' 
-                    ? "border-white/30 text-white/95" 
-                    : "border-black/30 text-black/95",
-                  platform === 'win32' 
-                    ? "bg-black/60"
-                    : theme === 'dark'
-                      ? "bg-gradient-to-b from-gray-900/95 to-gray-800/95"
-                      : "bg-gradient-to-b from-gray-100/95 to-gray-200/95"
-                )}
-              >
-                <div className={cn(
-                  "flex items-center justify-between p-4 border-b",
-                  platform === 'win32'
-                    ? "border-white/10"
-                    : theme === 'dark' ? "border-white/10" : "border-black/10"
-                )}>
-                  <h2 className="text-xl font-bold flex items-center gap-2">
-                    <span className="text-green-400">🔄</span>
-                    Chat Sync Dashboard
-                  </h2>
-                  <button
-                    onClick={() => setShowChatSyncDashboard(false)}
-                    className={cn(
-                      "p-2 rounded-lg transition-colors",
-                      theme === 'dark' 
-                        ? "hover:bg-white/10 text-white/70 hover:text-white" 
-                        : "hover:bg-black/10 text-black/70 hover:text-black"
-                    )}
-                  >
-                    <X size={20} />
-                  </button>
-                </div>
-                
-                <div className="p-4 overflow-y-auto max-h-[calc(85vh-80px)]">
-                  <ChatSyncDashboard
-                    status={chatSync.status}
-                    localSessions={chatSync.localSessions}
-                    streamingMessages={chatSync.streamingMessages}
-                    statistics={chatSync.statistics}
-                    errors={chatSync.errors}
-                    isActive={chatSync.isActive}
-                    isLoading={chatSync.isLoading}
-                    canSync={chatSync.canSync}
-                    onStart={chatSync.start}
-                    onStop={chatSync.stop}
-                    onForceSyncNow={chatSync.forceSyncNow}
-                    onTestConnectivity={chatSync.testConnectivity}
-                    onClearErrors={chatSync.clearErrors}
-                    onSimulateStream={chatSync.simulateStream}
-                  />
-                </div>
-              </motion.div>
-            </div>
-          </>
-        )}
-      </AnimatePresence>
 
     </motion.div>
   );
