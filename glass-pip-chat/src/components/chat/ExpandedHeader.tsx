@@ -79,6 +79,9 @@ interface ExpandedHeaderProps {
   // Message flow test props
   showMessageFlowTest?: boolean;
   onMessageFlowTestToggle?: () => void;
+  // LangChain props
+  langChainEnabled?: boolean;
+  onLangChainToggle?: () => void;
 }
 
 export default function ExpandedHeader({
@@ -119,7 +122,9 @@ export default function ExpandedHeader({
   showMessageFlowTest,
   onMessageFlowTestToggle,
   toolsEnabled,
-  onToolsToggle
+  onToolsToggle,
+  langChainEnabled,
+  onLangChainToggle
 }: ExpandedHeaderProps) {
   const modelButtonRef = useRef<HTMLButtonElement>(null);
   const [dropdownPosition, setDropdownPosition] = useState({ top: 0, right: 0, maxHeight: 256 });
@@ -139,19 +144,19 @@ export default function ExpandedHeader({
     if (showUnifiedIntegration) features.push('Integration');
     if (showToolAnalytics) features.push('Analytics');
     if (showMessageFlowTest) features.push('Testing');
-    
+
     const statusText = features.length > 0 ? features.join(', ') : 'Disabled';
-    
+
     // Add tool execution status if available
     if (toolStatus) {
       const toolInfo = [];
       if (toolStatus.isExecuting) toolInfo.push('Executing');
       if (toolStatus.activeToolCount > 0) toolInfo.push(`${toolStatus.activeToolCount} active`);
       if (toolStatus.failedToolCount > 0) toolInfo.push(`${toolStatus.failedToolCount} failed`);
-      
+
       return toolInfo.length > 0 ? `${statusText} (${toolInfo.join(', ')})` : statusText;
     }
-    
+
     return statusText;
   };
 
@@ -193,8 +198,8 @@ export default function ExpandedHeader({
           />
           {/* Indicator for auto-collapsed sidebar at large sizes */}
           {sidebarCollapsed && size === 'L' && (
-            <div className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-orange-400 rounded-full" 
-                 title="Sidebar auto-collapsed to prevent overflow" />
+            <div className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-orange-400 rounded-full"
+              title="Sidebar auto-collapsed to prevent overflow" />
           )}
         </button>
 
@@ -410,7 +415,7 @@ export default function ExpandedHeader({
               contextToggleEnabled ? "text-green-400" : "text-red-400 opacity-60"
             )} />
           </div>
-          
+
           {/* New context notification */}
           {hasNewContext && (contextData.clipboard || contextData.selectedText) && (
             <div className="absolute -top-1 -left-1 w-2.5 h-2.5 bg-blue-400 rounded-full animate-pulse">
@@ -458,7 +463,7 @@ export default function ExpandedHeader({
               {/* Main tool icon with overlays */}
               <div className="relative">
                 <Wrench className="w-3.5 h-3.5" />
-                
+
                 {/* Feature indicators as small overlays */}
                 {showUnifiedIntegration && (
                   <Zap className="w-2 h-2 absolute -top-0.5 -right-0.5 text-purple-400" />
@@ -481,7 +486,7 @@ export default function ExpandedHeader({
                   </div>
                 )}
               </div>
-              
+
               {/* Connection status indicator */}
               {unifiedIntegrationStatus?.isConnected && (
                 <div className="absolute -bottom-0.5 -right-0.5 w-2 h-2 bg-green-400 rounded-full" />
@@ -489,7 +494,7 @@ export default function ExpandedHeader({
               {!unifiedIntegrationStatus?.isConnected && unifiedIntegrationStatus && (
                 <div className="absolute -bottom-0.5 -right-0.5 w-2 h-2 bg-red-400 rounded-full" />
               )}
-              
+
               {/* Active features count */}
               {(getActiveToolFeaturesCount() > 0 || (toolStatus?.activeToolCount > 0)) && (
                 <div className="absolute -top-1 -left-1 w-3 h-3 bg-blue-500 rounded-full flex items-center justify-center">
@@ -517,6 +522,29 @@ export default function ExpandedHeader({
             <div className="absolute -bottom-0.5 -right-0.5 w-2 h-2 bg-blue-400 rounded-full" />
           )}
         </button>
+
+        {/* LangChain Toggle */}
+        {onLangChainToggle && (
+          <button
+            onClick={onLangChainToggle}
+            className={cn(
+              "p-1.5 rounded-lg transition-colors relative",
+              langChainEnabled
+                ? "bg-purple-500/20 hover:bg-purple-500/30 text-purple-300"
+                : "hover:bg-white/10"
+            )}
+            title={langChainEnabled ? "Switch to Basic Chat (Better for casual conversation)" : "Switch to LangChain Enhanced (Better for complex tasks)"}
+          >
+            {langChainEnabled ? (
+              <Wrench className="w-3.5 h-3.5" />
+            ) : (
+              <span className="text-xs">🧠</span>
+            )}
+            {langChainEnabled && (
+              <div className="absolute -bottom-0.5 -right-0.5 w-2 h-2 bg-purple-400 rounded-full" />
+            )}
+          </button>
+        )}
 
         <button
           onClick={onSettings}

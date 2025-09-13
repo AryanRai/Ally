@@ -62,6 +62,7 @@ export class ToolCallingService {
   private toolRegistry: ToolRegistry;
   private toolExecutor: ToolExecutor;
   private config: ToolCallingConfig;
+  private customToolCallPrompt: string | null = null;
 
   constructor(
     ollamaService: OllamaService,
@@ -469,17 +470,51 @@ Parameters: {"param1": "value1", "param2": "value2"}`;
    * Get default tool calling prompt template
    */
   private getDefaultToolCallPrompt(): string {
-    return `You are an AI assistant with access to various tools that can help you complete tasks and answer questions. 
+    if (this.customToolCallPrompt) {
+      return this.customToolCallPrompt;
+    }
+    
+    return `You are an AI assistant with access to various tools that can help you complete tasks and answer questions.
 
-When you need to use a tool to gather information, perform an action, or complete a task, you should:
+IMPORTANT: Only use tools when they are actually needed to complete the user's request. For casual conversation, greetings, simple questions you can answer directly, or general chat, respond normally WITHOUT using any tools.
 
-1. Analyze the user's request to determine what tools might be helpful
-2. Use the appropriate tool(s) with the correct parameters
+Use tools ONLY when:
+- The user explicitly asks for file operations (read, write, list files)
+- The user asks for current time/date information
+- The user asks for calculations that require computation
+- The user asks for weather information with a specific location
+- The user asks for system information
+- The user requests actions that require external data or operations
+
+DO NOT use tools for:
+- Casual greetings like "hey", "hello", "hi"
+- Simple math you can do mentally (like 2+2=4)
+- General conversation or questions you can answer from your knowledge
+- Vague requests without specific actionable tasks
+
+When you do need to use tools:
+1. Analyze the user's request to determine what tools are actually necessary
+2. Use only the appropriate tool(s) with correct parameters
 3. Wait for the tool results
 4. Incorporate the results into your response
-5. If needed, use additional tools based on the results
+5. Use additional tools only if the results indicate they're needed
 
-You can use multiple tools in sequence to complete complex tasks. Always explain what you're doing and why you're using specific tools.`;
+Always explain your reasoning when using tools.`;
+  }
+
+  /**
+   * Update system prompt for tool calling
+   */
+  updateToolCallPrompt(newPrompt: string): void {
+    this.customToolCallPrompt = newPrompt;
+    this.config.toolCallPromptTemplate = newPrompt;
+  }
+
+  /**
+   * Get current tool call prompt
+   */
+  getCurrentToolCallPrompt(): string {
+    return this.customToolCallPrompt || this.getDefaultToolCallPrompt();
   }
 
   /**

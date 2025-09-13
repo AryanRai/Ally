@@ -41,6 +41,7 @@ import {
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { ThemeUtils } from '../../utils/themeUtils';
+import { MCPACPDashboard } from './MCPACPDashboard';
 
 // Combined interfaces from all three components
 export interface UnifiedToolDefinition {
@@ -124,7 +125,7 @@ interface UnifiedToolDashboardProps {
     onExportData?: () => void;
 }
 
-type ViewMode = 'overview' | 'tools' | 'analytics' | 'status' | 'testing';
+type ViewMode = 'overview' | 'tools' | 'analytics' | 'status' | 'testing' | 'mcp-acp';
 type ToolFilter = 'all' | 'enabled' | 'disabled' | 'errors' | 'unused';
 type MetricSort = 'name' | 'executions' | 'successRate' | 'avgTime' | 'errorRate' | 'performance';
 
@@ -1221,6 +1222,25 @@ export function UnifiedToolDashboard({
 
     const renderTesting = () => renderTestingInterface();
 
+    const renderMCPACP = () => (
+        <div className="space-y-4">
+            <div className="flex items-center justify-between">
+                <h3 className={cn(
+                    "text-lg font-semibold",
+                    platform === 'win32'
+                        ? "text-white/90"
+                        : theme === 'dark' ? "text-white/90" : "text-black/90"
+                )}>
+                    MCP/ACP Integration
+                </h3>
+            </div>
+            <MCPACPDashboard
+                theme={theme}
+                platform={platform}
+            />
+        </div>
+    );
+
     return (
         <div
             className={cn(
@@ -1300,7 +1320,8 @@ export function UnifiedToolDashboard({
                     { key: 'tools', label: 'Tools', icon: Settings },
                     { key: 'analytics', label: 'Analytics', icon: TrendingUp },
                     { key: 'status', label: 'Status', icon: Activity },
-                    { key: 'testing', label: 'Testing', icon: Wrench }
+                    { key: 'testing', label: 'Testing', icon: Wrench },
+                    { key: 'mcp-acp', label: 'MCP/ACP', icon: Zap }
                 ].map(({ key, label, icon: Icon }) => (
                     <button
                         key={key}
@@ -1341,6 +1362,7 @@ export function UnifiedToolDashboard({
                         {viewMode === 'analytics' && renderAnalytics()}
                         {viewMode === 'status' && renderStatus()}
                         {viewMode === 'testing' && renderTesting()}
+                        {viewMode === 'mcp-acp' && renderMCPACP()}
                     </motion.div>
                 </AnimatePresence>
             </div>

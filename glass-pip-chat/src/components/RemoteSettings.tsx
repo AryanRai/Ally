@@ -19,7 +19,6 @@ import {
   Key
 } from 'lucide-react';
 import { useRemoteConnection } from '../hooks/useRemoteConnection';
-import { RemoteTestButton } from './RemoteTestButton';
 import { AuthHelper } from './AuthHelper';
 
 interface RemoteSettingsProps {
@@ -411,9 +410,6 @@ export const RemoteSettings: React.FC<RemoteSettingsProps> = ({ className = '' }
                           </div>
                         </div>
                       )}
-
-                      {/* Test Button */}
-                      <RemoteTestButton />
 
                       <button
                         onClick={signOut}

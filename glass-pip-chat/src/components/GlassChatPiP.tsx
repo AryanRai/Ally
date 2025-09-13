@@ -73,6 +73,12 @@ export default function GlassChatPiP() {
   
   // Tools state - must be declared before hooks that use it
   const [toolsEnabled, setToolsEnabled] = useState(false);
+  
+  // LangChain state
+  const [langChainEnabled, setLangChainEnabled] = useState(() => {
+    const saved = localStorage.getItem('ally-langchain-enabled');
+    return saved ? JSON.parse(saved) : false;
+  });
 
   // Create OllamaService instance for tool calling - must be before unified integration
   const ollamaService = useMemo(() => {
@@ -843,6 +849,11 @@ export default function GlassChatPiP() {
   useEffect(() => {
     setToolsEnabled(appSettings.tools?.enabled || false);
   }, [appSettings.tools?.enabled]);
+
+  // Save LangChain enabled state to localStorage
+  useEffect(() => {
+    localStorage.setItem('ally-langchain-enabled', JSON.stringify(langChainEnabled));
+  }, [langChainEnabled]);
 
   // Handle incoming remote messages
   useEffect(() => {
@@ -1707,6 +1718,13 @@ export default function GlassChatPiP() {
                 onMessageFlowTestToggle={() => setShowMessageFlowTest(!showMessageFlowTest)}
                 toolsEnabled={toolsEnabled}
                 onToolsToggle={() => setToolsEnabled(!toolsEnabled)}
+                langChainEnabled={langChainEnabled}
+                onLangChainToggle={() => {
+                  const newValue = !langChainEnabled;
+                  setLangChainEnabled(newValue);
+                  console.log(`🧠 LangChain mode ${newValue ? 'enabled' : 'disabled'}`);
+                  // TODO: Add toast notification when available
+                }}
               />
             )}
           </div>

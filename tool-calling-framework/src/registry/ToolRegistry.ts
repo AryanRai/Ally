@@ -50,7 +50,7 @@ import {
 export class ToolRegistry extends BrowserEventEmitter {
   private tools: Map<string, ToolRegistration> = new Map();
   private discoveryInfo: Map<string, ToolDiscoveryInfo> = new Map();
-  private healthCheckInterval: number | null = null;
+  private healthCheckInterval: NodeJS.Timeout | null = null;
 
   constructor() {
     super();

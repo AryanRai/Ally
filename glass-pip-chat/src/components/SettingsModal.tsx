@@ -7,6 +7,7 @@ import { useSpeechService } from '../hooks/useSpeechService';
 
 import { AppSettings, UISettings } from '../types/settings';
 import { MCPACPDashboard } from './chat/MCPACPDashboard';
+import { SystemPromptsEditor } from './SystemPromptsEditor';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -1413,6 +1414,18 @@ export default function SettingsModal({
                     Test Integration
                   </button>
                 </div>
+              </div>
+
+              {/* System Prompts Section */}
+              <div className="space-y-3">
+                <SystemPromptsEditor
+                  theme={theme}
+                  platform={platform}
+                  onPromptUpdate={(promptId, newPrompt) => {
+                    console.log(`Updated prompt ${promptId}:`, newPrompt);
+                    // TODO: Apply prompt updates to active services
+                  }}
+                />
               </div>
 
               {/* Info Section */}
