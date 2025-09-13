@@ -273,28 +273,21 @@ export class ResponseStreamer {
   }
 
   /**
-   * Append content to message response using local accumulation
+   * Update message response with cumulative content (for streaming)
    */
   private async appendToMessageResponse(messageId: string, content: string): Promise<void> {
-    console.log('📝 ResponseStreamer: Appending content to message:', messageId, content);
+    console.log('📝 ResponseStreamer: Updating message response:', messageId, 'Length:', content.length);
     
-    // Get or initialize the accumulated response for this message
-    if (!this.messageAccumulators.has(messageId)) {
-      this.messageAccumulators.set(messageId, '');
-    }
+    // Store the content directly (Ollama sends cumulative content, not incremental)
+    this.messageAccumulators.set(messageId, content);
     
-    // Append the new content to our local accumulator
-    const currentAccumulated = this.messageAccumulators.get(messageId) || '';
-    const newResponse = currentAccumulated + content;
-    this.messageAccumulators.set(messageId, newResponse);
-    
-    console.log('💾 ResponseStreamer: Updating message response, new length:', newResponse.length);
+    console.log('💾 ResponseStreamer: Setting message response, length:', content.length);
 
-    // Update the message with the accumulated response content
+    // Update the message with the new response content
     const { error: updateError } = await this.supabaseClient
       .from('chat_messages')
       .update({ 
-        response: newResponse,
+        response: content,
         updated_at: new Date().toISOString()
       })
       .eq('id', messageId);
@@ -304,10 +297,7 @@ export class ResponseStreamer {
       throw new Error(`Failed to update response content: ${updateError.message}`);
     }
 
-    console.log('✅ ResponseStreamer: Successfully appended content to message:', messageId);
-    
-    // Force a small delay to ensure the database update is committed
-    await new Promise(resolve => setTimeout(resolve, 10));
+    console.log('✅ ResponseStreamer: Successfully updated message response:', messageId);
   }
 
   /**

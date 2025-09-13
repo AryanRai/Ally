@@ -101,13 +101,11 @@ export class RemoteMessageProcessor {
 
       console.log(`💬 RemoteMessageProcessor: Created messages array:`, messages);
 
-      // Create streaming progress handler
+      // Create streaming progress handler (no longer streams to Supabase here, handled in processing methods)
       const streamingProgressHandler = async (chunk: string) => {
-        console.log(`📤 RemoteMessageProcessor: Streaming chunk for ${request.messageId}:`, chunk);
-        // Stream to Supabase
-        await this.responseStreamer.streamChunk(request.messageId, chunk);
+        console.log(`📤 RemoteMessageProcessor: Progress chunk for ${request.messageId}:`, chunk.substring(0, 50));
         
-        // Also call the original progress handler if provided
+        // Call the original progress handler if provided
         if (request.onProgress) {
           await request.onProgress(chunk);
         }
@@ -186,6 +184,9 @@ export class RemoteMessageProcessor {
         async (chunk: string, toolCalls?: ToolCall[], currentToolResults?: ToolCallResult[]) => {
           fullResponse += chunk;
           
+          // Stream the cumulative response (not just the chunk)
+          await this.responseStreamer.streamChunk(request.messageId, fullResponse);
+          
           // Update tool results if provided
           if (currentToolResults) {
             // Add new tool results
@@ -247,7 +248,11 @@ export class RemoteMessageProcessor {
         'llama3.2', // Default model
         async (chunk: ThinkingChunk) => {
           if (chunk.type === 'response') {
-            fullResponse += chunk.content;
+            // chunk.content is already cumulative from Ollama service
+            fullResponse = chunk.content;
+            
+            // Stream the cumulative response
+            await this.responseStreamer.streamChunk(request.messageId, fullResponse);
             
             if (request.onProgress) {
               await request.onProgress(chunk.content);
