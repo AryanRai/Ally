@@ -45,6 +45,7 @@ import { ToolCallingService } from './toolCallingService';
 import { Message } from '../types/chat';
 import { getMCPIntegrationService, MCPIntegrationService } from './mcpIntegrationService';
 import { getACPIntegrationService, ACPIntegrationService } from './acpIntegrationService';
+import { getFilesystemToolsService, FilesystemToolsService } from './filesystemTools';
 
 // WebSocket connection for Comms integration
 interface CommsWebSocket {
@@ -180,6 +181,7 @@ export class UnifiedToolIntegrationService extends BrowserEventEmitter {
   // MCP/ACP services
   private mcpService: MCPIntegrationService | null = null;
   private acpService: ACPIntegrationService | null = null;
+  private filesystemService: FilesystemToolsService | null = null;
   
   // WebSocket connection
   private ws: CommsWebSocket | null = null;
@@ -263,7 +265,7 @@ export class UnifiedToolIntegrationService extends BrowserEventEmitter {
         this.conversationManager
       );
       
-      // Initialize MCP/ACP integration if enabled
+      // Initialize MCP/ACP integration
       await this.initializeMCPACP();
       
       this.state.isInitialized = true;
@@ -548,6 +550,17 @@ ${toolDescriptions}
 
 IMPORTANT: When you need to use a tool, simply mention that you'll use it and then STOP your response. Do not provide fallback information or continue talking. Just say you'll use the tool and wait.
 
+For file system operations, you can:
+- Check if files/folders exist
+- List directory contents
+- Read file contents
+- Execute system commands (rm, mkdir, etc.)
+
+For complex operations like removing folders, use multiple steps:
+1. First check if the path exists
+2. Then list the directory contents to see if it's empty
+3. Finally execute the appropriate removal command
+
 Examples:
 - For time questions: "Let me check the current time for you."
 - For math questions: "Let me calculate that for you."
@@ -569,7 +582,7 @@ User: ${message}`;
 
     // Look for specific phrases that indicate the AI wants to use tools
     
-    // Check for MCP and ACP tool mentions
+    // Enhanced tool detection for MCP and ACP tools
     for (const tool of unifiedTools) {
       const toolNameLower = tool.name.toLowerCase();
       
@@ -598,6 +611,122 @@ User: ${message}`;
           name: tool.name,
           parameters
         });
+      }
+    }
+
+    // Enhanced detection for common file system operations
+    const originalLower = (originalMessage || '').toLowerCase();
+    
+    // Use built-in filesystem tools for common operations
+    if (this.filesystemService) {
+      
+      // Check for folder/file existence checks
+      if ((lowerResponse.includes('check') || lowerResponse.includes('see') || lowerResponse.includes('look')) &&
+          (lowerResponse.includes('folder') || lowerResponse.includes('directory') || lowerResponse.includes('file')) &&
+          (lowerResponse.includes('exist') || lowerResponse.includes('there'))) {
+        
+        const pathMatch = originalMessage?.match(/['"`]([^'"`]+)['"`]/) || originalMessage?.match(/(\S+\.\w+|\S+\/\S+)/);
+        if (pathMatch && !toolCalls.some(tc => tc.name === 'path_exists')) {
+          toolCalls.push({
+            name: 'path_exists',
+            parameters: {
+              path: pathMatch[1]
+            }
+          });
+        }
+      }
+
+      // Check for directory listing operations
+      if ((lowerResponse.includes('list') || lowerResponse.includes('see') || lowerResponse.includes('check')) &&
+          (lowerResponse.includes('folder') || lowerResponse.includes('directory') || lowerResponse.includes('contents'))) {
+        
+        const pathMatch = originalMessage?.match(/['"`]([^'"`]+)['"`]/) || originalMessage?.match(/(\S+\/\S+)/);
+        if (!toolCalls.some(tc => tc.name === 'list_directory')) {
+          toolCalls.push({
+            name: 'list_directory',
+            parameters: {
+              path: pathMatch ? pathMatch[1] : '.'
+            }
+          });
+        }
+      }
+
+      // Check for file reading operations
+      if ((lowerResponse.includes('read') || lowerResponse.includes('check') || lowerResponse.includes('look at')) &&
+          (lowerResponse.includes('file') || lowerResponse.includes('content'))) {
+        
+        const pathMatch = originalMessage?.match(/['"`]([^'"`]+)['"`]/) || originalMessage?.match(/(\S+\.\w+)/);
+        if (pathMatch && !toolCalls.some(tc => tc.name === 'read_file')) {
+          toolCalls.push({
+            name: 'read_file',
+            parameters: {
+              path: pathMatch[1]
+            }
+          });
+        }
+      }
+
+      // Check for removal operations - multi-step approach
+      if ((lowerResponse.includes('remove') || lowerResponse.includes('delete') || lowerResponse.includes('rm')) &&
+          (lowerResponse.includes('folder') || lowerResponse.includes('directory') || lowerResponse.includes('file'))) {
+        
+        const pathMatch = originalMessage?.match(/['"`]([^'"`]+)['"`]/) || originalMessage?.match(/(\S+\/\S+)/);
+        if (pathMatch) {
+          // Step 1: Check if path exists
+          if (!toolCalls.some(tc => tc.name === 'path_exists')) {
+            toolCalls.push({
+              name: 'path_exists',
+              parameters: {
+                path: pathMatch[1]
+              }
+            });
+          }
+          
+          // Step 2: List directory contents to check if empty
+          if (!toolCalls.some(tc => tc.name === 'list_directory')) {
+            toolCalls.push({
+              name: 'list_directory',
+              parameters: {
+                path: pathMatch[1]
+              }
+            });
+          }
+        }
+      }
+
+      // Check for command execution hints
+      if (lowerResponse.includes('rm ') || lowerResponse.includes('rmdir') || 
+          lowerResponse.includes('del ') || lowerResponse.includes('mkdir') ||
+          lowerResponse.includes('command') || lowerResponse.includes('execute')) {
+        
+        // Extract command from response or original message
+        let command = '';
+        let args: string[] = [];
+        
+        const rmMatch = (originalMessage || response).match(/rm\s+(-\w+\s+)?['"`]?([^'"`\s]+)['"`]?/);
+        const rmdirMatch = (originalMessage || response).match(/rmdir\s+(-\w+\s+)?['"`]?([^'"`\s]+)['"`]?/);
+        const delMatch = (originalMessage || response).match(/del\s+['"`]?([^'"`\s]+)['"`]?/);
+        
+        if (rmMatch) {
+          command = 'rm';
+          args = rmMatch[1] ? [rmMatch[1].trim(), rmMatch[2]] : [rmMatch[2]];
+        } else if (rmdirMatch) {
+          command = 'rmdir';
+          args = rmdirMatch[1] ? [rmdirMatch[1].trim(), rmdirMatch[2]] : [rmdirMatch[2]];
+        } else if (delMatch) {
+          command = 'del';
+          args = [delMatch[1]];
+        }
+        
+        if (command && !toolCalls.some(tc => tc.name === 'execute_command')) {
+          toolCalls.push({
+            name: 'execute_command',
+            parameters: {
+              command,
+              args
+            }
+          });
+        }
       }
     }
     
@@ -1113,15 +1242,42 @@ User: ${message}`;
    * Initialize MCP/ACP integration
    */
   private async initializeMCPACP(): Promise<void> {
-    const mcpAcpConfig = this.config.mcpAcp;
-    if (!mcpAcpConfig) {
-      console.log('MCP/ACP integration not configured');
-      return;
-    }
-
     try {
-      // Initialize MCP service
-      if (mcpAcpConfig.enableMCP) {
+      console.log('Initializing MCP/ACP integration...');
+      
+      // Initialize MCP service by default
+      this.mcpService = getMCPIntegrationService();
+      await this.mcpService.initialize();
+      
+      // Listen for MCP events
+      this.mcpService.on('toolsUpdated', (data) => {
+        console.log(`MCP tools updated for server ${data.serverName}:`, data.tools.length);
+        this.emit('mcpToolsUpdated', data);
+      });
+      
+      this.mcpService.on('serverError', (data) => {
+        console.error(`MCP server error for ${data.serverName}:`, data.error);
+        this.emit('mcpServerError', data);
+      });
+      
+      console.log('MCP integration initialized');
+
+      // Initialize ACP service by default
+      this.acpService = getACPIntegrationService();
+      await this.acpService.initialize();
+      
+      // Listen for ACP events
+      this.acpService.on('agentConnected', (data) => {
+        console.log(`ACP agent connected: ${data.agentId}`);
+        this.emit('acpAgentConnected', data);
+      });
+      
+      this.acpService.on('agentError', (data) => {
+        console.error(`ACP agent error for ${data.agentId}:`, data.error);
+        this.emit('acpAgentError', data);
+      });
+      
+      console.log('ACP integration initialized');
         this.mcpService = getMCPIntegrationService();
         await this.mcpService.initialize({
           mcpServers: mcpAcpConfig.mcpServers || {}
@@ -1138,33 +1294,11 @@ User: ${message}`;
           this.emit('mcpServerError', data);
         });
         
-        console.log('MCP integration initialized');
-      }
+      console.log('ACP integration initialized');
 
-      // Initialize ACP service
-      if (mcpAcpConfig.enableACP) {
-        this.acpService = getACPIntegrationService();
-        await this.acpService.initialize({
-          agents: mcpAcpConfig.acpAgents || {},
-          defaultTimeout: mcpAcpConfig.toolTimeout || 30000,
-          maxConcurrentQueries: this.config.maxConcurrentTools,
-          enableHeartbeat: true,
-          heartbeatInterval: 60000
-        });
-        
-        // Listen for ACP events
-        this.acpService.on('agentConnected', (data) => {
-          console.log(`ACP agent connected: ${data.agentId}`);
-          this.emit('acpAgentConnected', data);
-        });
-        
-        this.acpService.on('agentError', (data) => {
-          console.error(`ACP agent error for ${data.agentId}:`, data.error);
-          this.emit('acpAgentError', data);
-        });
-        
-        console.log('ACP integration initialized');
-      }
+      // Initialize built-in filesystem tools
+      this.filesystemService = getFilesystemToolsService();
+      console.log('Filesystem tools initialized');
 
     } catch (error) {
       console.error('Failed to initialize MCP/ACP integration:', error);
@@ -1265,6 +1399,11 @@ User: ${message}`;
       return await this.queryACPAgent(agentId, query, parameters.context);
     }
 
+    // Check if it's a built-in filesystem tool
+    if (this.filesystemService && this.filesystemService.hasTool(toolName)) {
+      return await this.filesystemService.executeTool(toolName, parameters);
+    }
+
     // Fall back to existing tool execution
     return await this.executeRegisteredTools(toolName);
   }
@@ -1299,6 +1438,17 @@ User: ${message}`;
         description: `Query ${agent.name}: ${agent.description}`,
         type: 'acp' as const,
         source: agent.id
+      })));
+    }
+
+    // Add built-in filesystem tools
+    if (this.filesystemService) {
+      const fsTools = this.filesystemService.getAvailableTools();
+      tools.push(...fsTools.map(tool => ({
+        name: tool.name,
+        description: tool.description,
+        type: 'internal' as const,
+        source: 'filesystem'
       })));
     }
 
