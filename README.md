@@ -79,12 +79,12 @@ It is ideal for:
                        |
      +-----------------+----------------+
      |                                  |
-Local Ollama (LLM)               Vercel API (via Public IP)
+Local Ollama (LLM)               Vercel web (via Public IP)
 [http://localhost:11434]             [https://api.example.vercel.app]
-(gpt-oss:20b, etc.)                (proxy to Supabase & PC LLM)
+(gpt-oss:20b, etc.)               
 |                                       |
 +------v-------+                        v
-|  LLM Output  |               Supabase (store/retrieve logs)
+|  LLM Output  |               Supabase (store/retrieve logs) and functions
 +------+-------+                        ^
 |                                       |
 v                                       |
@@ -160,9 +160,9 @@ Unified Robot Platform           Back to Vercel/Supabase
 - Bluetooth / Lora communications
 
 **Backend**
-- Vercel free site/API (serverless API)
+- Vercel free site
 - Express.js or FastAPI for API logic
-- Supabase (PostgreSQL)
+- Supabase (PostgreSQL) as api 
 
 ---
 
@@ -180,7 +180,9 @@ Unified Robot Platform           Back to Vercel/Supabase
 
 ---
 
-## Quick Start with Speech
+## Quick Start
+
+### Local Usage
 
 1. **Start the Speech Service:**
    ```bash
@@ -205,11 +207,27 @@ Unified Robot Platform           Back to Vercel/Supabase
    - Click "Connect" to link with the speech service
    - Start voice recognition and begin talking to Ally
 
-4. **Voice Commands:**
-   - Speak naturally to Ally - recognized text appears in the input field
-   - Use "Please explain..." or "Help me with..." for auto-send
-   - Test TTS with custom text
-   - Send ggwave signals for robot communication
+### Remote Control Setup
+
+1. **Deploy Remote Service:**
+   ```bash
+   cd Ally/ally-remote-service
+   ./deploy.sh
+   ```
+
+2. **Configure Local System:**
+   ```bash
+   cd Ally/glass-pip-chat
+   ./setup-remote.sh
+   ```
+
+3. **Enable Remote Mode:**
+   - Open your local Ally system
+   - Go to Settings and enable "Remote Mode"
+   - Sign in with your account
+   - Access your AI from anywhere at your Vercel URL
+
+See [REMOTE_INTEGRATION_GUIDE.md](REMOTE_INTEGRATION_GUIDE.md) for detailed setup instructions.
 
 ---
 

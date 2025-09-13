@@ -1,0 +1,93 @@
+import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
+import { cookies } from 'next/headers';
+import { NextRequest, NextResponse } from 'next/server';
+
+export async function GET(request: NextRequest) {
+  const cookieStore = cookies();
+  const supabase = createRouteHandlerClient({ cookies: () => cookieStore });
+  
+  try {
+    // Check authentication
+    const { data: { session }, error: authError } = await supabase.auth.getSession();
+    if (authError || !session) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const { data, error } = await supabase
+      .from('local_systems')
+      .select('*')
+      .eq('user_id', session.user.id)
+      .order('last_heartbeat', { ascending: false });
+
+    if (error) {
+      console.error('Database error:', error);
+      return NextResponse.json({ error: 'Failed to fetch systems' }, { status: 500 });
+    }
+
+    // Calculate system status based on last heartbeat
+    const now = new Date();
+    const systems = (data || []).map(system => {
+      const lastHeartbeat = new Date(system.last_heartbeat);
+      const timeDiff = now.getTime() - lastHeartbeat.getTime();
+      const isOnline = timeDiff < 60000; // Consider offline if no heartbeat for 1 minute
+      
+      return {
+        ...system,
+        computed_status: isOnline ? system.status : 'offline',
+        last_seen: timeDiff
+      };
+    });
+
+    return NextResponse.json({ systems });
+  } catch (error) {
+    console.error('API error:', error);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+  }
+}
+
+export async function POST(request: NextRequest) {
+  const cookieStore = cookies();
+  const supabase = createRouteHandlerClient({ cookies: () => cookieStore });
+  
+  try {
+    // Check authentication
+    const { data: { session }, error: authError } = await supabase.auth.getSession();
+    if (authError || !session) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const body = await request.json();
+    const { system_id, name, capabilities = {}, metadata = {} } = body;
+
+    if (!system_id || !name) {
+      return NextResponse.json({ error: 'System ID and name are required' }, { status: 400 });
+    }
+
+    const systemData = {
+      id: system_id,
+      user_id: session.user.id,
+      name,
+      status: 'online' as const,
+      capabilities,
+      metadata,
+      last_heartbeat: new Date().toISOString(),
+      created_at: new Date().toISOString()
+    };
+
+    const { data, error } = await supabase
+      .from('local_systems')
+      .upsert(systemData, { onConflict: 'id' })
+      .select()
+      .single();
+
+    if (error) {
+      console.error('Database error:', error);
+      return NextResponse.json({ error: 'Failed to register system' }, { status: 500 });
+    }
+
+    return NextResponse.json({ system: data });
+  } catch (error) {
+    console.error('API error:', error);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+  }
+}
