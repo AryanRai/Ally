@@ -3,6 +3,7 @@ import { Edit3 } from 'lucide-react';
 import { useMCPACPIntegration } from '../../hooks/useMCPACPIntegration';
 import { MCPACPSetupGuide } from './MCPACPSetupGuide';
 import { ConfigEditor } from './ConfigEditor';
+import { MCPTestPanel } from './MCPTestPanel';
 import { cn } from '../../lib/utils';
 
 interface MCPACPDashboardProps {
@@ -283,6 +284,9 @@ export const MCPACPDashboard: React.FC<MCPACPDashboardProps> = ({
                 </div>
               </div>
             </div>
+
+            {/* MCP Test Panel */}
+            <MCPTestPanel theme={theme} platform={platform} />
 
             {/* Debug Info */}
             <div className={cn(

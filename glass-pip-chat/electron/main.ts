@@ -940,23 +940,74 @@ ipcMain.handle('mcp:readConfig', async () => {
   }
 });
 
+// Store active MCP processes
+const mcpProcesses = new Map<string, any>();
+
 ipcMain.handle('mcp:spawnServer', async (_, config: any) => {
   try {
+    console.log('Spawning MCP server:', config);
     const { spawn } = await import('child_process');
-    const process = spawn(config.command, config.args, {
+    
+    const childProcess = spawn(config.command, config.args, {
       env: { ...process.env, ...config.env },
-      stdio: ['pipe', 'pipe', 'pipe']
+      stdio: ['pipe', 'pipe', 'pipe'],
+      shell: true // Enable shell for npx commands
     });
     
+    // Store process for cleanup
+    const processId = `${config.command}_${Date.now()}`;
+    mcpProcesses.set(processId, {
+      process: childProcess,
+      processId,
+      connected: false
+    });
+    
+    // Handle process events
+    childProcess.on('error', (error) => {
+      console.error('MCP server process error:', error);
+      mcpProcesses.delete(processId);
+      // Send error to renderer
+      if (win && !win.isDestroyed()) {
+        win.webContents.send('mcp:serverError', { processId, error: error.message });
+      }
+    });
+    
+    childProcess.on('exit', (code, signal) => {
+      console.log(`MCP server exited with code ${code}, signal ${signal}`);
+      mcpProcesses.delete(processId);
+      // Send exit notification to renderer
+      if (win && !win.isDestroyed()) {
+        win.webContents.send('mcp:serverExit', { processId, code, signal });
+      }
+    });
+    
+    // Handle stdout data and forward to renderer
+    childProcess.stdout?.on('data', (data) => {
+      if (win && !win.isDestroyed()) {
+        win.webContents.send('mcp:serverData', { processId, data: data.toString() });
+      }
+    });
+    
+    // Log stderr for debugging
+    childProcess.stderr?.on('data', (data) => {
+      console.error('MCP server stderr:', data.toString());
+      if (win && !win.isDestroyed()) {
+        win.webContents.send('mcp:serverError', { processId, error: data.toString() });
+      }
+    });
+    
+    // Return serializable data only
     return {
-      pid: process.pid,
-      stdin: process.stdin,
-      stdout: process.stdout,
-      stderr: process.stderr
+      success: true,
+      pid: childProcess.pid,
+      processId
     };
   } catch (error: any) {
     console.error('Failed to spawn MCP server:', error);
-    throw error;
+    return {
+      success: false,
+      error: error.message
+    };
   }
 });
 
@@ -987,6 +1038,35 @@ ipcMain.handle('mcp:restartServer', async (_, serverName: string) => {
   // Mock implementation - would restart actual server
   console.log(`Restarting MCP server: ${serverName}`);
   return { success: true };
+});
+
+ipcMain.handle('mcp:killServer', async (_, processId: string) => {
+  try {
+    const childProcess = mcpProcesses.get(processId);
+    if (childProcess) {
+      childProcess.kill('SIGTERM');
+      mcpProcesses.delete(processId);
+      return { success: true };
+    }
+    return { success: false, error: 'Process not found' };
+  } catch (error: any) {
+    console.error('Failed to kill MCP server:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('mcp:sendMessage', async (_, processId: string, message: string) => {
+  try {
+    const serverData = mcpProcesses.get(processId);
+    if (serverData && serverData.process && serverData.process.stdin) {
+      serverData.process.stdin.write(message);
+      return { success: true };
+    }
+    return { success: false, error: 'Process not found or stdin not available' };
+  } catch (error: any) {
+    console.error('Failed to send message to MCP server:', error);
+    return { success: false, error: error.message };
+  }
 });
 
 ipcMain.handle('mcp:executeTool', async (_, toolName: string, parameters: any) => {

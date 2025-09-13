@@ -6,7 +6,7 @@
       "description": "Specialized agent for research tasks and information gathering",
       "endpoint": "http://localhost:8001/api/agents/research",
       "capabilities": ["research", "analysis", "summarization"],
-      "autoConnect": true,
+      "autoConnect": false,
       "timeout": 30000,
       "retryAttempts": 3,
       "metadata": {
@@ -20,7 +20,7 @@
       "description": "Specialized agent for code analysis, debugging, and programming help",
       "endpoint": "http://localhost:8002/api/agents/code",
       "capabilities": ["code_analysis", "debugging", "code_generation", "refactoring"],
-      "autoConnect": true,
+      "autoConnect": false,
       "timeout": 45000,
       "retryAttempts": 2,
       "metadata": {

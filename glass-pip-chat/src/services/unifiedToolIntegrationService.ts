@@ -1278,23 +1278,6 @@ User: ${message}`;
       });
       
       console.log('ACP integration initialized');
-        this.mcpService = getMCPIntegrationService();
-        await this.mcpService.initialize({
-          mcpServers: mcpAcpConfig.mcpServers || {}
-        });
-        
-        // Listen for MCP events
-        this.mcpService.on('toolsUpdated', (data) => {
-          console.log(`MCP tools updated for server ${data.serverName}:`, data.tools.length);
-          this.emit('mcpToolsUpdated', data);
-        });
-        
-        this.mcpService.on('serverError', (data) => {
-          console.error(`MCP server error for ${data.serverName}:`, data.error);
-          this.emit('mcpServerError', data);
-        });
-        
-      console.log('ACP integration initialized');
 
       // Initialize built-in filesystem tools
       this.filesystemService = getFilesystemToolsService();

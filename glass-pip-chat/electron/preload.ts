@@ -176,7 +176,6 @@ const pipAPI = {
   onToggleSpeech: (callback: () => void) => {
     ipcRenderer.on('toggle-speech', callback);
     return () => ipcRenderer.removeListener('toggle-speech', callback);
-  }
   },
 
   // MCP/ACP Integration
@@ -184,9 +183,28 @@ const pipAPI = {
     readConfig: () => ipcRenderer.invoke('mcp:readConfig'),
     writeConfig: (config: any) => ipcRenderer.invoke('mcp:writeConfig', config),
     spawnServer: (config: any) => ipcRenderer.invoke('mcp:spawnServer', config),
+    sendMessage: (processId: string, message: string) => ipcRenderer.invoke('mcp:sendMessage', processId, message),
+    killServer: (processId: string) => ipcRenderer.invoke('mcp:killServer', processId),
     getServerStatus: () => ipcRenderer.invoke('mcp:getServerStatus'),
     restartServer: (serverName: string) => ipcRenderer.invoke('mcp:restartServer', serverName),
-    executeTool: (toolName: string, parameters: any) => ipcRenderer.invoke('mcp:executeTool', toolName, parameters)
+    executeTool: (toolName: string, parameters: any) => ipcRenderer.invoke('mcp:executeTool', toolName, parameters),
+    
+    // Event listeners for MCP server events
+    onServerData: (callback: (data: { processId: string; data: string }) => void) => {
+      const handler = (_: any, data: { processId: string; data: string }) => callback(data);
+      ipcRenderer.on('mcp:serverData', handler);
+      return () => ipcRenderer.removeListener('mcp:serverData', handler);
+    },
+    onServerError: (callback: (data: { processId: string; error: string }) => void) => {
+      const handler = (_: any, data: { processId: string; error: string }) => callback(data);
+      ipcRenderer.on('mcp:serverError', handler);
+      return () => ipcRenderer.removeListener('mcp:serverError', handler);
+    },
+    onServerExit: (callback: (data: { processId: string; code: number; signal: string }) => void) => {
+      const handler = (_: any, data: { processId: string; code: number; signal: string }) => callback(data);
+      ipcRenderer.on('mcp:serverExit', handler);
+      return () => ipcRenderer.removeListener('mcp:serverExit', handler);
+    }
   },
 
   acp: {

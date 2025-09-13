@@ -67,15 +67,19 @@ export class MCPClient extends BrowserEventEmitter {
 
       // Spawn the server process through Electron
       if (typeof window !== 'undefined' && window.pip?.mcp) {
-        const process = await window.pip.mcp.spawnServer(config);
+        const result = await window.pip.mcp.spawnServer(config);
+        
+        if (!result.success) {
+          throw new Error(result.error || 'Failed to spawn MCP server');
+        }
         
         const serverProcess: MCPServerProcess = {
           name,
-          process,
-          processId: process.processId,
-          stdin: process.stdin,
-          stdout: process.stdout,
-          stderr: process.stderr,
+          process: null, // We don't have direct access to the process object
+          processId: result.processId,
+          stdin: null,
+          stdout: null,
+          stderr: null,
           connected: false,
           tools: [],
           capabilities: null,
@@ -85,7 +89,7 @@ export class MCPClient extends BrowserEventEmitter {
 
         this.servers.set(name, serverProcess);
         
-        // Setup communication
+        // Setup communication through IPC events
         this.setupServerCommunication(serverProcess);
         
         // Initialize the server
@@ -105,39 +109,45 @@ export class MCPClient extends BrowserEventEmitter {
   }
 
   /**
-   * Setup communication with MCP server
+   * Setup communication with MCP server through IPC events
    */
   private setupServerCommunication(server: MCPServerProcess): void {
-    // Handle stdout messages
-    if (server.stdout && server.stdout.on) {
-      server.stdout.on('data', (data: Buffer) => {
-        const text = data.toString();
-        const lines = text.split('\n').filter(line => line.trim());
-        
-        for (const line of lines) {
-          try {
-            const message: MCPMessage = JSON.parse(line);
-            this.handleServerMessage(server, message);
-          } catch (error) {
-            console.warn(`Invalid JSON from ${server.name}:`, line);
+    if (typeof window !== 'undefined' && window.pip?.mcp) {
+      // Handle server data (stdout)
+      const removeDataListener = window.pip.mcp.onServerData((data) => {
+        if (data.processId === server.processId) {
+          const lines = data.data.split('\n').filter(line => line.trim());
+          
+          for (const line of lines) {
+            try {
+              const message: MCPMessage = JSON.parse(line);
+              this.handleServerMessage(server, message);
+            } catch (error) {
+              console.warn(`Invalid JSON from ${server.name}:`, line);
+            }
           }
         }
       });
-    }
 
-    // Handle stderr
-    if (server.stderr && server.stderr.on) {
-      server.stderr.on('data', (data: Buffer) => {
-        console.error(`MCP server ${server.name} stderr:`, data.toString());
+      // Handle server errors (stderr)
+      const removeErrorListener = window.pip.mcp.onServerError((data) => {
+        if (data.processId === server.processId) {
+          console.error(`MCP server ${server.name} error:`, data.error);
+        }
       });
-    }
 
-    // Handle process exit
-    if (server.process && server.process.on) {
-      server.process.on('exit', (code: number) => {
-        console.log(`MCP server ${server.name} exited with code ${code}`);
-        server.connected = false;
-        this.emit('serverDisconnected', { name: server.name, code });
+      // Handle server exit
+      const removeExitListener = window.pip.mcp.onServerExit((data) => {
+        if (data.processId === server.processId) {
+          console.log(`MCP server ${server.name} exited with code ${data.code}`);
+          server.connected = false;
+          this.emit('serverDisconnected', { name: server.name, code: data.code });
+          
+          // Cleanup listeners
+          removeDataListener();
+          removeErrorListener();
+          removeExitListener();
+        }
       });
     }
   }
@@ -185,10 +195,10 @@ export class MCPClient extends BrowserEventEmitter {
   }
 
   /**
-   * Send a request to MCP server
+   * Send a request to MCP server through IPC
    */
   private async sendServerRequest(server: MCPServerProcess, method: string, params: any): Promise<any> {
-    return new Promise((resolve, reject) => {
+    return new Promise(async (resolve, reject) => {
       const id = ++server.messageId;
       const message: MCPMessage = {
         jsonrpc: '2.0',
@@ -204,12 +214,26 @@ export class MCPClient extends BrowserEventEmitter {
 
       server.pendingRequests.set(id, { resolve, reject, timeout });
 
-      // Send message to server
+      // Send message to server through IPC
       const messageStr = JSON.stringify(message) + '\n';
-      if (server.stdin && server.stdin.write) {
-        server.stdin.write(messageStr);
+      
+      if (typeof window !== 'undefined' && window.pip?.mcp) {
+        try {
+          const result = await window.pip.mcp.sendMessage(server.processId, messageStr);
+          if (!result.success) {
+            server.pendingRequests.delete(id);
+            clearTimeout(timeout);
+            reject(new Error(result.error || 'Failed to send message to server'));
+          }
+        } catch (error) {
+          server.pendingRequests.delete(id);
+          clearTimeout(timeout);
+          reject(error);
+        }
       } else {
-        reject(new Error('Server stdin not available'));
+        server.pendingRequests.delete(id);
+        clearTimeout(timeout);
+        reject(new Error('Electron MCP API not available'));
       }
     });
   }
