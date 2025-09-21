@@ -398,8 +398,10 @@ export class OllamaService {
       // Simulate streaming by sending the content in chunks
       if (onProgress && content) {
         const words = content.split(' ');
+        let accumulatedContent = '';
         for (const word of words) {
-          onProgress(word + ' ');
+          accumulatedContent += word + ' ';
+          onProgress(accumulatedContent);
           // Small delay to simulate streaming
           await new Promise(resolve => setTimeout(resolve, 50));
         }
@@ -492,8 +494,8 @@ export class OllamaService {
               
               if (data.message?.content) {
                 const content = data.message.content;
-                onProgress?.(content);
                 fullResponse += content;
+                onProgress?.(fullResponse);
               }
               
               if (data.done) {
@@ -552,11 +554,11 @@ export class OllamaService {
     
     if (useOpenRouter) {
       // Use axios-based approach for OpenRouter with thinking simulation
-      const response = await this.chatOpenRouter(messages, mappedModel, (chunk) => {
-        // Convert regular progress to thinking chunks
+      const response = await this.chatOpenRouter(messages, mappedModel, (cumulativeContent) => {
+        // Convert regular progress to thinking chunks - content is already cumulative
         onProgress({
           type: 'response',
-          content: chunk,
+          content: cumulativeContent,
           isComplete: false
         });
       });
