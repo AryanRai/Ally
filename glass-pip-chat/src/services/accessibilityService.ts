@@ -418,6 +418,9 @@ declare global {
         getActiveWindow(): Promise<AccessibilityContext['activeWindow']>;
         getCursorPosition(): Promise<AccessibilityContext['cursorPosition']>;
         getScreenContent(): Promise<AccessibilityContext['screenContent']>;
+        connect(): Promise<{ success: boolean; error?: string }>;
+        disconnect(): Promise<{ success: boolean }>;
+        isConnected(): Promise<boolean>;
       };
     };
   }
