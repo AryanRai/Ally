@@ -23,6 +23,7 @@ import {
 import { cn } from '../../lib/utils';
 import { ThemeUtils } from '../../utils/themeUtils';
 import { ToolStatusIndicator } from './ToolStatusIndicator';
+import { UnifiedModelSelector } from '../UnifiedModelSelector';
 
 interface ExpandedHeaderProps {
   platform: string;
@@ -48,6 +49,7 @@ interface ExpandedHeaderProps {
   onSizeChange: () => void;
   onSettings: () => void;
   onCollapseToggle: () => void;
+  onProviderSettings?: () => void;
   onHide: () => void;
   size: string;
   showSpeechControls: boolean;
@@ -108,6 +110,7 @@ export default function ExpandedHeader({
   onSizeChange,
   onSettings,
   onCollapseToggle,
+  onProviderSettings,
   onHide,
   size,
   showSpeechControls,
@@ -298,99 +301,17 @@ export default function ExpandedHeader({
           userSelect: 'none'
         } as React.CSSProperties}
       >
-        {/* Model Selector */}
-        {ollamaAvailable && availableModels.length > 0 && (
-          <>
-            <button
-              ref={modelButtonRef}
-              onClick={onModelSelectorToggle}
-              className={cn(
-                "p-1.5 rounded-lg hover:bg-white/10 transition-colors",
-                showModelSelector && "bg-blue-500/20"
-              )}
-              title={`Current model: ${currentModel}`}
-            >
-              {showModelSelector ? (
-                <ChevronUp className="w-3.5 h-3.5" />
-              ) : (
-                <ChevronDown className="w-3.5 h-3.5" />
-              )}
-            </button>
-
-            {/* Model dropdown - Rendered via Portal */}
-            {showModelSelector && createPortal(
-              <>
-                {/* Backdrop to close dropdown */}
-                <div
-                  className="fixed inset-0 z-[999998]"
-                  onClick={onModelSelectorToggle}
-                  style={{ pointerEvents: 'auto' }}
-                />
-                <AnimatePresence>
-                  <motion.div
-                    initial={{ opacity: 0, scale: 0.9, y: -10 }}
-                    animate={{ opacity: 1, scale: 1, y: 0 }}
-                    exit={{ opacity: 0, scale: 0.9, y: -10 }}
-                    className={cn(
-                      "fixed w-48",
-                      ThemeUtils.getModalClass(platform, theme)
-                    )}
-                    style={{
-                      top: dropdownPosition.top,
-                      right: dropdownPosition.right,
-                      zIndex: 999999,
-                      pointerEvents: 'auto'
-                    } as React.CSSProperties}
-                  >
-                    <div className="p-2">
-                      <div className={cn(
-                        "text-xs font-medium mb-2 px-2",
-                        ThemeUtils.getTextClass(platform, theme, 'secondary')
-                      )}>
-                        Select Model
-                      </div>
-                      <div className={cn(
-                        "overflow-y-auto scrollbar-youtube",
-                        "scroll-smooth"
-                      )}
-                        style={{
-                          maxHeight: `${dropdownPosition.maxHeight}px`,
-                          scrollbarWidth: 'thin',
-                          scrollbarColor: 'rgba(255, 255, 255, 0.4) rgba(255, 255, 255, 0.1)'
-                        }}
-                      >
-                        {availableModels.map((model) => (
-                          <button
-                            key={model.name}
-                            onClick={() => {
-                              console.log('Model selected:', model.name);
-                              onModelSelect(model.name);
-                            }}
-                            className={cn(
-                              "w-full text-left px-2 py-1.5 text-xs rounded transition-colors cursor-pointer select-none",
-                              currentModel === model.name
-                                ? "bg-blue-500/20 text-blue-300"
-                                : cn(
-                                  ThemeUtils.getBackgroundClass(platform, theme, 'hover'),
-                                  ThemeUtils.getTextClass(platform, theme, 'secondary')
-                                )
-                            )}
-                          >
-                            <div className="font-medium">{model.name}</div>
-                            <div className={cn("text-xs opacity-60")}>
-                              {(model.size / (1024 * 1024 * 1024)).toFixed(1)}GB
-                            </div>
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  </motion.div>
-                </AnimatePresence>
-              </>,
-              document.body
-            )}
-          </>
-        )}
+        {/* Unified Model Selector */}
+        <UnifiedModelSelector
+          platform={platform}
+          theme={theme}
+          currentModel={currentModel}
+          onModelSelect={onModelSelect}
+          showSelector={showModelSelector}
+          onToggleSelector={onModelSelectorToggle}
+          showProviderSettings={onProviderSettings}
+          compact={true}
+        />
 
         {/* Combined Context Control - Eye + Clipboard with smart indicators */}
         <button

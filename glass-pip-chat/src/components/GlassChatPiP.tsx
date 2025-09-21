@@ -1650,6 +1650,7 @@ export default function GlassChatPiP() {
                   ollamaIntegration.setCurrentModel(model);
                   ollamaIntegration.setShowModelSelector(false);
                 }}
+                onProviderSettings={() => setShowProviderSettings(true)}
                 voiceModeEnabled={voiceModeEnabled}
                 onVoiceModeToggle={async () => {
                   const newVoiceMode = !voiceModeEnabled;

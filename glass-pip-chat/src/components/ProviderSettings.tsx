@@ -384,126 +384,18 @@ export const ProviderSettings: React.FC<ProviderSettingsProps> = ({
 
           </div>
 
-          {/* Unified Model Selection */}
-          <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <h3 className="font-medium flex items-center gap-2">
-                🤖 Model Selection
-              </h3>
-              <button
-                onClick={loadAllModels}
-                disabled={allModels.loading}
-                className="px-3 py-1 text-xs bg-purple-500/20 hover:bg-purple-500/30 rounded-lg transition-colors disabled:opacity-50"
-              >
-                {allModels.loading ? 'Loading...' : 'Refresh Models'}
-              </button>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium mb-1">
-                Select Model (from all providers)
-              </label>
-              <select
-                value={selectedModel}
-                onChange={(e) => setSelectedModel(e.target.value)}
-                className="w-full px-3 py-2 bg-white/10 border border-white/20 rounded-lg focus:border-blue-500 focus:outline-none"
-                disabled={allModels.loading}
-              >
-                <option value="">Choose a model...</option>
-
-                {/* Ollama Models */}
-                {allModels.ollama.length > 0 && (
-                  <optgroup label="🏠 Local Ollama Models">
-                    {allModels.ollama.map(model => (
-                      <option key={`ollama-${model.name}`} value={model.name}>
-                        {model.name} (Local - {(model.size / 1e9).toFixed(1)}GB)
-                      </option>
-                    ))}
-                  </optgroup>
-                )}
-
-                {/* OpenRouter Models by Category */}
-                {allModels.openrouter.length > 0 && (
-                  <>
-                    <optgroup label="🚀 Most Capable (OpenRouter)">
-                      {allModels.openrouter
-                        .filter(model =>
-                          model.id.includes('claude-3.5-sonnet') ||
-                          model.id.includes('gpt-4o') ||
-                          model.id.includes('llama-3.1-405b')
-                        )
-                        .slice(0, 5)
-                        .map(model => (
-                          <option key={`openrouter-${model.id}`} value={model.id}>
-                            {model.name || model.id} (${model.pricing?.completion || 'N/A'}/1K tokens)
-                          </option>
-                        ))}
-                    </optgroup>
-
-                    <optgroup label="⚡ Fast & Affordable (OpenRouter)">
-                      {allModels.openrouter
-                        .filter(model =>
-                          model.id.includes('gpt-4o-mini') ||
-                          model.id.includes('claude-3-haiku') ||
-                          model.id.includes('gemini-flash')
-                        )
-                        .slice(0, 5)
-                        .map(model => (
-                          <option key={`openrouter-${model.id}`} value={model.id}>
-                            {model.name || model.id} (${model.pricing?.completion || 'N/A'}/1K tokens)
-                          </option>
-                        ))}
-                    </optgroup>
-
-                    <optgroup label="🔬 Specialized (OpenRouter)">
-                      {allModels.openrouter
-                        .filter(model =>
-                          model.id.includes('perplexity') ||
-                          model.id.includes('qwen') ||
-                          model.id.includes('deepseek')
-                        )
-                        .slice(0, 5)
-                        .map(model => (
-                          <option key={`openrouter-${model.id}`} value={model.id}>
-                            {model.name || model.id} (${model.pricing?.completion || 'N/A'}/1K tokens)
-                          </option>
-                        ))}
-                    </optgroup>
-
-                    <optgroup label="📋 All OpenRouter Models">
-                      {allModels.openrouter
-                        .slice(0, 50) // Limit to first 50 to avoid overwhelming the dropdown
-                        .map(model => (
-                          <option key={`openrouter-all-${model.id}`} value={model.id}>
-                            {model.name || model.id} (${model.pricing?.completion || 'N/A'}/1K tokens)
-                          </option>
-                        ))}
-                    </optgroup>
-                  </>
-                )}
-              </select>
-
-              {selectedModel && (
-                <div className="mt-2 p-3 bg-white/5 rounded-lg">
-                  <div className="text-sm">
-                    <strong>Selected:</strong> {selectedModel}
-                    <br />
-                    <span className="text-white/70">
-                      {allModels.ollama.some(m => m.name === selectedModel)
-                        ? '🏠 Local Ollama model - Free, private, offline capable'
-                        : '☁️ OpenRouter model - Cloud-based, latest capabilities'
-                      }
-                    </span>
-                  </div>
-                </div>
-              )}
-
-              {allModels.loading && (
-                <div className="mt-2 text-sm text-white/70 flex items-center gap-2">
-                  <div className="w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
-                  Loading models from providers...
-                </div>
-              )}
+          {/* Model Selection Info */}
+          <div className="bg-white/5 rounded-lg p-4">
+            <h4 className="font-medium mb-2 flex items-center gap-2">
+              🤖 Model Selection
+            </h4>
+            <p className="text-sm text-white/70 mb-3">
+              Use the model selector in the chat header to choose from all available models across both providers.
+            </p>
+            <div className="text-xs text-white/50">
+              • Local Ollama models: Free, private, offline
+              <br />
+              • OpenRouter models: Latest capabilities, usage-based pricing
             </div>
           </div>
 

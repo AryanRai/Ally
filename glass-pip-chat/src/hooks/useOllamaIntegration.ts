@@ -7,41 +7,54 @@ export function useOllamaIntegration() {
   const [availableModels, setAvailableModels] = useState<any[]>([]);
   const [showModelSelector, setShowModelSelector] = useState(false);
 
-  // Ollama initialization
+  // Initialize both Ollama and OpenRouter
   useEffect(() => {
     if (!window.pip?.ollama) return;
 
-    const initOllama = async () => {
+    const initServices = async () => {
       try {
-        console.log('Checking Ollama availability...');
-        const available = await window.pip.ollama.isAvailable();
-        console.log('Ollama available:', available);
-        setOllamaAvailable(available);
+        console.log('🔄 Initializing AI services...');
+        
+        // Check Ollama availability
+        const ollamaAvailable = await window.pip.ollama.isAvailable();
+        console.log('Ollama available:', ollamaAvailable);
+        setOllamaAvailable(ollamaAvailable);
 
-        if (available) {
-          console.log('Loading Ollama models...');
-          const models = await window.pip.ollama.getModels();
-          console.log('Available models:', models);
-          setAvailableModels(models);
+        // Load all available models from both providers
+        const allModels = await window.pip.ollama.getModels();
+        console.log('All available models:', allModels);
+        setAvailableModels(allModels);
 
-          if (models.length > 0) {
-            const defaultModel = models.find((m: any) => m.name.includes('llama')) || models[0];
-            setCurrentModel(defaultModel.name);
-            console.log('Selected default model:', defaultModel.name);
+        // Set default model
+        if (allModels.length > 0) {
+          // Try to find a good default model
+          let defaultModel = allModels.find((m: any) => 
+            m.name?.includes('llama') || m.id?.includes('llama')
+          );
+          
+          if (!defaultModel) {
+            defaultModel = allModels.find((m: any) => 
+              m.name?.includes('claude') || m.id?.includes('claude')
+            );
           }
-        } else {
-          setAvailableModels([]);
-          setCurrentModel('');
+          
+          if (!defaultModel) {
+            defaultModel = allModels[0];
+          }
+          
+          const modelId = defaultModel.name || defaultModel.id;
+          setCurrentModel(modelId);
+          console.log('Selected default model:', modelId);
         }
       } catch (error) {
-        console.error('Failed to initialize Ollama:', error);
+        console.error('Failed to initialize AI services:', error);
         setOllamaAvailable(false);
         setAvailableModels([]);
         setCurrentModel('');
       }
     };
 
-    initOllama();
+    initServices();
   }, []);
 
   const sendMessageToOllama = async (
