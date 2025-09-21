@@ -21,6 +21,7 @@ interface SettingsModalProps {
   onSettingsChange: (settings: Partial<AppSettings>) => void;
   ollamaIntegration?: any;
   ollamaService?: any;
+  onOpenProviderSettings?: () => void;
 }
 
 export default function SettingsModal({ 
@@ -33,7 +34,8 @@ export default function SettingsModal({
   appSettings,
   onSettingsChange,
   ollamaIntegration,
-  ollamaService
+  ollamaService,
+  onOpenProviderSettings
 }: SettingsModalProps) {
   const [theme, setTheme] = useState<'light' | 'dark'>(initialTheme);
   const [serverStatus, setServerStatus] = useState<any>(null);
@@ -989,6 +991,60 @@ export default function SettingsModal({
                     </div>
                   )}
                 </div>
+                
+                {/* Provider Settings Button */}
+                {onOpenProviderSettings && (
+                  <button
+                    onClick={onOpenProviderSettings}
+                    className={cn(
+                      "w-full p-3 rounded-lg border transition-all duration-200 flex items-center justify-between group",
+                      platform === 'win32'
+                        ? "border-white/20 hover:border-blue-500/50 hover:bg-blue-500/10"
+                        : theme === 'dark' 
+                          ? "border-white/20 hover:border-blue-500/50 hover:bg-blue-500/10"
+                          : "border-black/20 hover:border-blue-500/50 hover:bg-blue-500/10"
+                    )}
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className={cn(
+                        "p-2 rounded-lg",
+                        platform === 'win32'
+                          ? "bg-blue-500/20"
+                          : theme === 'dark' ? "bg-blue-500/20" : "bg-blue-500/20"
+                      )}>
+                        <Server className="w-4 h-4 text-blue-400" />
+                      </div>
+                      <div className="text-left">
+                        <div className={cn(
+                          "text-sm font-medium",
+                          platform === 'win32'
+                            ? "text-white/90"
+                            : theme === 'dark' ? "text-white/90" : "text-black/90"
+                        )}>
+                          AI Provider Settings
+                        </div>
+                        <div className={cn(
+                          "text-xs",
+                          platform === 'win32'
+                            ? "text-white/60"
+                            : theme === 'dark' ? "text-white/60" : "text-black/60"
+                        )}>
+                          Configure Ollama and OpenRouter
+                        </div>
+                      </div>
+                    </div>
+                    <div className={cn(
+                      "text-xs px-2 py-1 rounded transition-colors",
+                      platform === 'win32'
+                        ? "text-white/50 group-hover:text-blue-400"
+                        : theme === 'dark' 
+                          ? "text-white/50 group-hover:text-blue-400"
+                          : "text-black/50 group-hover:text-blue-400"
+                    )}>
+                      Configure →
+                    </div>
+                  </button>
+                )}
               </div>
 
               {/* Server Status Section */}

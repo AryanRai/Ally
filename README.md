@@ -28,8 +28,9 @@ It is ideal for:
 - **Persistent layout:** remembers position/size between sessions.
 
 ### AI Integration
-- **Local Models:** Connects to Ollama (`http://localhost:11434`) for low-latency inference. Default: `gpt-oss:20b`.
-- **Remote Models (future):** Optional API bridge to cloud LLMs.
+- **Local Models:** Connects to Ollama (`http://localhost:11434`) for low-latency inference. Default: `llama3.2`.
+- **Cloud Models:** OpenRouter integration for access to GPT-4, Claude 3.5, Gemini Pro, and 100+ other models.
+- **Dual Provider Support:** Seamlessly switch between local Ollama and cloud OpenRouter models.
 - **Streaming output:** tokens rendered in real-time with smooth animations.
 - **Custom prompts & system personas:** switchable in settings.
 

@@ -4,12 +4,14 @@ import { UnifiedIntegrationTest } from './components/UnifiedIntegrationTest';
 import { GrammarlyFix, suppressExtensionWarnings } from './components/GrammarlyFix';
 import { LangChainChatInterface } from './components/chat/LangChainChatInterface';
 import { LangChainTest } from './components/LangChainTest';
+import { ProviderTest } from './components/ProviderTest';
 
 export default function App() {
   const [visible, setVisible] = useState(true);
   const [showIntegrationTest, setShowIntegrationTest] = useState(false);
   const [showLangChainChat, setShowLangChainChat] = useState(false);
   const [showLangChainTest, setShowLangChainTest] = useState(false);
+  const [showProviderTest, setShowProviderTest] = useState(false);
 
   // Suppress extension warnings on app start
   useEffect(() => {
@@ -44,6 +46,12 @@ export default function App() {
         e.preventDefault();
         setShowLangChainTest(!showLangChainTest);
       }
+      
+      // Handle Ctrl+Shift+P to toggle Provider test
+      if (e.ctrlKey && e.shiftKey && e.key === 'P') {
+        e.preventDefault();
+        setShowProviderTest(!showProviderTest);
+      }
     };
 
     // Listen for focus input event from main process
@@ -58,7 +66,7 @@ export default function App() {
       window.removeEventListener('keydown', handleKeyDown);
       unsubscribe?.();
     };
-  }, [visible, showIntegrationTest, showLangChainChat, showLangChainTest]);
+  }, [visible, showIntegrationTest, showLangChainChat, showLangChainTest, showProviderTest]);
 
   // Check URL for different modes
   useEffect(() => {
@@ -72,7 +80,26 @@ export default function App() {
     if (urlParams.get('test') === 'langchain') {
       setShowLangChainTest(true);
     }
+    if (urlParams.get('test') === 'provider') {
+      setShowProviderTest(true);
+    }
   }, []);
+
+  if (showProviderTest) {
+    return (
+      <div className="min-h-screen bg-gray-900 text-white">
+        <div className="fixed top-4 right-4 z-50 flex gap-2">
+          <button
+            onClick={() => setShowProviderTest(false)}
+            className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors"
+          >
+            Back to Chat
+          </button>
+        </div>
+        <ProviderTest />
+      </div>
+    );
+  }
 
   if (showLangChainTest) {
     return (

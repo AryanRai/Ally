@@ -71,7 +71,16 @@ const pipAPI = {
     },
     stop: () => ipcRenderer.invoke('ollama:stop'),
     getConfig: () => ipcRenderer.invoke('ollama:getConfig'),
-    updateConfig: (config: any) => ipcRenderer.send('ollama:updateConfig', config)
+    updateConfig: (config: any) => ipcRenderer.send('ollama:updateConfig', config),
+    
+    // Provider management
+    getProviders: () => ipcRenderer.invoke('ollama:getProviders'),
+    setProvider: (provider: 'ollama' | 'openrouter') => ipcRenderer.send('ollama:setProvider', provider),
+    
+    // OpenRouter specific methods
+    getOpenRouterModels: () => ipcRenderer.invoke('ollama:getOpenRouterModels'),
+    isOpenRouterAvailable: () => ipcRenderer.invoke('ollama:isOpenRouterAvailable'),
+    testOpenRouterConnection: () => ipcRenderer.invoke('ollama:testOpenRouterConnection')
   },
 
   // Server status

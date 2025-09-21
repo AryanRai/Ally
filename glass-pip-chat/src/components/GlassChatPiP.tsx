@@ -27,6 +27,8 @@ import { RemoteSettings } from './RemoteSettings';
 import { RemoteActivityIndicator } from './RemoteActivityIndicator';
 import { SpeechControls } from './SpeechControls';
 import { useSpeechService } from '../hooks/useSpeechService';
+import { ProviderSettings } from './ProviderSettings';
+import { ProviderConfig } from '../config/providers';
 
 
 // Tool Execution UI Components
@@ -158,6 +160,7 @@ export default function GlassChatPiP() {
   const [quickInput, setQuickInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [showProviderSettings, setShowProviderSettings] = useState(false);
   const [isPreviewExpanded, setIsPreviewExpanded] = useState(false);
   const [currentResponse, setCurrentResponse] = useState('');
   const [inputHistory, setInputHistory] = useState<string[]>([]);
@@ -1164,6 +1167,10 @@ export default function GlassChatPiP() {
             event.preventDefault();
             setShowSettings(true);
             return;
+          case 'P':
+            event.preventDefault();
+            setShowProviderSettings(true);
+            return;
           case 'N':
             event.preventDefault();
             handleChatCreate();
@@ -1243,6 +1250,11 @@ export default function GlassChatPiP() {
           case 'S':
             event.preventDefault();
             setShowSettings(true);
+            return;
+          case 'p':
+          case 'P':
+            event.preventDefault();
+            setShowProviderSettings(true);
             return;
           case 'h':
           case 'H':
@@ -1373,6 +1385,7 @@ export default function GlassChatPiP() {
 📱 APPLICATION SHORTCUTS:
 • Ctrl+N - New chat
 • Ctrl+S - Settings
+• Ctrl+P - Provider Settings
 • Ctrl+H - Hide window
 • Ctrl+R - Resize window
 • Ctrl+W - Hide window
@@ -1986,6 +1999,20 @@ export default function GlassChatPiP() {
         }}
         ollamaIntegration={ollamaIntegration}
         ollamaService={ollamaService}
+        onOpenProviderSettings={() => {
+          setShowSettings(false);
+          setShowProviderSettings(true);
+        }}
+      />
+
+      {/* Provider Settings Modal */}
+      <ProviderSettings
+        isOpen={showProviderSettings}
+        onClose={() => setShowProviderSettings(false)}
+        onConfigChange={(config: ProviderConfig) => {
+          console.log('Provider config updated:', config);
+          // The config is already saved in the component, just log for now
+        }}
       />
 
       {/* Unified Tool Dashboard Modal */}

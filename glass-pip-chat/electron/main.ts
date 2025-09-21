@@ -727,6 +727,43 @@ ipcMain.on('ollama:updateConfig', (_, config) => {
   ollamaService.updateConfig(config);
 });
 
+// Provider management handlers
+ipcMain.handle('ollama:getProviders', () => {
+  return ollamaService.getAvailableProviders();
+});
+
+ipcMain.on('ollama:setProvider', (_, provider: 'ollama' | 'openrouter') => {
+  ollamaService.setProvider(provider);
+});
+
+// OpenRouter specific handlers
+ipcMain.handle('ollama:getOpenRouterModels', async () => {
+  try {
+    return await ollamaService.getOpenRouterModels();
+  } catch (error) {
+    console.error('Error getting OpenRouter models:', error);
+    return [];
+  }
+});
+
+ipcMain.handle('ollama:isOpenRouterAvailable', async () => {
+  try {
+    return await ollamaService.isOpenRouterAvailable();
+  } catch (error) {
+    console.error('Error checking OpenRouter availability:', error);
+    return false;
+  }
+});
+
+ipcMain.handle('ollama:testOpenRouterConnection', async () => {
+  try {
+    return await ollamaService.testOpenRouterConnection();
+  } catch (error) {
+    console.error('Error testing OpenRouter connection:', error);
+    return { success: false, error: error.message };
+  }
+});
+
 // Global abort controller for Ollama requests
 let currentOllamaController: AbortController | null = null;
 

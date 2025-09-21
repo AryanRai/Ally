@@ -110,7 +110,7 @@ class WindowsAccessibilityService:
                 logger.error(f"Failed to initialize UI Automation: {e}")
                 self.ui_automation = None
 
-    async def register_client(self, websocket, path):
+    async def register_client(self, websocket):
         """Register a new WebSocket client"""
         self.clients.add(websocket)
         logger.info(f"Client connected: {websocket.remote_address}")
@@ -430,6 +430,10 @@ class WindowsAccessibilityService:
                 
         return False
 
+    async def websocket_handler(self, websocket):
+        """WebSocket connection handler wrapper"""
+        return await self.register_client(websocket)
+
     async def start_server(self, host="localhost", port=8766):
         """Start the WebSocket server"""
         logger.info(f"Starting accessibility service on {host}:{port}")
@@ -440,7 +444,7 @@ class WindowsAccessibilityService:
         
         try:
             # Start WebSocket server
-            async with websockets.serve(self.register_client, host, port):
+            async with websockets.serve(self.websocket_handler, host, port):
                 logger.info("Accessibility service is running...")
                 await monitor_task
         except KeyboardInterrupt:
