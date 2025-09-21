@@ -944,15 +944,15 @@ export default function GlassChatPiP() {
             const padding = appSettings.ui.windowPadding * 2;
             // Calculate the actual collapsed height based on current state
             let actualCollapsedHeight = collapsedDims.baseHeight;
-            // Add context height if context is present
-            if (contextMonitoring.hasNewContext && (contextMonitoring.contextData.clipboard || contextMonitoring.contextData.selectedText)) {
+            // Only add context height if context is present AND the context UI is expanded
+            if (isContextExpanded && contextMonitoring.hasNewContext && (contextMonitoring.contextData.clipboard || contextMonitoring.contextData.selectedText)) {
               actualCollapsedHeight += collapsedDims.contextHeight;
             }
 
             const baseHeight = actualCollapsedHeight + padding;
             const baseWidth = collapsedDims.width + padding;
 
-            console.log('Force resizing collapsed window to:', baseWidth, 'x', baseHeight, 'context present:', contextMonitoring.hasNewContext);
+            console.log('Force resizing collapsed window to:', baseWidth, 'x', baseHeight, 'context expanded:', isContextExpanded, 'context present:', contextMonitoring.hasNewContext);
             window.pip.resizeWindow(baseWidth, baseHeight);
           }
         }, 150); // Increased delay to ensure state updates have propagated
@@ -1461,14 +1461,10 @@ export default function GlassChatPiP() {
   if (isPreviewExpanded) {
     collapsedHeight = collapsedDims.expandedHeight;
   }
-  // Add space for context only when it's present and properly account for expansion state
-  if (contextMonitoring.hasNewContext && (contextMonitoring.contextData.clipboard || contextMonitoring.contextData.selectedText)) {
-    // Always add space for the context header (collapsed state)
-    collapsedHeight += 36; // Just enough for the collapsed context header
-    // Add additional space only if context is expanded
-    if (isContextExpanded) {
-      collapsedHeight += 60; // Additional space for expanded context content
-    }
+  // Add space for context only when it's present and the context UI is expanded
+  if (isContextExpanded && contextMonitoring.hasNewContext && (contextMonitoring.contextData.clipboard || contextMonitoring.contextData.selectedText)) {
+    // Add space for the context header and content when expanded
+    collapsedHeight += 96; // Space for both header and expanded content
   }
   // Add space for response preview when active
   if (currentResponse || isTyping) {
@@ -1532,7 +1528,7 @@ export default function GlassChatPiP() {
       clearTimeout(resizeTimeout);
       clearTimeout(resetTimeout);
     };
-  }, [state.size, state.collapsed, sidebarCollapsed, appSettings.ui.windowPadding, isPreviewExpanded, contextMonitoring.hasNewContext, contextMonitoring.contextData, currentResponse, isTyping, collapsedHeight, isContextExpanded]);
+  }, [state.size, state.collapsed, sidebarCollapsed, appSettings.ui.windowPadding, isPreviewExpanded, currentResponse, isTyping, collapsedHeight, isContextExpanded]);
 
   return (
     <motion.div

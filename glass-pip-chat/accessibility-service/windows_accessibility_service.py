@@ -37,19 +37,19 @@ try:
     import win32gui
     import win32process
     import win32clipboard
-    print("✅ pywin32 modules imported successfully")
+    print("[OK] pywin32 modules imported successfully")
 except ImportError as e:
     import_errors.append(f"pywin32: {e}")
 
 try:
     from comtypes import client
-    print("✅ comtypes imported successfully")
+    print("[OK] comtypes imported successfully")
 except ImportError as e:
     import_errors.append(f"comtypes: {e}")
 
 try:
     import psutil
-    print("✅ psutil imported successfully")
+    print("[OK] psutil imported successfully")
 except ImportError as e:
     import_errors.append(f"psutil: {e}")
 
@@ -57,35 +57,35 @@ except ImportError as e:
 UIAutomationClient = None
 try:
     from comtypes.gen import UIAutomationClient
-    print("✅ UIAutomationClient imported successfully")
+    print("[OK] UIAutomationClient imported successfully")
     HAS_WINDOWS_APIS = True
 except ImportError as e:
     import_errors.append(f"UIAutomationClient: {e}")
-    print("⚠️ UIAutomationClient not available, trying to generate...")
+    print("[WARN] UIAutomationClient not available, trying to generate...")
     
     # Try to generate the UI Automation client
     try:
         from comtypes.client import GetModule
         GetModule("UIAutomationCore.dll")
         from comtypes.gen import UIAutomationClient
-        print("✅ UIAutomationClient generated and imported successfully")
+        print("[OK] UIAutomationClient generated and imported successfully")
         HAS_WINDOWS_APIS = True
     except Exception as e2:
         import_errors.append(f"UIAutomationClient generation: {e2}")
 
 if import_errors:
-    print("⚠️ Some import issues encountered:")
+    print("[WARN] Some import issues encountered:")
     for error in import_errors:
         print(f"  - {error}")
     
     if not HAS_WINDOWS_APIS:
-        print("\n🔧 Troubleshooting steps:")
+        print("\n[INFO] Troubleshooting steps:")
         print("1. Try running: python -m pip install --force-reinstall pywin32")
         print("2. Run: python Scripts/pywin32_postinstall.py -install")
         print("3. If using conda: conda install pywin32")
         print("4. Restart your terminal/IDE after installation")
 else:
-    print("✅ All Windows APIs imported successfully")
+    print("[OK] All Windows APIs imported successfully")
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)

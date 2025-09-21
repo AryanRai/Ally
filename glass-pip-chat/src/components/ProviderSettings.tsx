@@ -119,12 +119,17 @@ export const ProviderSettings: React.FC<ProviderSettingsProps> = ({
         // Check if method exists
         if (typeof window.pip.ollama.getOpenRouterModels === 'function') {
           const openRouterModels = await window.pip.ollama.getOpenRouterModels();
+          console.log('🔍 Loaded OpenRouter models:', openRouterModels.slice(0, 5)); // Log first 5 models
           models.openrouter = openRouterModels;
         } else {
           console.error('getOpenRouterModels is not a function');
           // Fallback: use popular models from config
           models.openrouter = popularOpenRouterModels;
         }
+      } else {
+        console.log('🔑 No OpenRouter API key, using popular models fallback');
+        // Fallback: use popular models from config
+        models.openrouter = popularOpenRouterModels;
       }
     } catch (error) {
       console.warn('Failed to load OpenRouter models:', error);
@@ -140,16 +145,26 @@ export const ProviderSettings: React.FC<ProviderSettingsProps> = ({
       // Update config with selected model
       const updatedConfig = { ...config };
       if (selectedModel) {
+        console.log('🎯 Processing selected model:', selectedModel);
+        console.log('📋 Available OpenRouter models:', allModels.openrouter.map(m => m.id));
+        console.log('📋 Available Ollama models:', allModels.ollama.map(m => m.name));
+        
         // Determine if selected model is from OpenRouter or Ollama
         const isOpenRouterModel = allModels.openrouter.some(m => m.id === selectedModel);
         const isOllamaModel = allModels.ollama.some(m => m.name === selectedModel);
 
+        console.log('🔍 Model detection:', { selectedModel, isOpenRouterModel, isOllamaModel });
+
         if (isOpenRouterModel) {
           updatedConfig.openrouter.defaultModel = selectedModel;
           updatedConfig.preferred = 'openrouter';
+          console.log('✅ Set as OpenRouter model');
         } else if (isOllamaModel) {
           updatedConfig.ollama.defaultModel = selectedModel;
           updatedConfig.preferred = 'ollama';
+          console.log('✅ Set as Ollama model');
+        } else {
+          console.warn('⚠️ Model not found in either provider, keeping current preference');
         }
       }
 

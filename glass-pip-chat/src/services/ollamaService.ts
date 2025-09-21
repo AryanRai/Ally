@@ -166,7 +166,7 @@ export class OllamaService {
     }
   }
 
-  // Test OpenRouter with a simple non-streaming request
+  // Test OpenRouter with a simple non-streaming request using axios
   async testOpenRouterConnection(): Promise<{ success: boolean; error?: string }> {
     try {
       if (!this.config.openRouterApiKey) {
@@ -175,35 +175,30 @@ export class OllamaService {
 
       const testMessages = [{ role: 'user' as const, content: 'Hello' }];
       
-      const response = await fetch(`${this.config.openRouterBaseUrl}/chat/completions`, {
-        method: 'POST',
+      const response = await axios.post(`${this.config.openRouterBaseUrl}/chat/completions`, {
+        model: 'anthropic/claude-3-haiku',
+        messages: testMessages,
+        stream: false,
+        max_tokens: 10
+      }, {
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${this.config.openRouterApiKey}`,
           'HTTP-Referer': 'https://glass-pip-chat.local',
           'X-Title': 'Glass PiP Chat'
         },
-        body: JSON.stringify({
-          model: 'anthropic/claude-3-haiku',
-          messages: testMessages,
-          stream: false,
-          max_tokens: 10
-        }),
+        timeout: 10000
       });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        return { 
-          success: false, 
-          error: `HTTP ${response.status}: ${errorText}` 
-        };
-      }
 
       return { success: true };
     } catch (error: any) {
+      let errorMessage = error.message;
+      if (error.response) {
+        errorMessage = `HTTP ${error.response.status}: ${error.response.data?.error?.message || error.response.statusText}`;
+      }
       return { 
         success: false, 
-        error: error.message 
+        error: errorMessage 
       };
     }
   }
@@ -277,12 +272,17 @@ export class OllamaService {
     model?: string,
     onProgress?: (chunk: string) => void
   ): Promise<string> {
-    const modelName = model || this.getDefaultModel();
+    let modelName = model || this.getDefaultModel();
+    
+    // Map display names to actual model IDs
+    const originalModel = modelName;
+    modelName = this.mapDisplayNameToModelId(modelName);
     
     // Debug logging
     console.log('🤖 Chat Request Debug:', {
       providedModel: model,
-      resolvedModel: modelName,
+      originalModel,
+      mappedModel: modelName,
       preferredProvider: this.config.preferredProvider,
       hasOpenRouterKey: !!this.config.openRouterApiKey,
       openRouterDefaultModel: this.config.openRouterDefaultModel,
@@ -353,7 +353,7 @@ export class OllamaService {
     }
   }
 
-  // Chat with OpenRouter
+  // Chat with OpenRouter using axios (more reliable in Electron)
   private async chatOpenRouter(
     messages: ChatMessage[],
     model: string,
@@ -374,46 +374,59 @@ export class OllamaService {
         throw new Error(`❌ Invalid OpenRouter model format: "${model}"\n\n✅ OpenRouter models should be in format "provider/model-name"\n\nExamples:\n• anthropic/claude-3.5-sonnet\n• openai/gpt-4o\n• google/gemini-pro-1.5\n\nPlease select a valid model from the dropdown in Provider Settings.`);
       }
 
-      console.log(`Sending chat request to OpenRouter with model: ${model}`);
-      console.log('Messages:', messages);
-      console.log('API Key configured:', this.config.openRouterApiKey ? 'Yes' : 'No');
+      console.log(`🚀 Sending OpenRouter request with axios - Model: ${model}`);
+
+      // Use non-streaming request with axios (more reliable in Electron)
+      const response = await axios.post(`${this.config.openRouterBaseUrl}/chat/completions`, {
+        model,
+        messages: messages.map(msg => ({ role: msg.role, content: msg.content })),
+        stream: false,
+        temperature: 0.7,
+        max_tokens: 4000
+      }, {
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${this.config.openRouterApiKey}`,
+          'HTTP-Referer': 'https://glass-pip-chat.local',
+          'X-Title': 'Glass PiP Chat'
+        },
+        timeout: this.config.openRouterTimeout
+      });
+
+      const content = response.data.choices?.[0]?.message?.content || '';
       
-      return this.streamChatOpenRouter(messages, model, onProgress);
-      
+      // Simulate streaming by sending the content in chunks
+      if (onProgress && content) {
+        const words = content.split(' ');
+        for (const word of words) {
+          onProgress(word + ' ');
+          // Small delay to simulate streaming
+          await new Promise(resolve => setTimeout(resolve, 50));
+        }
+      }
+
+      return content;
     } catch (error: any) {
-      console.error('OpenRouter chat request failed:', error);
+      console.error('OpenRouter axios request failed:', error);
       
-      if (axios.isAxiosError(error)) {
-        if (error.response?.status === 401) {
-          throw new Error('Invalid OpenRouter API key. Please check your configuration.');
+      if (error.response) {
+        const status = error.response.status;
+        const errorData = error.response.data;
+        
+        let errorMessage = `OpenRouter API Error (${status}): ${errorData?.error?.message || error.response.statusText}`;
+        
+        if (status === 400) {
+          errorMessage += '\n\n🔧 Troubleshooting:\n• Check if the model name is correct\n• Verify your API key is valid\n• Ensure you have sufficient credits';
+        } else if (status === 401) {
+          errorMessage += '\n\n🔑 Authentication Error:\n• Your API key is invalid or expired\n• Get a new key from https://openrouter.ai/keys';
+        } else if (status === 402) {
+          errorMessage += '\n\n💳 Payment Required:\n• Insufficient credits in your OpenRouter account\n• Add credits at https://openrouter.ai/credits';
         }
-        if (error.response?.status === 402) {
-          throw new Error('Insufficient credits in OpenRouter account.');
-        }
-        if (error.response?.status === 404) {
-          throw new Error(`Model "${model}" not found on OpenRouter.`);
-        }
-        if (error.response?.status === 429) {
-          throw new Error('Rate limit exceeded. Please try again later.');
-        }
-        if (error.code === 'ECONNABORTED' || error.message.includes('timeout')) {
-          throw new Error(`Request timeout after ${this.config.openRouterTimeout / 1000}s.`);
-        }
-      }
-      // Provide helpful error messages for common issues
-      let errorMessage = `Failed to get response from OpenRouter: ${error.message}`;
-      
-      if (error.message.includes('400')) {
-        errorMessage += '\n\nTroubleshooting:\n• Check if your API key is valid\n• Verify the model name is correct\n• Ensure you have credits in your OpenRouter account';
-      } else if (error.message.includes('401')) {
-        errorMessage += '\n\nTroubleshooting:\n• Your API key is invalid or expired\n• Get a new key from https://openrouter.ai/keys';
-      } else if (error.message.includes('402')) {
-        errorMessage += '\n\nTroubleshooting:\n• Insufficient credits in your OpenRouter account\n• Add credits at https://openrouter.ai/credits';
-      } else if (error.message.includes('429')) {
-        errorMessage += '\n\nTroubleshooting:\n• Rate limit exceeded\n• Wait a moment and try again';
+        
+        throw new Error(errorMessage);
       }
       
-      throw new Error(errorMessage);
+      throw new Error(`Network error: ${error.message}\n\nTroubleshooting:\n• Check your internet connection\n• Verify OpenRouter API is accessible`);
     }
   }
 
@@ -460,7 +473,6 @@ export class OllamaService {
       }
 
       let fullResponse = '';
-      let thinkingMode = false;
 
       try {
         while (true) {
@@ -480,29 +492,15 @@ export class OllamaService {
               
               if (data.message?.content) {
                 const content = data.message.content;
-                
-                // Check for thinking patterns
-                if (content.includes('<thinking>') || content.includes('thinking:') || content.includes('Let me think')) {
-                  thinkingMode = true;
-                }
-                
-                if (thinkingMode && (content.includes('</thinking>') || content.includes('Now,') || content.includes('So,'))) {
-                  thinkingMode = false;
-                }
-                
-                // Always display the actual content
                 onProgress?.(content);
-                
                 fullResponse += content;
               }
               
-              // Handle done status
               if (data.done) {
                 console.log('Stream marked as done');
                 break;
               }
             } catch (parseError) {
-              // Ignore parsing errors for incomplete chunks
               console.warn('Failed to parse streaming chunk:', parseError, 'Line:', line);
             }
           }
@@ -529,146 +527,6 @@ export class OllamaService {
     }
   }
 
-  // Stream chat response for OpenRouter
-  private async streamChatOpenRouter(
-    messages: ChatMessage[],
-    model: string,
-    onProgress?: (chunk: string) => void
-  ): Promise<string> {
-    try {
-      console.log('Starting OpenRouter streaming request...');
-      
-      // Ensure messages are in the correct format for OpenRouter
-      const formattedMessages = messages.map(msg => ({
-        role: msg.role,
-        content: msg.content
-      }));
-
-      console.log('OpenRouter request:', {
-        model,
-        messages: formattedMessages,
-        stream: true,
-        temperature: 0.7,
-        max_tokens: 4000
-      });
-      
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => {
-        controller.abort();
-      }, this.config.openRouterTimeout);
-
-      const response = await fetch(`${this.config.openRouterBaseUrl}/chat/completions`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${this.config.openRouterApiKey}`,
-          'HTTP-Referer': 'https://glass-pip-chat.local',
-          'X-Title': 'Glass PiP Chat'
-        },
-        body: JSON.stringify({
-          model,
-          messages: formattedMessages,
-          stream: true,
-          temperature: 0.7,
-          max_tokens: 4000
-        }),
-        signal: controller.signal,
-      });
-
-      clearTimeout(timeoutId);
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('OpenRouter API Error Details:', {
-          status: response.status,
-          statusText: response.statusText,
-          headers: Object.fromEntries(response.headers.entries()),
-          body: errorText,
-          requestModel: model,
-          requestMessages: formattedMessages,
-          apiKeyPrefix: this.config.openRouterApiKey?.substring(0, 10) + '...'
-        });
-        
-        let errorMessage = `OpenRouter API Error (${response.status}): ${errorText}`;
-        
-        // Add specific troubleshooting for common errors
-        if (response.status === 400) {
-          errorMessage += '\n\n🔧 Troubleshooting:\n';
-          errorMessage += '• Check if the model name is correct (should be like "anthropic/claude-3.5-sonnet")\n';
-          errorMessage += '• Verify your API key is valid and starts with "sk-or-"\n';
-          errorMessage += '• Ensure you have sufficient credits in your OpenRouter account\n';
-          errorMessage += '• Try a different model from the dropdown';
-        } else if (response.status === 401) {
-          errorMessage += '\n\n🔑 Authentication Error:\n';
-          errorMessage += '• Your API key is invalid or expired\n';
-          errorMessage += '• Get a new key from https://openrouter.ai/keys';
-        } else if (response.status === 402) {
-          errorMessage += '\n\n💳 Payment Required:\n';
-          errorMessage += '• Insufficient credits in your OpenRouter account\n';
-          errorMessage += '• Add credits at https://openrouter.ai/credits';
-        }
-        
-        throw new Error(errorMessage);
-      }
-
-      const reader = response.body?.getReader();
-      if (!reader) {
-        throw new Error('Failed to get response reader');
-      }
-
-      let fullResponse = '';
-
-      try {
-        while (true) {
-          const { done, value } = await reader.read();
-          
-          if (done) {
-            console.log('OpenRouter stream completed');
-            break;
-          }
-
-          const chunk = new TextDecoder().decode(value);
-          const lines = chunk.split('\n').filter(line => line.trim() && line.startsWith('data: '));
-
-          for (const line of lines) {
-            const data = line.replace('data: ', '');
-            
-            if (data === '[DONE]') {
-              console.log('OpenRouter stream marked as done');
-              break;
-            }
-
-            try {
-              const parsed = JSON.parse(data);
-              const content = parsed.choices?.[0]?.delta?.content;
-              
-              if (content) {
-                onProgress?.(content);
-                fullResponse += content;
-              }
-            } catch (parseError) {
-              console.warn('Failed to parse OpenRouter streaming chunk:', parseError);
-            }
-          }
-        }
-      } finally {
-        reader.releaseLock();
-      }
-
-      console.log('OpenRouter final response length:', fullResponse.length);
-      return fullResponse;
-      
-    } catch (error: any) {
-      console.error('OpenRouter streaming failed:', error);
-      
-      if (error.name === 'AbortError') {
-        throw new Error(`Request timeout after ${this.config.openRouterTimeout / 1000}s.`);
-      }
-      
-      throw error;
-    }
-  }
-
   // Enhanced streaming with real-time thinking and word-by-word display
   async streamChatWithThinking(
     messages: ChatMessage[],
@@ -676,14 +534,43 @@ export class OllamaService {
     onProgress: (chunk: ThinkingChunk) => void,
     abortSignal?: AbortSignal
   ): Promise<string> {
+    // Map display names to actual model IDs
+    const mappedModel = this.mapDisplayNameToModelId(model);
+    console.log('🎭 StreamChatWithThinking - Model mapping:', { original: model, mapped: mappedModel });
+    
     // Determine provider based on model name or configuration
-    const isOpenRouterModel = this.isOpenRouterModelName(model);
+    const isOpenRouterModel = this.isOpenRouterModelName(mappedModel);
     const useOpenRouter = isOpenRouterModel || (this.config.preferredProvider === 'openrouter' && this.config.openRouterApiKey);
     
+    console.log('🔀 StreamChatWithThinking - Provider selection:', {
+      mappedModel,
+      isOpenRouterModel,
+      preferredProvider: this.config.preferredProvider,
+      hasApiKey: !!this.config.openRouterApiKey,
+      useOpenRouter
+    });
+    
     if (useOpenRouter) {
-      return this.streamChatWithThinkingOpenRouter(messages, model, onProgress, abortSignal);
+      // Use axios-based approach for OpenRouter with thinking simulation
+      const response = await this.chatOpenRouter(messages, mappedModel, (chunk) => {
+        // Convert regular progress to thinking chunks
+        onProgress({
+          type: 'response',
+          content: chunk,
+          isComplete: false
+        });
+      });
+      
+      // Send final completion
+      onProgress({
+        type: 'done',
+        content: response,
+        isComplete: true
+      });
+      
+      return response;
     } else {
-      return this.streamChatWithThinkingOllama(messages, model, onProgress, abortSignal);
+      return this.streamChatWithThinkingOllama(messages, mappedModel, onProgress, abortSignal);
     }
   }
 
@@ -702,7 +589,6 @@ export class OllamaService {
         controller.abort();
       }, this.config.ollamaStreamTimeout);
 
-      // If external abort signal is provided, listen to it
       if (abortSignal) {
         abortSignal.addEventListener('abort', () => {
           controller.abort();
@@ -718,7 +604,6 @@ export class OllamaService {
           model,
           messages,
           stream: true,
-          // Add options to encourage thinking output
           options: {
             temperature: 0.7,
             top_p: 0.9,
@@ -769,57 +654,19 @@ export class OllamaService {
                 
                 // Enhanced thinking detection patterns
                 const thinkingPatterns = [
-                  /let me think/i,
-                  /i need to/i,
-                  /first,?\s/i,
-                  /considering/i,
-                  /analyzing/i,
-                  /looking at/i,
-                  /examining/i,
-                  /hmm,?\s/i,
-                  /well,?\s/i,
-                  /actually,?\s/i,
-                  /wait,?\s/i,
-                  /hold on/i,
-                  /thinking about/i,
-                  /let's see/i,
-                  /i should/i,
-                  /i would/i,
-                  /i could/i,
-                  /perhaps/i,
-                  /maybe/i,
-                  /it seems/i,
-                  /it appears/i,
-                  /based on/i,
-                  /given that/i,
-                  /since/i,
-                  /because/i,
-                  /due to/i,
-                  /as a result/i,
-                  /therefore/i,
-                  /thus/i,
-                  /so/i,
-                  /hence/i,
-                  /consequently/i
+                  /let me think/i, /i need to/i, /first,?\s/i, /considering/i, /analyzing/i,
+                  /looking at/i, /examining/i, /hmm,?\s/i, /well,?\s/i, /actually,?\s/i,
+                  /wait,?\s/i, /hold on/i, /thinking about/i, /let's see/i, /i should/i,
+                  /i would/i, /i could/i, /perhaps/i, /maybe/i, /it seems/i, /it appears/i,
+                  /based on/i, /given that/i, /since/i, /because/i, /due to/i, /as a result/i,
+                  /therefore/i, /thus/i, /so/i, /hence/i, /consequently/i
                 ];
 
                 const responsePatterns = [
-                  /^(here's|here is)/i,
-                  /^(the answer)/i,
-                  /^(to answer)/i,
-                  /^(in summary)/i,
-                  /^(in conclusion)/i,
-                  /^(finally)/i,
-                  /^(ultimately)/i,
-                  /^(overall)/i,
-                  /^(basically)/i,
-                  /^(simply put)/i,
-                  /^(in other words)/i,
-                  /^(that means)/i,
-                  /^(this means)/i,
-                  /^(so the)/i,
-                  /^(therefore the)/i,
-                  /^(thus the)/i
+                  /^(here's|here is)/i, /^(the answer)/i, /^(to answer)/i, /^(in summary)/i,
+                  /^(in conclusion)/i, /^(finally)/i, /^(ultimately)/i, /^(overall)/i,
+                  /^(basically)/i, /^(simply put)/i, /^(in other words)/i, /^(that means)/i,
+                  /^(this means)/i, /^(so the)/i, /^(therefore the)/i, /^(thus the)/i
                 ];
 
                 // Detect thinking phase
@@ -844,10 +691,9 @@ export class OllamaService {
                     }
                   }
                   
-                  // Also check for sentence completion that might indicate end of thinking
                   if (content.includes('.') || content.includes('!') || content.includes('?')) {
                     const sentences = buffer.split(/[.!?]+/);
-                    if (sentences.length > 2) { // Multiple sentences likely means thinking is done
+                    if (sentences.length > 2) {
                       isInThinking = false;
                       responseStarted = true;
                       console.log('Detected response phase after multiple sentences');
@@ -881,7 +727,7 @@ export class OllamaService {
 
                 fullResponse += content;
                 
-                // Add small delay for real-time effect (reduced for better responsiveness)
+                // Add small delay for real-time effect
                 await new Promise(resolve => setTimeout(resolve, 5));
               }
               
@@ -909,274 +755,6 @@ export class OllamaService {
         return 'Stopped by user';
       }
       
-      throw error;
-    }
-  }
-
-  // Enhanced streaming with thinking for OpenRouter
-  private async streamChatWithThinkingOpenRouter(
-    messages: ChatMessage[],
-    model: string,
-    onProgress: (chunk: ThinkingChunk) => void,
-    abortSignal?: AbortSignal
-  ): Promise<string> {
-    try {
-      console.log('Starting enhanced OpenRouter streaming with thinking detection...');
-      
-      // Ensure messages are in the correct format for OpenRouter
-      const formattedMessages = messages.map(msg => ({
-        role: msg.role,
-        content: msg.content
-      }));
-      
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => {
-        controller.abort();
-      }, this.config.openRouterTimeout);
-
-      if (abortSignal) {
-        abortSignal.addEventListener('abort', () => {
-          controller.abort();
-        });
-      }
-
-      const response = await fetch(`${this.config.openRouterBaseUrl}/chat/completions`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${this.config.openRouterApiKey}`,
-          'HTTP-Referer': 'https://glass-pip-chat.local',
-          'X-Title': 'Glass PiP Chat'
-        },
-        body: JSON.stringify({
-          model,
-          messages: formattedMessages,
-          stream: true,
-          temperature: 0.7,
-          max_tokens: 4000
-        }),
-        signal: controller.signal,
-      });
-
-      clearTimeout(timeoutId);
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
-      const reader = response.body?.getReader();
-      if (!reader) {
-        throw new Error('Failed to get response reader');
-      }
-
-      let fullResponse = '';
-      let thinkingContent = '';
-      let responseContent = '';
-      let isInThinking = false;
-      let responseStarted = false;
-      let buffer = '';
-
-      try {
-        while (true) {
-          const { done, value } = await reader.read();
-          
-          if (done) {
-            console.log('OpenRouter stream completed');
-            onProgress({ type: 'done', content: fullResponse, isComplete: true });
-            break;
-          }
-
-          const chunk = new TextDecoder().decode(value);
-          const lines = chunk.split('\n').filter(line => line.trim() && line.startsWith('data: '));
-
-          for (const line of lines) {
-            const data = line.replace('data: ', '');
-            
-            if (data === '[DONE]') {
-              onProgress({ type: 'done', content: fullResponse, isComplete: true });
-              break;
-            }
-
-            try {
-              const parsed = JSON.parse(data);
-              const content = parsed.choices?.[0]?.delta?.content;
-              
-              if (content) {
-                buffer += content;
-                
-                // Use same thinking detection logic as Ollama
-                const { isThinking, isResponse } = this.detectThinkingPhase(buffer, content, isInThinking, responseStarted);
-                
-                if (isThinking && !isInThinking) {
-                  isInThinking = true;
-                  responseStarted = false;
-                }
-                
-                if (isResponse && isInThinking) {
-                  isInThinking = false;
-                  responseStarted = true;
-                }
-
-                // Auto-transition logic
-                if (isInThinking && thinkingContent.length > 300 && !responseStarted) {
-                  isInThinking = false;
-                  responseStarted = true;
-                }
-
-                // Send real-time updates
-                if (isInThinking) {
-                  thinkingContent += content;
-                  onProgress({ 
-                    type: 'thinking', 
-                    content: thinkingContent, 
-                    isComplete: false 
-                  });
-                } else {
-                  responseContent += content;
-                  onProgress({ 
-                    type: 'response', 
-                    content: responseContent, 
-                    isComplete: false 
-                  });
-                }
-
-                fullResponse += content;
-                
-                // Small delay for real-time effect
-                await new Promise(resolve => setTimeout(resolve, 5));
-              }
-            } catch (parseError) {
-              console.warn('Failed to parse OpenRouter streaming chunk:', parseError);
-            }
-          }
-        }
-      } finally {
-        reader.releaseLock();
-      }
-
-      return fullResponse;
-      
-    } catch (error: any) {
-      console.error('Enhanced OpenRouter streaming failed:', error);
-      
-      if (error.name === 'AbortError') {
-        console.log('OpenRouter streaming was aborted by user');
-        onProgress({ type: 'done', content: 'Stopped by user', isComplete: false });
-        return 'Stopped by user';
-      }
-      
-      throw error;
-    }
-  }
-
-  // Helper method to detect thinking patterns
-  private detectThinkingPhase(buffer: string, content: string, isInThinking: boolean, responseStarted: boolean): { isThinking: boolean, isResponse: boolean } {
-    const thinkingPatterns = [
-      /let me think/i, /i need to/i, /first,?\s/i, /considering/i, /analyzing/i,
-      /looking at/i, /examining/i, /hmm,?\s/i, /well,?\s/i, /actually,?\s/i,
-      /wait,?\s/i, /hold on/i, /thinking about/i, /let's see/i, /i should/i,
-      /i would/i, /i could/i, /perhaps/i, /maybe/i, /it seems/i, /it appears/i,
-      /based on/i, /given that/i, /since/i, /because/i, /due to/i, /as a result/i,
-      /therefore/i, /thus/i, /so/i, /hence/i, /consequently/i
-    ];
-
-    const responsePatterns = [
-      /^(here's|here is)/i, /^(the answer)/i, /^(to answer)/i, /^(in summary)/i,
-      /^(in conclusion)/i, /^(finally)/i, /^(ultimately)/i, /^(overall)/i,
-      /^(basically)/i, /^(simply put)/i, /^(in other words)/i, /^(that means)/i,
-      /^(this means)/i, /^(so the)/i, /^(therefore the)/i, /^(thus the)/i
-    ];
-
-    let isThinking = false;
-    let isResponse = false;
-
-    // Detect thinking phase
-    if (!responseStarted && !isInThinking) {
-      for (const pattern of thinkingPatterns) {
-        if (pattern.test(buffer)) {
-          isThinking = true;
-          break;
-        }
-      }
-    }
-
-    // Detect response phase
-    if (isInThinking && !responseStarted) {
-      for (const pattern of responsePatterns) {
-        if (pattern.test(content)) {
-          isResponse = true;
-          break;
-        }
-      }
-      
-      // Check for sentence completion
-      if (content.includes('.') || content.includes('!') || content.includes('?')) {
-        const sentences = buffer.split(/[.!?]+/);
-        if (sentences.length > 2) {
-          isResponse = true;
-        }
-      }
-    }
-
-    return { isThinking, isResponse };
-  }
-
-  // Helper method to determine if a model name is from OpenRouter
-  private isOpenRouterModelName(model: string): boolean {
-    const openRouterPrefixes = [
-      'openai/', 'anthropic/', 'google/', 'meta-llama/', 'mistralai/',
-      'cohere/', 'perplexity/', 'microsoft/', 'nousresearch/', 'qwen/',
-      'deepseek/', 'liquid/', 'ai21/', 'databricks/', 'nvidia/'
-    ];
-    
-    return openRouterPrefixes.some(prefix => model.startsWith(prefix));
-  }
-
-  // Helper method to get default model based on provider
-  private getDefaultModel(): string {
-    const defaultModel = this.config.preferredProvider === 'openrouter' && this.config.openRouterApiKey
-      ? this.config.openRouterDefaultModel
-      : this.config.ollamaDefaultModel;
-    
-    console.log('🎯 Default Model Selection:', {
-      preferredProvider: this.config.preferredProvider,
-      hasOpenRouterKey: !!this.config.openRouterApiKey,
-      openRouterDefault: this.config.openRouterDefaultModel,
-      ollamaDefault: this.config.ollamaDefaultModel,
-      selectedDefault: defaultModel
-    });
-    
-    return defaultModel;
-  }
-
-  // Method to get thinking tokens specifically
-  async getThinkingResponse(
-    messages: ChatMessage[],
-    model: string,
-    onProgress: (thinking: string, response: string) => void
-  ): Promise<{ thinking: string, response: string }> {
-    try {
-      let thinking = '';
-      let response = '';
-      let phase: 'thinking' | 'response' = 'thinking';
-
-      await this.streamChatWithThinking(messages, model, (chunk) => {
-        if (chunk.type === 'thinking') {
-          thinking += chunk.content;
-          phase = 'thinking';
-        } else if (chunk.type === 'response') {
-          if (phase === 'thinking') {
-            phase = 'response';
-          }
-          response += chunk.content;
-        }
-        
-        onProgress(thinking, response);
-      });
-
-      return { thinking, response };
-    } catch (error) {
-      console.error('Failed to get thinking response:', error);
       throw error;
     }
   }
@@ -1209,6 +787,75 @@ export class OllamaService {
     }
   }
 
+  // Helper method to determine if a model name is from OpenRouter
+  private isOpenRouterModelName(model: string): boolean {
+    const openRouterPrefixes = [
+      'openai/', 'anthropic/', 'google/', 'meta-llama/', 'mistralai/',
+      'cohere/', 'perplexity/', 'microsoft/', 'nousresearch/', 'qwen/',
+      'deepseek/', 'liquid/', 'ai21/', 'databricks/', 'nvidia/', 'x-ai/'
+    ];
+    
+    // Also check for common display names that should map to OpenRouter
+    const openRouterDisplayNames = [
+      'xai:', 'grok', 'claude', 'gpt-4', 'gemini', 'llama-3'
+    ];
+    
+    const modelLower = model.toLowerCase();
+    
+    // Check prefixes first
+    if (openRouterPrefixes.some(prefix => model.startsWith(prefix))) {
+      return true;
+    }
+    
+    // Check display names
+    if (openRouterDisplayNames.some(name => modelLower.includes(name))) {
+      console.log(`🔍 Detected OpenRouter model by display name: ${model}`);
+      return true;
+    }
+    
+    return false;
+  }
+
+  // Helper method to map display names to actual OpenRouter model IDs
+  private mapDisplayNameToModelId(displayName: string): string {
+    const modelMappings: Record<string, string> = {
+      'xai: grok 4 fast (free)': 'x-ai/grok-beta',
+      'xai: grok beta': 'x-ai/grok-beta',
+      'grok': 'x-ai/grok-beta',
+      'claude 3.5 sonnet': 'anthropic/claude-3.5-sonnet',
+      'gpt-4o': 'openai/gpt-4o',
+      'gpt-4o mini': 'openai/gpt-4o-mini',
+      'gemini pro 1.5': 'google/gemini-pro-1.5'
+    };
+    
+    const normalizedName = displayName.toLowerCase().trim();
+    const mappedId = modelMappings[normalizedName];
+    
+    if (mappedId) {
+      console.log(`🔄 Mapped display name "${displayName}" to model ID "${mappedId}"`);
+      return mappedId;
+    }
+    
+    return displayName;
+  }
+
+  // Helper method to get default model based on provider
+  private getDefaultModel(): string {
+    const defaultModel = this.config.preferredProvider === 'openrouter' && this.config.openRouterApiKey
+      ? this.config.openRouterDefaultModel
+      : this.config.ollamaDefaultModel;
+    
+    console.log('🎯 Default Model Selection:', {
+      preferredProvider: this.config.preferredProvider,
+      hasOpenRouterKey: !!this.config.openRouterApiKey,
+      openRouterDefault: this.config.openRouterDefaultModel,
+      ollamaDefault: this.config.ollamaDefaultModel,
+      selectedDefault: defaultModel
+    });
+    
+    return defaultModel;
+  }
+
   // Update configuration
   updateConfig(newConfig: Partial<ServiceConfig>): void {
     this.config = { ...this.config, ...newConfig };
@@ -1238,6 +885,15 @@ export class OllamaService {
         configured: !!this.config.openRouterApiKey
       }
     ];
+  }
+
+  // Public method for main process to use OpenRouter streaming
+  async streamChatOpenRouter(
+    messages: ChatMessage[],
+    model: string,
+    onProgress?: (chunk: string) => void
+  ): Promise<string> {
+    return this.chatOpenRouter(messages, model, onProgress);
   }
 }
 

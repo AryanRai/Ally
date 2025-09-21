@@ -78,8 +78,15 @@ export class AccessibilityService {
     console.log('🔍 Starting Accessibility Service...');
     
     try {
-      // Initialize Windows APIs if available
-      await this.initializeWindowsAPIs();
+      // Connect to the accessibility service via Electron
+      if (window.pip?.accessibility) {
+        await window.pip.accessibility.connect();
+        
+        // Listen for context updates from the main process
+        window.pip.accessibility.onContextUpdate((context) => {
+          this.updateContext(context);
+        });
+      }
       
       // Start monitoring
       this.isRunning = true;
@@ -101,6 +108,11 @@ export class AccessibilityService {
     if (this.pollingTimer) {
       clearInterval(this.pollingTimer);
       this.pollingTimer = undefined;
+    }
+    
+    // Disconnect from the accessibility service
+    if (window.pip?.accessibility) {
+      window.pip.accessibility.disconnect();
     }
     
     console.log('✅ Accessibility Service stopped');
@@ -407,20 +419,21 @@ export function getAccessibilityService(options?: Partial<AccessibilityServiceOp
   return accessibilityService;
 }
 
-// Type declarations for Windows APIs
+// Type declarations for Electron APIs
 declare global {
   interface Window {
     pip?: {
       accessibility?: {
+        connect(): Promise<{ success: boolean; error?: string }>;
+        disconnect(): Promise<{ success: boolean }>;
+        isConnected(): Promise<boolean>;
         getSelectedText(): Promise<string | undefined>;
         getElementAtCursor(): Promise<AccessibilityContext['hoveredElement']>;
         getFocusedElement(): Promise<AccessibilityContext['focusedElement']>;
         getActiveWindow(): Promise<AccessibilityContext['activeWindow']>;
         getCursorPosition(): Promise<AccessibilityContext['cursorPosition']>;
         getScreenContent(): Promise<AccessibilityContext['screenContent']>;
-        connect(): Promise<{ success: boolean; error?: string }>;
-        disconnect(): Promise<{ success: boolean }>;
-        isConnected(): Promise<boolean>;
+        onContextUpdate(callback: (context: AccessibilityContext) => void): () => void;
       };
     };
   }

@@ -80,7 +80,21 @@ const pipAPI = {
     // OpenRouter specific methods
     getOpenRouterModels: () => ipcRenderer.invoke('ollama:getOpenRouterModels'),
     isOpenRouterAvailable: () => ipcRenderer.invoke('ollama:isOpenRouterAvailable'),
-    testOpenRouterConnection: () => ipcRenderer.invoke('ollama:testOpenRouterConnection')
+    testOpenRouterConnection: () => ipcRenderer.invoke('ollama:testOpenRouterConnection'),
+    openRouterStreamChat: async (messages: any[], model: string, onProgress: (chunk: string) => void) => {
+      // Set up listener for progress updates
+      const progressHandler = (_: any, chunk: string) => onProgress(chunk);
+      ipcRenderer.on('ollama:openRouterProgress', progressHandler);
+      
+      try {
+        // Start the streaming request
+        const result = await ipcRenderer.invoke('ollama:openRouterStreamChat', messages, model);
+        return result;
+      } finally {
+        // Clean up the listener
+        ipcRenderer.removeListener('ollama:openRouterProgress', progressHandler);
+      }
+    }
   },
 
   // Server status
@@ -222,6 +236,26 @@ const pipAPI = {
     getAgentStatus: () => ipcRenderer.invoke('acp:getAgentStatus'),
     queryAgent: (agentId: string, query: string, context?: any) => ipcRenderer.invoke('acp:queryAgent', agentId, query, context),
     reconnectAgent: (agentId: string) => ipcRenderer.invoke('acp:reconnectAgent', agentId)
+  },
+
+  // Accessibility service
+  accessibility: {
+    connect: () => ipcRenderer.invoke('accessibility:connect'),
+    disconnect: () => ipcRenderer.invoke('accessibility:disconnect'),
+    isConnected: () => ipcRenderer.invoke('accessibility:isConnected'),
+    getSelectedText: () => ipcRenderer.invoke('accessibility:getSelectedText'),
+    getElementAtCursor: () => ipcRenderer.invoke('accessibility:getElementAtCursor'),
+    getFocusedElement: () => ipcRenderer.invoke('accessibility:getFocusedElement'),
+    getCursorPosition: () => ipcRenderer.invoke('accessibility:getCursorPosition'),
+    getActiveWindow: () => ipcRenderer.invoke('accessibility:getActiveWindow'),
+    getScreenContent: () => ipcRenderer.invoke('accessibility:getScreenContent'),
+    
+    // Listen for accessibility context updates
+    onContextUpdate: (callback: (context: any) => void) => {
+      const handler = (_: any, context: any) => callback(context);
+      ipcRenderer.on('accessibility-context-update', handler);
+      return () => ipcRenderer.removeListener('accessibility-context-update', handler);
+    }
   }
 };
 

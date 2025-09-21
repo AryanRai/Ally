@@ -42,6 +42,7 @@ class AccessibilityServiceClient {
   private ws: WebSocket | null = null;
   private reconnectTimer: NodeJS.Timeout | null = null;
   private isConnecting = false;
+  private latestContext: any = null;
 
   constructor(private url: string = 'ws://localhost:8766') {}
 
@@ -68,6 +69,8 @@ class AccessibilityServiceClient {
         try {
           const message = JSON.parse(data.toString());
           if (message.type === 'context_update') {
+            // Store the latest context
+            this.latestContext = message.data;
             // Forward accessibility context to renderer
             win?.webContents.send('accessibility-context-update', message.data);
           }
@@ -118,6 +121,10 @@ class AccessibilityServiceClient {
 
   isConnected(): boolean {
     return this.ws?.readyState === WebSocket.OPEN;
+  }
+
+  getLatestContext(): any {
+    return this.latestContext;
   }
 }
 
@@ -764,6 +771,25 @@ ipcMain.handle('ollama:testOpenRouterConnection', async () => {
   }
 });
 
+// OpenRouter streaming chat handler
+ipcMain.handle('ollama:openRouterStreamChat', async (event, messages, model) => {
+  try {
+    let fullResponse = '';
+    
+    // Use the service's OpenRouter streaming method
+    const response = await ollamaService.streamChatOpenRouter(messages, model, (chunk) => {
+      // Send progress updates back to renderer
+      event.sender.send('ollama:openRouterProgress', chunk);
+      fullResponse += chunk;
+    });
+    
+    return response;
+  } catch (error) {
+    console.error('OpenRouter streaming failed:', error);
+    throw error;
+  }
+});
+
 // Global abort controller for Ollama requests
 let currentOllamaController: AbortController | null = null;
 
@@ -972,25 +998,38 @@ ipcMain.handle('accessibility:isConnected', () => {
 });
 
 ipcMain.handle('accessibility:getSelectedText', async () => {
-  // This would be handled by the accessibility service
-  // For now, return clipboard as fallback
-  return clipboard.readText();
+  const context = accessibilityService.getLatestContext();
+  return context?.selectedText || clipboard.readText();
+});
+
+ipcMain.handle('accessibility:getElementAtCursor', async () => {
+  const context = accessibilityService.getLatestContext();
+  return context?.hoveredElement || null;
+});
+
+ipcMain.handle('accessibility:getFocusedElement', async () => {
+  const context = accessibilityService.getLatestContext();
+  return context?.focusedElement || null;
 });
 
 ipcMain.handle('accessibility:getCursorPosition', async () => {
-  const point = screen.getCursorScreenPoint();
-  return { x: point.x, y: point.y };
+  const context = accessibilityService.getLatestContext();
+  return context?.cursorPosition || screen.getCursorScreenPoint();
 });
 
 ipcMain.handle('accessibility:getActiveWindow', async () => {
-  // This would be provided by the accessibility service
-  // For now, return basic info
-  return {
+  const context = accessibilityService.getLatestContext();
+  return context?.activeWindow || {
     title: 'Unknown Window',
     application: 'Unknown Application',
     processName: 'unknown.exe',
     isActive: true
   };
+});
+
+ipcMain.handle('accessibility:getScreenContent', async () => {
+  const context = accessibilityService.getLatestContext();
+  return context?.screenContent || null;
 });
 
 // Setup speech service event forwarding to renderer

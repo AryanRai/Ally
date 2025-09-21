@@ -80,6 +80,12 @@ export const popularOpenRouterModels = [
     name: 'Qwen 2.5 72B',
     description: 'Alibaba\'s multilingual model',
     provider: 'Qwen'
+  },
+  {
+    id: 'x-ai/grok-beta',
+    name: 'xAI Grok Beta',
+    description: 'xAI\'s conversational AI model',
+    provider: 'xAI'
   }
 ];
 
@@ -93,7 +99,8 @@ export const modelCategories = {
   'Fast & Affordable': [
     'openai/gpt-4o-mini',
     'anthropic/claude-3-haiku',
-    'google/gemini-flash-1.5'
+    'google/gemini-flash-1.5',
+    'x-ai/grok-beta'
   ],
   'Specialized': [
     'perplexity/llama-3.1-sonar-large-128k-online',
