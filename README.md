@@ -2,11 +2,9 @@
 
 **Ally** is a **glassmorphic, picture-in-picture desktop overlay** that provides advanced access to local and remote LLMs, comprehensive tool calling framework, and seamless integration with the **Comms v4.0 Unified Robot Cognitive Overlay Platform**.
 
-<img width="480" height="450" alt="image" src="https://github.com/user-attachments/assets/85a65d19-8c13-430a-9b9e-6b38c196af9b" />
-
+<img width="481" height="214" alt="image" src="https://github.com/user-attachments/assets/f2e88fcf-58c6-447f-b384-19a7c1efbbb1" />
 
 It runs as a floating, always-on-top Electron app with Apple-style glass UI, animated interactions, and seamless integration with **Ollama (local models like gpt-oss-20b)** and the **Chyappy v4.0 Unified Protocol**. All chats are logged to a **Vercel-hosted API** with an exposed external domain, enabling persistent conversation history, analytics, and direct robot control through the unified tool calling framework. The API uses Supabase for database storage and integrates with the Comms v4.0 platform for real-time robot cognitive processing.
-
 
 <img width="867" height="704" alt="image" src="https://github.com/user-attachments/assets/1479ae38-7df5-4682-a35f-0e46c729a64d" />
 
@@ -17,6 +15,8 @@ It runs as a floating, always-on-top Electron app with Apple-style glass UI, ani
 Ally is designed as both a **personal AI assistant** and a **robot control console**:
 - **As a desktop overlay:** quick access to AI chat, search, and task automation without switching windows.
 - **As part of DroidCore:** acts as the human-facing “head” of the robot, providing vision, language, and speech interfaces.
+
+<img width="480" height="450" alt="image" src="https://github.com/user-attachments/assets/85a65d19-8c13-430a-9b9e-6b38c196af9b" />
 
 It is ideal for:
 - Rapid natural-language queries and responses via local LLMs.
