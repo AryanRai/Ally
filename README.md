@@ -2,7 +2,13 @@
 
 **Ally** is a **glassmorphic, picture-in-picture desktop overlay** that provides advanced access to local and remote LLMs, comprehensive tool calling framework, and seamless integration with the **Comms v4.0 Unified Robot Cognitive Overlay Platform**.
 
+<img width="480" height="450" alt="image" src="https://github.com/user-attachments/assets/85a65d19-8c13-430a-9b9e-6b38c196af9b" />
+
+
 It runs as a floating, always-on-top Electron app with Apple-style glass UI, animated interactions, and seamless integration with **Ollama (local models like gpt-oss-20b)** and the **Chyappy v4.0 Unified Protocol**. All chats are logged to a **Vercel-hosted API** with an exposed external domain, enabling persistent conversation history, analytics, and direct robot control through the unified tool calling framework. The API uses Supabase for database storage and integrates with the Comms v4.0 platform for real-time robot cognitive processing.
+
+
+<img width="867" height="704" alt="image" src="https://github.com/user-attachments/assets/1479ae38-7df5-4682-a35f-0e46c729a64d" />
 
 ---
 
@@ -27,12 +33,18 @@ It is ideal for:
 - **Keyboard accessible:** focus ring, `Esc` to close, `Cmd/Ctrl+Shift+C` to toggle.
 - **Persistent layout:** remembers position/size between sessions.
 
+<img width="397" height="622" alt="image" src="https://github.com/user-attachments/assets/701ac206-1e5d-4148-a32b-4ba484079020" />
+
+
 ### AI Integration
 - **Local Models:** Connects to Ollama (`http://localhost:11434`) for low-latency inference. Default: `llama3.2`.
 - **Cloud Models:** OpenRouter integration for access to GPT-4, Claude 3.5, Gemini Pro, and 100+ other models.
 - **Dual Provider Support:** Seamlessly switch between local Ollama and cloud OpenRouter models.
 - **Streaming output:** tokens rendered in real-time with smooth animations.
 - **Custom prompts & system personas:** switchable in settings.
+
+<img width="401" height="625" alt="image" src="https://github.com/user-attachments/assets/3f9eb11b-9d17-4eff-a549-76e4f5cc45db" />
+
 
 ### Chat Logging
 - **Vercel API:** all messages are sent to a Vercel free site/API, which routes to Supabase for storage and can proxy to the PC LLM via public IP.
@@ -54,6 +66,9 @@ It is ideal for:
 - **Tool Manager:** Centralized tool lifecycle management
 - **Schema Validation:** JSON schema validation for all tool definitions and executions
 - **Integration Testing:** Comprehensive test suite for tool execution workflows
+
+<img width="394" height="633" alt="image" src="https://github.com/user-attachments/assets/e5cd9523-410e-4890-ba52-8c7c68870871" />
+
 
 ### Unified Robot Integration (Comms v4.0)
 - **Tool Calling Framework:** Direct integration with Comms v4.0 tool execution system
