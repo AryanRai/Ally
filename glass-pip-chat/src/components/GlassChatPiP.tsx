@@ -19,7 +19,6 @@ import EditableMessage from './EditableMessage';
 import ClickAwayHandler from './ClickAwayHandler';
 import CollapsedHeader from './chat/CollapsedHeader';
 import ExpandedHeader from './chat/ExpandedHeader';
-import ContextDisplay from './chat/ContextDisplay';
 import ChatInput from './chat/ChatInput';
 import { AccessibilityContextMonitor } from './AccessibilityContextMonitor';
 import { RemoteSettings } from './RemoteSettings';
@@ -2042,27 +2041,12 @@ ${mcpTools.map(t => `- ${t.name}: ${t.description}${t.parameters ? ` (params: ${
                 exit={{ opacity: 0 }}
                 transition={{ duration: 0.2 }}
               >
-                {/* Enhanced Accessibility Context Display */}
+                {/* Unified Accessibility Context Display */}
                 <AccessibilityContextMonitor
                   platform={platform}
                   theme={theme}
                   className="mb-3"
-                />
-
-                {/* Legacy Context Display (for backward compatibility) */}
-                <ContextDisplay
-                  platform={platform}
-                  theme={theme}
-                  showContext={contextMonitoring.showContext}
-                  contextToggleEnabled={contextMonitoring.contextToggleEnabled}
-                  hasNewContext={contextMonitoring.hasNewContext}
-                  contextData={contextMonitoring.contextData}
-                  recentlySelected={contextMonitoring.recentlySelected}
-                  contextCollapsed={contextMonitoring.contextCollapsed}
-                  setContextCollapsed={contextMonitoring.setContextCollapsed}
-                  includeContextInMessage={contextMonitoring.includeContextInMessage}
-                  setIncludeContextInMessage={contextMonitoring.setIncludeContextInMessage}
-                  isMonitoring={contextMonitoring.isMonitoring}
+                  clipboardText={contextMonitoring.contextData.clipboard}
                   onDismiss={() => contextMonitoring.setHasNewContext(false)}
                 />
 
