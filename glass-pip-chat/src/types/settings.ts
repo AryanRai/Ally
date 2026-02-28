@@ -18,12 +18,18 @@ export interface GreetingSettings {
   randomGreetings: string[];
 }
 
+export interface NetworkSettings {
+  enableSupabase: boolean;
+  enableStreamHandler: boolean;
+}
+
 export interface AppSettings {
   ui: UISettings;
   theme: 'light' | 'dark';
   contextToggleEnabled: boolean;
   tools?: ToolSettings;
   greeting?: GreetingSettings;
+  network?: NetworkSettings;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -53,5 +59,9 @@ export const DEFAULT_SETTINGS: AppSettings = {
       'Let\'s talk!',
       'How can I help?'
     ]
+  },
+  network: {
+    enableSupabase: false,
+    enableStreamHandler: false
   }
 };

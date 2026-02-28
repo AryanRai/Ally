@@ -17,6 +17,20 @@ let supabaseEnabled = true;
 const SUPABASE_DISABLED_REASONS: string[] = [];
 
 function checkSupabaseEnabled(): boolean {
+  // Check settings from localStorage first
+  try {
+    const savedSettings = localStorage.getItem('ally-glass-pip-settings');
+    if (savedSettings) {
+      const settings = JSON.parse(savedSettings);
+      if (settings.network?.enableSupabase === false) {
+        SUPABASE_DISABLED_REASONS.push('Disabled in settings');
+        return false;
+      }
+    }
+  } catch (e) {
+    // Ignore parse errors
+  }
+  
   // Check if explicitly disabled via env
   if (import.meta.env.VITE_DISABLE_SUPABASE === 'true') {
     SUPABASE_DISABLED_REASONS.push('Explicitly disabled via VITE_DISABLE_SUPABASE');
@@ -55,6 +69,20 @@ if (!supabaseEnabled) {
  * Check if Supabase is enabled
  */
 export function isSupabaseEnabled(): boolean {
+  return supabaseEnabled;
+}
+
+/**
+ * Re-check if Supabase should be enabled (call after settings change)
+ */
+export function recheckSupabaseEnabled(): boolean {
+  SUPABASE_DISABLED_REASONS.length = 0; // Clear reasons
+  supabaseEnabled = checkSupabaseEnabled();
+  if (!supabaseEnabled) {
+    supabaseClient = null;
+    supabaseServiceClient = null;
+    console.log('🔒 Supabase disabled:', SUPABASE_DISABLED_REASONS.join(', '));
+  }
   return supabaseEnabled;
 }
 

@@ -289,6 +289,20 @@ export class UnifiedToolIntegrationService extends BrowserEventEmitter {
       return;
     }
 
+    // Check if stream handler is enabled in settings
+    try {
+      const savedSettings = localStorage.getItem('ally-glass-pip-settings');
+      if (savedSettings) {
+        const settings = JSON.parse(savedSettings);
+        if (settings.network?.enableStreamHandler === false) {
+          console.log('🔒 Stream handler disabled in settings - skipping connection');
+          return;
+        }
+      }
+    } catch (e) {
+      // Ignore parse errors, continue with connection
+    }
+
     this.state.connectionStatus = 'connecting';
     this.emit('connectionStatusChanged', 'connecting');
 
@@ -1109,6 +1123,20 @@ User: ${message}`;
   }
 
   private scheduleReconnect(): void {
+    // Check if stream handler is enabled in settings before reconnecting
+    try {
+      const savedSettings = localStorage.getItem('ally-glass-pip-settings');
+      if (savedSettings) {
+        const settings = JSON.parse(savedSettings);
+        if (settings.network?.enableStreamHandler === false) {
+          console.log('🔒 Stream handler disabled in settings - skipping reconnect');
+          return;
+        }
+      }
+    } catch (e) {
+      // Ignore parse errors
+    }
+    
     if (this.reconnectAttempts >= this.config.maxReconnectAttempts) {
       console.error('Max reconnection attempts reached');
       return;

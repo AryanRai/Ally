@@ -1,12 +1,13 @@
 import { useEffect, useState, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Sun, Moon, Monitor, Server, Wifi, WifiOff, RefreshCw, Keyboard, Volume2, Mic, Wrench, Activity } from 'lucide-react';
+import { X, Sun, Moon, Server, Wifi, WifiOff, RefreshCw, Keyboard, Volume2, Wrench, Activity } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { useSpeechService } from '../hooks/useSpeechService';
 import { GreetingUtils } from '../utils/greetingUtils';
+import { recheckSupabaseEnabled } from '../utils/supabase';
 
 
-import { AppSettings, UISettings } from '../types/settings';
+import { AppSettings } from '../types/settings';
 import { MCPACPDashboard } from './chat/MCPACPDashboard';
 import { SystemPromptsEditor } from './SystemPromptsEditor';
 
@@ -512,9 +513,7 @@ export default function SettingsModal({
                             ? "bg-white/20 border-white/30"
                             : "border-white/10 bg-white/5 hover:bg-white/10"
                           : theme === 'light' 
-                            ? theme === 'dark'
-                              ? "bg-white/20 border-white/30" 
-                              : "bg-black/20 border-black/30"
+                            ? "bg-black/20 border-black/30"
                             : theme === 'dark'
                               ? "border-white/10 bg-white/5 hover:bg-white/10"
                               : "border-black/10 bg-black/5 hover:bg-black/10"
@@ -533,12 +532,8 @@ export default function SettingsModal({
                             ? "bg-white/20 border-white/30"
                             : "border-white/10 bg-white/5 hover:bg-white/10"
                           : theme === 'dark' 
-                            ? theme === 'dark'
-                              ? "bg-white/20 border-white/30" 
-                              : "bg-black/20 border-black/30"
-                            : theme === 'dark'
-                              ? "border-white/10 bg-white/5 hover:bg-white/10"
-                              : "border-black/10 bg-black/5 hover:bg-black/10"
+                            ? "bg-white/20 border-white/30"
+                            : "border-black/10 bg-black/5 hover:bg-black/10"
                       )}
                     >
                       <Moon className="w-4 h-4" />
@@ -1113,6 +1108,131 @@ export default function SettingsModal({
                 )}
               </div>
 
+              {/* Network Services Section */}
+              <div className="space-y-3">
+                <h3 className={cn(
+                  "text-sm font-medium",
+                  platform === 'win32'
+                    ? "text-white/80"
+                    : theme === 'dark' ? "text-white/80" : "text-black/80"
+                )}>Network Services</h3>
+                
+                <div className="space-y-2">
+                  {/* Supabase Toggle */}
+                  <div className={cn(
+                    "p-3 rounded-lg border",
+                    platform === 'win32'
+                      ? "bg-white/5 border-white/10"
+                      : theme === 'dark' 
+                        ? "bg-white/5 border-white/10"
+                        : "bg-black/5 border-black/10"
+                  )}>
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <Activity className="w-4 h-4 text-purple-400" />
+                        <div>
+                          <span className="text-xs font-medium">Supabase (Remote)</span>
+                          <p className={cn(
+                            "text-[10px]",
+                            platform === 'win32'
+                              ? "text-white/50"
+                              : theme === 'dark' ? "text-white/50" : "text-black/50"
+                          )}>
+                            Cloud sync & remote access
+                          </p>
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => {
+                          const newValue = !appSettings.network?.enableSupabase;
+                          onSettingsChange({
+                            network: { 
+                              enableSupabase: newValue,
+                              enableStreamHandler: appSettings.network?.enableStreamHandler ?? false
+                            }
+                          });
+                          // Re-check Supabase enabled state after settings change
+                          setTimeout(() => recheckSupabaseEnabled(), 100);
+                        }}
+                        className={cn(
+                          "relative w-10 h-5 rounded-full transition-colors",
+                          appSettings.network?.enableSupabase
+                            ? "bg-purple-500"
+                            : platform === 'win32'
+                              ? "bg-white/20"
+                              : theme === 'dark' ? "bg-white/20" : "bg-black/20"
+                        )}
+                      >
+                        <div className={cn(
+                          "absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform",
+                          appSettings.network?.enableSupabase ? "translate-x-5" : "translate-x-0.5"
+                        )} />
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Stream Handler Toggle */}
+                  <div className={cn(
+                    "p-3 rounded-lg border",
+                    platform === 'win32'
+                      ? "bg-white/5 border-white/10"
+                      : theme === 'dark' 
+                        ? "bg-white/5 border-white/10"
+                        : "bg-black/5 border-black/10"
+                  )}>
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <Wifi className="w-4 h-4 text-blue-400" />
+                        <div>
+                          <span className="text-xs font-medium">Stream Handler</span>
+                          <p className={cn(
+                            "text-[10px]",
+                            platform === 'win32'
+                              ? "text-white/50"
+                              : theme === 'dark' ? "text-white/50" : "text-black/50"
+                          )}>
+                            WebSocket tool integration (ws://localhost:3000)
+                          </p>
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => {
+                          const newValue = !appSettings.network?.enableStreamHandler;
+                          onSettingsChange({
+                            network: { 
+                              enableSupabase: appSettings.network?.enableSupabase ?? false,
+                              enableStreamHandler: newValue
+                            }
+                          });
+                        }}
+                        className={cn(
+                          "relative w-10 h-5 rounded-full transition-colors",
+                          appSettings.network?.enableStreamHandler
+                            ? "bg-blue-500"
+                            : platform === 'win32'
+                              ? "bg-white/20"
+                              : theme === 'dark' ? "bg-white/20" : "bg-black/20"
+                        )}
+                      >
+                        <div className={cn(
+                          "absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform",
+                          appSettings.network?.enableStreamHandler ? "translate-x-5" : "translate-x-0.5"
+                        )} />
+                      </button>
+                    </div>
+                  </div>
+
+                  <p className={cn(
+                    "text-[10px] px-1",
+                    platform === 'win32'
+                      ? "text-white/40"
+                      : theme === 'dark' ? "text-white/40" : "text-black/40"
+                  )}>
+                    Disable these to run in local-only mode without network errors
+                  </p>
+                </div>
+              </div>
+
               {/* Speech Settings Section */}
               <div className="space-y-3">
                 <h3 className={cn(
@@ -1356,8 +1476,9 @@ export default function SettingsModal({
                               const updatedSettings = {
                                 ...appSettings,
                                 greeting: {
-                                  ...appSettings.greeting,
-                                  customGreeting: newGreeting
+                                  customGreeting: newGreeting,
+                                  useRandomGreeting: appSettings.greeting?.useRandomGreeting ?? false,
+                                  randomGreetings: appSettings.greeting?.randomGreetings ?? []
                                 }
                               };
                               onSettingsChange(updatedSettings);
@@ -1395,9 +1516,9 @@ export default function SettingsModal({
                           const updatedSettings = {
                             ...appSettings,
                             greeting: {
-                              ...appSettings.greeting,
                               customGreeting: e.target.value,
-                              useRandomGreeting: false
+                              useRandomGreeting: false,
+                              randomGreetings: appSettings.greeting?.randomGreetings ?? []
                             }
                           };
                           onSettingsChange(updatedSettings);
@@ -1423,8 +1544,9 @@ export default function SettingsModal({
                             const updatedSettings = {
                               ...appSettings,
                               greeting: {
-                                ...appSettings.greeting,
-                                useRandomGreeting: e.target.checked
+                                customGreeting: appSettings.greeting?.customGreeting ?? 'Balalalala',
+                                useRandomGreeting: e.target.checked,
+                                randomGreetings: appSettings.greeting?.randomGreetings ?? []
                               }
                             };
                             onSettingsChange(updatedSettings);
@@ -1454,7 +1576,8 @@ export default function SettingsModal({
                             const updatedSettings = {
                               ...appSettings,
                               greeting: {
-                                ...appSettings.greeting,
+                                customGreeting: appSettings.greeting?.customGreeting ?? 'Balalalala',
+                                useRandomGreeting: appSettings.greeting?.useRandomGreeting ?? false,
                                 randomGreetings: greetings
                               }
                             };
@@ -1518,7 +1641,11 @@ export default function SettingsModal({
                         type="checkbox"
                         checked={appSettings.tools?.enabled || false}
                         onChange={(e) => onSettingsChange({ 
-                          tools: { ...appSettings.tools, enabled: e.target.checked } 
+                          tools: { 
+                            enabled: e.target.checked,
+                            autoConnect: appSettings.tools?.autoConnect ?? true,
+                            streamHandlerUrl: appSettings.tools?.streamHandlerUrl ?? 'ws://localhost:3000'
+                          } 
                         })}
                         className="sr-only peer"
                       />
