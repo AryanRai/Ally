@@ -87,12 +87,12 @@ export default function ExpandedHeader({
 
   return (
     <>
-      <div className="flex items-center gap-1.5 flex-1 min-w-0">
+      <div className="flex items-center gap-1 flex-1 min-w-0">
         <Grip className="w-3 h-3 opacity-50 flex-shrink-0" />
         <button
           onClick={onSidebarToggle}
           className={cn(
-            "flex items-center justify-center p-1 rounded transition-colors relative",
+            "flex items-center justify-center p-1 rounded transition-colors relative flex-shrink-0",
             ThemeUtils.getBackgroundClass(platform, theme, 'hover')
           )}
           title={sidebarCollapsed ? "Show chats" : "Hide chats"}
@@ -145,7 +145,8 @@ export default function ExpandedHeader({
         ) : (
           <div
             className={cn(
-              "flex-1 text-xs font-medium text-left px-1.5 py-1 rounded transition-colors min-w-0 cursor-pointer truncate",
+              "flex-1 font-medium text-left px-1 py-0.5 rounded transition-colors min-w-0 cursor-pointer truncate",
+              size === 'S' ? "text-[10px] max-w-[60px]" : "text-xs",
               ThemeUtils.getTextClass(platform, theme),
               ThemeUtils.getBackgroundClass(platform, theme, 'hover')
             )}
@@ -153,11 +154,11 @@ export default function ExpandedHeader({
             title={`Chat: ${activeChat?.title || 'Untitled'} - Click to rename`}
             onClick={() => headerTitleEdit.startEdit(activeChat?.title)}
           >
-            {activeChat?.title || 'Untitled Chat'}
+            {activeChat?.title || 'Untitled'}
           </div>
         )}
 
-        {/* Status indicators */}
+        {/* Status indicators - always visible */}
         <div className="flex items-center gap-0.5 flex-shrink-0">
           {/* Ollama status */}
           <div
@@ -210,6 +211,7 @@ export default function ExpandedHeader({
           onToggleSelector={onModelSelectorToggle}
           showProviderSettings={onProviderSettings}
           compact={true}
+          windowSize={size as 'S' | 'M' | 'L'}
         />
 
         {/* Combined Context Control - Eye + Clipboard with smart indicators */}

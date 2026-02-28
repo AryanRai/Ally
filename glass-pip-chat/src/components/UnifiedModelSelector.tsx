@@ -16,6 +16,7 @@ interface UnifiedModelSelectorProps {
   className?: string;
   compact?: boolean;
   showProviderSettings?: () => void;
+  windowSize?: 'S' | 'M' | 'L';
 }
 
 interface ModelInfo {
@@ -59,7 +60,8 @@ export const UnifiedModelSelector: React.FC<UnifiedModelSelectorProps> = ({
   onToggleSelector,
   className,
   compact = false,
-  showProviderSettings
+  showProviderSettings,
+  windowSize = 'M'
 }) => {
   const [allModels, setAllModels] = useState<{
     ollama: any[];
@@ -302,16 +304,18 @@ export const UnifiedModelSelector: React.FC<UnifiedModelSelectorProps> = ({
         ref={buttonRef}
         onClick={onToggleSelector}
         className={cn(
-          "flex items-center gap-1.5 px-2 py-1 rounded-lg transition-all duration-200",
+          "flex items-center rounded-lg transition-all duration-200 flex-shrink-0",
           "hover:bg-white/10 border border-white/20",
           showSelector && "bg-blue-500/20 border-blue-500/50",
-          compact ? "text-xs" : "text-sm",
+          // In S size, just show icon
+          windowSize === 'S' ? "p-1" : "gap-1 px-1.5 py-1",
+          compact && windowSize !== 'S' ? "text-xs max-w-[100px]" : "text-sm",
           className
         )}
         title={`Current model: ${currentModelInfo.displayName} (${currentModelInfo.provider})`}
       >
         <div className={cn(
-          "flex items-center justify-center rounded",
+          "flex items-center justify-center rounded flex-shrink-0",
           currentModelInfo.type === 'local' ? "text-green-400" : "text-blue-400"
         )}>
           {currentModelInfo.type === 'local' ? (
@@ -321,27 +325,32 @@ export const UnifiedModelSelector: React.FC<UnifiedModelSelectorProps> = ({
           )}
         </div>
         
-        <div className="flex flex-col items-start min-w-0">
-          <div className={cn(
-            "font-medium truncate",
-            compact ? "text-xs max-w-20" : "text-sm max-w-28"
-          )}>
-            {currentModelInfo.displayName}
-          </div>
-          {!compact && (
-            <div className="text-xs text-white/50 truncate max-w-28">
-              {currentModelInfo.provider}
+        {/* Hide model name in S size */}
+        {windowSize !== 'S' && (
+          <>
+            <div className="flex flex-col items-start min-w-0 overflow-hidden">
+              <div className={cn(
+                "font-medium truncate w-full",
+                compact ? "text-[10px]" : "text-sm max-w-28"
+              )}>
+                {currentModelInfo.displayName}
+              </div>
+              {!compact && (
+                <div className="text-xs text-white/50 truncate max-w-28">
+                  {currentModelInfo.provider}
+                </div>
+              )}
             </div>
-          )}
-        </div>
-        
-        <div className="flex-shrink-0">
-          {showSelector ? (
-            <ChevronUp className="w-3 h-3" />
-          ) : (
-            <ChevronDown className="w-3 h-3" />
-          )}
-        </div>
+            
+            <div className="flex-shrink-0">
+              {showSelector ? (
+                <ChevronUp className="w-3 h-3" />
+              ) : (
+                <ChevronDown className="w-3 h-3" />
+              )}
+            </div>
+          </>
+        )}
       </button>
 
       {/* Model Dropdown - Rendered via Portal */}
@@ -364,7 +373,7 @@ export const UnifiedModelSelector: React.FC<UnifiedModelSelectorProps> = ({
               )}
               style={{
                 top: dropdownPosition.top,
-                right: dropdownPosition.right,
+                left: dropdownPosition.left,
                 pointerEvents: 'auto'
               } as React.CSSProperties}
             >
