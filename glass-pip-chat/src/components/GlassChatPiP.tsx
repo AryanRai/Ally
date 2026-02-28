@@ -482,22 +482,21 @@ export default function GlassChatPiP() {
     
     // Get saved tool prompt or use default
     const savedToolPrompt = localStorage.getItem('ally-prompt-tools') || 
-      `You are a helpful AI assistant with access to tools. When you need to use a tool, output a tool call in this exact format:
+      `You are an AI assistant with tool access. When you need information you don't have, use a tool.
 
-<tool_call>
-{"name": "tool_name", "parameters": {"param1": "value1"}}
-</tool_call>
+TO USE A TOOL, output ONLY this JSON (nothing else before or after):
+{"name": "tool_name", "parameters": {}}
 
-IMPORTANT: 
-- Use tools when the user asks for information you don't have (like file contents, system info, etc.)
-- After receiving tool results, incorporate them into your response
-- If a tool fails, explain the error and suggest alternatives`;
+RULES:
+- For questions about time, files, calculations - USE A TOOL, don't explain
+- Output the JSON tool call IMMEDIATELY, no explanation needed
+- After getting results, give a natural response incorporating the data`;
 
     // Build the full system prompt with available tools
     const toolsSystemPrompt = `${savedToolPrompt}
 
 Available tools:
-${mcpTools.map(t => `- ${t.name}: ${t.description}${t.parameters ? `\n  Parameters: ${JSON.stringify(t.parameters)}` : ''}`).join('\n')}`;
+${mcpTools.map(t => `- ${t.name}: ${t.description}${t.parameters ? ` (params: ${JSON.stringify(t.parameters)})` : ''}`).join('\n')}`;
 
     // Prepend system prompt to the user message
     const messageWithTools = `[System: ${toolsSystemPrompt}]\n\nUser: ${contextualContent}`;
@@ -561,25 +560,28 @@ ${mcpTools.map(t => `- ${t.name}: ${t.description}${t.parameters ? `\n  Paramete
         return { match: simpleMatch, toolCall: { name, parameters: params } };
       }
       
-      // Format 4: Raw JSON without tags - {"name": "...", "parameters": {...}}
-      // Look for JSON that looks like a tool call (has "name" field with a known tool)
-      const rawJsonMatch = cleanedText.match(/\{[\s\S]*?"name"\s*:\s*"(\w+)"[\s\S]*?"parameters"\s*:\s*(\{[^}]*\}|\[\])[\s\S]*?\}/);
+      // Format 4: Raw JSON without tags - {"name": "...", "parameters": ...}
+      // More flexible regex that handles various parameter formats including empty string
+      const rawJsonMatch = cleanedText.match(/\{\s*"name"\s*:\s*"([^"]+)"\s*,\s*"parameters"\s*:\s*("[^"]*"|\{[^}]*\}|\[\]|null)\s*\}/);
       if (rawJsonMatch) {
         try {
-          // Find the full JSON object
-          const jsonStart = cleanedText.indexOf('{');
-          const jsonEnd = cleanedText.lastIndexOf('}');
-          if (jsonStart !== -1 && jsonEnd !== -1) {
-            const jsonStr = cleanedText.substring(jsonStart, jsonEnd + 1);
-            const parsed = JSON.parse(jsonStr);
-            if (parsed.name && typeof parsed.name === 'string') {
-              // Create a fake match array for replacement
-              const fakeMatch = [jsonStr] as RegExpMatchArray;
-              fakeMatch.index = jsonStart;
-              fakeMatch.input = cleanedText;
-              return { match: fakeMatch, toolCall: { name: parsed.name, parameters: parsed.parameters || {} } };
+          const name = rawJsonMatch[1];
+          let params = {};
+          const paramsStr = rawJsonMatch[2];
+          // Handle different parameter formats
+          if (paramsStr && paramsStr !== '""' && paramsStr !== 'null') {
+            try {
+              params = JSON.parse(paramsStr);
+            } catch (e) {
+              // If it's an empty string or invalid, use empty object
+              params = {};
             }
           }
+          // Create a fake match array for replacement
+          const fakeMatch = [rawJsonMatch[0]] as RegExpMatchArray;
+          fakeMatch.index = cleanedText.indexOf(rawJsonMatch[0]);
+          fakeMatch.input = cleanedText;
+          return { match: fakeMatch, toolCall: { name, parameters: params } };
         } catch (e) {
           console.log('Raw JSON parse failed:', e);
         }
@@ -593,7 +595,8 @@ ${mcpTools.map(t => `- ${t.name}: ${t.description}${t.parameters ? `\n  Paramete
     // Helper to clean response for display (strip think tags, etc.)
     const cleanResponseForDisplay = (text: string): string => {
       return text
-        .replace(/<think>[\s\S]*?<\/think>/gi, '') // Remove think blocks
+        .replace(/<think>[\s\S]*?<\/think>/gi, '') // Remove complete think blocks
+        .replace(/<think>[\s\S]*$/gi, '') // Remove incomplete think blocks (no closing tag yet)
         .replace(/^\s*\n+/, '') // Remove leading newlines
         .trim();
     };
@@ -774,6 +777,20 @@ ${mcpTools.map(t => `- ${t.name}: ${t.description}${t.parameters ? `\n  Paramete
   const executeMcpTool = async (toolName: string, parameters: any): Promise<any> => {
     console.log('🔧 Executing tool:', toolName, 'with params:', parameters);
     
+    // Normalize parameters - handle empty string, null, undefined
+    let normalizedParams = parameters;
+    if (!parameters || parameters === '' || (typeof parameters === 'object' && Object.keys(parameters).length === 0)) {
+      normalizedParams = {};
+    }
+    
+    // Add default parameters for known tools that require them
+    if (toolName === 'list_directory' && !normalizedParams.path) {
+      normalizedParams = { path: '.' }; // Default to current directory
+    }
+    if (toolName === 'read_file' && !normalizedParams.path) {
+      return { error: 'read_file requires a path parameter' };
+    }
+    
     // Handle built-in tools first
     if (toolName === 'get_current_time') {
       return {
@@ -785,7 +802,7 @@ ${mcpTools.map(t => `- ${t.name}: ${t.description}${t.parameters ? `\n  Paramete
     
     if (toolName === 'calculate') {
       try {
-        const expr = parameters?.expression || parameters;
+        const expr = normalizedParams?.expression || normalizedParams;
         // Safe math evaluation (basic operations only)
         const sanitized = String(expr).replace(/[^0-9+\-*/().sqrt\s]/g, '');
         const result = Function('"use strict"; return (' + sanitized.replace(/sqrt/g, 'Math.sqrt') + ')')();
@@ -800,14 +817,27 @@ ${mcpTools.map(t => `- ${t.name}: ${t.description}${t.parameters ? `\n  Paramete
       // Check if this tool exists in our MCP tools
       const mcpTool = mcpIntegration.mcpTools.find(t => t.name === toolName);
       
+      console.log('🔍 Looking for tool:', toolName, 'in MCP tools:', mcpIntegration.mcpTools.map(t => t.name));
+      
       if (mcpTool) {
-        console.log('🔧 Executing MCP tool via integration:', toolName);
-        return await mcpIntegration.executeMCPTool(toolName, parameters);
+        console.log('🔧 Executing MCP tool via integration:', toolName, 'with normalized params:', normalizedParams);
+        return await mcpIntegration.executeMCPTool(toolName, normalizedParams);
       }
       
-      // Fallback to window.pip.mcp API
+      // Try executing via mcpIntegration even if not in the cached list
+      // (the tool might exist on the server but not be cached yet)
+      try {
+        console.log('🔧 Trying MCP tool execution (not in cache):', toolName);
+        const result = await mcpIntegration.executeMCPTool(toolName, normalizedParams);
+        return result;
+      } catch (mcpError) {
+        console.log('MCP integration failed, trying fallback:', mcpError);
+      }
+      
+      // Last resort fallback to window.pip.mcp API (this is the mock)
       if (window.pip?.mcp?.executeTool) {
-        return await window.pip.mcp.executeTool(toolName, parameters);
+        console.log('⚠️ Falling back to mock executeTool for:', toolName);
+        return await window.pip.mcp.executeTool(toolName, normalizedParams);
       }
       
       throw new Error(`Tool ${toolName} not found`);

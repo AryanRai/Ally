@@ -19,6 +19,7 @@ import { cn } from '../lib/utils';
 import { Message } from '../types/chat';
 import { UISettings } from '../types/settings';
 import MessageMetadata from './chat/MessageMetadata';
+import { MessagePills, parseMessageForPills } from './chat/InlineToolIndicator';
 
 interface EditableMessageProps {
   message: Message;
@@ -277,24 +278,23 @@ export default function EditableMessage({
   const renderMessageContent = (content: string) => {
     const parsed = parseMessageContent(content);
     
-    if (!parsed.hasContext) {
-      return (
-        <ReactMarkdown 
-          remarkPlugins={[remarkGfm]}
-          components={{
-            p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
-            code: CodeBlock
-          }}
-        >
-          {content}
-        </ReactMarkdown>
-      );
-    }
-
+    // Also parse for tool results and thinking to show as pills
+    const { cleanContent, toolResults, thinking } = parseMessageForPills(
+      parsed.hasContext ? parsed.beforeContext + ' ' + parsed.afterContext : content
+    );
+    
+    // Use clean content (without tool result blocks) for markdown rendering
+    const contentToRender = cleanContent || (parsed.hasContext ? parsed.beforeContext : content);
+    
     return (
-      <div className="space-y-3">
+      <div className="space-y-2">
+        {/* Tool and Thinking Pills */}
+        {(toolResults.length > 0 || thinking) && (
+          <MessagePills content={content} theme={theme} />
+        )}
+        
         {/* Main message content */}
-        {parsed.beforeContext && (
+        {contentToRender && (
           <ReactMarkdown 
             remarkPlugins={[remarkGfm]}
             components={{
@@ -302,90 +302,62 @@ export default function EditableMessage({
               code: CodeBlock
             }}
           >
-            {parsed.beforeContext}
+            {contentToRender}
           </ReactMarkdown>
         )}
 
         {/* Expandable context section */}
-        <div className={cn(
-          "border rounded-lg transition-all duration-200",
-          platform === 'win32'
-            ? "border-white/10 bg-white/5"
-            : theme === 'dark'
+        {parsed.hasContext && (
+          <div className={cn(
+            "border rounded-lg transition-all duration-200",
+            platform === 'win32'
               ? "border-white/10 bg-white/5"
-              : "border-black/10 bg-black/5"
-        )}>
-          <button
-            onClick={() => setContextExpanded(!contextExpanded)}
-            className={cn(
-              "w-full flex items-center justify-between p-3 text-left transition-colors",
-              "hover:bg-white/5 rounded-lg"
-            )}
-          >
-            <div className="flex items-center gap-2">
-              <Clipboard className="w-3 h-3 opacity-60" />
-              <span className="text-xs font-medium opacity-80">
-                Context attached
-              </span>
-            </div>
-            <ChevronDown className={cn(
-              "w-3 h-3 opacity-60 transition-transform duration-200",
-              contextExpanded && "rotate-180"
-            )} />
-          </button>
-          
-          <AnimatePresence>
-            {contextExpanded && (
-              <motion.div
-                initial={{ opacity: 0, height: 0 }}
-                animate={{ opacity: 1, height: 'auto' }}
-                exit={{ opacity: 0, height: 0 }}
-                className="border-t border-white/10"
-              >
-                <div className="p-3 space-y-2">
-                  <div className="text-xs opacity-70 font-medium">Context Details:</div>
-                  <div className={cn(
-                    "text-xs p-2 rounded bg-black/20 max-h-32 overflow-y-auto scrollbar-thin",
-                    platform === 'win32'
-                      ? "scrollbar-thumb-white/10"
-                      : theme === 'dark' ? "scrollbar-thumb-white/10" : "scrollbar-thumb-black/10"
-                  )}>
-                    {parsed.contextText}
+              : theme === 'dark'
+                ? "border-white/10 bg-white/5"
+                : "border-black/10 bg-black/5"
+          )}>
+            <button
+              onClick={() => setContextExpanded(!contextExpanded)}
+              className={cn(
+                "w-full flex items-center justify-between p-3 text-left transition-colors",
+                "hover:bg-white/5 rounded-lg"
+              )}
+            >
+              <div className="flex items-center gap-2">
+                <Clipboard className="w-3 h-3 opacity-60" />
+                <span className="text-xs font-medium opacity-80">
+                  Context attached
+                </span>
+              </div>
+              <ChevronDown className={cn(
+                "w-3 h-3 opacity-60 transition-transform duration-200",
+                contextExpanded && "rotate-180"
+              )} />
+            </button>
+            
+            <AnimatePresence>
+              {contextExpanded && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  exit={{ opacity: 0, height: 0 }}
+                  className="border-t border-white/10"
+                >
+                  <div className="p-3 space-y-2">
+                    <div className="text-xs opacity-70 font-medium">Context Details:</div>
+                    <div className={cn(
+                      "text-xs p-2 rounded bg-black/20 max-h-32 overflow-y-auto scrollbar-thin",
+                      platform === 'win32'
+                        ? "scrollbar-thumb-white/10"
+                        : theme === 'dark' ? "scrollbar-thumb-white/10" : "scrollbar-thumb-black/10"
+                    )}>
+                      {parsed.contextText}
+                    </div>
                   </div>
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </div>
-
-        {/* After context content */}
-        {parsed.afterContext && (
-          <ReactMarkdown 
-            remarkPlugins={[remarkGfm]}
-            components={{
-              p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
-              code: ({ inline, className, children, ...props }: any) => {
-                const codeSize = uiSettings.fontSize === 'xs' ? 'text-xs' :
-                               uiSettings.fontSize === 'sm' ? 'text-xs' :
-                               uiSettings.fontSize === 'base' ? 'text-sm' :
-                               uiSettings.fontSize === 'lg' ? 'text-base' : 'text-lg';
-                
-                return inline ? (
-                  <code className={cn("px-1 py-0.5 bg-white/10 rounded", codeSize)} {...props}>
-                    {children}
-                  </code>
-                ) : (
-                  <pre className={cn("bg-black/20 rounded-lg overflow-x-auto my-2", getTextareaPaddingClass())}>
-                    <code className={cn(codeSize, className)} {...props}>
-                      {children}
-                    </code>
-                  </pre>
-                );
-              }
-            }}
-          >
-            {parsed.afterContext}
-          </ReactMarkdown>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
         )}
       </div>
     );

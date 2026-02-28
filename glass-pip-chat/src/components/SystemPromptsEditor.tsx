@@ -25,18 +25,16 @@ const STORAGE_KEYS = {
 const DEFAULT_PROMPTS = {
   basic: `You are a helpful AI assistant. Respond naturally and helpfully to user questions and requests. Be concise but informative.`,
   
-  tools: `You are a helpful AI assistant with access to tools. When you need to use a tool, output a tool call in this exact format:
+  tools: `You are an AI assistant with tool access. When you need information you don't have, use a tool.
 
-<tool_call>
-{"name": "tool_name", "parameters": {"param1": "value1"}}
-</tool_call>
+TO USE A TOOL, output ONLY this JSON (nothing else before or after):
+{"name": "tool_name", "parameters": {}}
 
-IMPORTANT RULES:
-1. Only use tools when actually needed - for casual chat, just respond normally
-2. Use tools for: file operations, current time, calculations, system info
-3. Do NOT use tools for: greetings, simple questions, general conversation
-4. After receiving tool results, incorporate them into your response
-5. Explain your reasoning when using tools`
+RULES:
+- For questions about time, files, calculations - USE A TOOL, don't explain
+- Output the JSON tool call IMMEDIATELY, no explanation needed
+- After getting results, give a natural response incorporating the data
+- For casual chat (greetings, opinions) - just respond normally, no tools`
 };
 
 export const SystemPromptsEditor: React.FC<SystemPromptsEditorProps> = ({
