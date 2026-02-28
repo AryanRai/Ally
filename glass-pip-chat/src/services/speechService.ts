@@ -80,61 +80,81 @@ export class SpeechServiceClient extends EventEmitter {
     const url = `ws://${this.config.websocketHost}:${this.config.websocketPort}`;
     console.log(`Attempting to connect to speech service at ${url}`);
 
-    try {
-      this.ws = new WebSocket(url);
-      
-      this.ws.on('open', () => {
-        console.log('✅ Connected to speech service');
-        this.isConnecting = false;
-        this.isConnected = true;
-        this.emit('connected');
+    return new Promise<void>((resolve) => {
+      try {
+        this.ws = new WebSocket(url);
         
-        // Clear any reconnect timer
-        if (this.reconnectTimer) {
-          clearTimeout(this.reconnectTimer);
-          this.reconnectTimer = null;
-        }
-      });
-
-      this.ws.on('message', (data: WebSocket.Data) => {
-        try {
-          const message = JSON.parse(data.toString());
-          console.log('📨 Received message from speech service:', message.command);
-          this.handleMessage(message);
-        } catch (error) {
-          console.error('Error parsing WebSocket message:', error);
-        }
-      });
-
-      this.ws.on('close', (code, reason) => {
-        console.log(`❌ Disconnected from speech service (code: ${code}, reason: ${reason})`);
-        this.isConnected = false;
-        this.isConnecting = false;
-        this.emit('disconnected');
+        // Set a connection timeout
+        const connectionTimeout = setTimeout(() => {
+          if (this.isConnecting) {
+            console.log('⏱️ Speech service connection timed out');
+            this.isConnecting = false;
+            if (this.ws) {
+              this.ws.terminate();
+              this.ws = null;
+            }
+            resolve(); // Resolve anyway, don't block
+          }
+        }, 5000);
         
-        // Auto-reconnect if enabled
-        if (this.config.autoReconnect && !this.reconnectTimer) {
-          this.scheduleReconnect();
-        }
-      });
+        this.ws.on('open', () => {
+          clearTimeout(connectionTimeout);
+          console.log('✅ Connected to speech service');
+          this.isConnecting = false;
+          this.isConnected = true;
+          this.emit('connected');
+          
+          // Clear any reconnect timer
+          if (this.reconnectTimer) {
+            clearTimeout(this.reconnectTimer);
+            this.reconnectTimer = null;
+          }
+          resolve();
+        });
 
-      this.ws.on('error', (error) => {
-        console.error('❌ Speech service WebSocket error:', error);
+        this.ws.on('message', (data: WebSocket.Data) => {
+          try {
+            const message = JSON.parse(data.toString());
+            console.log('📨 Received message from speech service:', message.command);
+            this.handleMessage(message);
+          } catch (error) {
+            console.error('Error parsing WebSocket message:', error);
+          }
+        });
+
+        this.ws.on('close', (code, reason) => {
+          clearTimeout(connectionTimeout);
+          console.log(`❌ Disconnected from speech service (code: ${code}, reason: ${reason})`);
+          this.isConnected = false;
+          this.isConnecting = false;
+          this.emit('disconnected');
+          
+          // Auto-reconnect if enabled
+          if (this.config.autoReconnect && !this.reconnectTimer) {
+            this.scheduleReconnect();
+          }
+        });
+
+        this.ws.on('error', (error) => {
+          clearTimeout(connectionTimeout);
+          console.error('❌ Speech service WebSocket error:', error.message || error);
+          this.isConnecting = false;
+          this.isConnected = false;
+          this.emit('error', error);
+          
+          // Schedule reconnect on error
+          if (this.config.autoReconnect && !this.reconnectTimer) {
+            this.scheduleReconnect();
+          }
+          resolve(); // Resolve anyway, don't block app startup
+        });
+
+      } catch (error) {
+        console.error('Failed to create WebSocket connection:', error);
         this.isConnecting = false;
-        this.isConnected = false;
-        this.emit('error', error);
-        
-        // Schedule reconnect on error
-        if (this.config.autoReconnect && !this.reconnectTimer) {
-          this.scheduleReconnect();
-        }
-      });
-
-    } catch (error) {
-      console.error('Failed to create WebSocket connection:', error);
-      this.isConnecting = false;
-      throw error;
-    }
+        resolve(); // Resolve anyway, don't block app startup
+      }
+    });
   }
 
   /**

@@ -31,8 +31,34 @@ let clipboardMonitorInterval: NodeJS.Timeout | null = null;
 let currentTheme: 'light' | 'dark' = 'dark';
 const THEME_FILE = path.join(app.getPath('userData'), 'theme.json');
 
-// Ollama service
-const ollamaService = new OllamaService();
+// Provider config persistence
+const PROVIDER_CONFIG_FILE = path.join(app.getPath('userData'), 'provider-config.json');
+
+// Load saved provider config
+function loadProviderConfig(): any {
+  try {
+    const configData = JSON.parse(fs.readFileSync(PROVIDER_CONFIG_FILE, 'utf8'));
+    console.log('📂 Loaded provider config from disk');
+    return configData;
+  } catch {
+    console.log('📂 No saved provider config found, using defaults');
+    return null;
+  }
+}
+
+// Save provider config
+function saveProviderConfig(config: any): void {
+  try {
+    fs.writeFileSync(PROVIDER_CONFIG_FILE, JSON.stringify(config, null, 2));
+    console.log('💾 Saved provider config to disk');
+  } catch (error) {
+    console.error('Failed to save provider config:', error);
+  }
+}
+
+// Initialize Ollama service with saved config
+const savedProviderConfig = loadProviderConfig();
+const ollamaService = new OllamaService(savedProviderConfig || {});
 
 // Speech service
 const speechService = getSpeechService();
@@ -732,6 +758,8 @@ ipcMain.handle('ollama:getConfig', () => {
 
 ipcMain.on('ollama:updateConfig', (_, config) => {
   ollamaService.updateConfig(config);
+  // Persist config to disk
+  saveProviderConfig(config);
 });
 
 // Provider management handlers
@@ -1451,10 +1479,17 @@ app.whenReady().then(async () => {
   // Setup speech service event forwarding
   setupSpeechServiceEvents();
 
-  // Auto-connect to speech service
-  speechService.connect().catch(error => {
-    console.warn('Failed to auto-connect to speech service:', error);
-  });
+  // Auto-connect to speech service (non-blocking, with timeout)
+  const speechConnectTimeout = setTimeout(() => {
+    console.log('⏱️ Speech service connection attempt timed out (service may not be running)');
+  }, 3000);
+  
+  speechService.connect()
+    .then(() => clearTimeout(speechConnectTimeout))
+    .catch(error => {
+      clearTimeout(speechConnectTimeout);
+      console.warn('Failed to auto-connect to speech service:', error.message || error);
+    });
 });
 
 app.on('window-all-closed', () => {
