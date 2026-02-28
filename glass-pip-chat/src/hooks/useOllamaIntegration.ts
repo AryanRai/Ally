@@ -1,11 +1,39 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Message } from '../types/chat';
 
 export function useOllamaIntegration() {
   const [ollamaAvailable, setOllamaAvailable] = useState(false);
-  const [currentModel, setCurrentModel] = useState<string>('');
+  const [currentModel, setCurrentModelState] = useState<string>('');
   const [availableModels, setAvailableModels] = useState<any[]>([]);
   const [showModelSelector, setShowModelSelector] = useState(false);
+
+  // Wrapper to persist model selection
+  const setCurrentModel = useCallback(async (model: string) => {
+    console.log('🎯 Setting current model:', model);
+    setCurrentModelState(model);
+    
+    // Persist the selection to config
+    try {
+      if (window.pip?.ollama) {
+        const config = await window.pip.ollama.getConfig();
+        
+        // Determine if it's an OpenRouter model (contains /)
+        const isOpenRouterModel = model.includes('/');
+        
+        await window.pip.ollama.updateConfig({
+          ...config,
+          preferredProvider: isOpenRouterModel ? 'openrouter' : 'ollama',
+          openRouterDefaultModel: isOpenRouterModel ? model : config.openRouterDefaultModel,
+          ollamaDefaultModel: !isOpenRouterModel ? model : config.ollamaDefaultModel,
+        });
+        
+        await window.pip.ollama.setProvider(isOpenRouterModel ? 'openrouter' : 'ollama');
+        console.log('✅ Model selection persisted:', model, 'Provider:', isOpenRouterModel ? 'openrouter' : 'ollama');
+      }
+    } catch (error) {
+      console.error('Failed to persist model selection:', error);
+    }
+  }, []);
 
   // Initialize both Ollama and OpenRouter
   useEffect(() => {
@@ -14,6 +42,10 @@ export function useOllamaIntegration() {
     const initServices = async () => {
       try {
         console.log('🔄 Initializing AI services...');
+        
+        // Load saved config first
+        const savedConfig = await window.pip.ollama.getConfig();
+        console.log('📂 Loaded saved config:', savedConfig);
         
         // Check Ollama availability
         const ollamaAvailable = await window.pip.ollama.isAvailable();
@@ -25,9 +57,19 @@ export function useOllamaIntegration() {
         console.log('All available models:', allModels);
         setAvailableModels(allModels);
 
-        // Set default model
-        if (allModels.length > 0) {
-          // Try to find a good default model
+        // Use saved model from config if available
+        let selectedModel = '';
+        
+        if (savedConfig?.preferredProvider === 'openrouter' && savedConfig?.openRouterDefaultModel) {
+          selectedModel = savedConfig.openRouterDefaultModel;
+          console.log('📂 Using saved OpenRouter model:', selectedModel);
+        } else if (savedConfig?.ollamaDefaultModel) {
+          selectedModel = savedConfig.ollamaDefaultModel;
+          console.log('📂 Using saved Ollama model:', selectedModel);
+        }
+        
+        // Fallback to finding a default if no saved model
+        if (!selectedModel && allModels.length > 0) {
           let defaultModel = allModels.find((m: any) => 
             m.name?.includes('llama') || m.id?.includes('llama')
           );
@@ -42,15 +84,19 @@ export function useOllamaIntegration() {
             defaultModel = allModels[0];
           }
           
-          const modelId = defaultModel.name || defaultModel.id;
-          setCurrentModel(modelId);
-          console.log('Selected default model:', modelId);
+          selectedModel = defaultModel.name || defaultModel.id;
+          console.log('🔍 Selected fallback model:', selectedModel);
+        }
+        
+        if (selectedModel) {
+          setCurrentModelState(selectedModel);
+          console.log('✅ Current model set to:', selectedModel);
         }
       } catch (error) {
         console.error('Failed to initialize AI services:', error);
         setOllamaAvailable(false);
         setAvailableModels([]);
-        setCurrentModel('');
+        setCurrentModelState('');
       }
     };
 
@@ -66,7 +112,7 @@ export function useOllamaIntegration() {
       throw new Error('Ollama not available');
     }
 
-    console.log('Sending message to Ollama with model:', currentModel);
+    console.log('🚀 Sending message with model:', currentModel);
 
     // Convert our messages to Ollama format
     const chatHistory = messages.map(msg => ({
@@ -92,7 +138,6 @@ export function useOllamaIntegration() {
         console.log('Received chunk:', chunk);
         
         if (chunk.type === 'thinking') {
-          // The chunk.content should already be the accumulated thinking content
           thinkingContent = chunk.content;
           onStreamUpdate({
             type: 'thinking',
@@ -100,7 +145,6 @@ export function useOllamaIntegration() {
             response: responseContent
           });
         } else if (chunk.type === 'response') {
-          // The chunk.content should already be the accumulated response content
           responseContent = chunk.content;
           onStreamUpdate({
             type: 'response',
@@ -108,7 +152,6 @@ export function useOllamaIntegration() {
             response: responseContent
           });
         } else if (chunk.type === 'done') {
-          // Final update
           fullResponse = chunk.content;
           onStreamUpdate({
             type: 'done',
@@ -119,7 +162,6 @@ export function useOllamaIntegration() {
       });
     } catch (error: any) {
       if (error.message?.includes('aborted') || error.name === 'AbortError') {
-        // Handle graceful stop
         onStreamUpdate({
           type: 'done',
           thinking: thinkingContent,

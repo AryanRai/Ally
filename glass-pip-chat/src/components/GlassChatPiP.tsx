@@ -507,7 +507,8 @@ export default function GlassChatPiP() {
               }
 
               setCurrentResponse(responseContent);
-            }
+            },
+            ollamaIntegration.currentModel // Pass the current model
           );
           response = toolResult.response;
           

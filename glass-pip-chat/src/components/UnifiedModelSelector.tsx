@@ -1,7 +1,7 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ChevronDown, ChevronUp, Check, Server, Zap, Settings } from 'lucide-react';
+import { ChevronDown, ChevronUp, Check, Server, Zap, Settings, Search, Filter } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { ThemeUtils } from '../utils/themeUtils';
 import { popularOpenRouterModels } from '../config/providers';
@@ -18,20 +18,37 @@ interface UnifiedModelSelectorProps {
   showProviderSettings?: () => void;
 }
 
+interface ModelInfo {
+  id: string;
+  name: string;
+  displayName: string;
+  provider: string;
+  type: 'local' | 'cloud';
+  size?: number;
+  pricing?: string;
+  description?: string;
+  isFree?: boolean;
+}
+
 interface ModelGroup {
   name: string;
   icon: React.ReactNode;
-  models: Array<{
-    id: string;
-    name: string;
-    displayName: string;
-    provider: string;
-    type: 'local' | 'cloud';
-    size?: number;
-    pricing?: string;
-    description?: string;
-  }>;
+  models: ModelInfo[];
 }
+
+// Known providers for filtering
+const PROVIDERS = [
+  'All',
+  'Anthropic',
+  'OpenAI', 
+  'Google',
+  'Meta',
+  'Mistral',
+  'xAI',
+  'DeepSeek',
+  'Qwen',
+  'Other'
+];
 
 export const UnifiedModelSelector: React.FC<UnifiedModelSelectorProps> = ({
   platform,
@@ -56,7 +73,13 @@ export const UnifiedModelSelector: React.FC<UnifiedModelSelectorProps> = ({
     maxHeight: 300
   });
   
+  const [searchQuery, setSearchQuery] = useState('');
+  const [showFreeOnly, setShowFreeOnly] = useState(false);
+  const [selectedProvider, setSelectedProvider] = useState('All');
+  const [showFilters, setShowFilters] = useState(false);
+  
   const buttonRef = useRef<HTMLButtonElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
 
   // Load models from both providers
   const loadAllModels = async () => {
@@ -83,7 +106,6 @@ export const UnifiedModelSelector: React.FC<UnifiedModelSelectorProps> = ({
         const openRouterModels = await window.pip.ollama.getOpenRouterModels();
         models.openrouter = openRouterModels;
       } else {
-        // Fallback to popular models
         models.openrouter = popularOpenRouterModels;
       }
     } catch (error) {
@@ -99,6 +121,20 @@ export const UnifiedModelSelector: React.FC<UnifiedModelSelectorProps> = ({
     loadAllModels();
   }, []);
 
+  // Focus search input when dropdown opens
+  useEffect(() => {
+    if (showSelector && searchInputRef.current) {
+      setTimeout(() => searchInputRef.current?.focus(), 100);
+    }
+  }, [showSelector]);
+
+  // Reset filters when closing
+  useEffect(() => {
+    if (!showSelector) {
+      setSearchQuery('');
+    }
+  }, [showSelector]);
+
   // Update dropdown position when opened
   useEffect(() => {
     if (showSelector && buttonRef.current) {
@@ -109,40 +145,113 @@ export const UnifiedModelSelector: React.FC<UnifiedModelSelectorProps> = ({
       setDropdownPosition({
         top: rect.bottom + 5,
         right: window.innerWidth - rect.right,
-        maxHeight: Math.max(200, Math.min(400, availableHeight))
+        maxHeight: Math.max(200, Math.min(500, availableHeight))
       });
     }
   }, [showSelector]);
 
-  // Organize models into groups
-  const modelGroups: ModelGroup[] = [
-    {
-      name: 'Local Models (Ollama)',
-      icon: <Server className="w-4 h-4" />,
-      models: allModels.ollama.map(model => ({
-        id: model.name,
-        name: model.name,
-        displayName: model.name,
-        provider: 'Ollama',
-        type: 'local' as const,
-        size: model.size,
-        description: `Local model - ${(model.size / 1e9).toFixed(1)}GB`
-      }))
-    },
-    {
-      name: 'Cloud Models (OpenRouter)',
-      icon: <Zap className="w-4 h-4" />,
-      models: allModels.openrouter.map(model => ({
-        id: model.id,
-        name: model.name || model.id,
-        displayName: model.name || model.id,
-        provider: model.provider || 'OpenRouter',
-        type: 'cloud' as const,
-        pricing: model.pricing?.completion,
-        description: model.description || `${model.provider || 'OpenRouter'} model`
-      }))
+  // Helper to check if model is free
+  const isModelFree = (model: any): boolean => {
+    if (!model.pricing) return false;
+    const promptPrice = parseFloat(model.pricing.prompt || '0');
+    const completionPrice = parseFloat(model.pricing.completion || '0');
+    return promptPrice === 0 && completionPrice === 0;
+  };
+
+  // Helper to extract provider from model id
+  const getProviderFromId = (id: string): string => {
+    const providerMap: Record<string, string> = {
+      'anthropic': 'Anthropic',
+      'openai': 'OpenAI',
+      'google': 'Google',
+      'meta-llama': 'Meta',
+      'meta': 'Meta',
+      'mistralai': 'Mistral',
+      'mistral': 'Mistral',
+      'x-ai': 'xAI',
+      'deepseek': 'DeepSeek',
+      'qwen': 'Qwen',
+      'alibaba': 'Qwen',
+    };
+    
+    const prefix = id.split('/')[0]?.toLowerCase();
+    return providerMap[prefix] || 'Other';
+  };
+
+  // Organize and filter models
+  const modelGroups: ModelGroup[] = useMemo(() => {
+    const ollamaModels: ModelInfo[] = allModels.ollama.map(model => ({
+      id: model.name,
+      name: model.name,
+      displayName: model.name,
+      provider: 'Ollama',
+      type: 'local' as const,
+      size: model.size,
+      description: `Local model - ${(model.size / 1e9).toFixed(1)}GB`,
+      isFree: true
+    }));
+
+    const openrouterModels: ModelInfo[] = allModels.openrouter.map(model => ({
+      id: model.id,
+      name: model.name || model.id,
+      displayName: model.name || model.id,
+      provider: getProviderFromId(model.id),
+      type: 'cloud' as const,
+      pricing: model.pricing?.completion,
+      description: model.description || `${getProviderFromId(model.id)} model`,
+      isFree: isModelFree(model)
+    }));
+
+    // Apply filters to OpenRouter models
+    let filteredOpenRouter = openrouterModels;
+    
+    // Search filter
+    if (searchQuery) {
+      const query = searchQuery.toLowerCase();
+      filteredOpenRouter = filteredOpenRouter.filter(m => 
+        m.name.toLowerCase().includes(query) ||
+        m.id.toLowerCase().includes(query) ||
+        m.provider.toLowerCase().includes(query)
+      );
     }
-  ];
+    
+    // Free only filter
+    if (showFreeOnly) {
+      filteredOpenRouter = filteredOpenRouter.filter(m => m.isFree);
+    }
+    
+    // Provider filter
+    if (selectedProvider !== 'All') {
+      filteredOpenRouter = filteredOpenRouter.filter(m => m.provider === selectedProvider);
+    }
+
+    // Also filter Ollama models by search
+    let filteredOllama = ollamaModels;
+    if (searchQuery) {
+      const query = searchQuery.toLowerCase();
+      filteredOllama = filteredOllama.filter(m => 
+        m.name.toLowerCase().includes(query)
+      );
+    }
+
+    return [
+      {
+        name: 'Local Models (Ollama)',
+        icon: <Server className="w-4 h-4" />,
+        models: filteredOllama
+      },
+      {
+        name: 'Cloud Models (OpenRouter)',
+        icon: <Zap className="w-4 h-4" />,
+        models: filteredOpenRouter
+      }
+    ];
+  }, [allModels, searchQuery, showFreeOnly, selectedProvider]);
+
+  // Count free models
+  const freeModelCount = useMemo(() => {
+    return allModels.openrouter.filter(m => isModelFree(m)).length;
+  }, [allModels.openrouter]);
 
   // Get current model display info
   const getCurrentModelInfo = () => {
@@ -186,7 +295,6 @@ export const UnifiedModelSelector: React.FC<UnifiedModelSelectorProps> = ({
         )}
         title={`Current model: ${currentModelInfo.displayName} (${currentModelInfo.provider})`}
       >
-        {/* Provider Icon */}
         <div className={cn(
           "flex items-center justify-center rounded",
           currentModelInfo.type === 'local' ? "text-green-400" : "text-blue-400"
@@ -198,7 +306,6 @@ export const UnifiedModelSelector: React.FC<UnifiedModelSelectorProps> = ({
           )}
         </div>
         
-        {/* Model Name */}
         <div className="flex flex-col items-start min-w-0">
           <div className={cn(
             "font-medium truncate max-w-32",
@@ -213,7 +320,6 @@ export const UnifiedModelSelector: React.FC<UnifiedModelSelectorProps> = ({
           )}
         </div>
         
-        {/* Dropdown Arrow */}
         <div className="flex-shrink-0">
           {showSelector ? (
             <ChevronUp className="w-3 h-3" />
@@ -226,14 +332,12 @@ export const UnifiedModelSelector: React.FC<UnifiedModelSelectorProps> = ({
       {/* Model Dropdown - Rendered via Portal */}
       {showSelector && createPortal(
         <>
-          {/* Backdrop */}
           <div
             className="fixed inset-0 z-[999998]"
             onClick={onToggleSelector}
             style={{ pointerEvents: 'auto' }}
           />
           
-          {/* Dropdown */}
           <AnimatePresence>
             <motion.div
               initial={{ opacity: 0, scale: 0.9, y: -10 }}
@@ -258,27 +362,122 @@ export const UnifiedModelSelector: React.FC<UnifiedModelSelectorProps> = ({
                   )}>
                     Select Model
                   </div>
-                  {showProviderSettings && (
+                  <div className="flex items-center gap-1">
                     <button
-                      onClick={() => {
-                        showProviderSettings();
-                        onToggleSelector();
-                      }}
+                      onClick={() => setShowFilters(!showFilters)}
                       className={cn(
                         "p-1 rounded hover:bg-white/10 transition-colors",
+                        showFilters && "bg-white/10",
                         ThemeUtils.getTextClass(platform, theme, 'secondary')
                       )}
-                      title="Provider Settings"
+                      title="Filters"
                     >
-                      <Settings className="w-4 h-4" />
+                      <Filter className="w-4 h-4" />
                     </button>
-                  )}
+                    {showProviderSettings && (
+                      <button
+                        onClick={() => {
+                          showProviderSettings();
+                          onToggleSelector();
+                        }}
+                        className={cn(
+                          "p-1 rounded hover:bg-white/10 transition-colors",
+                          ThemeUtils.getTextClass(platform, theme, 'secondary')
+                        )}
+                        title="Provider Settings"
+                      >
+                        <Settings className="w-4 h-4" />
+                      </button>
+                    )}
+                  </div>
                 </div>
+
+                {/* Search */}
+                <div className="relative mb-3">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-white/40" />
+                  <input
+                    ref={searchInputRef}
+                    type="text"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    placeholder="Search models..."
+                    className="w-full pl-9 pr-3 py-2 bg-white/10 border border-white/20 rounded-lg text-sm focus:border-blue-500 focus:outline-none"
+                  />
+                </div>
+
+                {/* Filters */}
+                <AnimatePresence>
+                  {showFilters && (
+                    <motion.div
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: 'auto' }}
+                      exit={{ opacity: 0, height: 0 }}
+                      className="mb-3 space-y-2 overflow-hidden"
+                    >
+                      {/* Free Only Toggle */}
+                      <button
+                        onClick={() => setShowFreeOnly(!showFreeOnly)}
+                        className={cn(
+                          "w-full flex items-center justify-between px-3 py-2 rounded-lg border transition-colors text-sm",
+                          showFreeOnly 
+                            ? "bg-green-500/20 border-green-500/50 text-green-300"
+                            : "bg-white/5 border-white/20 hover:bg-white/10"
+                        )}
+                      >
+                        <span>Free Models Only</span>
+                        <span className="text-xs text-white/50">({freeModelCount})</span>
+                      </button>
+
+                      {/* Provider Filter */}
+                      <div className="flex flex-wrap gap-1">
+                        {PROVIDERS.map(provider => (
+                          <button
+                            key={provider}
+                            onClick={() => setSelectedProvider(provider)}
+                            className={cn(
+                              "px-2 py-1 text-xs rounded-md border transition-colors",
+                              selectedProvider === provider
+                                ? "bg-blue-500/20 border-blue-500/50 text-blue-300"
+                                : "bg-white/5 border-white/20 hover:bg-white/10"
+                            )}
+                          >
+                            {provider}
+                          </button>
+                        ))}
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+
+                {/* Active Filters Display */}
+                {(showFreeOnly || selectedProvider !== 'All') && !showFilters && (
+                  <div className="flex flex-wrap gap-1 mb-3">
+                    {showFreeOnly && (
+                      <span className="px-2 py-0.5 text-xs bg-green-500/20 text-green-300 rounded-full">
+                        Free
+                      </span>
+                    )}
+                    {selectedProvider !== 'All' && (
+                      <span className="px-2 py-0.5 text-xs bg-blue-500/20 text-blue-300 rounded-full">
+                        {selectedProvider}
+                      </span>
+                    )}
+                    <button
+                      onClick={() => {
+                        setShowFreeOnly(false);
+                        setSelectedProvider('All');
+                      }}
+                      className="px-2 py-0.5 text-xs text-white/50 hover:text-white/70"
+                    >
+                      Clear
+                    </button>
+                  </div>
+                )}
 
                 {/* Model Groups */}
                 <div 
                   className="overflow-y-auto scrollbar-thin"
-                  style={{ maxHeight: `${dropdownPosition.maxHeight - 60}px` }}
+                  style={{ maxHeight: `${dropdownPosition.maxHeight - (showFilters ? 200 : 120)}px` }}
                 >
                   {allModels.loading ? (
                     <div className="flex items-center justify-center py-8">
@@ -289,7 +488,6 @@ export const UnifiedModelSelector: React.FC<UnifiedModelSelectorProps> = ({
                     modelGroups.map((group, groupIndex) => (
                       group.models.length > 0 && (
                         <div key={group.name} className={cn(groupIndex > 0 && "mt-4")}>
-                          {/* Group Header */}
                           <div className={cn(
                             "flex items-center gap-2 px-2 py-1 text-xs font-medium mb-2",
                             ThemeUtils.getTextClass(platform, theme, 'secondary')
@@ -299,9 +497,8 @@ export const UnifiedModelSelector: React.FC<UnifiedModelSelectorProps> = ({
                             <span className="text-white/40">({group.models.length})</span>
                           </div>
                           
-                          {/* Models */}
                           <div className="space-y-1">
-                            {group.models.slice(0, 10).map((model) => (
+                            {group.models.slice(0, 20).map((model) => (
                               <button
                                 key={model.id}
                                 onClick={() => handleModelSelect(model.id)}
@@ -319,26 +516,26 @@ export const UnifiedModelSelector: React.FC<UnifiedModelSelectorProps> = ({
                                       <span className="font-medium text-sm truncate">
                                         {model.displayName}
                                       </span>
+                                      {model.isFree && model.type === 'cloud' && (
+                                        <span className="px-1.5 py-0.5 text-[10px] bg-green-500/20 text-green-400 rounded">
+                                          FREE
+                                        </span>
+                                      )}
                                       {(currentModel === model.id || currentModel === model.name) && (
                                         <Check className="w-3 h-3 text-blue-400 flex-shrink-0" />
                                       )}
                                     </div>
-                                    <div className="text-xs text-white/60 truncate">
-                                      {model.description}
+                                    <div className="text-xs text-white/50 truncate">
+                                      {model.provider}
                                     </div>
-                                    {model.pricing && (
-                                      <div className="text-xs text-green-400">
-                                        ${model.pricing}/1K tokens
-                                      </div>
-                                    )}
                                   </div>
                                 </div>
                               </button>
                             ))}
                             
-                            {group.models.length > 10 && (
+                            {group.models.length > 20 && (
                               <div className="px-3 py-2 text-xs text-white/50 text-center">
-                                +{group.models.length - 10} more models available
+                                +{group.models.length - 20} more models
                               </div>
                             )}
                           </div>
@@ -346,27 +543,14 @@ export const UnifiedModelSelector: React.FC<UnifiedModelSelectorProps> = ({
                       )
                     ))
                   )}
-                </div>
 
-                {/* Footer */}
-                {showProviderSettings && (
-                  <div className="mt-3 pt-3 border-t border-white/10">
-                    <button
-                      onClick={() => {
-                        showProviderSettings();
-                        onToggleSelector();
-                      }}
-                      className={cn(
-                        "w-full px-3 py-2 text-sm rounded-lg transition-colors",
-                        "bg-blue-500/20 hover:bg-blue-500/30 text-blue-300",
-                        "flex items-center justify-center gap-2"
-                      )}
-                    >
-                      <Settings className="w-4 h-4" />
-                      Configure Providers
-                    </button>
-                  </div>
-                )}
+                  {/* No results */}
+                  {!allModels.loading && modelGroups.every(g => g.models.length === 0) && (
+                    <div className="py-8 text-center text-white/50 text-sm">
+                      No models found
+                    </div>
+                  )}
+                </div>
               </div>
             </motion.div>
           </AnimatePresence>

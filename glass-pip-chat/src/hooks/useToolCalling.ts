@@ -146,7 +146,8 @@ export function useToolCalling(
   const sendMessageWithTools = useCallback(async (
     messages: Message[],
     newMessage: string,
-    onProgress?: (progress: ToolExecutionProgress) => void
+    onProgress?: (progress: ToolExecutionProgress) => void,
+    model?: string
   ): Promise<{
     response: string;
     toolCalls: ToolCall[];
@@ -177,11 +178,11 @@ export function useToolCalling(
         toolExecutionHistory: executionHistoryRef.current
       };
 
-      // Execute chat with tools
+      // Execute chat with tools - pass the model parameter
       const result = await toolCallingService.chatWithTools(
         toolAwareMessages,
         updatedContext,
-        undefined, // Use default model
+        model, // Pass the model from caller
         (chunk, toolCalls, toolResults) => {
           // Update current state
           setState(prev => ({
