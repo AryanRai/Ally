@@ -75,7 +75,7 @@ const pipAPI = {
     
     // Provider management
     getProviders: () => ipcRenderer.invoke('ollama:getProviders'),
-    setProvider: (provider: 'ollama' | 'openrouter') => ipcRenderer.send('ollama:setProvider', provider),
+    setProvider: (provider: 'ollama' | 'openrouter' | 'gemini') => ipcRenderer.send('ollama:setProvider', provider),
     
     // OpenRouter specific methods
     getOpenRouterModels: () => ipcRenderer.invoke('ollama:getOpenRouterModels'),
@@ -94,7 +94,12 @@ const pipAPI = {
         // Clean up the listener
         ipcRenderer.removeListener('ollama:openRouterProgress', progressHandler);
       }
-    }
+    },
+    
+    // Gemini specific methods
+    getGeminiModels: () => ipcRenderer.invoke('ollama:getGeminiModels'),
+    isGeminiAvailable: () => ipcRenderer.invoke('ollama:isGeminiAvailable'),
+    testGeminiConnection: () => ipcRenderer.invoke('ollama:testGeminiConnection')
   },
 
   // Server status

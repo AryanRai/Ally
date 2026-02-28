@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ChevronDown, ChevronUp, Check, Server, Zap, Settings, Search, Filter } from 'lucide-react';
+import { ChevronDown, ChevronUp, Check, Server, Zap, Settings, Search, Filter, Sparkles } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { ThemeUtils } from '../utils/themeUtils';
-import { popularOpenRouterModels } from '../config/providers';
+import { popularOpenRouterModels, popularGeminiModels } from '../config/providers';
 
 interface UnifiedModelSelectorProps {
   platform: string;
@@ -66,8 +66,9 @@ export const UnifiedModelSelector: React.FC<UnifiedModelSelectorProps> = ({
   const [allModels, setAllModels] = useState<{
     ollama: any[];
     openrouter: any[];
+    gemini: any[];
     loading: boolean;
-  }>({ ollama: [], openrouter: [], loading: false });
+  }>({ ollama: [], openrouter: [], gemini: [], loading: false });
   
   const [dropdownPosition, setDropdownPosition] = useState({
     top: 0,
@@ -83,11 +84,11 @@ export const UnifiedModelSelector: React.FC<UnifiedModelSelectorProps> = ({
   const buttonRef = useRef<HTMLButtonElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
 
-  // Load models from both providers
+  // Load models from all providers
   const loadAllModels = async () => {
     setAllModels(prev => ({ ...prev, loading: true }));
     
-    const models = { ollama: [], openrouter: [], loading: false };
+    const models: { ollama: any[]; openrouter: any[]; gemini: any[]; loading: boolean } = { ollama: [], openrouter: [], gemini: [], loading: false };
     
     // Load Ollama models
     try {
@@ -114,6 +115,10 @@ export const UnifiedModelSelector: React.FC<UnifiedModelSelectorProps> = ({
       console.warn('Failed to load OpenRouter models, using fallback:', error);
       models.openrouter = popularOpenRouterModels;
     }
+    
+    // Load Gemini models - use static list to avoid API calls on mount
+    // The models list API is free but we don't need to call it every time
+    models.gemini = popularGeminiModels;
     
     setAllModels(models);
   };
@@ -219,6 +224,16 @@ export const UnifiedModelSelector: React.FC<UnifiedModelSelectorProps> = ({
       isFree: isModelFree(model)
     }));
 
+    const geminiModels: ModelInfo[] = allModels.gemini.map(model => ({
+      id: model.id,
+      name: model.name || model.id,
+      displayName: model.name || model.id,
+      provider: 'Google',
+      type: 'cloud' as const,
+      description: model.description || 'Google Gemini model',
+      isFree: true // Gemini has a free tier
+    }));
+
     // Apply filters to OpenRouter models
     let filteredOpenRouter = openrouterModels;
     
@@ -242,6 +257,19 @@ export const UnifiedModelSelector: React.FC<UnifiedModelSelectorProps> = ({
       filteredOpenRouter = filteredOpenRouter.filter(m => m.provider === selectedProvider);
     }
 
+    // Apply filters to Gemini models
+    let filteredGemini = geminiModels;
+    if (searchQuery) {
+      const query = searchQuery.toLowerCase();
+      filteredGemini = filteredGemini.filter(m => 
+        m.name.toLowerCase().includes(query) ||
+        m.id.toLowerCase().includes(query)
+      );
+    }
+    if (selectedProvider !== 'All' && selectedProvider !== 'Google') {
+      filteredGemini = [];
+    }
+
     // Also filter Ollama models by search
     let filteredOllama = ollamaModels;
     if (searchQuery) {
@@ -256,6 +284,11 @@ export const UnifiedModelSelector: React.FC<UnifiedModelSelectorProps> = ({
         name: 'Local Models (Ollama)',
         icon: <Server className="w-4 h-4" />,
         models: filteredOllama
+      },
+      {
+        name: 'Google Gemini (Direct)',
+        icon: <Sparkles className="w-4 h-4" />,
+        models: filteredGemini
       },
       {
         name: 'Cloud Models (OpenRouter)',

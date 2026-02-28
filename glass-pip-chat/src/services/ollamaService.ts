@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { GoogleGenAI } from '@google/genai';
 
 export interface OllamaModel {
   name: string;
@@ -71,8 +72,14 @@ export interface ServiceConfig {
   openRouterDefaultModel: string;
   openRouterTimeout: number;
   
+  // Gemini settings
+  geminiApiKey: string;
+  geminiBaseUrl: string;
+  geminiDefaultModel: string;
+  geminiTimeout: number;
+  
   // General settings
-  preferredProvider: 'ollama' | 'openrouter';
+  preferredProvider: 'ollama' | 'openrouter' | 'gemini';
 }
 
 // Enhanced streaming with real-time thinking process
@@ -99,6 +106,12 @@ export class OllamaService {
       openRouterDefaultModel: config.openRouterDefaultModel || 'anthropic/claude-3.5-sonnet',
       openRouterTimeout: config.openRouterTimeout || 60000,
       
+      // Gemini defaults
+      geminiApiKey: config.geminiApiKey || '',
+      geminiBaseUrl: config.geminiBaseUrl || 'https://generativelanguage.googleapis.com/v1beta',
+      geminiDefaultModel: config.geminiDefaultModel || 'gemini-2.0-flash',
+      geminiTimeout: config.geminiTimeout || 60000,
+      
       // General defaults
       preferredProvider: config.preferredProvider || 'ollama',
     };
@@ -108,6 +121,9 @@ export class OllamaService {
   async isAvailable(): Promise<boolean> {
     if (this.config.preferredProvider === 'openrouter') {
       return this.isOpenRouterAvailable();
+    }
+    if (this.config.preferredProvider === 'gemini') {
+      return this.isGeminiAvailable();
     }
     return this.isOllamaAvailable();
   }
@@ -230,6 +246,253 @@ export class OllamaService {
     return models;
   }
 
+  // Test if Gemini is accessible using the SDK
+  async isGeminiAvailable(): Promise<boolean> {
+    try {
+      if (!this.config.geminiApiKey) {
+        console.error('Gemini API key not configured');
+        return false;
+      }
+      
+      console.log('Checking Gemini availability with SDK...');
+      // Just verify the API key is set - actual validation happens on first request
+      return this.config.geminiApiKey.length > 0;
+    } catch (error: any) {
+      console.error('Gemini not available:', error.message);
+      return false;
+    }
+  }
+
+  // Test Gemini connection using the SDK - uses models.get to avoid rate limits
+  async testGeminiConnection(): Promise<{ success: boolean; error?: string }> {
+    try {
+      if (!this.config.geminiApiKey) {
+        return { success: false, error: 'API key not configured' };
+      }
+
+      // Use a simple REST call to list models - this doesn't consume tokens
+      // and is the lightest way to verify the API key works
+      const response = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models?key=${this.config.geminiApiKey}`,
+        { method: 'GET' }
+      );
+
+      if (response.ok) {
+        const data = await response.json();
+        if (data.models && data.models.length > 0) {
+          console.log('Gemini connection test successful, found', data.models.length, 'models');
+          return { success: true };
+        }
+        return { success: false, error: 'No models found' };
+      }
+
+      // Handle specific error codes
+      if (response.status === 400) {
+        return { success: false, error: 'Invalid API key format' };
+      }
+      if (response.status === 401 || response.status === 403) {
+        return { success: false, error: 'Invalid or expired API key' };
+      }
+      if (response.status === 429) {
+        return { success: false, error: 'Rate limited - please wait and try again' };
+      }
+
+      return { success: false, error: `HTTP ${response.status}: ${response.statusText}` };
+    } catch (error: any) {
+      console.error('Gemini connection test failed:', error);
+      return { success: false, error: error.message || 'Connection failed' };
+    }
+  }
+
+  // Get Gemini models - returns static list of recommended models
+  async getGeminiModels(): Promise<any[]> {
+    // Return static list of known models based on codegen_instructions.md
+    return [
+      { id: 'gemini-2.0-flash', name: 'Gemini 2.0 Flash', description: 'Fast and efficient (recommended)' },
+      { id: 'gemini-2.0-flash-lite', name: 'Gemini 2.0 Flash Lite', description: 'Low latency, high volume' },
+      { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', description: 'Latest flash model with thinking' },
+      { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro', description: 'Advanced reasoning capabilities' },
+    ];
+  }
+
+  // Chat with Gemini using the SDK
+  private async chatGemini(
+    messages: ChatMessage[],
+    model: string,
+    onProgress?: (chunk: string) => void
+  ): Promise<string> {
+    try {
+      if (!this.config.geminiApiKey) {
+        throw new Error('Gemini API key not configured');
+      }
+
+      const ai = new GoogleGenAI({ apiKey: this.config.geminiApiKey });
+
+      // Extract system instruction
+      const systemMsg = messages.find(m => m.role === 'system');
+      
+      // Build contents array for multi-turn conversation
+      const nonSystemMessages = messages.filter(m => m.role !== 'system');
+      
+      // For simple single message, use direct content
+      if (nonSystemMessages.length === 1) {
+        console.log(`🚀 Sending Gemini request (simple) - Model: ${model}`);
+        
+        const response = await ai.models.generateContent({
+          model,
+          contents: nonSystemMessages[0].content,
+          config: {
+            ...(systemMsg && { systemInstruction: systemMsg.content }),
+            temperature: 0.7,
+          }
+        });
+
+        const content = response.text || '';
+        
+        if (onProgress && content) {
+          onProgress(content);
+        }
+
+        return content;
+      }
+
+      // For multi-turn, build proper contents array
+      const contents: Array<{ role: string; parts: Array<{ text: string }> }> = [];
+      for (const msg of nonSystemMessages) {
+        const role = msg.role === 'assistant' ? 'model' : 'user';
+        const lastContent = contents[contents.length - 1];
+        
+        if (lastContent && lastContent.role === role) {
+          lastContent.parts[0].text += '\n\n' + msg.content;
+        } else {
+          contents.push({ role, parts: [{ text: msg.content }] });
+        }
+      }
+
+      // Ensure first message is from user
+      if (contents.length > 0 && contents[0].role === 'model') {
+        contents.unshift({ role: 'user', parts: [{ text: 'Hello' }] });
+      }
+
+      console.log(`🚀 Sending Gemini request (multi-turn) - Model: ${model}, Messages: ${contents.length}`);
+
+      const response = await ai.models.generateContent({
+        model,
+        contents,
+        config: {
+          ...(systemMsg && { systemInstruction: systemMsg.content }),
+          temperature: 0.7,
+        }
+      });
+
+      const content = response.text || '';
+      
+      if (onProgress && content) {
+        onProgress(content);
+      }
+
+      return content;
+    } catch (error: any) {
+      console.error('Gemini request failed:', error);
+      
+      let errorMessage = `Gemini API Error: ${error.message}`;
+      
+      if (error.message?.includes('404')) {
+        errorMessage += `\n\n🔍 Model Not Found:\n• Model "${model}" may not exist\n• Try: gemini-2.0-flash or gemini-1.5-flash`;
+      } else if (error.message?.includes('401') || error.message?.includes('403')) {
+        errorMessage += '\n\n🔑 Authentication Error:\n• Your API key is invalid\n• Get a new key from https://aistudio.google.com/apikey';
+      } else if (error.message?.includes('429')) {
+        errorMessage += '\n\n⏱️ Rate Limited:\n• Too many requests\n• Wait a moment and try again';
+      }
+      
+      throw new Error(errorMessage);
+    }
+  }
+
+  // Stream chat with Gemini using the SDK
+  async streamChatGemini(
+    messages: ChatMessage[],
+    model: string,
+    onProgress: (chunk: ThinkingChunk) => void
+  ): Promise<string> {
+    try {
+      if (!this.config.geminiApiKey) {
+        throw new Error('Gemini API key not configured');
+      }
+
+      const ai = new GoogleGenAI({ apiKey: this.config.geminiApiKey });
+
+      // Extract system instruction
+      const systemMsg = messages.find(m => m.role === 'system');
+      
+      // Build contents
+      const nonSystemMessages = messages.filter(m => m.role !== 'system');
+      
+      // For simple single message
+      let contents: string | Array<{ role: string; parts: Array<{ text: string }> }>;
+      
+      if (nonSystemMessages.length === 1) {
+        contents = nonSystemMessages[0].content;
+      } else {
+        // Build multi-turn contents
+        const contentArray: Array<{ role: string; parts: Array<{ text: string }> }> = [];
+        for (const msg of nonSystemMessages) {
+          const role = msg.role === 'assistant' ? 'model' : 'user';
+          const lastContent = contentArray[contentArray.length - 1];
+          
+          if (lastContent && lastContent.role === role) {
+            lastContent.parts[0].text += '\n\n' + msg.content;
+          } else {
+            contentArray.push({ role, parts: [{ text: msg.content }] });
+          }
+        }
+
+        // Ensure first message is from user
+        if (contentArray.length > 0 && contentArray[0].role === 'model') {
+          contentArray.unshift({ role: 'user', parts: [{ text: 'Hello' }] });
+        }
+        
+        contents = contentArray;
+      }
+
+      console.log(`🚀 Streaming Gemini request - Model: ${model}`);
+
+      const responseStream = await ai.models.generateContentStream({
+        model,
+        contents,
+        config: {
+          ...(systemMsg && { systemInstruction: systemMsg.content }),
+          temperature: 0.7,
+        }
+      });
+
+      let fullResponse = '';
+
+      for await (const chunk of responseStream) {
+        const text = chunk.text || '';
+        if (text) {
+          fullResponse += text;
+          onProgress({
+            type: 'response',
+            content: fullResponse,
+            isComplete: false
+          });
+        }
+      }
+
+      onProgress({
+        type: 'done',
+        content: fullResponse,
+        isComplete: true
+      });
+
+      return fullResponse;
+    } catch (error: any) {
+      console.error('Gemini streaming failed:', error);
+      throw new Error(`Gemini streaming error: ${error.message}`);
+    }
+  }
+
   // Get Ollama models specifically
   async getOllamaModels(): Promise<OllamaModel[]> {
     try {
@@ -285,23 +548,32 @@ export class OllamaService {
       mappedModel: modelName,
       preferredProvider: this.config.preferredProvider,
       hasOpenRouterKey: !!this.config.openRouterApiKey,
+      hasGeminiKey: !!this.config.geminiApiKey,
       openRouterDefaultModel: this.config.openRouterDefaultModel,
+      geminiDefaultModel: this.config.geminiDefaultModel,
       ollamaDefaultModel: this.config.ollamaDefaultModel
     });
     
     // Determine provider based on model name or configuration
     const isOpenRouterModel = this.isOpenRouterModelName(modelName);
+    const isGeminiModel = this.isGeminiModelName(modelName);
     const useOpenRouter = isOpenRouterModel || (this.config.preferredProvider === 'openrouter' && this.config.openRouterApiKey);
+    const useGemini = isGeminiModel || (this.config.preferredProvider === 'gemini' && this.config.geminiApiKey);
     
     console.log('🔀 Provider Selection:', {
       modelName,
       isOpenRouterModel,
+      isGeminiModel,
       preferredProvider: this.config.preferredProvider,
-      hasApiKey: !!this.config.openRouterApiKey,
-      useOpenRouter
+      hasOpenRouterKey: !!this.config.openRouterApiKey,
+      hasGeminiKey: !!this.config.geminiApiKey,
+      useOpenRouter,
+      useGemini
     });
     
-    if (useOpenRouter) {
+    if (useGemini) {
+      return this.chatGemini(messages, modelName, onProgress);
+    } else if (useOpenRouter) {
       return this.chatOpenRouter(messages, modelName, onProgress);
     } else {
       return this.chatOllama(messages, modelName, onProgress);
@@ -542,17 +814,25 @@ export class OllamaService {
     
     // Determine provider based on model name or configuration
     const isOpenRouterModel = this.isOpenRouterModelName(mappedModel);
+    const isGeminiModel = this.isGeminiModelName(mappedModel);
     const useOpenRouter = isOpenRouterModel || (this.config.preferredProvider === 'openrouter' && this.config.openRouterApiKey);
+    const useGemini = isGeminiModel || (this.config.preferredProvider === 'gemini' && this.config.geminiApiKey);
     
     console.log('🔀 StreamChatWithThinking - Provider selection:', {
       mappedModel,
       isOpenRouterModel,
+      isGeminiModel,
       preferredProvider: this.config.preferredProvider,
-      hasApiKey: !!this.config.openRouterApiKey,
-      useOpenRouter
+      hasOpenRouterKey: !!this.config.openRouterApiKey,
+      hasGeminiKey: !!this.config.geminiApiKey,
+      useOpenRouter,
+      useGemini
     });
     
-    if (useOpenRouter) {
+    if (useGemini) {
+      // Use Gemini streaming
+      return this.streamChatGemini(messages, mappedModel, onProgress);
+    } else if (useOpenRouter) {
       // Use axios-based approach for OpenRouter with thinking simulation
       const response = await this.chatOpenRouter(messages, mappedModel, (cumulativeContent) => {
         // Convert regular progress to thinking chunks - content is already cumulative
@@ -799,10 +1079,15 @@ export class OllamaService {
     
     // Also check for common display names that should map to OpenRouter
     const openRouterDisplayNames = [
-      'xai:', 'grok', 'claude', 'gpt-4', 'gemini', 'llama-3'
+      'xai:', 'grok', 'claude', 'gpt-4', 'llama-3'
     ];
     
     const modelLower = model.toLowerCase();
+    
+    // Don't match Gemini models as OpenRouter - they should go to direct Gemini API
+    if (this.isGeminiModelName(model)) {
+      return false;
+    }
     
     // Check prefixes first
     if (openRouterPrefixes.some(prefix => model.startsWith(prefix))) {
@@ -812,6 +1097,30 @@ export class OllamaService {
     // Check display names
     if (openRouterDisplayNames.some(name => modelLower.includes(name))) {
       console.log(`🔍 Detected OpenRouter model by display name: ${model}`);
+      return true;
+    }
+    
+    return false;
+  }
+
+  // Helper method to determine if a model name is from Gemini
+  private isGeminiModelName(model: string): boolean {
+    const geminiPatterns = [
+      'gemini-2.0', 'gemini-2.5', 'gemini-1.5', 'gemini-1.0', 'gemini-pro', 'gemini-flash',
+      'gemini-2.0-flash', 'gemini-2.0-flash-lite', 'gemini-2.5-flash', 'gemini-2.5-pro'
+    ];
+    
+    const modelLower = model.toLowerCase();
+    
+    // Check if it's a direct Gemini model (not via OpenRouter)
+    // OpenRouter Gemini models have 'google/' prefix
+    if (model.startsWith('google/')) {
+      return false; // This is OpenRouter's Gemini
+    }
+    
+    // Check for Gemini patterns
+    if (geminiPatterns.some(pattern => modelLower.includes(pattern))) {
+      console.log(`🔍 Detected direct Gemini model: ${model}`);
       return true;
     }
     
@@ -843,14 +1152,22 @@ export class OllamaService {
 
   // Helper method to get default model based on provider
   private getDefaultModel(): string {
-    const defaultModel = this.config.preferredProvider === 'openrouter' && this.config.openRouterApiKey
-      ? this.config.openRouterDefaultModel
-      : this.config.ollamaDefaultModel;
+    let defaultModel: string;
+    
+    if (this.config.preferredProvider === 'gemini' && this.config.geminiApiKey) {
+      defaultModel = this.config.geminiDefaultModel;
+    } else if (this.config.preferredProvider === 'openrouter' && this.config.openRouterApiKey) {
+      defaultModel = this.config.openRouterDefaultModel;
+    } else {
+      defaultModel = this.config.ollamaDefaultModel;
+    }
     
     console.log('🎯 Default Model Selection:', {
       preferredProvider: this.config.preferredProvider,
       hasOpenRouterKey: !!this.config.openRouterApiKey,
+      hasGeminiKey: !!this.config.geminiApiKey,
       openRouterDefault: this.config.openRouterDefaultModel,
+      geminiDefault: this.config.geminiDefaultModel,
       ollamaDefault: this.config.ollamaDefaultModel,
       selectedDefault: defaultModel
     });
@@ -869,7 +1186,7 @@ export class OllamaService {
   }
 
   // Set preferred provider
-  setProvider(provider: 'ollama' | 'openrouter'): void {
+  setProvider(provider: 'ollama' | 'openrouter' | 'gemini'): void {
     this.config.preferredProvider = provider;
   }
 
@@ -885,6 +1202,11 @@ export class OllamaService {
         name: 'openrouter',
         available: !!this.config.openRouterApiKey,
         configured: !!this.config.openRouterApiKey
+      },
+      {
+        name: 'gemini',
+        available: !!this.config.geminiApiKey,
+        configured: !!this.config.geminiApiKey
       }
     ];
   }
@@ -896,6 +1218,15 @@ export class OllamaService {
     onProgress?: (chunk: string) => void
   ): Promise<string> {
     return this.chatOpenRouter(messages, model, onProgress);
+  }
+
+  // Public method for main process to use Gemini streaming
+  async streamChatGeminiPublic(
+    messages: ChatMessage[],
+    model: string,
+    onProgress: (chunk: ThinkingChunk) => void
+  ): Promise<string> {
+    return this.streamChatGemini(messages, model, onProgress);
   }
 }
 

@@ -12,7 +12,13 @@ export interface ProviderConfig {
     defaultModel: string;
     timeout: number;
   };
-  preferred: 'ollama' | 'openrouter';
+  gemini: {
+    apiKey: string;
+    baseUrl: string;
+    defaultModel: string;
+    timeout: number;
+  };
+  preferred: 'ollama' | 'openrouter' | 'gemini';
 }
 
 export const defaultProviderConfig: ProviderConfig = {
@@ -28,8 +34,42 @@ export const defaultProviderConfig: ProviderConfig = {
     defaultModel: 'anthropic/claude-3.5-sonnet',
     timeout: 60000,
   },
+  gemini: {
+    apiKey: '',
+    baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
+    defaultModel: 'gemini-2.0-flash',
+    timeout: 60000,
+  },
   preferred: 'ollama',
 };
+
+// Popular Google Gemini models
+export const popularGeminiModels = [
+  {
+    id: 'gemini-2.0-flash',
+    name: 'Gemini 2.0 Flash',
+    description: 'Fast and efficient for most tasks (recommended)',
+    provider: 'Google'
+  },
+  {
+    id: 'gemini-2.0-flash-lite',
+    name: 'Gemini 2.0 Flash Lite',
+    description: 'Low latency, high volume tasks',
+    provider: 'Google'
+  },
+  {
+    id: 'gemini-2.5-flash',
+    name: 'Gemini 2.5 Flash',
+    description: 'Latest flash model with thinking capabilities',
+    provider: 'Google'
+  },
+  {
+    id: 'gemini-2.5-pro',
+    name: 'Gemini 2.5 Pro',
+    description: 'Advanced reasoning and complex tasks',
+    provider: 'Google'
+  }
+];
 
 // Popular OpenRouter models with descriptions
 export const popularOpenRouterModels = [
@@ -94,13 +134,16 @@ export const modelCategories = {
   'Most Capable': [
     'anthropic/claude-3.5-sonnet',
     'openai/gpt-4o',
-    'meta-llama/llama-3.1-405b-instruct'
+    'meta-llama/llama-3.1-405b-instruct',
+    'gemini-2.5-pro'
   ],
   'Fast & Affordable': [
     'openai/gpt-4o-mini',
     'anthropic/claude-3-haiku',
     'google/gemini-flash-1.5',
-    'x-ai/grok-beta'
+    'x-ai/grok-beta',
+    'gemini-2.0-flash',
+    'gemini-2.0-flash-lite'
   ],
   'Specialized': [
     'perplexity/llama-3.1-sonar-large-128k-online',

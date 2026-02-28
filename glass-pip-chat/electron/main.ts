@@ -795,7 +795,7 @@ ipcMain.handle('ollama:getProviders', () => {
   return ollamaService.getAvailableProviders();
 });
 
-ipcMain.on('ollama:setProvider', (_, provider: 'ollama' | 'openrouter') => {
+ipcMain.on('ollama:setProvider', (_, provider: 'ollama' | 'openrouter' | 'gemini') => {
   ollamaService.setProvider(provider);
 });
 
@@ -818,12 +818,40 @@ ipcMain.handle('ollama:isOpenRouterAvailable', async () => {
   }
 });
 
+// Gemini specific handlers
+ipcMain.handle('ollama:getGeminiModels', async () => {
+  try {
+    return await ollamaService.getGeminiModels();
+  } catch (error) {
+    console.error('Error getting Gemini models:', error);
+    return [];
+  }
+});
+
+ipcMain.handle('ollama:isGeminiAvailable', async () => {
+  try {
+    return await ollamaService.isGeminiAvailable();
+  } catch (error) {
+    console.error('Error checking Gemini availability:', error);
+    return false;
+  }
+});
+
+ipcMain.handle('ollama:testGeminiConnection', async () => {
+  try {
+    return await ollamaService.testGeminiConnection();
+  } catch (error: unknown) {
+    console.error('Error testing Gemini connection:', error);
+    return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+  }
+});
+
 ipcMain.handle('ollama:testOpenRouterConnection', async () => {
   try {
     return await ollamaService.testOpenRouterConnection();
-  } catch (error) {
+  } catch (error: unknown) {
     console.error('Error testing OpenRouter connection:', error);
-    return { success: false, error: error.message };
+    return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
   }
 });
 

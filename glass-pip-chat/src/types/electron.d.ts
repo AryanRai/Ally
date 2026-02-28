@@ -65,6 +65,23 @@ export interface PipAPI {
     chat: (messages: ChatMessage[], model?: string) => Promise<string>;
     getConfig: () => Promise<any>;
     updateConfig: (config: any) => void;
+    streamChatWithThinking: (messages: ChatMessage[], model: string, onProgress: (chunk: any) => void) => Promise<string>;
+    stop: () => Promise<boolean>;
+    
+    // Provider management
+    getProviders: () => Promise<Array<{ name: string; available: boolean; configured: boolean }>>;
+    setProvider: (provider: 'ollama' | 'openrouter' | 'gemini') => void;
+    
+    // OpenRouter specific
+    getOpenRouterModels: () => Promise<any[]>;
+    isOpenRouterAvailable: () => Promise<boolean>;
+    testOpenRouterConnection: () => Promise<{ success: boolean; error?: string }>;
+    openRouterStreamChat: (messages: ChatMessage[], model: string, onProgress: (chunk: string) => void) => Promise<string>;
+    
+    // Gemini specific
+    getGeminiModels: () => Promise<any[]>;
+    isGeminiAvailable: () => Promise<boolean>;
+    testGeminiConnection: () => Promise<{ success: boolean; error?: string }>;
   };
 
   // Server status

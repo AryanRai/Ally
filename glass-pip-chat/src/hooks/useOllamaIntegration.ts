@@ -17,18 +17,27 @@ export function useOllamaIntegration() {
       if (window.pip?.ollama) {
         const config = await window.pip.ollama.getConfig();
         
-        // Determine if it's an OpenRouter model (contains /)
-        const isOpenRouterModel = model.includes('/');
+        // Determine provider based on model name
+        const isOpenRouterModel = model.includes('/'); // OpenRouter models have provider/model format
+        const isGeminiModel = model.startsWith('gemini-'); // Direct Gemini models
+        
+        let provider: 'ollama' | 'openrouter' | 'gemini' = 'ollama';
+        if (isGeminiModel) {
+          provider = 'gemini';
+        } else if (isOpenRouterModel) {
+          provider = 'openrouter';
+        }
         
         await window.pip.ollama.updateConfig({
           ...config,
-          preferredProvider: isOpenRouterModel ? 'openrouter' : 'ollama',
+          preferredProvider: provider,
           openRouterDefaultModel: isOpenRouterModel ? model : config.openRouterDefaultModel,
-          ollamaDefaultModel: !isOpenRouterModel ? model : config.ollamaDefaultModel,
+          geminiDefaultModel: isGeminiModel ? model : config.geminiDefaultModel,
+          ollamaDefaultModel: (!isOpenRouterModel && !isGeminiModel) ? model : config.ollamaDefaultModel,
         });
         
-        await window.pip.ollama.setProvider(isOpenRouterModel ? 'openrouter' : 'ollama');
-        console.log('✅ Model selection persisted:', model, 'Provider:', isOpenRouterModel ? 'openrouter' : 'ollama');
+        await window.pip.ollama.setProvider(provider);
+        console.log('✅ Model selection persisted:', model, 'Provider:', provider);
       }
     } catch (error) {
       console.error('Failed to persist model selection:', error);
@@ -60,7 +69,10 @@ export function useOllamaIntegration() {
         // Use saved model from config if available
         let selectedModel = '';
         
-        if (savedConfig?.preferredProvider === 'openrouter' && savedConfig?.openRouterDefaultModel) {
+        if (savedConfig?.preferredProvider === 'gemini' && savedConfig?.geminiDefaultModel) {
+          selectedModel = savedConfig.geminiDefaultModel;
+          console.log('📂 Using saved Gemini model:', selectedModel);
+        } else if (savedConfig?.preferredProvider === 'openrouter' && savedConfig?.openRouterDefaultModel) {
           selectedModel = savedConfig.openRouterDefaultModel;
           console.log('📂 Using saved OpenRouter model:', selectedModel);
         } else if (savedConfig?.ollamaDefaultModel) {
