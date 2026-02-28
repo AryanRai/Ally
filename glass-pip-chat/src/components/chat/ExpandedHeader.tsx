@@ -1,6 +1,4 @@
-import { useRef, useEffect, useState } from 'react';
-import { createPortal } from 'react-dom';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 import {
   Grip,
   Maximize2,
@@ -10,8 +8,6 @@ import {
   Eye,
   EyeOff,
   Clipboard,
-  ChevronDown,
-  ChevronUp,
   Check,
   Mic,
   MicOff,
@@ -22,7 +18,7 @@ import {
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { ThemeUtils } from '../../utils/themeUtils';
-import { ToolStatusIndicator } from './ToolStatusIndicator';
+
 import { UnifiedModelSelector } from '../UnifiedModelSelector';
 
 interface ExpandedHeaderProps {
@@ -41,7 +37,6 @@ interface ExpandedHeaderProps {
   onContextToggle: () => void;
   contextToggleEnabled: boolean;
   onContextToggleChange: (enabled: boolean) => void;
-  availableModels: any[];
   currentModel: string;
   showModelSelector: boolean;
   onModelSelectorToggle: () => void;
@@ -81,9 +76,6 @@ interface ExpandedHeaderProps {
   // Message flow test props
   showMessageFlowTest?: boolean;
   onMessageFlowTestToggle?: () => void;
-  // LangChain props
-  langChainEnabled?: boolean;
-  onLangChainToggle?: () => void;
 }
 
 export default function ExpandedHeader({
@@ -102,7 +94,6 @@ export default function ExpandedHeader({
   onContextToggle,
   contextToggleEnabled,
   onContextToggleChange,
-  availableModels,
   currentModel,
   showModelSelector,
   onModelSelectorToggle,
@@ -125,12 +116,8 @@ export default function ExpandedHeader({
   showMessageFlowTest,
   onMessageFlowTestToggle,
   toolsEnabled,
-  onToolsToggle,
-  langChainEnabled,
-  onLangChainToggle
+  onToolsToggle
 }: ExpandedHeaderProps) {
-  const modelButtonRef = useRef<HTMLButtonElement>(null);
-  const [dropdownPosition, setDropdownPosition] = useState({ top: 0, right: 0, maxHeight: 256 });
 
   // Helper functions for smart tool control
   const getActiveToolFeaturesCount = () => {
@@ -162,25 +149,6 @@ export default function ExpandedHeader({
 
     return statusText;
   };
-
-  // Update dropdown position and calculate available height when it opens
-  useEffect(() => {
-    if (showModelSelector && modelButtonRef.current) {
-      const rect = modelButtonRef.current.getBoundingClientRect();
-      const viewportHeight = window.innerHeight;
-      const spaceBelow = viewportHeight - rect.bottom - 8; // 8px margin
-      const spaceAbove = rect.top - 8; // 8px margin
-
-      // Calculate optimal height - prefer showing below, but use above if more space
-      const maxHeight = Math.max(120, Math.min(256, Math.max(spaceBelow, spaceAbove) - 20)); // Min 120px, max 256px, with 20px buffer
-
-      setDropdownPosition({
-        top: rect.bottom + 8,
-        right: window.innerWidth - rect.right,
-        maxHeight
-      });
-    }
-  }, [showModelSelector]);
 
   return (
     <>
@@ -377,7 +345,7 @@ export default function ExpandedHeader({
                   ? "bg-purple-500/20 hover:bg-purple-500/30 text-purple-300"
                   : "hover:bg-white/10",
                 toolStatus?.isExecuting && "ring-1 ring-yellow-400/50",
-                toolStatus?.failedToolCount > 0 && "ring-1 ring-red-400/50"
+                (toolStatus?.failedToolCount ?? 0) > 0 && "ring-1 ring-red-400/50"
               )}
               title={`Tools Hub - Click: ${toolsEnabled ? 'Disable' : 'Enable'} tools | Right-click: Tool Status | Double-click: Cycle features | Status: ${getToolHubStatus()}${toolStatus ? ` | Active: ${toolStatus.activeToolCount}, Completed: ${toolStatus.completedToolCount}` : ''}`}
             >
@@ -401,7 +369,7 @@ export default function ExpandedHeader({
                     <div className="w-2 h-2 bg-yellow-400 rounded-full animate-pulse" />
                   </div>
                 )}
-                {toolStatus?.failedToolCount > 0 && (
+                {(toolStatus?.failedToolCount ?? 0) > 0 && (
                   <div className="absolute -top-0.5 -left-0.5 w-2 h-2">
                     <div className="w-2 h-2 bg-red-400 rounded-full" />
                   </div>
@@ -417,10 +385,10 @@ export default function ExpandedHeader({
               )}
 
               {/* Active features count */}
-              {(getActiveToolFeaturesCount() > 0 || (toolStatus?.activeToolCount > 0)) && (
+              {(getActiveToolFeaturesCount() > 0 || ((toolStatus?.activeToolCount ?? 0) > 0)) && (
                 <div className="absolute -top-1 -left-1 w-3 h-3 bg-blue-500 rounded-full flex items-center justify-center">
                   <span className="text-[8px] font-bold text-white">
-                    {toolStatus?.activeToolCount > 0 ? toolStatus.activeToolCount : getActiveToolFeaturesCount()}
+                    {(toolStatus?.activeToolCount ?? 0) > 0 ? toolStatus?.activeToolCount : getActiveToolFeaturesCount()}
                   </span>
                 </div>
               )}
@@ -443,29 +411,6 @@ export default function ExpandedHeader({
             <div className="absolute -bottom-0.5 -right-0.5 w-2 h-2 bg-blue-400 rounded-full" />
           )}
         </button>
-
-        {/* LangChain Toggle */}
-        {onLangChainToggle && (
-          <button
-            onClick={onLangChainToggle}
-            className={cn(
-              "p-1.5 rounded-lg transition-colors relative",
-              langChainEnabled
-                ? "bg-purple-500/20 hover:bg-purple-500/30 text-purple-300"
-                : "hover:bg-white/10"
-            )}
-            title={langChainEnabled ? "Switch to Basic Chat (Better for casual conversation)" : "Switch to LangChain Enhanced (Better for complex tasks)"}
-          >
-            {langChainEnabled ? (
-              <Wrench className="w-3.5 h-3.5" />
-            ) : (
-              <Zap className="w-3.5 h-3.5" />
-            )}
-            {langChainEnabled && (
-              <div className="absolute -bottom-0.5 -right-0.5 w-2 h-2 bg-purple-400 rounded-full" />
-            )}
-          </button>
-        )}
 
         <button
           onClick={onSettings}

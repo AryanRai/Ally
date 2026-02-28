@@ -1529,7 +1529,6 @@ export default function GlassChatPiP() {
                 onContextToggle={() => contextMonitoring.setShowContext(!contextMonitoring.showContext)}
                 contextToggleEnabled={contextMonitoring.contextToggleEnabled}
                 onContextToggleChange={contextMonitoring.setContextToggleEnabled}
-                availableModels={ollamaIntegration.availableModels}
                 currentModel={ollamaIntegration.currentModel}
                 showModelSelector={ollamaIntegration.showModelSelector}
                 onModelSelectorToggle={() => ollamaIntegration.setShowModelSelector(!ollamaIntegration.showModelSelector)}
@@ -1539,6 +1538,7 @@ export default function GlassChatPiP() {
                 }}
                 onSizeChange={handleSizeChange}
                 onSettings={() => setShowSettings(true)}
+                onProviderSettings={() => setShowProviderSettings(true)}
                 onCollapseToggle={handleCustomCollapseToggle}
                 onHide={handleHide}
                 size={state.size}

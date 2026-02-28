@@ -57,13 +57,6 @@ export const SystemPromptsEditor: React.FC<SystemPromptsEditorProps> = ({
         description: 'System prompt for tool-aware conversations',
         prompt: getCurrentToolCallingPrompt(),
         isDefault: true
-      },
-      {
-        id: 'langchain',
-        name: 'LangChain Enhanced',
-        description: 'System prompt for LangChain agent with enhanced reasoning',
-        prompt: getCurrentLangChainPrompt(),
-        isDefault: true
       }
     ];
 
@@ -83,15 +76,6 @@ export const SystemPromptsEditor: React.FC<SystemPromptsEditorProps> = ({
       return (window as any).toolCallingService?.getCurrentToolCallPrompt?.() || getDefaultToolCallingPrompt();
     } catch {
       return getDefaultToolCallingPrompt();
-    }
-  };
-
-  const getCurrentLangChainPrompt = () => {
-    // Try to get from global LangChain service if available
-    try {
-      return (window as any).langChainService?.getCurrentSystemPrompt?.() || getDefaultLangChainPrompt();
-    } catch {
-      return getDefaultLangChainPrompt();
     }
   };
 
@@ -128,45 +112,6 @@ When you do need to use tools:
 Always explain your reasoning when using tools.`;
   };
 
-  const getDefaultLangChainPrompt = () => {
-    // Try to load saved prompt first
-    const saved = localStorage.getItem('ally-prompt-langchain');
-    if (saved) return saved;
-    
-    return `You are an intelligent AI assistant with access to various tools that can help you complete tasks and answer questions effectively.
-
-IMPORTANT: Be selective about tool usage. Only use tools when they are actually needed to complete the user's request.
-
-Use tools ONLY when:
-- User explicitly requests file operations (read, write, list files)
-- User asks for current time/date information  
-- User requests complex calculations that require computation
-- User asks for specific system information
-- User requests actions that require external data or operations
-
-DO NOT use tools for:
-- Casual conversation, greetings, or simple chat
-- Basic math you can answer directly (like 2+2=4)
-- General knowledge questions you can answer from training
-- Vague or unclear requests
-
-Your capabilities include:
-- File system operations (reading, writing, listing files and directories)
-- Mathematical calculations for complex expressions
-- Memory search and retrieval
-- Time and date information
-- MCP (Model Context Protocol) tools for extended functionality
-
-When you do need to use tools:
-1. Clearly explain why the tool is necessary
-2. Break down complex requests into manageable steps
-3. Use the most appropriate tools for each step
-4. Combine results from multiple tools when necessary
-5. If a tool fails, try alternative approaches
-
-Always be helpful, accurate, and explain your reasoning. Prioritize direct conversation over tool usage when possible.`;
-  };
-
   const handlePromptSelect = (promptId: string) => {
     const prompt = prompts.find(p => p.id === promptId);
     if (prompt) {
@@ -193,11 +138,6 @@ Always be helpful, accurate, and explain your reasoning. Prioritize direct conve
           case 'tool-calling':
             if ((window as any).toolCallingService?.updateToolCallPrompt) {
               (window as any).toolCallingService.updateToolCallPrompt(editingPrompt);
-            }
-            break;
-          case 'langchain':
-            if ((window as any).langChainService?.updateSystemPrompt) {
-              (window as any).langChainService.updateSystemPrompt(editingPrompt);
             }
             break;
         }

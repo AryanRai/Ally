@@ -23,9 +23,6 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@langchain/community": "^0.3.55",
-    "@langchain/core": "^0.3.75",
-    "@langchain/ollama": "^0.1.6",
     "@radix-ui/react-dialog": "^1.0.5",
     "@radix-ui/react-dropdown-menu": "^2.0.6",
     "@radix-ui/react-tooltip": "^1.0.7",
@@ -36,7 +33,6 @@
     "axios": "^1.11.0",
     "clsx": "^2.1.0",
     "framer-motion": "^11.2.0",
-    "langchain": "^0.3.33",
     "lucide-react": "^0.453.0",
     "ollama": "^0.5.17",
     "react": "^18.3.1",
