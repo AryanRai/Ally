@@ -1806,11 +1806,7 @@ ${mcpTools.map(t => `- ${t.name}: ${t.description}${t.parameters ? ` (params: ${
       console.log('Auto-collapsing sidebar to prevent window overflow at size', state.size);
       setSidebarCollapsed(true);
     }
-    // Auto-expand sidebar if there's enough space and it's currently collapsed (but only for smaller sizes)
-    else if (!wouldExceedBounds && sidebarCollapsed && state.size !== 'L') {
-      console.log('Auto-expanding sidebar as there is sufficient space at size', state.size);
-      setSidebarCollapsed(false);
-    }
+    // Don't auto-expand - let user control sidebar state manually
   }, [state.size, state.collapsed, padding]);
 
   // Sync window size when size state changes

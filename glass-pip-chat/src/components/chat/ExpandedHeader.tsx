@@ -87,7 +87,7 @@ export default function ExpandedHeader({
 
   return (
     <>
-      <div className="flex items-center gap-2 flex-1 min-w-0">
+      <div className="flex items-center gap-1.5 flex-1 min-w-0">
         <Grip className="w-3 h-3 opacity-50 flex-shrink-0" />
         <button
           onClick={onSidebarToggle}
@@ -145,7 +145,7 @@ export default function ExpandedHeader({
         ) : (
           <div
             className={cn(
-              "flex-1 text-sm font-medium text-left px-2 py-1.5 rounded transition-colors min-w-0 cursor-pointer",
+              "flex-1 text-xs font-medium text-left px-1.5 py-1 rounded transition-colors min-w-0 cursor-pointer truncate",
               ThemeUtils.getTextClass(platform, theme),
               ThemeUtils.getBackgroundClass(platform, theme, 'hover')
             )}
@@ -153,18 +153,16 @@ export default function ExpandedHeader({
             title={`Chat: ${activeChat?.title || 'Untitled'} - Click to rename`}
             onClick={() => headerTitleEdit.startEdit(activeChat?.title)}
           >
-            <span className="block truncate">
-              {activeChat?.title || 'Untitled Chat'}
-            </span>
+            {activeChat?.title || 'Untitled Chat'}
           </div>
         )}
 
         {/* Status indicators */}
-        <div className="flex items-center gap-1 flex-shrink-0">
+        <div className="flex items-center gap-0.5 flex-shrink-0">
           {/* Ollama status */}
           <div
             className={cn(
-              "w-2 h-2 rounded-full",
+              "w-1.5 h-1.5 rounded-full",
               ollamaAvailable ? "bg-green-400" : "bg-red-400"
             )}
             title={ollamaAvailable ? "Ollama connected" : "Ollama offline"}
@@ -174,7 +172,7 @@ export default function ExpandedHeader({
           {serverStatus && (
             <div
               className={cn(
-                "w-2 h-2 rounded-full",
+                "w-1.5 h-1.5 rounded-full",
                 serverStatus.status === 'online' ? "bg-green-400" :
                   serverStatus.status === 'offline' ? "bg-red-400" : "bg-yellow-400"
               )}
@@ -182,8 +180,6 @@ export default function ExpandedHeader({
             />
           )}
         </div>
-
-        {/* Combined Context Indicator - removed separate "New" indicator */}
       </div>
 
       {isResizing && (
@@ -197,7 +193,7 @@ export default function ExpandedHeader({
       )}
 
       <div
-        className="flex items-center gap-1 flex-shrink-0"
+        className="flex items-center gap-0.5 flex-shrink-0"
         style={{
           WebkitAppRegion: 'no-drag',
           WebkitUserSelect: 'none',
@@ -224,49 +220,43 @@ export default function ExpandedHeader({
             onContextToggleChange(!contextToggleEnabled);
           }}
           className={cn(
-            "p-1.5 rounded-lg hover:bg-white/10 transition-colors relative",
+            "p-1 rounded-lg hover:bg-white/10 transition-colors relative",
             showContext && hasNewContext && (contextData.clipboard || contextData.selectedText) && "bg-blue-500/20",
             contextToggleEnabled && "ring-1 ring-green-400/30"
           )}
-          title={`Context: ${showContext ? 'Visible' : 'Hidden'} | Monitoring: ${contextToggleEnabled ? 'ON' : 'OFF'} | Click: toggle view, Right-click: toggle monitoring`}
+          title={`Context: ${showContext ? 'Visible' : 'Hidden'} | Monitoring: ${contextToggleEnabled ? 'ON' : 'OFF'}`}
         >
-          {/* Main icon - Eye for visibility, Clipboard overlay for monitoring */}
           <div className="relative">
-            {showContext ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-            {/* Clipboard overlay indicator */}
+            {showContext ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
             <Clipboard className={cn(
-              "w-2 h-2 absolute -bottom-0.5 -right-0.5",
+              "w-1.5 h-1.5 absolute -bottom-0.5 -right-0.5",
               contextToggleEnabled ? "text-green-400" : "text-red-400 opacity-60"
             )} />
           </div>
-
-          {/* New context notification */}
           {hasNewContext && (contextData.clipboard || contextData.selectedText) && (
-            <div className="absolute -top-1 -left-1 w-2.5 h-2.5 bg-blue-400 rounded-full animate-pulse">
-              <span className="absolute inset-0 text-[8px] font-bold text-white flex items-center justify-center">N</span>
-            </div>
+            <div className="absolute -top-0.5 -left-0.5 w-2 h-2 bg-blue-400 rounded-full animate-pulse" />
           )}
         </button>
 
-        {/* Simple Tool Toggle - enables/disables tools for LLM */}
+        {/* Simple Tool Toggle */}
         {onToolsToggle && (
           <button
             onClick={onToolsToggle}
             className={cn(
-              "p-1.5 rounded-lg transition-colors relative",
+              "p-1 rounded-lg transition-colors relative",
               toolsEnabled
                 ? "bg-purple-500/20 hover:bg-purple-500/30 text-purple-300"
                 : "hover:bg-white/10 opacity-60"
             )}
             title={toolsEnabled 
-              ? `Tools enabled (${mcpServerCount} MCP servers) - Click to disable` 
-              : "Tools disabled - Click to enable"
+              ? `Tools ON (${mcpServerCount} MCP)` 
+              : "Tools OFF"
             }
           >
-            <Wrench className="w-3.5 h-3.5" />
+            <Wrench className="w-3 h-3" />
             {toolsEnabled && mcpServerCount > 0 && (
-              <div className="absolute -top-1 -right-1 w-3 h-3 bg-green-500 rounded-full flex items-center justify-center">
-                <span className="text-[8px] font-bold text-white">{mcpServerCount}</span>
+              <div className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 bg-green-500 rounded-full flex items-center justify-center">
+                <span className="text-[7px] font-bold text-white">{mcpServerCount}</span>
               </div>
             )}
           </button>
@@ -275,65 +265,57 @@ export default function ExpandedHeader({
         <button
           onClick={onSpeechToggle}
           className={cn(
-            "p-1.5 rounded-lg transition-colors relative",
+            "p-1 rounded-lg transition-colors relative",
             showSpeechControls
               ? "bg-blue-500/20 hover:bg-blue-500/30 text-blue-300"
               : "hover:bg-white/10"
           )}
-          title={`Speech controls: ${showSpeechControls ? 'ON' : 'OFF'} (Ctrl+Shift+V)`}
+          title={`Speech: ${showSpeechControls ? 'ON' : 'OFF'}`}
         >
-          {showSpeechControls ? <Mic className="w-3.5 h-3.5" /> : <MicOff className="w-3.5 h-3.5" />}
-          {showSpeechControls && (
-            <div className="absolute -bottom-0.5 -right-0.5 w-2 h-2 bg-blue-400 rounded-full" />
-          )}
+          {showSpeechControls ? <Mic className="w-3 h-3" /> : <MicOff className="w-3 h-3" />}
         </button>
 
         <button
           onClick={onSettings}
           className={cn(
-            "p-1.5 rounded-lg transition-colors",
+            "p-1 rounded-lg transition-colors",
             ThemeUtils.getBackgroundClass(platform, theme, 'hover')
           )}
           title="Settings"
         >
-          <Settings className="w-3.5 h-3.5" />
+          <Settings className="w-3 h-3" />
         </button>
 
         <button
           onClick={onSizeChange}
           className={cn(
-            "p-1.5 rounded-lg hover:bg-white/10 transition-all duration-200",
+            "p-1 rounded-lg hover:bg-white/10 transition-all duration-200",
             isResizing && "bg-blue-500/20 scale-110"
           )}
-          title={`Change size (${size} → ${size === 'S' ? 'M' : size === 'M' ? 'L' : 'S'}) - Ctrl+Shift+S`}
+          title={`Size: ${size}`}
           disabled={isResizing}
         >
-          <Maximize2 className={cn(
-            "w-3.5 h-3.5 transition-all duration-200",
-            isResizing && "animate-pulse"
-          )} />
+          <Maximize2 className="w-3 h-3" />
         </button>
-
-
 
         <button
           onClick={onCollapseToggle}
           className={cn(
-            "p-1.5 rounded-lg hover:bg-white/10 transition-all duration-200",
+            "p-1 rounded-lg hover:bg-white/10 transition-all duration-200",
             isResizing && "opacity-50"
           )}
-          title="Collapse - Ctrl+Shift+M"
+          title="Collapse"
           disabled={isResizing}
         >
-          <Minus className="w-3.5 h-3.5" />
+          <Minus className="w-3 h-3" />
         </button>
 
         <button
           onClick={onHide}
-          className="p-1.5 rounded-lg hover:bg-white/10 transition-colors"
+          className="p-1 rounded-lg hover:bg-white/10 transition-colors"
           title="Close"
         >
-          <X className="w-3.5 h-3.5" />
+          <X className="w-3 h-3" />
         </button>
       </div>
     </>

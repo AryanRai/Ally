@@ -69,7 +69,7 @@ export const UnifiedModelSelector: React.FC<UnifiedModelSelectorProps> = ({
   
   const [dropdownPosition, setDropdownPosition] = useState({
     top: 0,
-    right: 0,
+    left: 0,
     maxHeight: 300
   });
   
@@ -140,12 +140,27 @@ export const UnifiedModelSelector: React.FC<UnifiedModelSelectorProps> = ({
     if (showSelector && buttonRef.current) {
       const rect = buttonRef.current.getBoundingClientRect();
       const viewportHeight = window.innerHeight;
+      const viewportWidth = window.innerWidth;
+      const dropdownWidth = 320; // w-80 = 20rem = 320px
       const availableHeight = viewportHeight - rect.bottom - 20;
+      
+      // Calculate left position - align to button's left edge, but ensure it stays in viewport
+      let left = rect.left;
+      
+      // If dropdown would go off the right edge, align to right edge of button instead
+      if (left + dropdownWidth > viewportWidth - 10) {
+        left = Math.max(10, rect.right - dropdownWidth);
+      }
+      
+      // If still going off left edge, just use 10px margin
+      if (left < 10) {
+        left = 10;
+      }
       
       setDropdownPosition({
         top: rect.bottom + 5,
-        right: window.innerWidth - rect.right,
-        maxHeight: Math.max(200, Math.min(500, availableHeight))
+        left: left,
+        maxHeight: Math.max(200, Math.min(400, availableHeight))
       });
     }
   }, [showSelector]);
@@ -287,7 +302,7 @@ export const UnifiedModelSelector: React.FC<UnifiedModelSelectorProps> = ({
         ref={buttonRef}
         onClick={onToggleSelector}
         className={cn(
-          "flex items-center gap-2 px-3 py-1.5 rounded-lg transition-all duration-200",
+          "flex items-center gap-1.5 px-2 py-1 rounded-lg transition-all duration-200",
           "hover:bg-white/10 border border-white/20",
           showSelector && "bg-blue-500/20 border-blue-500/50",
           compact ? "text-xs" : "text-sm",
@@ -308,13 +323,13 @@ export const UnifiedModelSelector: React.FC<UnifiedModelSelectorProps> = ({
         
         <div className="flex flex-col items-start min-w-0">
           <div className={cn(
-            "font-medium truncate max-w-32",
-            compact ? "text-xs" : "text-sm"
+            "font-medium truncate",
+            compact ? "text-xs max-w-20" : "text-sm max-w-28"
           )}>
             {currentModelInfo.displayName}
           </div>
           {!compact && (
-            <div className="text-xs text-white/50 truncate">
+            <div className="text-xs text-white/50 truncate max-w-28">
               {currentModelInfo.provider}
             </div>
           )}
