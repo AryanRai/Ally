@@ -166,6 +166,8 @@ export default function GlassChatPiP() {
   // Active tool executions for inline display during streaming
   const [activeToolExecutions, setActiveToolExecutions] = useState<ToolExecution[]>([]);
   const [mcpServerCount, setMcpServerCount] = useState(0);
+  // Streaming thinking state - for showing thinking as pill during streaming
+  const [streamingThinking, setStreamingThinking] = useState<string | null>(null);
 
   // Refresh greeting periodically when random mode is enabled
   useEffect(() => {
@@ -393,6 +395,7 @@ export default function GlassChatPiP() {
       setIsTyping(false);
       setCurrentResponse('');
       setActiveToolExecutions([]); // Clear tool executions when done
+      setStreamingThinking(null); // Clear streaming thinking when done
     }
   };
 
@@ -592,13 +595,63 @@ ${mcpTools.map(t => `- ${t.name}: ${t.description}${t.parameters ? ` (params: ${
 
     let toolExecutionPromise: Promise<void> | null = null;
 
-    // Helper to clean response for display (strip think tags, etc.)
-    const cleanResponseForDisplay = (text: string): string => {
-      return text
-        .replace(/<think>[\s\S]*?<\/think>/gi, '') // Remove complete think blocks
-        .replace(/<think>[\s\S]*$/gi, '') // Remove incomplete think blocks (no closing tag yet)
-        .replace(/^\s*\n+/, '') // Remove leading newlines
-        .trim();
+    // Track thinking state for streaming display - use state for UI updates
+    let currentThinking = '';
+    let thinkingComplete = false;
+
+    // Helper to extract and format thinking for display
+    const extractThinking = (text: string): { thinking: string; isComplete: boolean; rest: string } => {
+      // Check for complete thinking block
+      const completeMatch = text.match(/<think>([\s\S]*?)<\/think>/i);
+      if (completeMatch) {
+        const thinking = completeMatch[1].trim();
+        const rest = text.replace(completeMatch[0], '').trim();
+        return { thinking, isComplete: true, rest };
+      }
+      
+      // Check for incomplete thinking block (still streaming)
+      const incompleteMatch = text.match(/<think>([\s\S]*)$/i);
+      if (incompleteMatch) {
+        const thinking = incompleteMatch[1].trim();
+        const rest = text.substring(0, incompleteMatch.index).trim();
+        return { thinking, isComplete: false, rest };
+      }
+      
+      return { thinking: '', isComplete: false, rest: text };
+    };
+
+    // Helper to clean response for display (handles thinking based on state)
+    // Returns: { displayText: string, thinkingForPill: string | null }
+    const formatResponseForDisplay = (text: string, showThinkingInline: boolean): { displayText: string; thinkingForPill: string | null } => {
+      const { thinking, isComplete, rest } = extractThinking(text);
+      
+      // Update tracking
+      if (thinking) {
+        currentThinking = thinking;
+        thinkingComplete = isComplete;
+      }
+      
+      if (thinking && !isComplete && showThinkingInline) {
+        // Show thinking inline while streaming (with visual indicator) - not yet complete
+        return { 
+          displayText: `💭 *Thinking...*\n\n${thinking}\n\n---\n\n${rest}`.trim(),
+          thinkingForPill: null // Don't show pill yet, still streaming thinking
+        };
+      }
+      
+      if (thinking && isComplete) {
+        // Thinking is complete - return it for pill display, show only rest as text
+        return {
+          displayText: rest.replace(/^\s*\n+/, '').trim(),
+          thinkingForPill: thinking
+        };
+      }
+      
+      // No thinking, just return the rest
+      return { 
+        displayText: rest.replace(/^\s*\n+/, '').trim(),
+        thinkingForPill: null
+      };
     };
 
     await ollamaIntegration.sendMessageToOllama(
@@ -657,7 +710,7 @@ ${mcpTools.map(t => `- ${t.name}: ${t.description}${t.parameters ? ` (params: ${
                 const resultText = `🔧 **${toolCall.name}**\n\`\`\`\n${resultDisplay}\n\`\`\``;
                 
                 // Clean the response and replace tool call with result
-                const cleanedResponse = cleanResponseForDisplay(accumulatedResponse);
+                const { displayText: cleanedResponse } = formatResponseForDisplay(accumulatedResponse, false);
                 // Replace the tool call JSON or tags with the result
                 if (toolCallMatch[0]) {
                   finalResponseWithToolResults = cleanedResponse.replace(toolCallMatch[0], resultText);
@@ -674,7 +727,7 @@ ${mcpTools.map(t => `- ${t.name}: ${t.description}${t.parameters ? ` (params: ${
                 
                 // Show error in response
                 const errorText = `❌ **Tool Error: ${pendingToolCall?.name}** - ${error}`;
-                const cleanedResponse = cleanResponseForDisplay(accumulatedResponse);
+                const { displayText: cleanedResponse } = formatResponseForDisplay(accumulatedResponse, false);
                 finalResponseWithToolResults = toolCallMatch[0] 
                   ? cleanedResponse.replace(toolCallMatch[0], errorText)
                   : errorText;
@@ -683,7 +736,7 @@ ${mcpTools.map(t => `- ${t.name}: ${t.description}${t.parameters ? ` (params: ${
             })();
             
             // Show loading state while tool executes (clean display)
-            const cleanedForLoading = cleanResponseForDisplay(accumulatedResponse);
+            const { displayText: cleanedForLoading } = formatResponseForDisplay(accumulatedResponse, false);
             const loadingDisplay = toolCallMatch[0] 
               ? cleanedForLoading.replace(toolCallMatch[0], `🔧 *Executing ${toolCall.name}...*`)
               : `🔧 *Executing ${toolCall.name}...*`;
@@ -697,9 +750,16 @@ ${mcpTools.map(t => `- ${t.name}: ${t.description}${t.parameters ? ` (params: ${
             const loadingText = pendingToolCall ? `🔧 *Executing ${pendingToolCall.name}...*` : '';
             setCurrentResponse(loadingText + '▋');
           } else {
-            // Regular response update (no tool call detected yet) - clean for display
-            const cleanedResponse = cleanResponseForDisplay(accumulatedResponse);
-            setCurrentResponse(cleanedResponse + (update.type === 'done' ? '' : '▋'));
+            // Regular response update (no tool call detected yet)
+            // Show thinking inline while streaming, collapse to pill when complete
+            const { displayText, thinkingForPill } = formatResponseForDisplay(accumulatedResponse, true);
+            
+            // Update streaming thinking state for pill display
+            if (thinkingForPill !== null) {
+              setStreamingThinking(thinkingForPill);
+            }
+            
+            setCurrentResponse(displayText + (update.type === 'done' ? '' : '▋'));
           }
         }
       }
@@ -710,9 +770,34 @@ ${mcpTools.map(t => `- ${t.name}: ${t.description}${t.parameters ? ` (params: ${
       await toolExecutionPromise;
     }
 
-    // Save the final message - use the modified response if tool was executed, clean it
+    // Save the final message - preserve thinking for pill display
     let finalContent = finalResponseWithToolResults || accumulatedResponse;
-    finalContent = cleanResponseForDisplay(finalContent);
+    
+    // If we have thinking, keep it in the content (will be shown as pill)
+    // But clean up the display format
+    if (currentThinking && thinkingComplete) {
+      // Keep the <think> tags in the saved content so MessagePills can parse them
+      // Just clean up any streaming artifacts
+      const { rest } = extractThinking(finalContent);
+      finalContent = `<think>${currentThinking}</think>\n\n${rest}`.trim();
+    } else {
+      // No thinking or incomplete - just use the response part
+      const { displayText } = formatResponseForDisplay(finalContent, false);
+      finalContent = displayText;
+    }
+    
+    // Also include tool results if any
+    if (finalResponseWithToolResults) {
+      const { rest } = extractThinking(finalResponseWithToolResults);
+      if (currentThinking && thinkingComplete) {
+        finalContent = `<think>${currentThinking}</think>\n\n${rest}`.trim();
+      } else {
+        finalContent = rest;
+      }
+    }
+    
+    // Clear streaming thinking state
+    setStreamingThinking(null);
     
     if (finalContent) {
       const assistantMessage: Message = {
@@ -1229,6 +1314,7 @@ ${mcpTools.map(t => `- ${t.name}: ${t.description}${t.parameters ? ` (params: ${
     setIsTyping(false);
     setCurrentResponse(''); // Clear current response when stopping
     setActiveToolExecutions([]); // Clear tool executions when stopping
+    setStreamingThinking(null); // Clear streaming thinking when stopping
 
     // Stop the Ollama request if it's running
     if (window.pip?.ollama?.stop) {
@@ -2041,9 +2127,9 @@ ${mcpTools.map(t => `- ${t.name}: ${t.description}${t.parameters ? ` (params: ${
                               appSettings.ui.fontSize === 'lg' ? 'text-lg' : 'text-xl'
                       )}
                     >
-                      {/* Inline tool executions - shown during streaming when tools are being used */}
-                      {activeToolExecutions.length > 0 && (
-                        <InlineToolExecutions tools={activeToolExecutions} theme={theme} />
+                      {/* Inline tool executions and thinking pill - shown during streaming */}
+                      {(activeToolExecutions.length > 0 || streamingThinking) && (
+                        <InlineToolExecutions tools={activeToolExecutions} theme={theme} thinking={streamingThinking || undefined} />
                       )}
                       
                       <div className={cn(
