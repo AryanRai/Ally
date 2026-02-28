@@ -8,7 +8,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { remoteServiceManager, RemoteServiceStatus } from '../services/remoteServiceManager';
 import { SupabaseClient, User } from '@supabase/supabase-js';
-import { getSupabaseClient } from '../utils/supabase';
+import { getSupabaseClient, isSupabaseEnabled } from '../utils/supabase';
 
 export interface RemoteConnectionState {
   mode: 'local' | 'remote';
@@ -18,6 +18,7 @@ export interface RemoteConnectionState {
   serviceStatus: RemoteServiceStatus | null;
   connectionError: string | null;
   isLoading: boolean;
+  supabaseDisabled: boolean;
 }
 
 export interface RemoteConnectionActions {
@@ -38,14 +39,38 @@ export function useRemoteConnection(): RemoteConnectionState & RemoteConnectionA
     user: null,
     serviceStatus: null,
     connectionError: null,
-    isLoading: false
+    isLoading: false,
+    supabaseDisabled: !isSupabaseEnabled()
   });
 
   const [supabaseClient, setSupabaseClient] = useState<SupabaseClient | null>(null);
 
-  // Initialize Supabase client
+  // Initialize Supabase client (only if enabled)
   useEffect(() => {
+    // Skip if Supabase is disabled
+    if (!isSupabaseEnabled()) {
+      console.log('🔒 Supabase disabled - running in local-only mode');
+      setState(prev => ({
+        ...prev,
+        mode: 'local',
+        supabaseDisabled: true,
+        connectionError: null
+      }));
+      return;
+    }
+    
     const client = getSupabaseClient();
+    
+    if (!client) {
+      console.log('🔒 Supabase client not available - running in local-only mode');
+      setState(prev => ({
+        ...prev,
+        mode: 'local',
+        supabaseDisabled: true
+      }));
+      return;
+    }
+    
     setSupabaseClient(client);
 
     // Check for existing session with error handling

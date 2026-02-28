@@ -4,7 +4,7 @@
  * Provides utilities to fix common authentication issues in the browser
  */
 
-import { getSupabaseClient } from './supabase';
+import { getSupabaseClient, isSupabaseEnabled } from './supabase';
 
 export interface AuthFixResult {
   success: boolean;
@@ -19,8 +19,10 @@ export async function clearCorruptedAuth(): Promise<AuthFixResult> {
   try {
     const supabase = getSupabaseClient();
     
-    // Sign out from Supabase
-    await supabase.auth.signOut({ scope: 'local' });
+    // Sign out from Supabase if available
+    if (supabase) {
+      await supabase.auth.signOut({ scope: 'local' });
+    }
     
     // Clear localStorage
     const keys = Object.keys(localStorage);
@@ -64,8 +66,25 @@ export async function clearCorruptedAuth(): Promise<AuthFixResult> {
  * Test authentication health
  */
 export async function testAuthHealth(): Promise<AuthFixResult> {
+  // If Supabase is disabled, return success (local mode)
+  if (!isSupabaseEnabled()) {
+    return {
+      success: true,
+      message: 'Running in local mode - Supabase disabled',
+      details: { authenticated: false, localMode: true }
+    };
+  }
+  
   try {
     const supabase = getSupabaseClient();
+    
+    if (!supabase) {
+      return {
+        success: true,
+        message: 'Supabase not available - running in local mode',
+        details: { authenticated: false, localMode: true }
+      };
+    }
     
     // Check session
     const { data: { session }, error: sessionError } = await supabase.auth.getSession();
@@ -118,7 +137,7 @@ export async function testAuthHealth(): Promise<AuthFixResult> {
       details: { 
         authenticated: true, 
         userId: session.user.id,
-        expiresAt: new Date(session.expires_at * 1000)
+        expiresAt: new Date(session.expires_at! * 1000)
       }
     };
   } catch (error) {
@@ -133,8 +152,22 @@ export async function testAuthHealth(): Promise<AuthFixResult> {
  * Attempt to recover authentication
  */
 export async function recoverAuth(email: string, password: string): Promise<AuthFixResult> {
+  if (!isSupabaseEnabled()) {
+    return {
+      success: false,
+      message: 'Supabase is disabled - cannot recover auth in local mode'
+    };
+  }
+  
   try {
     const supabase = getSupabaseClient();
+    
+    if (!supabase) {
+      return {
+        success: false,
+        message: 'Supabase client not available'
+      };
+    }
     
     // First clear any corrupted data
     await clearCorruptedAuth();
@@ -183,7 +216,7 @@ export async function recoverAuth(email: string, password: string): Promise<Auth
       message: 'Authentication recovered successfully',
       details: { 
         userId: data.user?.id,
-        expiresAt: new Date(data.session?.expires_at * 1000)
+        expiresAt: data.session ? new Date(data.session.expires_at! * 1000) : undefined
       }
     };
   } catch (error) {

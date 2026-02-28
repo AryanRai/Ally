@@ -11,7 +11,7 @@ import { SupabaseClient } from '@supabase/supabase-js';
 import { OllamaService, ChatMessage } from './ollamaService';
 import { ToolCallingService } from './toolCallingService';
 import { RemoteMessageProcessor, ProcessMessageRequest } from './remoteMessageProcessor';
-import { getSupabaseServiceClient, getSupabaseClient } from '../utils/supabase';
+import { getSupabaseServiceClient, getSupabaseClient, isSupabaseEnabled } from '../utils/supabase';
 
 export interface RemoteMessage {
   id: string;
@@ -149,8 +149,20 @@ export class RemoteMessagePoller {
    * Register the local system in Supabase
    */
   private async registerLocalSystem(): Promise<void> {
+    // Check if Supabase is enabled
+    if (!isSupabaseEnabled()) {
+      console.log('🔒 RemoteMessagePoller: Supabase disabled - skipping system registration');
+      return;
+    }
+    
     // Get the current user from the regular client (not service client)
     const regularClient = getSupabaseClient();
+    
+    if (!regularClient) {
+      console.log('🔒 RemoteMessagePoller: Supabase client not available - skipping system registration');
+      return;
+    }
+    
     const { data: { session }, error: sessionError } = await regularClient.auth.getSession();
     
     if (sessionError || !session?.user) {

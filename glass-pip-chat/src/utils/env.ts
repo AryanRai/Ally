@@ -20,7 +20,8 @@ export const env = {
 
   // Remote Service Configuration
   REMOTE_SERVICE_URL: import.meta.env.VITE_REMOTE_SERVICE_URL || 'https://your-ally-remote.vercel.app',
-  ENABLE_REMOTE: import.meta.env.VITE_ENABLE_REMOTE !== 'false',
+  ENABLE_REMOTE: import.meta.env.VITE_ENABLE_REMOTE === 'true', // Default to false (local mode)
+  DISABLE_SUPABASE: import.meta.env.VITE_DISABLE_SUPABASE === 'true', // Explicitly disable Supabase
 
   // Feature Flags
   ENABLE_SPEECH: import.meta.env.VITE_ENABLE_SPEECH !== 'false',
