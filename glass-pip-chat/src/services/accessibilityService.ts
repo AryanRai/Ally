@@ -419,22 +419,4 @@ export function getAccessibilityService(options?: Partial<AccessibilityServiceOp
   return accessibilityService;
 }
 
-// Type declarations for Electron APIs
-declare global {
-  interface Window {
-    pip?: {
-      accessibility?: {
-        connect(): Promise<{ success: boolean; error?: string }>;
-        disconnect(): Promise<{ success: boolean }>;
-        isConnected(): Promise<boolean>;
-        getSelectedText(): Promise<string | undefined>;
-        getElementAtCursor(): Promise<AccessibilityContext['hoveredElement']>;
-        getFocusedElement(): Promise<AccessibilityContext['focusedElement']>;
-        getActiveWindow(): Promise<AccessibilityContext['activeWindow']>;
-        getCursorPosition(): Promise<AccessibilityContext['cursorPosition']>;
-        getScreenContent(): Promise<AccessibilityContext['screenContent']>;
-        onContextUpdate(callback: (context: AccessibilityContext) => void): () => void;
-      };
-    };
-  }
-}
+// Type declarations moved to src/types/electron.d.ts

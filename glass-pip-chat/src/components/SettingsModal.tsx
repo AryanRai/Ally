@@ -22,6 +22,7 @@ interface SettingsModalProps {
   ollamaIntegration?: any;
   ollamaService?: any;
   onOpenProviderSettings?: () => void;
+  onMcpToolCountChange?: (count: number) => void;
 }
 
 export default function SettingsModal({ 
@@ -35,7 +36,8 @@ export default function SettingsModal({
   onSettingsChange,
   ollamaIntegration,
   ollamaService,
-  onOpenProviderSettings
+  onOpenProviderSettings,
+  onMcpToolCountChange
 }: SettingsModalProps) {
   const [theme, setTheme] = useState<'light' | 'dark'>(initialTheme);
   const [serverStatus, setServerStatus] = useState<any>(null);
@@ -1573,46 +1575,11 @@ export default function SettingsModal({
                     : theme === 'dark' ? "border-white/10 bg-white/5" : "border-black/10 bg-black/5"
                 )}>
                   <MCPACPDashboard 
-                    className="bg-transparent border-0" 
+                    className="bg-transparent border-0 p-4" 
                     theme={theme}
                     platform={platform}
+                    onToolCountChange={onMcpToolCountChange}
                   />
-                </div>
-                
-                {/* Quick Test Button */}
-                <div className="mt-2">
-                  <button
-                    onClick={async () => {
-                      console.log('Testing MCP/ACP integration...');
-                      try {
-                        const { getMCPIntegrationService } = await import('../services/mcpIntegrationService');
-                        const { getACPIntegrationService } = await import('../services/acpIntegrationService');
-                        
-                        const mcpService = getMCPIntegrationService();
-                        const acpService = getACPIntegrationService();
-                        
-                        console.log('Services created, attempting initialization...');
-                        await Promise.all([
-                          mcpService.initialize(),
-                          acpService.initialize()
-                        ]);
-                        
-                        console.log('MCP/ACP services initialized successfully');
-                      } catch (error) {
-                        console.error('MCP/ACP test failed:', error);
-                      }
-                    }}
-                    className={cn(
-                      "px-3 py-1 text-xs rounded border",
-                      platform === 'win32'
-                        ? "border-white/20 text-white/70 hover:bg-white/10"
-                        : theme === 'dark' 
-                          ? "border-white/20 text-white/70 hover:bg-white/10"
-                          : "border-black/20 text-black/70 hover:bg-black/10"
-                    )}
-                  >
-                    Test Integration
-                  </button>
                 </div>
               </div>
 

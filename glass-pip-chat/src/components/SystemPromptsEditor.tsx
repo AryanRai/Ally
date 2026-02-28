@@ -5,16 +5,8 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { Save, RotateCcw, Eye, EyeOff, Copy, Check } from 'lucide-react';
+import { Save, RotateCcw, Copy, Check, Wrench, MessageSquare } from 'lucide-react';
 import { cn } from '../lib/utils';
-
-interface SystemPrompt {
-  id: string;
-  name: string;
-  description: string;
-  prompt: string;
-  isDefault: boolean;
-}
 
 interface SystemPromptsEditorProps {
   className?: string;
@@ -23,330 +15,240 @@ interface SystemPromptsEditorProps {
   onPromptUpdate?: (promptId: string, newPrompt: string) => void;
 }
 
+// Storage keys
+const STORAGE_KEYS = {
+  basicPrompt: 'ally-prompt-basic',
+  toolPrompt: 'ally-prompt-tools'
+};
+
+// Default prompts
+const DEFAULT_PROMPTS = {
+  basic: `You are a helpful AI assistant. Respond naturally and helpfully to user questions and requests. Be concise but informative.`,
+  
+  tools: `You are a helpful AI assistant with access to tools. When you need to use a tool, output a tool call in this exact format:
+
+<tool_call>
+{"name": "tool_name", "parameters": {"param1": "value1"}}
+</tool_call>
+
+IMPORTANT RULES:
+1. Only use tools when actually needed - for casual chat, just respond normally
+2. Use tools for: file operations, current time, calculations, system info
+3. Do NOT use tools for: greetings, simple questions, general conversation
+4. After receiving tool results, incorporate them into your response
+5. Explain your reasoning when using tools`
+};
+
 export const SystemPromptsEditor: React.FC<SystemPromptsEditorProps> = ({
   className = '',
   theme,
   platform,
   onPromptUpdate
 }) => {
-  const [prompts, setPrompts] = useState<SystemPrompt[]>([]);
-  const [selectedPrompt, setSelectedPrompt] = useState<string>('');
-  const [editingPrompt, setEditingPrompt] = useState<string>('');
-  const [isEditing, setIsEditing] = useState(false);
-  const [showPreview, setShowPreview] = useState(false);
-  const [copiedId, setCopiedId] = useState<string>('');
+  const [activeTab, setActiveTab] = useState<'basic' | 'tools'>('basic');
+  const [basicPrompt, setBasicPrompt] = useState(DEFAULT_PROMPTS.basic);
+  const [toolPrompt, setToolPrompt] = useState(DEFAULT_PROMPTS.tools);
+  const [hasChanges, setHasChanges] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [saved, setSaved] = useState(false);
 
-  // Load system prompts from services
+  // Load saved prompts on mount
   useEffect(() => {
-    loadSystemPrompts();
+    const savedBasic = localStorage.getItem(STORAGE_KEYS.basicPrompt);
+    const savedTool = localStorage.getItem(STORAGE_KEYS.toolPrompt);
+    
+    if (savedBasic) setBasicPrompt(savedBasic);
+    if (savedTool) setToolPrompt(savedTool);
   }, []);
 
-  const loadSystemPrompts = async () => {
-    // Get prompts from different services
-    const defaultPrompts: SystemPrompt[] = [
-      {
-        id: 'basic-chat',
-        name: 'Basic Chat',
-        description: 'Default system prompt for basic conversation',
-        prompt: `You are a helpful AI assistant. Respond naturally and helpfully to user questions and requests. Be concise but informative.`,
-        isDefault: true
-      },
-      {
-        id: 'tool-calling',
-        name: 'Tool Calling',
-        description: 'System prompt for tool-aware conversations',
-        prompt: getCurrentToolCallingPrompt(),
-        isDefault: true
-      }
-    ];
+  const currentPrompt = activeTab === 'basic' ? basicPrompt : toolPrompt;
+  const setCurrentPrompt = activeTab === 'basic' ? setBasicPrompt : setToolPrompt;
 
-    // Load custom prompts from localStorage
-    const customPrompts = JSON.parse(localStorage.getItem('ally-custom-prompts') || '[]');
-    
-    setPrompts([...defaultPrompts, ...customPrompts]);
-    if (defaultPrompts.length > 0) {
-      setSelectedPrompt(defaultPrompts[0].id);
-      setEditingPrompt(defaultPrompts[0].prompt);
-    }
-  };
-
-  const getCurrentToolCallingPrompt = () => {
-    // Try to get from global tool calling service if available
-    try {
-      return (window as any).toolCallingService?.getCurrentToolCallPrompt?.() || getDefaultToolCallingPrompt();
-    } catch {
-      return getDefaultToolCallingPrompt();
-    }
-  };
-
-  const getDefaultToolCallingPrompt = () => {
-    // Try to load saved prompt first
-    const saved = localStorage.getItem('ally-prompt-tool-calling');
-    if (saved) return saved;
-    
-    return `You are an AI assistant with access to various tools that can help you complete tasks and answer questions.
-
-IMPORTANT: Only use tools when they are actually needed to complete the user's request. For casual conversation, greetings, simple questions you can answer directly, or general chat, respond normally WITHOUT using any tools.
-
-Use tools ONLY when:
-- The user explicitly asks for file operations (read, write, list files)
-- The user asks for current time/date information
-- The user asks for calculations that require computation
-- The user asks for weather information with a specific location
-- The user asks for system information
-- The user requests actions that require external data or operations
-
-DO NOT use tools for:
-- Casual greetings like "hey", "hello", "hi"
-- Simple math you can do mentally (like 2+2=4)
-- General conversation or questions you can answer from your knowledge
-- Vague requests without specific actionable tasks
-
-When you do need to use tools:
-1. Analyze the user's request to determine what tools are actually necessary
-2. Use only the appropriate tool(s) with correct parameters
-3. Wait for the tool results
-4. Incorporate the results into your response
-5. Use additional tools only if the results indicate they're needed
-
-Always explain your reasoning when using tools.`;
-  };
-
-  const handlePromptSelect = (promptId: string) => {
-    const prompt = prompts.find(p => p.id === promptId);
-    if (prompt) {
-      setSelectedPrompt(promptId);
-      setEditingPrompt(prompt.prompt);
-      setIsEditing(false);
-    }
+  const handleChange = (value: string) => {
+    setCurrentPrompt(value);
+    setHasChanges(true);
+    setSaved(false);
   };
 
   const handleSave = () => {
-    const promptIndex = prompts.findIndex(p => p.id === selectedPrompt);
-    if (promptIndex !== -1) {
-      const updatedPrompts = [...prompts];
-      updatedPrompts[promptIndex] = {
-        ...updatedPrompts[promptIndex],
-        prompt: editingPrompt
-      };
-      
-      setPrompts(updatedPrompts);
-      
-      // Apply prompt to the appropriate service
-      try {
-        switch (selectedPrompt) {
-          case 'tool-calling':
-            if ((window as any).toolCallingService?.updateToolCallPrompt) {
-              (window as any).toolCallingService.updateToolCallPrompt(editingPrompt);
-            }
-            break;
-        }
-      } catch (error) {
-        console.warn('Failed to update service prompt:', error);
-      }
-      
-      // Save custom prompts to localStorage
-      const customPrompts = updatedPrompts.filter(p => !p.isDefault);
-      localStorage.setItem('ally-custom-prompts', JSON.stringify(customPrompts));
-      
-      // Also save the current prompt for this type
-      localStorage.setItem(`ally-prompt-${selectedPrompt}`, editingPrompt);
-      
-      // Notify parent component
-      onPromptUpdate?.(selectedPrompt, editingPrompt);
-      
-      setIsEditing(false);
+    if (activeTab === 'basic') {
+      localStorage.setItem(STORAGE_KEYS.basicPrompt, basicPrompt);
+      onPromptUpdate?.('basic', basicPrompt);
+    } else {
+      localStorage.setItem(STORAGE_KEYS.toolPrompt, toolPrompt);
+      onPromptUpdate?.('tools', toolPrompt);
     }
+    setHasChanges(false);
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2000);
   };
 
   const handleReset = () => {
-    const prompt = prompts.find(p => p.id === selectedPrompt);
-    if (prompt) {
-      setEditingPrompt(prompt.prompt);
-      setIsEditing(false);
+    if (activeTab === 'basic') {
+      setBasicPrompt(DEFAULT_PROMPTS.basic);
+      localStorage.removeItem(STORAGE_KEYS.basicPrompt);
+    } else {
+      setToolPrompt(DEFAULT_PROMPTS.tools);
+      localStorage.removeItem(STORAGE_KEYS.toolPrompt);
     }
+    setHasChanges(false);
   };
 
-  const handleCopy = async (promptId: string) => {
-    const prompt = prompts.find(p => p.id === promptId);
-    if (prompt) {
-      await navigator.clipboard.writeText(prompt.prompt);
-      setCopiedId(promptId);
-      setTimeout(() => setCopiedId(''), 2000);
-    }
+  const handleCopy = async () => {
+    await navigator.clipboard.writeText(currentPrompt);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
   };
-
-  const selectedPromptData = prompts.find(p => p.id === selectedPrompt);
 
   return (
-    <div className={cn('space-y-4', className)}>
-      <div className="flex items-center justify-between">
-        <h3 className={cn(
-          'text-lg font-semibold',
-          theme === 'dark' ? 'text-white' : 'text-gray-900'
-        )}>
-          System Prompts
-        </h3>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => setShowPreview(!showPreview)}
-            className={cn(
-              'p-2 rounded-lg transition-colors',
-              showPreview
-                ? 'bg-blue-500/20 text-blue-400'
+    <div className={cn('space-y-3', className)}>
+      <h3 className={cn(
+        'text-sm font-medium',
+        platform === 'win32' ? 'text-white/80' : theme === 'dark' ? 'text-white/80' : 'text-black/80'
+      )}>
+        System Prompts
+      </h3>
+
+      {/* Tab Selector */}
+      <div className="flex gap-2">
+        <button
+          onClick={() => setActiveTab('basic')}
+          className={cn(
+            'flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg transition-colors',
+            activeTab === 'basic'
+              ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30'
+              : platform === 'win32'
+                ? 'border border-white/10 text-white/60 hover:bg-white/5'
                 : theme === 'dark'
-                  ? 'hover:bg-white/10 text-gray-400'
-                  : 'hover:bg-black/10 text-gray-600'
+                  ? 'border border-white/10 text-white/60 hover:bg-white/5'
+                  : 'border border-black/10 text-black/60 hover:bg-black/5'
+          )}
+        >
+          <MessageSquare className="w-3 h-3" />
+          Basic Chat
+        </button>
+        <button
+          onClick={() => setActiveTab('tools')}
+          className={cn(
+            'flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg transition-colors',
+            activeTab === 'tools'
+              ? 'bg-purple-500/20 text-purple-400 border border-purple-500/30'
+              : platform === 'win32'
+                ? 'border border-white/10 text-white/60 hover:bg-white/5'
+                : theme === 'dark'
+                  ? 'border border-white/10 text-white/60 hover:bg-white/5'
+                  : 'border border-black/10 text-black/60 hover:bg-black/5'
+          )}
+        >
+          <Wrench className="w-3 h-3" />
+          Tool Calling
+        </button>
+      </div>
+
+      {/* Description */}
+      <p className={cn(
+        'text-xs',
+        platform === 'win32' ? 'text-white/50' : theme === 'dark' ? 'text-gray-400' : 'text-gray-500'
+      )}>
+        {activeTab === 'basic' 
+          ? 'Used for regular conversations without tool access.'
+          : 'Used when tools are enabled. Defines how the AI should use tools.'}
+      </p>
+
+      {/* Editor */}
+      <div className="relative">
+        <textarea
+          value={currentPrompt}
+          onChange={(e) => handleChange(e.target.value)}
+          className={cn(
+            'w-full h-40 p-3 rounded-lg border text-xs font-mono resize-y',
+            platform === 'win32'
+              ? 'bg-black/30 border-white/20 text-white/90 placeholder-white/40'
+              : theme === 'dark'
+                ? 'bg-gray-800 border-gray-600 text-white placeholder-gray-400'
+                : 'bg-white border-gray-300 text-gray-900 placeholder-gray-500'
+          )}
+          placeholder="Enter system prompt..."
+        />
+        
+        {/* Action buttons */}
+        <div className="absolute top-2 right-2 flex gap-1">
+          <button
+            onClick={handleCopy}
+            className={cn(
+              'p-1.5 rounded transition-colors',
+              copied
+                ? 'bg-green-500/20 text-green-400'
+                : platform === 'win32'
+                  ? 'bg-black/30 hover:bg-white/10 text-white/60'
+                  : theme === 'dark'
+                    ? 'bg-gray-700 hover:bg-gray-600 text-gray-400'
+                    : 'bg-gray-100 hover:bg-gray-200 text-gray-600'
             )}
-            title={showPreview ? 'Hide preview' : 'Show preview'}
+            title="Copy"
           >
-            {showPreview ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+            {copied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
           </button>
         </div>
       </div>
 
-      {/* Prompt Selector */}
-      <div className="space-y-2">
-        <label className={cn(
-          'text-sm font-medium',
-          theme === 'dark' ? 'text-gray-300' : 'text-gray-700'
-        )}>
-          Select Prompt
-        </label>
-        <select
-          value={selectedPrompt}
-          onChange={(e) => handlePromptSelect(e.target.value)}
+      {/* Save/Reset buttons */}
+      <div className="flex items-center justify-between">
+        <button
+          onClick={handleReset}
           className={cn(
-            'w-full p-2 rounded-lg border text-sm',
-            theme === 'dark'
-              ? 'bg-gray-800 border-gray-600 text-white'
-              : 'bg-white border-gray-300 text-gray-900'
+            'flex items-center gap-1 px-2 py-1 text-xs rounded transition-colors',
+            platform === 'win32'
+              ? 'text-white/60 hover:bg-white/10'
+              : theme === 'dark'
+                ? 'text-gray-400 hover:bg-gray-700'
+                : 'text-gray-600 hover:bg-gray-100'
           )}
         >
-          {prompts.map((prompt) => (
-            <option key={prompt.id} value={prompt.id}>
-              {prompt.name} {prompt.isDefault ? '(Default)' : '(Custom)'}
-            </option>
-          ))}
-        </select>
-      </div>
-
-      {/* Prompt Description */}
-      {selectedPromptData && (
-        <div className={cn(
-          'p-3 rounded-lg text-sm',
-          theme === 'dark'
-            ? 'bg-gray-800/50 text-gray-300'
-            : 'bg-gray-50 text-gray-600'
-        )}>
-          {selectedPromptData.description}
-        </div>
-      )}
-
-      {/* Prompt Editor */}
-      <div className="space-y-2">
-        <div className="flex items-center justify-between">
-          <label className={cn(
-            'text-sm font-medium',
-            theme === 'dark' ? 'text-gray-300' : 'text-gray-700'
-          )}>
-            Prompt Content
-          </label>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => handleCopy(selectedPrompt)}
-              className={cn(
-                'p-1.5 rounded transition-colors text-xs',
-                copiedId === selectedPrompt
-                  ? 'bg-green-500/20 text-green-400'
-                  : theme === 'dark'
-                    ? 'hover:bg-white/10 text-gray-400'
-                    : 'hover:bg-black/10 text-gray-600'
-              )}
-              title="Copy prompt"
-            >
-              {copiedId === selectedPrompt ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
-            </button>
-            {isEditing && (
-              <>
-                <button
-                  onClick={handleReset}
-                  className={cn(
-                    'p-1.5 rounded transition-colors text-xs',
-                    theme === 'dark'
-                      ? 'hover:bg-white/10 text-gray-400'
-                      : 'hover:bg-black/10 text-gray-600'
-                  )}
-                  title="Reset changes"
-                >
-                  <RotateCcw className="w-3 h-3" />
-                </button>
-                <button
-                  onClick={handleSave}
-                  className="p-1.5 rounded transition-colors text-xs bg-blue-500/20 text-blue-400 hover:bg-blue-500/30"
-                  title="Save changes"
-                >
-                  <Save className="w-3 h-3" />
-                </button>
-              </>
-            )}
-          </div>
-        </div>
-
-        <textarea
-          value={editingPrompt}
-          onChange={(e) => {
-            setEditingPrompt(e.target.value);
-            setIsEditing(true);
-          }}
+          <RotateCcw className="w-3 h-3" />
+          Reset to Default
+        </button>
+        
+        <button
+          onClick={handleSave}
+          disabled={!hasChanges}
           className={cn(
-            'w-full h-64 p-3 rounded-lg border text-sm font-mono resize-y',
-            theme === 'dark'
-              ? 'bg-gray-800 border-gray-600 text-white placeholder-gray-400'
-              : 'bg-white border-gray-300 text-gray-900 placeholder-gray-500'
+            'flex items-center gap-1 px-3 py-1 text-xs rounded transition-colors',
+            saved
+              ? 'bg-green-500/20 text-green-400'
+              : hasChanges
+                ? 'bg-blue-500 text-white hover:bg-blue-600'
+                : platform === 'win32'
+                  ? 'bg-white/10 text-white/40 cursor-not-allowed'
+                  : theme === 'dark'
+                    ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
+                    : 'bg-gray-200 text-gray-400 cursor-not-allowed'
           )}
-          placeholder="Enter your system prompt here..."
-        />
+        >
+          {saved ? <Check className="w-3 h-3" /> : <Save className="w-3 h-3" />}
+          {saved ? 'Saved!' : 'Save'}
+        </button>
       </div>
 
-      {/* Preview */}
-      {showPreview && selectedPromptData && (
-        <div className="space-y-2">
-          <label className={cn(
-            'text-sm font-medium',
-            theme === 'dark' ? 'text-gray-300' : 'text-gray-700'
-          )}>
-            Preview
-          </label>
-          <div className={cn(
-            'p-3 rounded-lg text-sm whitespace-pre-wrap max-h-32 overflow-y-auto',
-            theme === 'dark'
-              ? 'bg-gray-800 border border-gray-600 text-gray-300'
-              : 'bg-gray-50 border border-gray-200 text-gray-700'
-          )}>
-            {editingPrompt || 'No prompt content'}
-          </div>
-        </div>
-      )}
-
-      {/* Status */}
-      {isEditing && (
-        <div className={cn(
-          'p-2 rounded text-xs',
-          theme === 'dark'
-            ? 'bg-yellow-900/20 text-yellow-300 border border-yellow-500/20'
-            : 'bg-yellow-50 text-yellow-700 border border-yellow-200'
-        )}>
-          ⚠️ You have unsaved changes. Click Save to apply them.
-        </div>
-      )}
-
+      {/* Info */}
       <div className={cn(
-        'text-xs',
-        theme === 'dark' ? 'text-gray-400' : 'text-gray-500'
+        'p-2 rounded text-xs',
+        platform === 'win32'
+          ? 'bg-blue-500/10 border border-blue-500/20 text-blue-300'
+          : theme === 'dark'
+            ? 'bg-blue-900/20 border border-blue-800/30 text-blue-300'
+            : 'bg-blue-50 border border-blue-200 text-blue-700'
       )}>
-        💡 System prompts control how the AI behaves. Default prompts are restored on app restart unless saved as custom prompts.
+        💡 {activeTab === 'tools' 
+          ? 'The tool list is automatically added when tools are enabled. Edit the instructions above to change how the AI uses tools.'
+          : 'This prompt is used when the tool toggle is disabled.'}
       </div>
     </div>
   );
 };
+
+// Export helper to get the current prompts
+export const getSystemPrompts = () => ({
+  basic: localStorage.getItem(STORAGE_KEYS.basicPrompt) || DEFAULT_PROMPTS.basic,
+  tools: localStorage.getItem(STORAGE_KEYS.toolPrompt) || DEFAULT_PROMPTS.tools
+});

@@ -33,6 +33,7 @@ import { ProviderConfig } from '../config/providers';
 import { ToolExecutionStatus } from './chat/ToolExecutionStatus';
 import { InlineToolExecutions, ToolExecution } from './chat/InlineToolIndicator';
 import { useToolCalling } from '../hooks/useToolCalling';
+import { useMCPACPIntegration } from '../hooks/useMCPACPIntegration';
 
 // Unified Tool Integration
 import { useUnifiedToolIntegration } from '../hooks/useUnifiedToolIntegration';
@@ -144,6 +145,9 @@ export default function GlassChatPiP() {
 
   // Remote connection integration
   const remoteConnection = useRemoteConnection();
+
+  // MCP/ACP Integration - uses shared store for persistence
+  const mcpIntegration = useMCPACPIntegration();
 
   // UI state
   const [input, setInput] = useState('');
@@ -366,78 +370,13 @@ export default function GlassChatPiP() {
     setCurrentResponse('');
 
     try {
-      // Use the regular Ollama streaming for all queries
-      // This provides word-by-word streaming display
-      const response = await ollamaIntegration.sendMessageToOllama(
-        activeChat?.messages || [],
-        contextualContent,
-        (() => {
-          let lastSentenceIndex = 0;
-          let accumulatedResponse = '';
-
-          return (update) => {
-            let responseContent = '';
-
-            if (update.type === 'thinking') {
-              responseContent = `💭 **Thinking...**\n\n${update.thinking}${update.thinking.endsWith('.') || update.thinking.endsWith('!') || update.thinking.endsWith('?') ? '' : '▋'}`;
-            } else if (update.type === 'response') {
-              if (update.thinking) {
-                responseContent = `💭 **Thought Process:**\n\n${update.thinking}\n\n---\n\n**Answer:**\n\n${update.response}${update.response.endsWith('.') || update.response.endsWith('!') || update.response.endsWith('?') ? '' : '▋'}`;
-              } else {
-                responseContent = `${update.response}${update.response.endsWith('.') || update.response.endsWith('!') || update.response.endsWith('?') ? '' : '▋'}`;
-              }
-
-              // Stream TTS for new sentences if voice mode is enabled
-              if (voiceModeEnabled && update.response) {
-                accumulatedResponse = update.response;
-                const sentences = accumulatedResponse.split(/(?<=[.!?])\s+/);
-
-                if (sentences.length > lastSentenceIndex + 1) {
-                  for (let i = lastSentenceIndex; i < sentences.length - 1; i++) {
-                    const sentence = sentences[i].trim();
-                    if (sentence && sentence.length > 3) {
-                      speechService.synthesizeSpeechStreaming(sentence).catch(error => {
-                        console.error('Error in streaming TTS:', error);
-                      });
-                    }
-                  }
-                  lastSentenceIndex = sentences.length - 1;
-                }
-              }
-            } else if (update.type === 'done') {
-              if (update.thinking) {
-                responseContent = `💭 **Thought Process:**\n\n${update.thinking}\n\n---\n\n**Answer:**\n\n${update.response}`;
-              } else {
-                responseContent = update.response;
-              }
-
-              // Speak any remaining incomplete sentence
-              if (voiceModeEnabled && accumulatedResponse) {
-                const sentences = accumulatedResponse.split(/(?<=[.!?])\s+/);
-                const lastSentence = sentences[sentences.length - 1]?.trim();
-                if (lastSentence && lastSentence.length > 3 && !lastSentence.match(/[.!?]$/)) {
-                  speechService.synthesizeSpeechStreaming(lastSentence).catch(error => {
-                    console.error('Error in final streaming TTS:', error);
-                  });
-                }
-              }
-            }
-
-            setCurrentResponse(responseContent);
-          };
-        })()
-      );
-
-      if (response) {
-        // Create assistant message only after streaming is complete
-        const assistantMessage: Message = {
-          id: `assistant-${Date.now()}`,
-          role: 'assistant',
-          content: response,
-          timestamp: Date.now()
-        };
-
-        addMessageToActiveChat(assistantMessage);
+      // Check if tools are enabled - use tool-aware chat
+      if (toolsEnabled) {
+        // Use tool-aware chat flow
+        await handleSendWithTools(contextualContent);
+      } else {
+        // Use regular streaming chat
+        await handleSendRegular(contextualContent);
       }
     } catch (error) {
       console.error('Error sending message:', error);
@@ -454,6 +393,427 @@ export default function GlassChatPiP() {
       setIsTyping(false);
       setCurrentResponse('');
       setActiveToolExecutions([]); // Clear tool executions when done
+    }
+  };
+
+  // Regular streaming chat (no tools)
+  const handleSendRegular = async (contextualContent: string) => {
+    let lastSentenceIndex = 0;
+    let accumulatedResponse = '';
+
+    const response = await ollamaIntegration.sendMessageToOllama(
+      activeChat?.messages || [],
+      contextualContent,
+      (update) => {
+        let responseContent = '';
+
+        if (update.type === 'thinking') {
+          responseContent = `💭 **Thinking...**\n\n${update.thinking}${update.thinking.endsWith('.') || update.thinking.endsWith('!') || update.thinking.endsWith('?') ? '' : '▋'}`;
+        } else if (update.type === 'response') {
+          if (update.thinking) {
+            responseContent = `💭 **Thought Process:**\n\n${update.thinking}\n\n---\n\n**Answer:**\n\n${update.response}${update.response.endsWith('.') || update.response.endsWith('!') || update.response.endsWith('?') ? '' : '▋'}`;
+          } else {
+            responseContent = `${update.response}${update.response.endsWith('.') || update.response.endsWith('!') || update.response.endsWith('?') ? '' : '▋'}`;
+          }
+
+          // Stream TTS for new sentences if voice mode is enabled
+          if (voiceModeEnabled && update.response) {
+            accumulatedResponse = update.response;
+            const sentences = accumulatedResponse.split(/(?<=[.!?])\s+/);
+
+            if (sentences.length > lastSentenceIndex + 1) {
+              for (let i = lastSentenceIndex; i < sentences.length - 1; i++) {
+                const sentence = sentences[i].trim();
+                if (sentence && sentence.length > 3) {
+                  speechService.synthesizeSpeechStreaming(sentence).catch(error => {
+                    console.error('Error in streaming TTS:', error);
+                  });
+                }
+              }
+              lastSentenceIndex = sentences.length - 1;
+            }
+          }
+        } else if (update.type === 'done') {
+          if (update.thinking) {
+            responseContent = `💭 **Thought Process:**\n\n${update.thinking}\n\n---\n\n**Answer:**\n\n${update.response}`;
+          } else {
+            responseContent = update.response;
+          }
+
+          // Speak any remaining incomplete sentence
+          if (voiceModeEnabled && accumulatedResponse) {
+            const sentences = accumulatedResponse.split(/(?<=[.!?])\s+/);
+            const lastSentence = sentences[sentences.length - 1]?.trim();
+            if (lastSentence && lastSentence.length > 3 && !lastSentence.match(/[.!?]$/)) {
+              speechService.synthesizeSpeechStreaming(lastSentence).catch(error => {
+                console.error('Error in final streaming TTS:', error);
+              });
+            }
+          }
+        }
+
+        setCurrentResponse(responseContent);
+      }
+    );
+
+    if (response) {
+      const assistantMessage: Message = {
+        id: `assistant-${Date.now()}`,
+        role: 'assistant',
+        content: response,
+        timestamp: Date.now()
+      };
+      addMessageToActiveChat(assistantMessage);
+    }
+  };
+
+  // Tool-aware chat flow with MCP integration
+  const handleSendWithTools = async (contextualContent: string) => {
+    // Get available MCP tools from the hook
+    const mcpTools = await getMcpToolsForLLM();
+    
+    console.log('🔧 Available MCP tools:', mcpTools);
+    
+    if (mcpTools.length === 0) {
+      console.log('⚠️ No MCP tools available, falling back to regular chat');
+      await handleSendRegular(contextualContent);
+      return;
+    }
+    
+    // Get saved tool prompt or use default
+    const savedToolPrompt = localStorage.getItem('ally-prompt-tools') || 
+      `You are a helpful AI assistant with access to tools. When you need to use a tool, output a tool call in this exact format:
+
+<tool_call>
+{"name": "tool_name", "parameters": {"param1": "value1"}}
+</tool_call>
+
+IMPORTANT: 
+- Use tools when the user asks for information you don't have (like file contents, system info, etc.)
+- After receiving tool results, incorporate them into your response
+- If a tool fails, explain the error and suggest alternatives`;
+
+    // Build the full system prompt with available tools
+    const toolsSystemPrompt = `${savedToolPrompt}
+
+Available tools:
+${mcpTools.map(t => `- ${t.name}: ${t.description}${t.parameters ? `\n  Parameters: ${JSON.stringify(t.parameters)}` : ''}`).join('\n')}`;
+
+    // Prepend system prompt to the user message
+    const messageWithTools = `[System: ${toolsSystemPrompt}]\n\nUser: ${contextualContent}`;
+
+    let accumulatedResponse = '';
+    let finalResponseWithToolResults = ''; // Track the modified response with tool results
+    let pendingToolCall: { name: string; parameters: any } | null = null;
+    let toolExecuted = false;
+
+    // Helper to parse different tool call formats (handles multiple formats LLMs use)
+    const parseToolCall = (text: string): { match: RegExpMatchArray | null; toolCall: { name: string; parameters: any } | null } => {
+      // First, strip any <think>...</think> blocks
+      const cleanedText = text.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+      
+      // Format 1: JSON format with tags - <tool_call>{"name": "...", "parameters": {...}}</tool_call>
+      const jsonMatch = cleanedText.match(/<tool_call>\s*(\{[\s\S]*?\})\s*<\/tool_call>/);
+      if (jsonMatch) {
+        try {
+          const parsed = JSON.parse(jsonMatch[1].trim());
+          return { match: jsonMatch, toolCall: { name: parsed.name, parameters: parsed.parameters || {} } };
+        } catch (e) {
+          console.log('JSON parse failed, trying other formats');
+        }
+      }
+      
+      // Format 2: Function format - <tool_call><function=name>params</function></tool_call>
+      const funcMatch = cleanedText.match(/<tool_call>\s*<function=(\w+)>([\s\S]*?)<\/function>\s*<\/tool_call>/);
+      if (funcMatch) {
+        const name = funcMatch[1];
+        let params = {};
+        const paramsStr = funcMatch[2].trim();
+        if (paramsStr) {
+          try {
+            params = JSON.parse(paramsStr);
+          } catch (e) {
+            // Try to parse as key=value pairs
+            const pairs = paramsStr.match(/(\w+)=["']?([^"'\s]+)["']?/g);
+            if (pairs) {
+              pairs.forEach(pair => {
+                const [key, value] = pair.split('=');
+                (params as any)[key] = value.replace(/["']/g, '');
+              });
+            }
+          }
+        }
+        return { match: funcMatch, toolCall: { name, parameters: params } };
+      }
+      
+      // Format 3: Simple format - <tool_call>tool_name</tool_call>
+      const simpleMatch = cleanedText.match(/<tool_call>\s*(\w+)(?:\s*\(([\s\S]*?)\))?\s*<\/tool_call>/);
+      if (simpleMatch) {
+        const name = simpleMatch[1];
+        let params = {};
+        if (simpleMatch[2]) {
+          try {
+            params = JSON.parse(`{${simpleMatch[2]}}`);
+          } catch (e) {
+            // Ignore parse errors
+          }
+        }
+        return { match: simpleMatch, toolCall: { name, parameters: params } };
+      }
+      
+      // Format 4: Raw JSON without tags - {"name": "...", "parameters": {...}}
+      // Look for JSON that looks like a tool call (has "name" field with a known tool)
+      const rawJsonMatch = cleanedText.match(/\{[\s\S]*?"name"\s*:\s*"(\w+)"[\s\S]*?"parameters"\s*:\s*(\{[^}]*\}|\[\])[\s\S]*?\}/);
+      if (rawJsonMatch) {
+        try {
+          // Find the full JSON object
+          const jsonStart = cleanedText.indexOf('{');
+          const jsonEnd = cleanedText.lastIndexOf('}');
+          if (jsonStart !== -1 && jsonEnd !== -1) {
+            const jsonStr = cleanedText.substring(jsonStart, jsonEnd + 1);
+            const parsed = JSON.parse(jsonStr);
+            if (parsed.name && typeof parsed.name === 'string') {
+              // Create a fake match array for replacement
+              const fakeMatch = [jsonStr] as RegExpMatchArray;
+              fakeMatch.index = jsonStart;
+              fakeMatch.input = cleanedText;
+              return { match: fakeMatch, toolCall: { name: parsed.name, parameters: parsed.parameters || {} } };
+            }
+          }
+        } catch (e) {
+          console.log('Raw JSON parse failed:', e);
+        }
+      }
+      
+      return { match: null, toolCall: null };
+    };
+
+    let toolExecutionPromise: Promise<void> | null = null;
+
+    // Helper to clean response for display (strip think tags, etc.)
+    const cleanResponseForDisplay = (text: string): string => {
+      return text
+        .replace(/<think>[\s\S]*?<\/think>/gi, '') // Remove think blocks
+        .replace(/^\s*\n+/, '') // Remove leading newlines
+        .trim();
+    };
+
+    await ollamaIntegration.sendMessageToOllama(
+      activeChat?.messages || [],
+      messageWithTools,
+      (update) => {
+        if (update.type === 'response' || update.type === 'done') {
+          accumulatedResponse = update.response || '';
+          
+          // Try to parse tool call from response
+          const { match: toolCallMatch, toolCall } = parseToolCall(accumulatedResponse);
+          
+          if (toolCallMatch && toolCall && !pendingToolCall && !toolExecuted) {
+            pendingToolCall = toolCall;
+            toolExecuted = true;
+            
+            console.log('🔧 Executing tool:', toolCall);
+            
+            // Show inline tool execution indicator
+            setActiveToolExecutions([{
+              id: `tool-${Date.now()}`,
+              name: toolCall.name,
+              status: 'executing',
+              startTime: Date.now()
+            }]);
+            
+            // Start tool execution (don't await in callback)
+            toolExecutionPromise = (async () => {
+              try {
+                // Execute the tool
+                const toolResult = await executeMcpTool(toolCall.name, toolCall.parameters || {});
+                
+                console.log('✅ Tool result:', toolResult);
+                
+                // Update indicator to complete
+                setActiveToolExecutions(prev => prev.map(t => 
+                  t.name === toolCall.name ? { ...t, status: 'success' as const, result: toolResult, endTime: Date.now() } : t
+                ));
+                
+                // Format the result for display
+                let resultDisplay = '';
+                if (toolResult.content && Array.isArray(toolResult.content)) {
+                  // MCP tool result format
+                  const textContent = toolResult.content.find((c: any) => c.type === 'text');
+                  resultDisplay = textContent?.text || JSON.stringify(toolResult.content);
+                } else if (toolResult.formatted) {
+                  resultDisplay = toolResult.formatted;
+                } else if (toolResult.time) {
+                  // Time result
+                  resultDisplay = toolResult.formatted || toolResult.time;
+                } else {
+                  resultDisplay = JSON.stringify(toolResult.result || toolResult, null, 2);
+                }
+                
+                // Create the formatted result text
+                const resultText = `🔧 **${toolCall.name}**\n\`\`\`\n${resultDisplay}\n\`\`\``;
+                
+                // Clean the response and replace tool call with result
+                const cleanedResponse = cleanResponseForDisplay(accumulatedResponse);
+                // Replace the tool call JSON or tags with the result
+                if (toolCallMatch[0]) {
+                  finalResponseWithToolResults = cleanedResponse.replace(toolCallMatch[0], resultText);
+                } else {
+                  finalResponseWithToolResults = resultText;
+                }
+                setCurrentResponse(finalResponseWithToolResults);
+                
+              } catch (error) {
+                console.error('❌ Tool execution failed:', error);
+                setActiveToolExecutions(prev => prev.map(t => 
+                  t.name === pendingToolCall?.name ? { ...t, status: 'error' as const, error: String(error) } : t
+                ));
+                
+                // Show error in response
+                const errorText = `❌ **Tool Error: ${pendingToolCall?.name}** - ${error}`;
+                const cleanedResponse = cleanResponseForDisplay(accumulatedResponse);
+                finalResponseWithToolResults = toolCallMatch[0] 
+                  ? cleanedResponse.replace(toolCallMatch[0], errorText)
+                  : errorText;
+                setCurrentResponse(finalResponseWithToolResults);
+              }
+            })();
+            
+            // Show loading state while tool executes (clean display)
+            const cleanedForLoading = cleanResponseForDisplay(accumulatedResponse);
+            const loadingDisplay = toolCallMatch[0] 
+              ? cleanedForLoading.replace(toolCallMatch[0], `🔧 *Executing ${toolCall.name}...*`)
+              : `🔧 *Executing ${toolCall.name}...*`;
+            setCurrentResponse(loadingDisplay + '▋');
+            
+          } else if (toolExecuted && finalResponseWithToolResults) {
+            // Tool already executed, keep showing the modified response
+            setCurrentResponse(finalResponseWithToolResults + (update.type === 'done' ? '' : '▋'));
+          } else if (toolExecuted && !finalResponseWithToolResults) {
+            // Tool is still executing, show loading state
+            const loadingText = pendingToolCall ? `🔧 *Executing ${pendingToolCall.name}...*` : '';
+            setCurrentResponse(loadingText + '▋');
+          } else {
+            // Regular response update (no tool call detected yet) - clean for display
+            const cleanedResponse = cleanResponseForDisplay(accumulatedResponse);
+            setCurrentResponse(cleanedResponse + (update.type === 'done' ? '' : '▋'));
+          }
+        }
+      }
+    );
+
+    // Wait for tool execution to complete if it's in progress
+    if (toolExecutionPromise) {
+      await toolExecutionPromise;
+    }
+
+    // Save the final message - use the modified response if tool was executed, clean it
+    let finalContent = finalResponseWithToolResults || accumulatedResponse;
+    finalContent = cleanResponseForDisplay(finalContent);
+    
+    if (finalContent) {
+      const assistantMessage: Message = {
+        id: `assistant-${Date.now()}`,
+        role: 'assistant',
+        content: finalContent,
+        timestamp: Date.now()
+      };
+      addMessageToActiveChat(assistantMessage);
+    }
+  };
+
+  // Get MCP tools formatted for LLM - use tools from mcpIntegration (persisted in store)
+  const getMcpToolsForLLM = async (): Promise<Array<{ name: string; description: string; parameters?: any }>> => {
+    try {
+      const tools: Array<{ name: string; description: string; parameters?: any }> = [];
+      
+      // Always add built-in tools that work without MCP
+      tools.push(
+        { name: 'get_current_time', description: 'Get the current date and time', parameters: {} },
+        { name: 'calculate', description: 'Perform a mathematical calculation', parameters: { expression: 'string (e.g., "2 + 2", "sqrt(16)")' } }
+      );
+      
+      // Add MCP tools from the integration hook (persisted in store)
+      const mcpTools = mcpIntegration.mcpTools;
+      console.log('📡 MCP tools for LLM:', mcpTools);
+      
+      for (const tool of mcpTools) {
+        if (!tools.find(t => t.name === tool.name)) {
+          tools.push({
+            name: tool.name,
+            description: tool.description || `MCP tool from ${tool.serverName}`,
+            parameters: undefined
+          });
+        }
+      }
+      
+      // Also try unified integration tools
+      const unifiedToolNames = unifiedIntegration.getAvailableTools?.() || [];
+      for (const toolName of unifiedToolNames) {
+        if (typeof toolName === 'string' && !tools.find(existing => existing.name === toolName)) {
+          tools.push({
+            name: toolName,
+            description: `Tool: ${toolName}`,
+            parameters: undefined
+          });
+        }
+      }
+      
+      console.log('🔧 Total available tools for LLM:', tools);
+      return tools;
+    } catch (error) {
+      console.error('Failed to get MCP tools:', error);
+      return [
+        { name: 'get_current_time', description: 'Get the current date and time', parameters: {} },
+        { name: 'calculate', description: 'Perform a mathematical calculation', parameters: { expression: 'string' } }
+      ];
+    }
+  };
+
+  // Execute an MCP tool (or built-in tool)
+  const executeMcpTool = async (toolName: string, parameters: any): Promise<any> => {
+    console.log('🔧 Executing tool:', toolName, 'with params:', parameters);
+    
+    // Handle built-in tools first
+    if (toolName === 'get_current_time') {
+      return {
+        time: new Date().toISOString(),
+        formatted: new Date().toLocaleString(),
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone
+      };
+    }
+    
+    if (toolName === 'calculate') {
+      try {
+        const expr = parameters?.expression || parameters;
+        // Safe math evaluation (basic operations only)
+        const sanitized = String(expr).replace(/[^0-9+\-*/().sqrt\s]/g, '');
+        const result = Function('"use strict"; return (' + sanitized.replace(/sqrt/g, 'Math.sqrt') + ')')();
+        return { expression: expr, result };
+      } catch (e) {
+        return { error: `Invalid expression: ${e}` };
+      }
+    }
+    
+    // Try MCP tool execution via the integration hook
+    try {
+      // Check if this tool exists in our MCP tools
+      const mcpTool = mcpIntegration.mcpTools.find(t => t.name === toolName);
+      
+      if (mcpTool) {
+        console.log('🔧 Executing MCP tool via integration:', toolName);
+        return await mcpIntegration.executeMCPTool(toolName, parameters);
+      }
+      
+      // Fallback to window.pip.mcp API
+      if (window.pip?.mcp?.executeTool) {
+        return await window.pip.mcp.executeTool(toolName, parameters);
+      }
+      
+      throw new Error(`Tool ${toolName} not found`);
+    } catch (error) {
+      console.error(`Failed to execute tool ${toolName}:`, error);
+      throw error;
     }
   };
 
@@ -692,26 +1052,13 @@ export default function GlassChatPiP() {
     setToolsEnabled(appSettings.tools?.enabled || false);
   }, [appSettings.tools?.enabled]);
 
-  // Get MCP server count
+  // Sync MCP server count from mcpIntegration hook
   useEffect(() => {
-    const getMcpServerCount = async () => {
-      try {
-        if (window.pip?.mcp?.getServerStatus) {
-          const status = await window.pip.mcp.getServerStatus();
-          if (status && Array.isArray(status)) {
-            setMcpServerCount(status.filter((s: any) => s.connected).length);
-          }
-        }
-      } catch (error) {
-        console.warn('Failed to get MCP server status:', error);
-      }
-    };
-    
-    getMcpServerCount();
-    // Refresh every 30 seconds
-    const interval = setInterval(getMcpServerCount, 30000);
-    return () => clearInterval(interval);
-  }, []);
+    // Update server count from connected servers
+    const connectedCount = mcpIntegration.mcpServers.filter(s => s.connected).length;
+    setMcpServerCount(connectedCount);
+    console.log('🔌 MCP servers:', mcpIntegration.mcpServers.length, 'connected:', connectedCount, 'tools:', mcpIntegration.mcpTools.length);
+  }, [mcpIntegration.mcpTools, mcpIntegration.mcpServers]);
 
   // Handle incoming remote messages
   useEffect(() => {
@@ -1837,6 +2184,7 @@ export default function GlassChatPiP() {
           setShowSettings(false);
           setShowProviderSettings(true);
         }}
+        onMcpToolCountChange={setMcpServerCount}
       />
 
       {/* Provider Settings Modal */}

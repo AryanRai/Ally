@@ -104,6 +104,52 @@ export interface PipAPI {
 
   // Speech toggle event
   onToggleSpeech: (callback: () => void) => () => void;
+
+  // MCP Integration
+  mcp: {
+    readConfig: () => Promise<any>;
+    writeConfig: (config: any) => Promise<void>;
+    spawnServer: (config: any) => Promise<{ processId: string }>;
+    sendMessage: (processId: string, message: string) => Promise<void>;
+    killServer: (processId: string) => Promise<void>;
+    getServerStatus: () => Promise<Array<{ name: string; connected: boolean; toolCount: number }>>;
+    restartServer: (serverName: string) => Promise<void>;
+    executeTool: (toolName: string, parameters: any) => Promise<any>;
+    
+    onServerData: (callback: (data: { processId: string; data: string }) => void) => () => void;
+    onServerError: (callback: (data: { processId: string; error: string }) => void) => () => void;
+    onServerExit: (callback: (data: { processId: string; code: number; signal: string }) => void) => () => void;
+  };
+
+  // ACP Integration
+  acp: {
+    readConfig: () => Promise<any>;
+    writeConfig: (config: any) => Promise<void>;
+    getAgentStatus: () => Promise<any>;
+    queryAgent: (agentId: string, query: string, context?: any) => Promise<any>;
+    reconnectAgent: (agentId: string) => Promise<void>;
+  };
+
+  // Accessibility service
+  accessibility?: {
+    connect: () => Promise<{ success: boolean; error?: string }>;
+    disconnect: () => Promise<{ success: boolean }>;
+    isConnected: () => Promise<boolean>;
+    getSelectedText: () => Promise<string>;
+    getElementAtCursor: () => Promise<any>;
+    getFocusedElement: () => Promise<any>;
+    getCursorPosition: () => Promise<{ x: number; y: number }>;
+    getActiveWindow: () => Promise<any>;
+    getScreenContent: () => Promise<any>;
+    onContextUpdate: (callback: (context: AccessibilityContext) => void) => () => void;
+  };
+}
+
+export interface AccessibilityContext {
+  selectedText?: string;
+  focusedElement?: any;
+  cursorPosition?: { x: number; y: number };
+  activeWindow?: any;
 }
 
 declare global {

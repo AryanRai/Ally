@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { getMCPIntegrationService } from '../services/mcpIntegrationService';
 import { getACPIntegrationService } from '../services/acpIntegrationService';
+import { mcpToolsStore } from '../stores/mcpToolsStore';
 
 interface MCPACPState {
   // MCP State
@@ -55,15 +56,29 @@ interface MCPACPActions {
 }
 
 export function useMCPACPIntegration(): MCPACPState & MCPACPActions {
-  const [state, setState] = useState<MCPACPState>({
-    mcpEnabled: false,
-    mcpServers: [],
-    mcpTools: [],
+  // Initialize state from store if available
+  const [state, setState] = useState<MCPACPState>(() => ({
+    mcpEnabled: mcpToolsStore.isInitialized(),
+    mcpServers: mcpToolsStore.getServers(),
+    mcpTools: mcpToolsStore.getTools(),
     acpEnabled: false,
     acpAgents: [],
-    isInitialized: false,
+    isInitialized: mcpToolsStore.isInitialized(),
     isInitializing: false
-  });
+  }));
+
+  // Subscribe to store changes
+  useEffect(() => {
+    const unsubscribe = mcpToolsStore.subscribe(() => {
+      setState(prev => ({
+        ...prev,
+        mcpServers: mcpToolsStore.getServers(),
+        mcpTools: mcpToolsStore.getTools(),
+        isInitialized: mcpToolsStore.isInitialized()
+      }));
+    });
+    return unsubscribe;
+  }, []);
 
   // Initialize services
   const initialize = useCallback(async () => {
@@ -98,24 +113,36 @@ export function useMCPACPIntegration(): MCPACPState & MCPACPActions {
       // Initial data load
       await Promise.all([refreshMCPData(), refreshACPData()]);
 
+      // Get final state for demo data fallback
+      const finalServers = mcpToolsStore.getServers().length > 0 
+        ? mcpToolsStore.getServers() 
+        : [{
+            name: 'demo-filesystem',
+            connected: true,
+            toolCount: 1,
+            lastSeen: new Date()
+          }];
+      
+      const finalTools = mcpToolsStore.getTools().length > 0
+        ? mcpToolsStore.getTools()
+        : [{
+            name: 'read_file',
+            description: 'Read file contents (demo)',
+            serverName: 'demo-filesystem'
+          }];
+
+      // Update store with final data
+      mcpToolsStore.setServers(finalServers);
+      mcpToolsStore.setTools(finalTools);
+
       setState(prev => ({ 
         ...prev, 
         isInitialized: true, 
         isInitializing: false,
         mcpEnabled: true,
         acpEnabled: true,
-        // Add demo data if no real data is available
-        mcpServers: prev.mcpServers.length === 0 ? [{
-          name: 'demo-filesystem',
-          connected: true,
-          toolCount: 1,
-          lastSeen: new Date()
-        }] : prev.mcpServers,
-        mcpTools: prev.mcpTools.length === 0 ? [{
-          name: 'read_file',
-          description: 'Read file contents (demo)',
-          serverName: 'demo-filesystem'
-        }] : prev.mcpTools,
+        mcpServers: finalServers,
+        mcpTools: finalTools,
         acpAgents: prev.acpAgents.length === 0 ? [{
           id: 'demo-assistant',
           name: 'Demo Assistant',
@@ -145,11 +172,16 @@ export function useMCPACPIntegration(): MCPACPState & MCPACPActions {
       const servers = mcpService.getServerStatus();
       const tools = mcpService.getAvailableTools();
 
+      // Update local state
       setState(prev => ({
         ...prev,
         mcpServers: servers,
         mcpTools: tools
       }));
+      
+      // Also update the global store so other components can access
+      mcpToolsStore.setServers(servers);
+      mcpToolsStore.setTools(tools);
     } catch (error) {
       console.error('Failed to refresh MCP data:', error);
     }

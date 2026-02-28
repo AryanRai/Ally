@@ -1,4 +1,4 @@
-import { PipAPI } from '../../electron/preload';
+import { PipAPI } from './electron';
 
 declare global {
   interface Window {
