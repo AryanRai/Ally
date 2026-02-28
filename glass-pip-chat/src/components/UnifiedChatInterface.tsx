@@ -21,7 +21,6 @@ import { ToolAwareProcessingProgress } from '../services/toolAwareIntegrationSer
 
 // Components
 import { ToolExecutionStatus } from './chat/ToolExecutionStatus';
-import { UnifiedToolDashboard } from './chat/UnifiedToolDashboard';
 
 // Types
 import { Message } from '../types/chat';
@@ -151,7 +150,6 @@ export const UnifiedChatInterface: React.FC<ToolCallTestProps> = ({
   const [input, setInput] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
   const [currentProgress, setCurrentProgress] = useState<ToolAwareProcessingProgress>();
-  const [showToolDashboard, setShowToolDashboard] = useState(false);
 
   // Refs
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -302,10 +300,7 @@ export const UnifiedChatInterface: React.FC<ToolCallTestProps> = ({
               lastError={connectionStats.lastError}
             />
             
-            <button
-              onClick={() => setShowToolDashboard(!showToolDashboard)}
-              className="flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
-            >
+            <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white">
               <span className="text-blue-400">🔧</span>
               <span className="text-sm font-medium">
                 {connectionStats.activeExecutions > 0 
@@ -313,7 +308,7 @@ export const UnifiedChatInterface: React.FC<ToolCallTestProps> = ({
                   : `${toolStats.availableTools?.length || toolStats.toolCount || 0} tools available`
                 }
               </span>
-            </button>
+            </div>
           </div>
         </div>
 
@@ -324,162 +319,6 @@ export const UnifiedChatInterface: React.FC<ToolCallTestProps> = ({
           </div>
         </div>
       </div>
-
-      {/* Unified Tool Dashboard */}
-      <AnimatePresence>
-        {showToolDashboard && (
-          <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: 'auto', opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            className="border-b border-gray-200 dark:border-gray-700 overflow-hidden"
-          >
-            <UnifiedToolDashboard
-              tools={[
-                {
-                  name: 'calculator',
-                  description: 'Performs mathematical calculations',
-                  category: 'utility',
-                  version: '1.0.0',
-                  enabled: true,
-                  parameters: {},
-                  securityLevel: 'low',
-                  lastUsed: Date.now() - 300000,
-                  usageCount: 15,
-                  averageExecutionTime: 200,
-                  successRate: 1.0,
-                  errorCount: 0,
-                  totalExecutions: 15,
-                  successfulExecutions: 15,
-                  failedExecutions: 0,
-                  minExecutionTime: 150,
-                  maxExecutionTime: 250,
-                  usageFrequency: 5,
-                  errorRate: 0,
-                  performanceScore: 95,
-                  trend: 'stable'
-                },
-                {
-                  name: 'weather',
-                  description: 'Provides weather information',
-                  category: 'data',
-                  version: '1.0.0',
-                  enabled: true,
-                  parameters: {},
-                  securityLevel: 'medium',
-                  lastUsed: Date.now() - 600000,
-                  usageCount: 12,
-                  averageExecutionTime: 800,
-                  successRate: 0.92,
-                  errorCount: 1,
-                  totalExecutions: 12,
-                  successfulExecutions: 11,
-                  failedExecutions: 1,
-                  minExecutionTime: 600,
-                  maxExecutionTime: 1200,
-                  usageFrequency: 3,
-                  errorRate: 0.08,
-                  performanceScore: 85,
-                  trend: 'up'
-                },
-                {
-                  name: 'current_time',
-                  description: 'Returns current date and time',
-                  category: 'utility',
-                  version: '1.0.0',
-                  enabled: true,
-                  parameters: {},
-                  securityLevel: 'low',
-                  lastUsed: Date.now() - 120000,
-                  usageCount: 15,
-                  averageExecutionTime: 50,
-                  successRate: 1.0,
-                  errorCount: 0,
-                  totalExecutions: 15,
-                  successfulExecutions: 15,
-                  failedExecutions: 0,
-                  minExecutionTime: 30,
-                  maxExecutionTime: 80,
-                  usageFrequency: 8,
-                  errorRate: 0,
-                  performanceScore: 98,
-                  trend: 'stable'
-                }
-              ]}
-              systemMetrics={{
-                totalTools: 3,
-                activeTools: 3,
-                totalExecutions: 42,
-                successRate: 0.905,
-                averageResponseTime: 350,
-                peakUsageHour: 14,
-                mostReliableTool: 'current_time',
-                slowestTool: 'weather',
-                mostUsedTool: 'calculator',
-                errorProneTool: 'weather',
-                isExecuting: connectionStats.activeExecutions > 0,
-                activeToolCount: connectionStats.activeExecutions,
-                completedToolCount: 38,
-                failedToolCount: 4,
-                totalExecutionTime: 52500,
-                lastExecutionTime: Date.now() - 120000,
-                availableToolCount: toolStats.availableTools?.length || toolStats.toolCount || 0
-              }}
-              analytics={{
-                totalExecutions: 42,
-                successfulExecutions: 38,
-                failedExecutions: 4,
-                averageExecutionTime: 350,
-                mostUsedTools: [
-                  { name: 'calculator', count: 15, percentage: 35.7 },
-                  { name: 'current_time', count: 15, percentage: 35.7 },
-                  { name: 'weather', count: 12, percentage: 28.6 }
-                ],
-                recentActivity: [
-                  { timestamp: Date.now() - 120000, toolName: 'current_time', status: 'success', executionTime: 45 },
-                  { timestamp: Date.now() - 300000, toolName: 'calculator', status: 'success', executionTime: 180 },
-                  { timestamp: Date.now() - 600000, toolName: 'weather', status: 'error', executionTime: 1200 }
-                ],
-                performanceTrends: {
-                  executionTimesTrend: 'stable',
-                  successRateTrend: 'up',
-                  usageTrend: 'up'
-                }
-              }}
-              platform="web"
-              theme="dark"
-              timeRange="24h"
-              onToolToggle={(toolName, enabled) => {
-                console.log(`Tool ${toolName} ${enabled ? 'enabled' : 'disabled'}`);
-              }}
-              onToolConfigure={(toolName, config) => {
-                console.log(`Configure tool: ${toolName}`, config);
-              }}
-              onToolRefresh={(toolName) => {
-                console.log(`Refresh tool: ${toolName}`);
-              }}
-              onToolRemove={(toolName) => {
-                console.log(`Remove tool: ${toolName}`);
-              }}
-              onExportConfig={() => {
-                console.log('Export configuration');
-              }}
-              onImportConfig={(config) => {
-                console.log('Import configuration', config);
-              }}
-              onRefreshAnalytics={() => {
-                console.log('Refresh analytics');
-              }}
-              onTimeRangeChange={(range) => {
-                console.log('Time range changed:', range);
-              }}
-              onExportData={() => {
-                console.log('Export data');
-              }}
-            />
-          </motion.div>
-        )}
-      </AnimatePresence>
 
       {/* Messages */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4">

@@ -11,9 +11,6 @@ import {
   Check,
   Mic,
   MicOff,
-  Zap,
-  BarChart3,
-  TestTube,
   Wrench
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
@@ -49,33 +46,10 @@ interface ExpandedHeaderProps {
   size: string;
   showSpeechControls: boolean;
   onSpeechToggle: () => void;
-  // Tool status props
-  toolStatus?: {
-    isExecuting: boolean;
-    activeToolCount: number;
-    completedToolCount: number;
-    failedToolCount: number;
-    totalExecutionTime: number;
-    lastExecutionTime?: number;
-    availableToolCount: number;
-  };
-  onToolStatusClick?: () => void;
-  // Unified integration props
-  showUnifiedIntegration?: boolean;
-  onUnifiedIntegrationToggle?: () => void;
-  showToolAnalytics?: boolean;
-  onToolAnalyticsToggle?: () => void;
-  unifiedIntegrationStatus?: {
-    isConnected: boolean;
-    connectionStatus: string;
-    availableTools: number;
-    activeExecutions: number;
-  };
+  // Simple tool toggle
   toolsEnabled?: boolean;
   onToolsToggle?: () => void;
-  // Message flow test props
-  showMessageFlowTest?: boolean;
-  onMessageFlowTestToggle?: () => void;
+  mcpServerCount?: number;
 }
 
 export default function ExpandedHeader({
@@ -106,49 +80,10 @@ export default function ExpandedHeader({
   size,
   showSpeechControls,
   onSpeechToggle,
-  toolStatus,
-  onToolStatusClick,
-  showUnifiedIntegration,
-  onUnifiedIntegrationToggle,
-  showToolAnalytics,
-  onToolAnalyticsToggle,
-  unifiedIntegrationStatus,
-  showMessageFlowTest,
-  onMessageFlowTestToggle,
   toolsEnabled,
-  onToolsToggle
+  onToolsToggle,
+  mcpServerCount = 0
 }: ExpandedHeaderProps) {
-
-  // Helper functions for smart tool control
-  const getActiveToolFeaturesCount = () => {
-    let count = 0;
-    if (showUnifiedIntegration) count++;
-    if (showToolAnalytics) count++;
-    if (showMessageFlowTest) count++;
-    return count;
-  };
-
-  const getToolHubStatus = () => {
-    const features = [];
-    if (toolsEnabled) features.push('Tools');
-    if (showUnifiedIntegration) features.push('Integration');
-    if (showToolAnalytics) features.push('Analytics');
-    if (showMessageFlowTest) features.push('Testing');
-
-    const statusText = features.length > 0 ? features.join(', ') : 'Disabled';
-
-    // Add tool execution status if available
-    if (toolStatus) {
-      const toolInfo = [];
-      if (toolStatus.isExecuting) toolInfo.push('Executing');
-      if (toolStatus.activeToolCount > 0) toolInfo.push(`${toolStatus.activeToolCount} active`);
-      if (toolStatus.failedToolCount > 0) toolInfo.push(`${toolStatus.failedToolCount} failed`);
-
-      return toolInfo.length > 0 ? `${statusText} (${toolInfo.join(', ')})` : statusText;
-    }
-
-    return statusText;
-  };
 
   return (
     <>
@@ -313,87 +248,28 @@ export default function ExpandedHeader({
           )}
         </button>
 
-        {/* Combined Tool Control - Wrench + Tool Status */}
-        {(onUnifiedIntegrationToggle || onToolAnalyticsToggle || onMessageFlowTestToggle || onToolsToggle) && (
-          <div className="relative">
-            <button
-              onClick={() => {
-                // Primary action: toggle main tool system
-                if (onToolsToggle) onToolsToggle();
-                else if (onUnifiedIntegrationToggle) onUnifiedIntegrationToggle();
-              }}
-              onContextMenu={(e) => {
-                e.preventDefault();
-                // Secondary action: show tool status details
-                if (onToolStatusClick) onToolStatusClick();
-              }}
-              onDoubleClick={() => {
-                // Double-click: cycle through tool features
-                if (showUnifiedIntegration && onToolAnalyticsToggle) {
-                  onToolAnalyticsToggle();
-                } else if (showToolAnalytics && onMessageFlowTestToggle) {
-                  onMessageFlowTestToggle();
-                } else if (showMessageFlowTest && onUnifiedIntegrationToggle) {
-                  onUnifiedIntegrationToggle();
-                } else if (onUnifiedIntegrationToggle) {
-                  onUnifiedIntegrationToggle();
-                }
-              }}
-              className={cn(
-                "p-1.5 rounded-lg transition-colors relative",
-                (toolsEnabled || showUnifiedIntegration || showToolAnalytics || showMessageFlowTest)
-                  ? "bg-purple-500/20 hover:bg-purple-500/30 text-purple-300"
-                  : "hover:bg-white/10",
-                toolStatus?.isExecuting && "ring-1 ring-yellow-400/50",
-                (toolStatus?.failedToolCount ?? 0) > 0 && "ring-1 ring-red-400/50"
-              )}
-              title={`Tools Hub - Click: ${toolsEnabled ? 'Disable' : 'Enable'} tools | Right-click: Tool Status | Double-click: Cycle features | Status: ${getToolHubStatus()}${toolStatus ? ` | Active: ${toolStatus.activeToolCount}, Completed: ${toolStatus.completedToolCount}` : ''}`}
-            >
-              {/* Main tool icon with overlays */}
-              <div className="relative">
-                <Wrench className="w-3.5 h-3.5" />
-
-                {/* Feature indicators as small overlays */}
-                {showUnifiedIntegration && (
-                  <Zap className="w-2 h-2 absolute -top-0.5 -right-0.5 text-purple-400" />
-                )}
-                {showToolAnalytics && (
-                  <BarChart3 className="w-1.5 h-1.5 absolute -bottom-0.5 -left-0.5 text-green-400" />
-                )}
-                {showMessageFlowTest && (
-                  <TestTube className="w-1.5 h-1.5 absolute -bottom-0.5 -right-0.5 text-orange-400" />
-                )}
-                {/* Tool status indicator */}
-                {toolStatus?.isExecuting && (
-                  <div className="absolute -top-0.5 -left-0.5 w-2 h-2">
-                    <div className="w-2 h-2 bg-yellow-400 rounded-full animate-pulse" />
-                  </div>
-                )}
-                {(toolStatus?.failedToolCount ?? 0) > 0 && (
-                  <div className="absolute -top-0.5 -left-0.5 w-2 h-2">
-                    <div className="w-2 h-2 bg-red-400 rounded-full" />
-                  </div>
-                )}
+        {/* Simple Tool Toggle - enables/disables tools for LLM */}
+        {onToolsToggle && (
+          <button
+            onClick={onToolsToggle}
+            className={cn(
+              "p-1.5 rounded-lg transition-colors relative",
+              toolsEnabled
+                ? "bg-purple-500/20 hover:bg-purple-500/30 text-purple-300"
+                : "hover:bg-white/10 opacity-60"
+            )}
+            title={toolsEnabled 
+              ? `Tools enabled (${mcpServerCount} MCP servers) - Click to disable` 
+              : "Tools disabled - Click to enable"
+            }
+          >
+            <Wrench className="w-3.5 h-3.5" />
+            {toolsEnabled && mcpServerCount > 0 && (
+              <div className="absolute -top-1 -right-1 w-3 h-3 bg-green-500 rounded-full flex items-center justify-center">
+                <span className="text-[8px] font-bold text-white">{mcpServerCount}</span>
               </div>
-
-              {/* Connection status indicator */}
-              {unifiedIntegrationStatus?.isConnected && (
-                <div className="absolute -bottom-0.5 -right-0.5 w-2 h-2 bg-green-400 rounded-full" />
-              )}
-              {!unifiedIntegrationStatus?.isConnected && unifiedIntegrationStatus && (
-                <div className="absolute -bottom-0.5 -right-0.5 w-2 h-2 bg-red-400 rounded-full" />
-              )}
-
-              {/* Active features count */}
-              {(getActiveToolFeaturesCount() > 0 || ((toolStatus?.activeToolCount ?? 0) > 0)) && (
-                <div className="absolute -top-1 -left-1 w-3 h-3 bg-blue-500 rounded-full flex items-center justify-center">
-                  <span className="text-[8px] font-bold text-white">
-                    {(toolStatus?.activeToolCount ?? 0) > 0 ? toolStatus?.activeToolCount : getActiveToolFeaturesCount()}
-                  </span>
-                </div>
-              )}
-            </button>
-          </div>
+            )}
+          </button>
         )}
 
         <button
