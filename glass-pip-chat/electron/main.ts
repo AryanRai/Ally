@@ -69,6 +69,9 @@ class AccessibilityServiceClient {
   private reconnectTimer: NodeJS.Timeout | null = null;
   private isConnecting = false;
   private latestContext: any = null;
+  private reconnectAttempts = 0;
+  private maxReconnectAttempts = 3;
+  private hasLoggedDisconnect = false;
 
   constructor(private url: string = 'ws://localhost:8766') {}
 
@@ -85,6 +88,8 @@ class AccessibilityServiceClient {
       this.ws.on('open', () => {
         console.log('✅ Connected to accessibility service');
         this.isConnecting = false;
+        this.reconnectAttempts = 0;
+        this.hasLoggedDisconnect = false;
         if (this.reconnectTimer) {
           clearTimeout(this.reconnectTimer);
           this.reconnectTimer = null;
@@ -106,19 +111,21 @@ class AccessibilityServiceClient {
       });
 
       this.ws.on('close', () => {
-        console.log('🔌 Accessibility service disconnected');
+        if (!this.hasLoggedDisconnect) {
+          console.log('🔌 Accessibility service disconnected (will retry silently)');
+          this.hasLoggedDisconnect = true;
+        }
         this.isConnecting = false;
         this.scheduleReconnect();
       });
 
-      this.ws.on('error', (error) => {
-        console.log('⚠️ Accessibility service connection error:', error.message);
+      this.ws.on('error', () => {
+        // Silently handle errors - no spam
         this.isConnecting = false;
         this.scheduleReconnect();
       });
 
     } catch (error) {
-      console.error('Failed to connect to accessibility service:', error);
       this.isConnecting = false;
       this.scheduleReconnect();
     }
@@ -127,10 +134,31 @@ class AccessibilityServiceClient {
   private scheduleReconnect(): void {
     if (this.reconnectTimer) return;
     
+    // Stop retrying after max attempts
+    if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+      if (!this.hasLoggedDisconnect) {
+        console.log('⏹️ Accessibility service not available, stopping reconnection attempts');
+        this.hasLoggedDisconnect = true;
+      }
+      return;
+    }
+    
+    this.reconnectAttempts++;
+    
+    // Exponential backoff: 5s, 10s, 20s
+    const delay = 5000 * Math.pow(2, this.reconnectAttempts - 1);
+    
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
       this.connect();
-    }, 5000); // Retry every 5 seconds
+    }, delay);
+  }
+
+  // Allow manual reconnection (resets attempt counter)
+  reconnect(): void {
+    this.reconnectAttempts = 0;
+    this.hasLoggedDisconnect = false;
+    this.connect();
   }
 
   disconnect(): void {
