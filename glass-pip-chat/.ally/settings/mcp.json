@@ -5,7 +5,7 @@
       "args": [
         "-y",
         "@modelcontextprotocol/server-filesystem",
-        "."
+        "C:\\"
       ],
       "env": {
         "FASTMCP_LOG_LEVEL": "ERROR"
@@ -15,7 +15,12 @@
         "read_file",
         "list_directory",
         "write_file",
-        "create_directory"
+        "create_directory",
+        "move_file",
+        "search_files",
+        "get_file_info",
+        "read_multiple_files",
+        "list_allowed_directories"
       ]
     },
     "brave-search": {

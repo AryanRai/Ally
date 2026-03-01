@@ -359,6 +359,33 @@ export function parseMessageForPills(content: string): {
     cleanContent = cleanContent.replace(match[0], '');
   }
 
+  // Handle model-echoed format: 🔧 **Executed:** `command`\n✅ **Success**\n**Output:**\n```\n...\n```
+  const executedRegex = /🔧 \*\*Executed:\*\*\s*`([^`]+)`\s*\n[✅❌]\s*\*\*(?:Success|Error)[^*]*\*\*\s*(?:\n\*\*Output:\*\*\s*)?\n?```\n?([\s\S]*?)\n?```/g;
+  while ((match = executedRegex.exec(content)) !== null) {
+    toolResults.push({
+      name: `execute_command`,
+      result: `$ ${match[1]}\n${match[2].trim()}`
+    });
+    cleanContent = cleanContent.replace(match[0], '');
+  }
+
+  // Handle simpler model-echoed: ✅ **Status:** ... 🔧 **Executed:** `cmd` ✅ **Success** **Output:** ```...```
+  const simpleExecutedRegex = /🔧 \*\*Executed:\*\*\s*`([^`]+)`\s*\n?[✅❌]\s*\*\*Success\*\*\s*\n?\*\*Output:\*\*\s*\n?```\n?([\s\S]*?)\n?```/g;
+  while ((match = simpleExecutedRegex.exec(content)) !== null) {
+    if (!toolResults.find(t => t.result.includes(match![1]))) {
+      toolResults.push({
+        name: `execute_command`,
+        result: `$ ${match[1]}\n${match[2].trim()}`
+      });
+      cleanContent = cleanContent.replace(match[0], '');
+    }
+  }
+
+  // Clean up leftover status lines that aren't part of tool blocks
+  cleanContent = cleanContent
+    .replace(/✅ \*\*Status:\*\*[^\n]*/g, '')
+    .replace(/\n{3,}/g, '\n\n');
+
   return {
     cleanContent: cleanContent.trim(),
     toolResults,

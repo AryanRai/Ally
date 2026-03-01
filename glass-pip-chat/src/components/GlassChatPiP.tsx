@@ -75,6 +75,17 @@ export default function GlassChatPiP() {
   const [toolsEnabled, setToolsEnabled] = useState(false);
   // Agentic mode - allows AI to use multiple tools sequentially
   const [agenticMode, setAgenticMode] = useState(true); // Default to agentic mode when tools are enabled
+  // Autopilot mode - auto-approve all tool executions without confirmation
+  const [autopilotMode, setAutopilotMode] = useState(() => {
+    const saved = localStorage.getItem('ally-autopilot-mode');
+    return saved === null ? true : saved === 'true';
+  });
+  // Pending tool approval state
+  const [pendingToolApproval, setPendingToolApproval] = useState<{
+    toolName: string;
+    parameters: any;
+    resolve: (approved: boolean) => void;
+  } | null>(null);
 
   // Create OllamaService instance for tool calling - must be before unified integration
   const ollamaService = useMemo(() => {
@@ -490,20 +501,21 @@ export default function GlassChatPiP() {
       (agenticMode 
         ? `You are an AI assistant with access to powerful tools. You MUST use tools to get real information.
 
-⚠️ CRITICAL - YOU DO NOT KNOW THE CURRENT TIME OR DATE! You must ALWAYS call get_current_time to get it.
+⚠️ CRITICAL RULES:
+1. YOU DO NOT KNOW THE CURRENT TIME OR DATE! You must ALWAYS call get_current_time to get it.
+2. NEVER fabricate, simulate, or make up tool output. If you need to run a command, you MUST call execute_command. Do NOT write fake terminal output.
+3. NEVER pretend a tool succeeded without actually calling it. If a tool fails, say it failed.
+4. NEVER guess file contents, directory listings, or command output — use the appropriate tool.
+5. Output the JSON tool call IMMEDIATELY — no explanations before it.
+6. You can use MULTIPLE tools in sequence.
+7. After getting ALL needed info, give your final answer WITHOUT any JSON and WITHOUT repeating raw tool results.
 
 MANDATORY TOOL USAGE:
 • "time", "what time", "current time", "date", "today", "now" → MUST call: {"name": "get_current_time", "parameters": {}}
 • "files", "directory", "folder", "list", "what's here" → MUST call: {"name": "list_directory", "parameters": {"path": "."}}
 • "read", "show file", "contents of" → MUST call: {"name": "read_file", "parameters": {"path": "filename"}}
 • math expressions, "calculate", numbers → MUST call: {"name": "calculate", "parameters": {"expression": "..."}}
-
-RULES:
-1. NEVER guess time/date - you don't have a clock, use the tool
-2. NEVER make up file contents - use read_file
-3. Output the JSON tool call IMMEDIATELY - no explanations before it
-4. You can use MULTIPLE tools in sequence
-5. After getting ALL needed info, give your final answer WITHOUT any JSON
+• "run", "execute", "command", terminal tasks → MUST call: {"name": "execute_command", "parameters": {"command": "..."}}
 
 TOOL FORMAT:
 {"name": "tool_name", "parameters": {"key": "value"}}
@@ -520,6 +532,7 @@ TO USE A TOOL, output ONLY this JSON (nothing else before or after):
 RULES:
 - For questions about time, files, calculations - USE A TOOL, don't explain
 - Output the JSON tool call IMMEDIATELY, no explanation needed
+- NEVER fabricate or simulate tool output — always call the tool
 - After getting results, give a natural response incorporating the data`);
 
     // Build the full system prompt with available tools
@@ -554,9 +567,10 @@ Remember: Output ONLY the JSON tool call when you need to use a tool. No explana
     
     let iteration = 0;
     let totalToolCalls = 0;
-    const allToolResults: Array<{ tool: string; result: string }> = []; // Track ALL tool results
+    const allToolResults: Array<{ tool: string; result: string }> = []; // Track ALL tool results for LLM context
     const allToolExecutions: ToolExecution[] = [];
-    const finalResponseParts: string[] = [];
+    const toolResultBlocks: string[] = []; // Clean tool result blocks for final message
+    let finalModelSummary = ''; // The model's final text answer (no tool JSON)
     let currentThinking = '';
     // Retry guard: track consecutive failures of same tool+params
     const failureTracker: Map<string, number> = new Map();
@@ -570,7 +584,7 @@ Remember: Output ONLY the JSON tool call when you need to use a tool. No explana
       
       // Build context from ALL previous tool results
       const toolResultsContext = allToolResults.length > 0
-        ? `\n\nPrevious tool results:\n${allToolResults.map(tr => `- ${tr.tool}: ${tr.result}`).join('\n')}\n\nUse these results to answer the user's question. If you need more information, call another tool. Otherwise, provide your final answer WITHOUT any JSON.`
+        ? `\n\nPrevious tool results:\n${allToolResults.map(tr => `- ${tr.tool}: ${tr.result}`).join('\n')}\n\nUse these results to answer the user's question. If you need more information, call another tool. Otherwise, provide your final answer WITHOUT any JSON. IMPORTANT: Do NOT repeat the raw tool results or tool names in your answer — just summarize the information naturally.`
         : '';
       
       let accumulatedResponse = '';
@@ -601,35 +615,30 @@ Remember: Output ONLY the JSON tool call when you need to use a tool. No explana
               detectedToolCall = parsed.toolCall;
               beforeToolText = parsed.beforeText;
               
-              // Show text before tool call
-              const displayParts = [...finalResponseParts];
-              if (beforeToolText) displayParts.push(beforeToolText);
-              displayParts.push(`🔧 *Calling ${parsed.toolCall.name}...*`);
-              setCurrentResponse(displayParts.join('\n\n'));
+              // During streaming, just show a brief status — pills handle the rest
+              setCurrentResponse(beforeToolText || `🔧 *Calling ${parsed.toolCall.name}...*`);
             } else if (!toolCallDetected) {
               // No tool call yet, show streaming response
               const cleanedResponse = accumulatedResponse
                 .replace(/<think>[\s\S]*?<\/think>/gi, '')
                 .trim();
-              const displayParts = [...finalResponseParts, cleanedResponse];
-              setCurrentResponse(displayParts.join('\n\n') + (update.type === 'done' ? '' : '▋'));
+              setCurrentResponse(cleanedResponse + (update.type === 'done' ? '' : '▋'));
             }
           }
         }
       );
       
-      // If no tool call detected, we're done
+      // If no tool call detected, this is the final summary from the model
       if (!toolCallDetected || !detectedToolCall) {
         console.log('✅ No more tool calls, task complete');
         
-        // Clean final response
-        const cleanedFinal = accumulatedResponse
+        finalModelSummary = accumulatedResponse
           .replace(/<think>[\s\S]*?<\/think>/gi, '')
+          // Strip any tool-result formatting the model echoes back
+          .replace(/🔧\s*\*\*(Executed|[^*]+)\*\*:?\s*/g, '')
+          .replace(/[✅❌]\s*\*\*(Success|Status|Error)[^*]*\*\*:?\s*/g, '')
+          .replace(/\*\*Output:\*\*\s*/g, '')
           .trim();
-        
-        if (cleanedFinal && !finalResponseParts.includes(cleanedFinal)) {
-          finalResponseParts.push(cleanedFinal);
-        }
         break;
       }
       
@@ -653,12 +662,10 @@ Remember: Output ONLY the JSON tool call when you need to use a tool. No explana
         const missingParams = requiredParams.filter(p => !params[p] && params[p] !== 0 && params[p] !== false);
         if (missingParams.length > 0) {
           console.warn(`⚠️ Tool ${toolToExecute.name} missing required params: ${missingParams.join(', ')} — skipping`);
-          // Tell the model it needs to provide params
           allToolResults.push({ 
             tool: toolToExecute.name, 
             result: `ERROR: Missing required parameters: ${missingParams.join(', ')}. You must provide these.` 
           });
-          finalResponseParts.push(`⚠️ **${toolToExecute.name}**: missing params (${missingParams.join(', ')})`);
           currentMessage = '';
           continue;
         }
@@ -669,13 +676,8 @@ Remember: Output ONLY the JSON tool call when you need to use a tool. No explana
       const priorFailures = failureTracker.get(toolKey) || 0;
       if (priorFailures >= MAX_SAME_TOOL_RETRIES) {
         console.warn(`🛑 Tool ${toolToExecute.name} has failed ${priorFailures} times with same params — breaking loop`);
-        finalResponseParts.push(`⚠️ **${toolToExecute.name}** failed repeatedly, stopping retries.`);
+        toolResultBlocks.push(`⚠️ ${toolToExecute.name} failed repeatedly, stopped retrying.`);
         break;
-      }
-      
-      // Add text before tool call to response
-      if (beforeToolText && !finalResponseParts.includes(beforeToolText)) {
-        finalResponseParts.push(beforeToolText);
       }
       
       // Execute the tool
@@ -701,15 +703,16 @@ Remember: Output ONLY the JSON tool call when you need to use a tool. No explana
         // Format result
         const resultText = formatToolResultForDisplay(toolToExecute.name, result);
         
-        // Add to accumulated tool results for context
+        // Add to LLM context
         allToolResults.push({ tool: toolToExecute.name, result: resultText });
         
-        // Add tool result to response parts
-        finalResponseParts.push(`🔧 **${toolToExecute.name}**\n\`\`\`\n${resultText}\n\`\`\``);
+        // Add clean tool result block for final message (shown via pills)
+        toolResultBlocks.push(`🔧 **${toolToExecute.name}**\n\`\`\`\n${resultText}\n\`\`\``);
         
-        // Update display
+        // Update pill display
         setActiveToolExecutions([...allToolExecutions]);
-        setCurrentResponse(finalResponseParts.join('\n\n') + '\n\n*Analyzing results...*');
+        // Show brief status during tool execution — no raw markdown dump
+        setCurrentResponse('*Analyzing results...*');
         
         // Reset message for next iteration (context is built from allToolResults)
         currentMessage = '';
@@ -726,23 +729,28 @@ Remember: Output ONLY the JSON tool call when you need to use a tool. No explana
         
         setActiveToolExecutions([...allToolExecutions]);
         
-        // Add error to response
-        finalResponseParts.push(`❌ **${toolToExecute.name}** failed: ${toolExecution.error}`);
-        
-        // Add error to accumulated results
+        // Add error to LLM context
         allToolResults.push({ tool: toolToExecute.name, result: `ERROR: ${toolExecution.error}` });
+        toolResultBlocks.push(`❌ **${toolToExecute.name}** failed: ${toolExecution.error}`);
         
         // Reset message for next iteration
         currentMessage = '';
       }
     }
     
-    // Build final message content
+    // Build final message: tool result blocks first, then model's summary
+    // Tool results are compact blocks that the pill parser can pick up
+    // Model summary is the clean final answer
     let finalContent = '';
     if (currentThinking) {
-      finalContent = `<think>${currentThinking}</think>\n\n`;
+      finalContent += `<think>${currentThinking}</think>\n\n`;
     }
-    finalContent += finalResponseParts.join('\n\n');
+    if (toolResultBlocks.length > 0) {
+      finalContent += toolResultBlocks.join('\n\n') + '\n\n';
+    }
+    if (finalModelSummary) {
+      finalContent += finalModelSummary;
+    }
     
     // Clear streaming state
     setStreamingThinking(null);
@@ -851,20 +859,29 @@ Remember: Output ONLY the JSON tool call when you need to use a tool. No explana
     if (result.content && Array.isArray(result.content)) {
       const textContent = result.content.find((c: any) => c.type === 'text');
       if (textContent?.text) {
+        let text = textContent.text;
+        
+        // Strip any existing tool-result-like formatting from MCP output
+        // (some MCP servers return pre-formatted text with 🔧 **tool_name** headers)
+        text = text.replace(/^🔧\s*\*\*[^*]+\*\*\s*\n?/gm, '');
+        
         // For directory listings, format more compactly
         if (toolName === 'list_directory' || toolName.includes('directory')) {
-          const lines = textContent.text.split('\n').filter((l: string) => l.trim());
+          const lines = text.split('\n').filter((l: string) => l.trim());
           if (lines.length > 15) {
             return `${lines.slice(0, 12).join('\n')}\n... and ${lines.length - 12} more items`;
           }
         }
-        return textContent.text;
+        return text.trim();
       }
     }
     
     if (result.formatted) return result.formatted;
     if (result.result !== undefined) return String(result.result);
-    if (typeof result === 'string') return result;
+    if (typeof result === 'string') {
+      // Strip any existing tool formatting from string results too
+      return result.replace(/^🔧\s*\*\*[^*]+\*\*\s*\n?/gm, '').trim();
+    }
     
     // Truncate long JSON
     const jsonStr = JSON.stringify(result, null, 2);
@@ -1029,6 +1046,25 @@ Remember: Output ONLY the JSON tool call when you need to use a tool. No explana
   // Execute an MCP tool (or built-in tool)
   const executeMcpTool = async (toolName: string, parameters: any): Promise<any> => {
     console.log('🔧 Executing tool:', toolName, 'with params:', parameters);
+    
+    // If autopilot is OFF, ask for user approval before executing
+    // (skip approval for safe read-only tools)
+    const safeTools = ['get_current_time', 'current_time', 'get_time', 'time', 'calculate', 'calc', 'math', 
+                       'list_directory', 'ls', 'dir', 'read_file', 'cat', 'read', 'read_text_file', 
+                       'read_multiple_files', 'get_file_info', 'list_allowed_directories', 'search_files',
+                       'get_current_directory', 'directory_tree', 'list_directory_with_sizes',
+                       'search_nodes', 'read_graph', 'open_nodes'];
+    
+    if (!autopilotMode && !safeTools.includes(toolName)) {
+      const approved = await new Promise<boolean>((resolve) => {
+        setPendingToolApproval({ toolName, parameters, resolve });
+      });
+      setPendingToolApproval(null);
+      
+      if (!approved) {
+        return { error: `Tool execution denied by user: ${toolName}` };
+      }
+    }
     
     // Normalize parameters - handle empty string, null, undefined
     let normalizedParams = parameters;
@@ -2205,11 +2241,6 @@ Remember: Output ONLY the JSON tool call when you need to use a tool. No explana
                 size={state.size}
                 showSpeechControls={showSpeechControls}
                 onSpeechToggle={() => setShowSpeechControls(!showSpeechControls)}
-                toolsEnabled={toolsEnabled}
-                onToolsToggle={() => setToolsEnabled(!toolsEnabled)}
-                mcpServerCount={mcpServerCount}
-                agenticMode={agenticMode}
-                onAgenticModeToggle={() => setAgenticMode(!agenticMode)}
               />
             )}
           </div>
@@ -2382,9 +2413,55 @@ Remember: Output ONLY the JSON tool call when you need to use a tool. No explana
                   currentModel={ollamaIntegration.currentModel}
                   toolsEnabled={toolsEnabled}
                   agenticMode={agenticMode}
+                  autopilotMode={autopilotMode}
+                  mcpToolCount={mcpIntegration.mcpTools.length + 2}
                   onToolsToggle={() => setToolsEnabled(!toolsEnabled)}
                   onAgenticModeToggle={() => setAgenticMode(!agenticMode)}
+                  onAutopilotToggle={() => {
+                    const next = !autopilotMode;
+                    setAutopilotMode(next);
+                    localStorage.setItem('ally-autopilot-mode', String(next));
+                  }}
                 />
+
+                {/* Tool Approval Dialog */}
+                <AnimatePresence>
+                  {pendingToolApproval && (
+                    <motion.div
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: 10 }}
+                      className={cn(
+                        "border-t p-3",
+                        "bg-amber-500/10 border-amber-500/20"
+                      )}
+                    >
+                      <div className="text-xs text-amber-300 mb-2 font-medium">
+                        🔧 Allow tool execution?
+                      </div>
+                      <div className="text-[11px] text-white/70 mb-2 font-mono bg-black/20 rounded p-2 overflow-x-auto">
+                        <span className="text-amber-300">{pendingToolApproval.toolName}</span>
+                        {pendingToolApproval.parameters && Object.keys(pendingToolApproval.parameters).length > 0 && (
+                          <span className="text-white/50">({JSON.stringify(pendingToolApproval.parameters)})</span>
+                        )}
+                      </div>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => pendingToolApproval.resolve(true)}
+                          className="px-3 py-1 text-xs rounded-lg bg-green-500/20 hover:bg-green-500/30 border border-green-500/30 text-green-300 transition-colors"
+                        >
+                          Allow
+                        </button>
+                        <button
+                          onClick={() => pendingToolApproval.resolve(false)}
+                          className="px-3 py-1 text-xs rounded-lg bg-red-500/20 hover:bg-red-500/30 border border-red-500/30 text-red-300 transition-colors"
+                        >
+                          Deny
+                        </button>
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
 
                 {/* Speech Controls */}
                 <AnimatePresence>

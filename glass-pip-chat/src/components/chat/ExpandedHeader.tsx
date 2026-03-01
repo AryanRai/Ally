@@ -10,9 +10,7 @@ import {
   Clipboard,
   Check,
   Mic,
-  MicOff,
-  Wrench,
-  Zap
+  MicOff
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { ThemeUtils } from '../../utils/themeUtils';
@@ -47,13 +45,6 @@ interface ExpandedHeaderProps {
   size: string;
   showSpeechControls: boolean;
   onSpeechToggle: () => void;
-  // Simple tool toggle
-  toolsEnabled?: boolean;
-  onToolsToggle?: () => void;
-  mcpServerCount?: number;
-  // Agentic mode toggle
-  agenticMode?: boolean;
-  onAgenticModeToggle?: () => void;
 }
 
 export default function ExpandedHeader({
@@ -83,12 +74,7 @@ export default function ExpandedHeader({
   onHide,
   size,
   showSpeechControls,
-  onSpeechToggle,
-  toolsEnabled,
-  onToolsToggle,
-  mcpServerCount = 0,
-  agenticMode,
-  onAgenticModeToggle
+  onSpeechToggle
 }: ExpandedHeaderProps) {
 
   return (
@@ -246,48 +232,7 @@ export default function ExpandedHeader({
           )}
         </button>
 
-        {/* Simple Tool Toggle */}
-        {onToolsToggle && (
-          <button
-            onClick={onToolsToggle}
-            className={cn(
-              "p-1 rounded-lg transition-colors relative",
-              toolsEnabled
-                ? "bg-purple-500/20 hover:bg-purple-500/30 text-purple-300"
-                : "hover:bg-white/10 opacity-60"
-            )}
-            title={toolsEnabled 
-              ? `Tools ON (${mcpServerCount} MCP)` 
-              : "Tools OFF"
-            }
-          >
-            <Wrench className="w-3 h-3" />
-            {toolsEnabled && mcpServerCount > 0 && (
-              <div className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 bg-green-500 rounded-full flex items-center justify-center">
-                <span className="text-[7px] font-bold text-white">{mcpServerCount}</span>
-              </div>
-            )}
-          </button>
-        )}
-
-        {/* Agentic Mode Toggle - only show when tools are enabled */}
-        {toolsEnabled && onAgenticModeToggle && (
-          <button
-            onClick={onAgenticModeToggle}
-            className={cn(
-              "p-1 rounded-lg transition-colors relative",
-              agenticMode
-                ? "bg-amber-500/20 hover:bg-amber-500/30 text-amber-300"
-                : "hover:bg-white/10 opacity-60"
-            )}
-            title={agenticMode 
-              ? "Agentic Mode: Multi-tool loop" 
-              : "Single Tool Mode"
-            }
-          >
-            <Zap className="w-3 h-3" />
-          </button>
-        )}
+        {/* Simple Tool Toggle - moved to footer ChatInput */}
 
         <button
           onClick={onSpeechToggle}

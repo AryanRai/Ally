@@ -8,7 +8,9 @@ import {
   X,
   ClipboardCopy,
   Wrench,
-  Zap
+  Zap,
+  ShieldCheck,
+  ShieldAlert
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { ThemeUtils } from '../../utils/themeUtils';
@@ -32,8 +34,11 @@ interface ChatInputProps {
   currentModel?: string;
   toolsEnabled?: boolean;
   agenticMode?: boolean;
+  autopilotMode?: boolean;
+  mcpToolCount?: number;
   onToolsToggle?: () => void;
   onAgenticModeToggle?: () => void;
+  onAutopilotToggle?: () => void;
 }
 
 const ChatInput = forwardRef<HTMLInputElement, ChatInputProps>(({
@@ -53,8 +58,11 @@ const ChatInput = forwardRef<HTMLInputElement, ChatInputProps>(({
   currentModel = 'unknown',
   toolsEnabled = false,
   agenticMode = false,
+  autopilotMode = true,
+  mcpToolCount = 0,
   onToolsToggle,
-  onAgenticModeToggle
+  onAgenticModeToggle,
+  onAutopilotToggle
 }, ref) => {
   const [showToolbar, setShowToolbar] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -198,10 +206,10 @@ const ChatInput = forwardRef<HTMLInputElement, ChatInputProps>(({
                     ? "bg-purple-500/20 border-purple-500/30 text-purple-300"
                     : "bg-white/5 hover:bg-white/10 border-white/10 text-white/60"
                 )}
-                title={toolsEnabled ? "Tools ON" : "Tools OFF"}
+                title={toolsEnabled ? `Tools ON (${mcpToolCount} available)` : "Tools OFF"}
               >
                 <Wrench className="w-3 h-3" />
-                Tools
+                Tools{toolsEnabled && mcpToolCount > 0 ? ` (${mcpToolCount})` : ''}
               </button>
             )}
 
@@ -271,6 +279,23 @@ const ChatInput = forwardRef<HTMLInputElement, ChatInputProps>(({
         >
           {isTyping ? <Square className="w-4 h-4" /> : <CornerDownLeft className="w-4 h-4" />}
         </button>
+        {/* Autopilot toggle - extreme right */}
+        {toolsEnabled && onAutopilotToggle && (
+          <button
+            type="button"
+            onClick={onAutopilotToggle}
+            className={cn(
+              "p-2 rounded-xl transition-all",
+              platform !== 'win32' && "backdrop-blur-md",
+              autopilotMode
+                ? "bg-green-500/20 hover:bg-green-500/30 text-green-300 border border-green-500/30"
+                : "bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/30"
+            )}
+            title={autopilotMode ? "Autopilot ON — tools run without asking" : "Autopilot OFF — asks before running tools"}
+          >
+            {autopilotMode ? <ShieldCheck className="w-4 h-4" /> : <ShieldAlert className="w-4 h-4" />}
+          </button>
+        )}
       </form>
     </div>
   );
