@@ -490,24 +490,28 @@ export default function GlassChatPiP() {
       (agenticMode 
         ? `You are an AI assistant with access to powerful tools. You MUST use tools to get real information.
 
-CRITICAL RULES - FOLLOW EXACTLY:
-1. NEVER guess or make up information - ALWAYS use a tool to get real data
-2. For ANY question about time/date → use get_current_time IMMEDIATELY
-3. For ANY question about files/directories → use list_directory or read_file IMMEDIATELY  
-4. For ANY math calculation → use calculate IMMEDIATELY
-5. You can chain MULTIPLE tools - use as many as needed to complete the task
-6. After each tool result, decide: need more info? → use another tool. Task complete? → give final answer
-7. NEVER say "I'll use a tool" or "Let me check" - just output the tool call JSON directly
+⚠️ CRITICAL - YOU DO NOT KNOW THE CURRENT TIME OR DATE! You must ALWAYS call get_current_time to get it.
 
-TOOL CALL FORMAT (output this JSON exactly):
-{"name": "tool_name", "parameters": {"param1": "value1"}}
+MANDATORY TOOL USAGE:
+• "time", "what time", "current time", "date", "today", "now" → MUST call: {"name": "get_current_time", "parameters": {}}
+• "files", "directory", "folder", "list", "what's here" → MUST call: {"name": "list_directory", "parameters": {"path": "."}}
+• "read", "show file", "contents of" → MUST call: {"name": "read_file", "parameters": {"path": "filename"}}
+• math expressions, "calculate", numbers → MUST call: {"name": "calculate", "parameters": {"expression": "..."}}
 
-EXAMPLES:
-- User asks "what time is it?" → {"name": "get_current_time", "parameters": {}}
-- User asks "list files" → {"name": "list_directory", "parameters": {"path": "."}}
-- User asks "what's 15 * 23?" → {"name": "calculate", "parameters": {"expression": "15 * 23"}}
+RULES:
+1. NEVER guess time/date - you don't have a clock, use the tool
+2. NEVER make up file contents - use read_file
+3. Output the JSON tool call IMMEDIATELY - no explanations before it
+4. You can use MULTIPLE tools in sequence
+5. After getting ALL needed info, give your final answer WITHOUT any JSON
 
-WHEN DONE: After you have ALL needed information from tools, write your final response naturally WITHOUT any JSON.`
+TOOL FORMAT:
+{"name": "tool_name", "parameters": {"key": "value"}}
+
+EXAMPLE - User asks "what time is it and list my files":
+Step 1: {"name": "get_current_time", "parameters": {}}
+Step 2 (after getting time): {"name": "list_directory", "parameters": {"path": "."}}
+Step 3 (after getting files): Give final answer with both pieces of info`
         : `You are an AI assistant with tool access. When you need information you don't have, use a tool.
 
 TO USE A TOOL, output ONLY this JSON (nothing else before or after):
@@ -546,13 +550,16 @@ Remember: Output ONLY the JSON tool call when you need to use a tool. No explana
   ) => {
     const MAX_ITERATIONS = 10;
     const MAX_TOOL_CALLS = 20;
+    const MAX_SAME_TOOL_RETRIES = 2; // Max times same tool can fail with same error
     
     let iteration = 0;
     let totalToolCalls = 0;
-    let conversationContext = '';
+    const allToolResults: Array<{ tool: string; result: string }> = []; // Track ALL tool results
     const allToolExecutions: ToolExecution[] = [];
     const finalResponseParts: string[] = [];
     let currentThinking = '';
+    // Retry guard: track consecutive failures of same tool+params
+    const failureTracker: Map<string, number> = new Map();
     
     // Initial message with system prompt
     let currentMessage = `[System: ${systemPrompt}]\n\nUser: ${contextualContent}`;
@@ -560,6 +567,11 @@ Remember: Output ONLY the JSON tool call when you need to use a tool. No explana
     while (iteration < MAX_ITERATIONS && totalToolCalls < MAX_TOOL_CALLS) {
       iteration++;
       console.log(`🔄 Agentic iteration ${iteration}`);
+      
+      // Build context from ALL previous tool results
+      const toolResultsContext = allToolResults.length > 0
+        ? `\n\nPrevious tool results:\n${allToolResults.map(tr => `- ${tr.tool}: ${tr.result}`).join('\n')}\n\nUse these results to answer the user's question. If you need more information, call another tool. Otherwise, provide your final answer WITHOUT any JSON.`
+        : '';
       
       let accumulatedResponse = '';
       let toolCallDetected = false;
@@ -569,7 +581,7 @@ Remember: Output ONLY the JSON tool call when you need to use a tool. No explana
       // Stream response from LLM
       await ollamaIntegration.sendMessageToOllama(
         activeChat?.messages || [],
-        currentMessage + (conversationContext ? `\n\n${conversationContext}` : ''),
+        currentMessage + toolResultsContext,
         (update) => {
           if (update.type === 'response' || update.type === 'done') {
             accumulatedResponse = update.response || '';
@@ -624,6 +636,43 @@ Remember: Output ONLY the JSON tool call when you need to use a tool. No explana
       // TypeScript needs this assertion after the null check
       const toolToExecute = detectedToolCall as { name: string; parameters: any };
       
+      // VALIDATION: Check required params for known tools before executing
+      const toolRequiresParams: Record<string, string[]> = {
+        'execute_command': ['command'],
+        'read_file': ['path'],
+        'read_text_file': ['path'],
+        'write_file': ['path', 'content'],
+        'edit_file': ['path'],
+        'move_file': ['source', 'destination'],
+        'search_files': ['pattern'],
+      };
+      
+      const requiredParams = toolRequiresParams[toolToExecute.name];
+      if (requiredParams) {
+        const params = toolToExecute.parameters || {};
+        const missingParams = requiredParams.filter(p => !params[p] && params[p] !== 0 && params[p] !== false);
+        if (missingParams.length > 0) {
+          console.warn(`⚠️ Tool ${toolToExecute.name} missing required params: ${missingParams.join(', ')} — skipping`);
+          // Tell the model it needs to provide params
+          allToolResults.push({ 
+            tool: toolToExecute.name, 
+            result: `ERROR: Missing required parameters: ${missingParams.join(', ')}. You must provide these.` 
+          });
+          finalResponseParts.push(`⚠️ **${toolToExecute.name}**: missing params (${missingParams.join(', ')})`);
+          currentMessage = '';
+          continue;
+        }
+      }
+      
+      // RETRY GUARD: Check if same tool+params has failed repeatedly
+      const toolKey = `${toolToExecute.name}:${JSON.stringify(toolToExecute.parameters)}`;
+      const priorFailures = failureTracker.get(toolKey) || 0;
+      if (priorFailures >= MAX_SAME_TOOL_RETRIES) {
+        console.warn(`🛑 Tool ${toolToExecute.name} has failed ${priorFailures} times with same params — breaking loop`);
+        finalResponseParts.push(`⚠️ **${toolToExecute.name}** failed repeatedly, stopping retries.`);
+        break;
+      }
+      
       // Add text before tool call to response
       if (beforeToolText && !finalResponseParts.includes(beforeToolText)) {
         finalResponseParts.push(beforeToolText);
@@ -652,6 +701,9 @@ Remember: Output ONLY the JSON tool call when you need to use a tool. No explana
         // Format result
         const resultText = formatToolResultForDisplay(toolToExecute.name, result);
         
+        // Add to accumulated tool results for context
+        allToolResults.push({ tool: toolToExecute.name, result: resultText });
+        
         // Add tool result to response parts
         finalResponseParts.push(`🔧 **${toolToExecute.name}**\n\`\`\`\n${resultText}\n\`\`\``);
         
@@ -659,10 +711,7 @@ Remember: Output ONLY the JSON tool call when you need to use a tool. No explana
         setActiveToolExecutions([...allToolExecutions]);
         setCurrentResponse(finalResponseParts.join('\n\n') + '\n\n*Analyzing results...*');
         
-        // Build context for next iteration
-        conversationContext = `Tool "${toolToExecute.name}" returned:\n${resultText}\n\nBased on this result, continue with the task. If you need more information, use another tool. If the task is complete, provide your final response WITHOUT any tool call JSON.`;
-        
-        // Reset message for next iteration
+        // Reset message for next iteration (context is built from allToolResults)
         currentMessage = '';
         
       } catch (error) {
@@ -671,13 +720,19 @@ Remember: Output ONLY the JSON tool call when you need to use a tool. No explana
         toolExecution.error = error instanceof Error ? error.message : String(error);
         toolExecution.endTime = Date.now();
         
+        // Track failure for retry guard
+        const failKey = `${toolToExecute.name}:${JSON.stringify(toolToExecute.parameters)}`;
+        failureTracker.set(failKey, (failureTracker.get(failKey) || 0) + 1);
+        
         setActiveToolExecutions([...allToolExecutions]);
         
         // Add error to response
         finalResponseParts.push(`❌ **${toolToExecute.name}** failed: ${toolExecution.error}`);
         
-        // Let the AI know about the error
-        conversationContext = `Tool "${toolToExecute.name}" failed with error: ${toolExecution.error}\n\nYou can try a different approach or explain the issue to the user.`;
+        // Add error to accumulated results
+        allToolResults.push({ tool: toolToExecute.name, result: `ERROR: ${toolExecution.error}` });
+        
+        // Reset message for next iteration
         currentMessage = '';
       }
     }
@@ -712,34 +767,61 @@ Remember: Output ONLY the JSON tool call when you need to use a tool. No explana
     // Strip thinking blocks
     const cleanedText = text.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
     
-    // Format 1: Raw JSON - {"name": "...", "parameters": ...}
-    const rawJsonMatch = cleanedText.match(/\{\s*"name"\s*:\s*"([^"]+)"\s*,\s*"parameters"\s*:\s*("[^"]*"|\{[^}]*\}|\[\]|null|\{\})\s*\}/);
-    if (rawJsonMatch) {
-      const name = rawJsonMatch[1];
-      let params = {};
-      const paramsStr = rawJsonMatch[2];
-      if (paramsStr && paramsStr !== '""' && paramsStr !== 'null') {
-        try {
-          params = JSON.parse(paramsStr);
-        } catch {
-          params = {};
+    // Find any JSON object containing "name" or "tool" key
+    const toolKeyMatch = cleanedText.match(/\{\s*"(?:name|tool)"\s*:\s*"([^"]+)"/);
+    if (toolKeyMatch) {
+      const name = toolKeyMatch[1];
+      const startIdx = cleanedText.indexOf(toolKeyMatch[0]);
+      
+      // Use brace counting to extract the full JSON object (handles nested objects)
+      let braceCount = 0;
+      let endIdx = -1;
+      let inString = false;
+      let escapeNext = false;
+      for (let i = startIdx; i < cleanedText.length; i++) {
+        const ch = cleanedText[i];
+        if (escapeNext) { escapeNext = false; continue; }
+        if (ch === '\\' && inString) { escapeNext = true; continue; }
+        if (ch === '"' && !escapeNext) { inString = !inString; continue; }
+        if (inString) continue;
+        if (ch === '{') braceCount++;
+        if (ch === '}') braceCount--;
+        if (braceCount === 0) {
+          endIdx = i + 1;
+          break;
         }
       }
-      const idx = cleanedText.indexOf(rawJsonMatch[0]);
-      return {
-        toolCall: { name, parameters: params },
-        beforeText: cleanedText.substring(0, idx).trim()
-      };
+      
+      // CRITICAL: If braces aren't balanced, the JSON is incomplete (still streaming)
+      // Return null so we wait for more data
+      if (endIdx === -1 || braceCount !== 0) {
+        return { toolCall: null, beforeText: cleanedText };
+      }
+      
+      const jsonStr = cleanedText.substring(startIdx, endIdx);
+      
+      try {
+        const parsed = JSON.parse(jsonStr);
+        const params = parsed.parameters || parsed.args || parsed.arguments || parsed.params || {};
+        return {
+          toolCall: { name, parameters: params },
+          beforeText: cleanedText.substring(0, startIdx).trim()
+        };
+      } catch {
+        // JSON parse failed even with balanced braces - likely malformed, skip
+        console.warn('⚠️ Tool call JSON parse failed despite balanced braces:', jsonStr);
+        return { toolCall: null, beforeText: cleanedText };
+      }
     }
     
-    // Format 2: JSON with tags
+    // Format with tags: <tool_call>...</tool_call>
     const jsonTagMatch = cleanedText.match(/<tool_call>\s*(\{[\s\S]*?\})\s*<\/tool_call>/);
     if (jsonTagMatch) {
       try {
         const parsed = JSON.parse(jsonTagMatch[1].trim());
         const idx = cleanedText.indexOf(jsonTagMatch[0]);
         return {
-          toolCall: { name: parsed.name, parameters: parsed.parameters || {} },
+          toolCall: { name: parsed.name || parsed.tool, parameters: parsed.parameters || parsed.args || parsed.arguments || {} },
           beforeText: cleanedText.substring(0, idx).trim()
         };
       } catch { /* continue */ }
@@ -903,7 +985,7 @@ Remember: Output ONLY the JSON tool call when you need to use a tool. No explana
       
       // Always add built-in tools that work without MCP
       tools.push(
-        { name: 'get_current_time', description: 'Get the current date and time', parameters: {} },
+        { name: 'get_current_time', description: 'Get the current date and time. USE THIS for any time/date questions!', parameters: {} },
         { name: 'calculate', description: 'Perform a mathematical calculation', parameters: { expression: 'string (e.g., "2 + 2", "sqrt(16)")' } }
       );
       
@@ -955,23 +1037,38 @@ Remember: Output ONLY the JSON tool call when you need to use a tool. No explana
     }
     
     // Add default parameters for known tools that require them
-    if (toolName === 'list_directory' && !normalizedParams.path) {
+    // Also normalize tool name aliases
+    let actualToolName = toolName;
+    
+    // Alias: ls -> list_directory
+    if (toolName === 'ls' || toolName === 'dir') {
+      actualToolName = 'list_directory';
+    }
+    // Alias: cat -> read_file
+    if (toolName === 'cat' || toolName === 'read') {
+      actualToolName = 'read_file';
+    }
+    
+    if (actualToolName === 'list_directory' && !normalizedParams.path) {
       normalizedParams = { path: '.' }; // Default to current directory
     }
-    if (toolName === 'read_file' && !normalizedParams.path) {
+    if (actualToolName === 'read_file' && !normalizedParams.path) {
       return { error: 'read_file requires a path parameter' };
     }
     
     // Handle built-in tools first
-    if (toolName === 'get_current_time') {
+    if (actualToolName === 'get_current_time' || toolName === 'current_time' || toolName === 'get_time' || toolName === 'time') {
+      const now = new Date();
       return {
-        time: new Date().toISOString(),
-        formatted: new Date().toLocaleString(),
-        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone
+        time: now.toISOString(),
+        formatted: now.toLocaleString(),
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        date: now.toLocaleDateString(),
+        timeOnly: now.toLocaleTimeString()
       };
     }
     
-    if (toolName === 'calculate') {
+    if (actualToolName === 'calculate' || toolName === 'calc' || toolName === 'math') {
       try {
         const expr = normalizedParams?.expression || normalizedParams;
         // Safe math evaluation (basic operations only)
@@ -985,21 +1082,21 @@ Remember: Output ONLY the JSON tool call when you need to use a tool. No explana
     
     // Try MCP tool execution via the integration hook
     try {
-      // Check if this tool exists in our MCP tools
-      const mcpTool = mcpIntegration.mcpTools.find(t => t.name === toolName);
+      // Check if this tool exists in our MCP tools (try both original and actual name)
+      const mcpTool = mcpIntegration.mcpTools.find(t => t.name === actualToolName || t.name === toolName);
       
-      console.log('🔍 Looking for tool:', toolName, 'in MCP tools:', mcpIntegration.mcpTools.map(t => t.name));
+      console.log('🔍 Looking for tool:', actualToolName, '(original:', toolName, ') in MCP tools:', mcpIntegration.mcpTools.map(t => t.name));
       
       if (mcpTool) {
-        console.log('🔧 Executing MCP tool via integration:', toolName, 'with normalized params:', normalizedParams);
-        return await mcpIntegration.executeMCPTool(toolName, normalizedParams);
+        console.log('🔧 Executing MCP tool via integration:', mcpTool.name, 'with normalized params:', normalizedParams);
+        return await mcpIntegration.executeMCPTool(mcpTool.name, normalizedParams);
       }
       
       // Try executing via mcpIntegration even if not in the cached list
       // (the tool might exist on the server but not be cached yet)
       try {
-        console.log('🔧 Trying MCP tool execution (not in cache):', toolName);
-        const result = await mcpIntegration.executeMCPTool(toolName, normalizedParams);
+        console.log('🔧 Trying MCP tool execution (not in cache):', actualToolName);
+        const result = await mcpIntegration.executeMCPTool(actualToolName, normalizedParams);
         return result;
       } catch (mcpError) {
         console.log('MCP integration failed, trying fallback:', mcpError);
@@ -1007,13 +1104,13 @@ Remember: Output ONLY the JSON tool call when you need to use a tool. No explana
       
       // Last resort fallback to window.pip.mcp API (this is the mock)
       if (window.pip?.mcp?.executeTool) {
-        console.log('⚠️ Falling back to mock executeTool for:', toolName);
-        return await window.pip.mcp.executeTool(toolName, normalizedParams);
+        console.log('⚠️ Falling back to mock executeTool for:', actualToolName);
+        return await window.pip.mcp.executeTool(actualToolName, normalizedParams);
       }
       
-      throw new Error(`Tool ${toolName} not found`);
+      throw new Error(`Tool ${actualToolName} not found`);
     } catch (error) {
-      console.error(`Failed to execute tool ${toolName}:`, error);
+      console.error(`Failed to execute tool ${actualToolName}:`, error);
       throw error;
     }
   };
@@ -2281,6 +2378,12 @@ Remember: Output ONLY the JSON tool call when you need to use a tool. No explana
                   }}
                   onRunCommand={() => setInput('/run ')}
                   placeholder={currentGreeting}
+                  messages={messages}
+                  currentModel={ollamaIntegration.currentModel}
+                  toolsEnabled={toolsEnabled}
+                  agenticMode={agenticMode}
+                  onToolsToggle={() => setToolsEnabled(!toolsEnabled)}
+                  onAgenticModeToggle={() => setAgenticMode(!agenticMode)}
                 />
 
                 {/* Speech Controls */}

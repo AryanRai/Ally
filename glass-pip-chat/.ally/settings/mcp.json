@@ -82,13 +82,30 @@
       "command": "npx",
       "args": [
         "-y",
-        "@modelcontextprotocol/server-time"
+        "time-mcp"
       ],
       "env": {},
-      "disabled": true,
+      "disabled": false,
       "autoApprove": [
-        "get_current_time",
-        "get_timezone"
+        "current_time",
+        "get_timestamp",
+        "convert_time"
+      ]
+    },
+    "terminal-controller": {
+      "command": "uvx",
+      "args": [
+        "terminal_controller"
+      ],
+      "env": {},
+      "disabled": false,
+      "autoApprove": [
+        "execute_command",
+        "get_current_directory",
+        "list_directory",
+        "change_directory",
+        "read_file",
+        "write_file"
       ]
     }
   }

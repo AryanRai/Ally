@@ -1,12 +1,18 @@
-import { forwardRef } from 'react';
+import { forwardRef, useState } from 'react';
 import { 
   CornerDownLeft, 
   Square, 
   Clipboard, 
-  MousePointer 
+  MousePointer,
+  Plus,
+  X,
+  ClipboardCopy,
+  Wrench,
+  Zap
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { ThemeUtils } from '../../utils/themeUtils';
+import { Message } from '../../types/chat';
 
 interface ChatInputProps {
   platform: string;
@@ -21,6 +27,13 @@ interface ChatInputProps {
   onHelpSelected: () => void;
   onRunCommand: () => void;
   placeholder?: string;
+  // Extra toolbar props
+  messages?: Message[];
+  currentModel?: string;
+  toolsEnabled?: boolean;
+  agenticMode?: boolean;
+  onToolsToggle?: () => void;
+  onAgenticModeToggle?: () => void;
 }
 
 const ChatInput = forwardRef<HTMLInputElement, ChatInputProps>(({
@@ -35,8 +48,59 @@ const ChatInput = forwardRef<HTMLInputElement, ChatInputProps>(({
   onExplainClipboard,
   onHelpSelected,
   onRunCommand,
-  placeholder = 'Balalalala'
+  placeholder = 'Balalalala',
+  messages = [],
+  currentModel = 'unknown',
+  toolsEnabled = false,
+  agenticMode = false,
+  onToolsToggle,
+  onAgenticModeToggle
 }, ref) => {
+  const [showToolbar, setShowToolbar] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  const handleCopyChatDebug = async () => {
+    const timestamp = new Date().toISOString();
+    const lines: string[] = [
+      `=== CHAT DEBUG EXPORT ===`,
+      `Exported: ${new Date().toLocaleString()}`,
+      `Model: ${currentModel}`,
+      `Tools Enabled: ${toolsEnabled}`,
+      `Agentic Mode: ${agenticMode}`,
+      `Messages: ${messages.length}`,
+      `Platform: ${navigator.platform}`,
+      `---`,
+      ''
+    ];
+
+    for (const msg of messages) {
+      const time = new Date(msg.timestamp).toLocaleTimeString();
+      const role = msg.role.toUpperCase();
+      lines.push(`[${time}] ${role}:`);
+      lines.push(msg.content);
+      if (msg.metadata?.toolCalls?.length) {
+        lines.push(`  Tool Calls: ${JSON.stringify(msg.metadata.toolCalls)}`);
+      }
+      if (msg.metadata?.toolResults?.length) {
+        lines.push(`  Tool Results: ${JSON.stringify(msg.metadata.toolResults)}`);
+      }
+      if (msg.metadata?.source) {
+        lines.push(`  Source: ${msg.metadata.source}`);
+      }
+      lines.push('');
+    }
+
+    lines.push(`=== END EXPORT ===`);
+
+    try {
+      await navigator.clipboard.writeText(lines.join('\n'));
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      console.error('Failed to copy chat:', err);
+    }
+  };
+
   return (
     <div className={cn(
       "border-t p-3",
@@ -90,6 +154,80 @@ const ChatInput = forwardRef<HTMLInputElement, ChatInputProps>(({
           <CornerDownLeft className="w-3 h-3 inline mr-1" />
           Run
         </button>
+      </div>
+
+      {/* Expandable extra toolbar */}
+      <div className="flex items-center gap-1 mb-2">
+        <button
+          onClick={() => setShowToolbar(!showToolbar)}
+          className={cn(
+            "p-1 rounded-lg transition-colors",
+            showToolbar
+              ? "bg-white/15 text-white/80"
+              : "hover:bg-white/10 text-white/40"
+          )}
+          title={showToolbar ? "Hide toolbar" : "More options"}
+        >
+          {showToolbar ? <X className="w-3 h-3" /> : <Plus className="w-3 h-3" />}
+        </button>
+
+        {showToolbar && (
+          <div className="flex flex-wrap items-center gap-1 animate-in fade-in slide-in-from-left-2 duration-150">
+            {/* Copy Chat Debug */}
+            <button
+              onClick={handleCopyChatDebug}
+              className={cn(
+                "inline-flex items-center gap-1 px-2 py-1 text-[10px] rounded-lg transition-colors",
+                copied
+                  ? "bg-green-500/20 border border-green-500/30 text-green-300"
+                  : "bg-white/5 hover:bg-white/10 border border-white/10 text-white/60 hover:text-white/80"
+              )}
+              title="Copy full chat with debug info"
+            >
+              <ClipboardCopy className="w-3 h-3" />
+              {copied ? 'Copied!' : 'Copy Chat'}
+            </button>
+
+            {/* Tools toggle */}
+            {onToolsToggle && (
+              <button
+                onClick={onToolsToggle}
+                className={cn(
+                  "inline-flex items-center gap-1 px-2 py-1 text-[10px] rounded-lg transition-colors border",
+                  toolsEnabled
+                    ? "bg-purple-500/20 border-purple-500/30 text-purple-300"
+                    : "bg-white/5 hover:bg-white/10 border-white/10 text-white/60"
+                )}
+                title={toolsEnabled ? "Tools ON" : "Tools OFF"}
+              >
+                <Wrench className="w-3 h-3" />
+                Tools
+              </button>
+            )}
+
+            {/* Agentic toggle */}
+            {toolsEnabled && onAgenticModeToggle && (
+              <button
+                onClick={onAgenticModeToggle}
+                className={cn(
+                  "inline-flex items-center gap-1 px-2 py-1 text-[10px] rounded-lg transition-colors border",
+                  agenticMode
+                    ? "bg-amber-500/20 border-amber-500/30 text-amber-300"
+                    : "bg-white/5 hover:bg-white/10 border-white/10 text-white/60"
+                )}
+                title={agenticMode ? "Agentic: Multi-tool" : "Single tool"}
+              >
+                <Zap className="w-3 h-3" />
+                Agentic
+              </button>
+            )}
+
+            {/* Model indicator */}
+            <span className="px-2 py-1 text-[10px] text-white/30 truncate max-w-[120px]" title={currentModel}>
+              {currentModel}
+            </span>
+          </div>
+        )}
       </div>
 
       <form
