@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { isWeb } from '../utils/platform';
 
 type Size = 'S' | 'M' | 'L';
 
@@ -21,11 +22,11 @@ export function useWindowManagement() {
   const [state, setState] = useState<PiPState>({
     x: 24,
     y: 24,
-    size: 'M',
-    collapsed: false
+    size: isWeb ? 'L' : 'M',
+    collapsed: false // In web mode, never collapsed
   });
   
-  const [platform, setPlatform] = useState<string>('');
+  const [platform, setPlatform] = useState<string>(isWeb ? 'web' : '');
   const [theme, setTheme] = useState<'light' | 'dark'>('dark');
   const [isResizing, setIsResizing] = useState(false);
   const [serverStatus, setServerStatus] = useState<any>(null);
@@ -177,14 +178,14 @@ export function useWindowManagement() {
   };
 
   const handleCollapseToggle = () => {
+    if (isWeb) return; // Never collapse in web mode
     const newCollapsed = !state.collapsed;
     console.log('Toggling collapse from', state.collapsed, 'to', newCollapsed);
-
-    // Update state - the useEffect will handle the window resize
     setState(prev => ({ ...prev, collapsed: newCollapsed }));
   };
 
   const handleHide = () => {
+    if (isWeb) return;
     window.pip?.hide();
   };
 

@@ -1,10 +1,12 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ChevronDown, ChevronUp, Check, Server, Zap, Settings, Search, Filter, Sparkles } from 'lucide-react';
+import { ChevronDown, ChevronUp, Check, Server, Zap, Settings, Search, Filter, Sparkles, Globe } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { ThemeUtils } from '../utils/themeUtils';
 import { popularOpenRouterModels, popularGeminiModels } from '../config/providers';
+import { isWeb } from '../utils/platform';
+import { SupabaseChatSync } from '../services/supabaseChatSync';
 
 interface UnifiedModelSelectorProps {
   platform: string;
@@ -78,6 +80,24 @@ export const UnifiedModelSelector: React.FC<UnifiedModelSelectorProps> = ({
   
   const [searchQuery, setSearchQuery] = useState('');
   const [showFreeOnly, setShowFreeOnly] = useState(false);
+  const [remoteModel, setRemoteModel] = useState<string | null>(null);
+
+  // On web, fetch the desktop's current model from the selected system
+  useEffect(() => {
+    if (!isWeb) return;
+    const sync = SupabaseChatSync.getInstance();
+    const fetchRemoteModel = async () => {
+      await sync.init();
+      const systems = await sync.fetchActiveSystems();
+      const selected = systems.find(s => s.id === sync.selectedSystemId) || systems[0];
+      if (selected?.capabilities?.currentModel) {
+        setRemoteModel(selected.capabilities.currentModel);
+      }
+    };
+    fetchRemoteModel();
+    const interval = setInterval(fetchRemoteModel, 30000);
+    return () => clearInterval(interval);
+  }, []);
   const [selectedProvider, setSelectedProvider] = useState('All');
   const [showFilters, setShowFilters] = useState(false);
   
@@ -90,7 +110,7 @@ export const UnifiedModelSelector: React.FC<UnifiedModelSelectorProps> = ({
     
     const models: { ollama: any[]; openrouter: any[]; gemini: any[]; loading: boolean } = { ollama: [], openrouter: [], gemini: [], loading: false };
     
-    // Load Ollama models
+    // Load Ollama models (only available in Electron)
     try {
       if (window.pip?.ollama?.isAvailable) {
         const isOllamaAvailable = await window.pip.ollama.isAvailable();
@@ -100,7 +120,7 @@ export const UnifiedModelSelector: React.FC<UnifiedModelSelectorProps> = ({
         }
       }
     } catch (error) {
-      console.warn('Failed to load Ollama models:', error);
+      // Expected in web mode — no local Ollama
     }
     
     // Load OpenRouter models
@@ -112,12 +132,10 @@ export const UnifiedModelSelector: React.FC<UnifiedModelSelectorProps> = ({
         models.openrouter = popularOpenRouterModels;
       }
     } catch (error) {
-      console.warn('Failed to load OpenRouter models, using fallback:', error);
       models.openrouter = popularOpenRouterModels;
     }
     
-    // Load Gemini models - use static list to avoid API calls on mount
-    // The models list API is free but we don't need to call it every time
+    // Load Gemini models
     models.gemini = popularGeminiModels;
     
     setAllModels(models);
@@ -332,6 +350,29 @@ export const UnifiedModelSelector: React.FC<UnifiedModelSelectorProps> = ({
 
   return (
     <>
+      {/* Web mode: show remote model as read-only */}
+      {isWeb ? (
+        <div
+          className={cn(
+            "flex items-center rounded-lg flex-shrink-0",
+            "border border-white/20 bg-white/5",
+            windowSize === 'S' ? "p-1" : "gap-1 px-1.5 py-1",
+            className
+          )}
+          title={`Desktop model: ${remoteModel || 'unknown'}`}
+        >
+          <Globe className="w-3 h-3 text-blue-400 flex-shrink-0" />
+          {windowSize !== 'S' && (
+            <div className={cn(
+              "font-medium truncate",
+              compact ? "text-[10px]" : "text-sm max-w-28"
+            )}>
+              {remoteModel || 'Desktop model'}
+            </div>
+          )}
+        </div>
+      ) : (
+      <>
       {/* Model Selector Button */}
       <button
         ref={buttonRef}
@@ -613,6 +654,8 @@ export const UnifiedModelSelector: React.FC<UnifiedModelSelectorProps> = ({
           </AnimatePresence>
         </>,
         document.body
+      )}
+    </>
       )}
     </>
   );

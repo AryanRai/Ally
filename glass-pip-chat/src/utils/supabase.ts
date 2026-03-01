@@ -49,11 +49,9 @@ function checkSupabaseEnabled(): boolean {
     return false;
   }
   
-  // Check if remote is disabled (implies local-only mode)
-  if (!env.ENABLE_REMOTE) {
-    SUPABASE_DISABLED_REASONS.push('Remote features disabled (local-only mode)');
-    return false;
-  }
+  // Note: We no longer gate Supabase on ENABLE_REMOTE.
+  // Supabase auth should work independently so users can sign in
+  // even when remote polling/message features are off.
   
   return true;
 }

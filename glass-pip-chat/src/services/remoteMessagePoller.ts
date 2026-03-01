@@ -11,7 +11,8 @@ import { SupabaseClient } from '@supabase/supabase-js';
 import { OllamaService, ChatMessage } from './ollamaService';
 import { ToolCallingService } from './toolCallingService';
 import { RemoteMessageProcessor, ProcessMessageRequest } from './remoteMessageProcessor';
-import { getSupabaseServiceClient, getSupabaseClient, isSupabaseEnabled } from '../utils/supabase';
+import { getSupabaseClient, isSupabaseEnabled } from '../utils/supabase';
+import { RemoteToolBridge } from './remoteToolBridge';
 
 export interface RemoteMessage {
   id: string;
@@ -82,7 +83,15 @@ export class RemoteMessagePoller {
   ) {
     this.config = config;
     this.messageProcessor = new RemoteMessageProcessor(ollamaService, toolCallingService);
-    this.supabaseClient = getSupabaseServiceClient();
+    
+    // Use the regular (publishable key) client with the user's auth session.
+    // The secret/service key must NOT be used in the browser — Supabase blocks it.
+    // RLS policies on the tables handle authorization instead.
+    const client = getSupabaseClient();
+    if (!client) {
+      throw new Error('Supabase client not available — cannot start poller');
+    }
+    this.supabaseClient = client;
   }
 
   /**
@@ -180,7 +189,8 @@ export class RemoteMessagePoller {
       capabilities: {
         models: ['llama3.2', 'llama3.1', 'codellama'], // Default models
         tools: ['file_operations', 'system_commands', 'web_search'], // Default tools
-        features: ['streaming', 'tool_calling', 'voice_mode']
+        features: ['streaming', 'tool_calling', 'voice_mode'],
+        currentModel: localStorage.getItem('ally-current-model') || 'unknown'
       },
       metadata: {
         version: '1.0.0',
@@ -358,6 +368,26 @@ export class RemoteMessagePoller {
     console.log(`🔄 RemoteMessagePoller: Processing message ${message.id}: ${message.content.substring(0, 100)}...`);
     
     try {
+      // If the message requests tool usage and the bridge is ready, delegate to GlassChatPiP's pipeline
+      if (message.metadata?.useTools && RemoteToolBridge.isReady) {
+        console.log(`🔧 RemoteMessagePoller: Delegating to tool bridge for message ${message.id}`);
+        await this.updateMessageStatus(message.id, 'processing');
+        
+        const handled = await RemoteToolBridge.dispatch({
+          messageId: message.id,
+          sessionId: message.session_id,
+          content: message.content,
+          userId: message.user_id,
+        });
+        
+        if (handled) {
+          console.log(`✅ RemoteMessagePoller: Tool bridge handled message ${message.id}`);
+          return; // Bridge handles status updates
+        }
+        // Fall through to normal processing if bridge fails
+        console.log(`⚠️ RemoteMessagePoller: Tool bridge failed, falling back to normal processing`);
+      }
+
       // Update status to processing
       console.log(`📝 RemoteMessagePoller: Updating message ${message.id} status to processing`);
       await this.updateMessageStatus(message.id, 'processing');

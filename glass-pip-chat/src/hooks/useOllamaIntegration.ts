@@ -12,6 +12,9 @@ export function useOllamaIntegration() {
     console.log('🎯 Setting current model:', model);
     setCurrentModelState(model);
     
+    // Save to localStorage so remote poller can include it in heartbeat
+    try { localStorage.setItem('ally-current-model', model); } catch {}
+    
     // Persist the selection to config
     try {
       if (window.pip?.ollama) {
@@ -102,6 +105,7 @@ export function useOllamaIntegration() {
         
         if (selectedModel) {
           setCurrentModelState(selectedModel);
+          try { localStorage.setItem('ally-current-model', selectedModel); } catch {}
           console.log('✅ Current model set to:', selectedModel);
         }
       } catch (error) {

@@ -100,6 +100,10 @@ CREATE POLICY "Users manage own messages" ON chat_messages FOR ALL USING (auth.u
 CREATE POLICY "Users manage own systems" ON local_systems FOR ALL USING (auth.uid() = user_id);
 CREATE POLICY "Users view own tool executions" ON tool_executions FOR SELECT
   USING (EXISTS (SELECT 1 FROM chat_messages WHERE chat_messages.id = tool_executions.message_id AND chat_messages.user_id = auth.uid()));
+CREATE POLICY "Users insert own tool executions" ON tool_executions FOR INSERT
+  WITH CHECK (EXISTS (SELECT 1 FROM chat_messages WHERE chat_messages.id = tool_executions.message_id AND chat_messages.user_id = auth.uid()));
+CREATE POLICY "Users update own tool executions" ON tool_executions FOR UPDATE
+  USING (EXISTS (SELECT 1 FROM chat_messages WHERE chat_messages.id = tool_executions.message_id AND chat_messages.user_id = auth.uid()));
 CREATE POLICY "Users manage own link tokens" ON link_tokens FOR ALL USING (auth.uid() = user_id);
 CREATE POLICY "Users manage own discord links" ON discord_links FOR ALL USING (auth.uid() = user_id);
 
@@ -129,3 +133,13 @@ BEGIN
   UPDATE link_tokens SET status = 'expired' WHERE status = 'pending' AND expires_at < NOW();
 END;
 $$ LANGUAGE plpgsql;
+
+-- Update system heartbeat (called by desktop poller via RPC)
+CREATE OR REPLACE FUNCTION update_system_heartbeat(system_id TEXT, new_status TEXT DEFAULT 'online')
+RETURNS void AS $$
+BEGIN
+  UPDATE local_systems
+  SET last_heartbeat = NOW(), status = new_status
+  WHERE id = system_id AND user_id = auth.uid();
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;

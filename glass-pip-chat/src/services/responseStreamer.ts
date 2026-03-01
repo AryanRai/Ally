@@ -8,7 +8,7 @@
  */
 
 import { SupabaseClient } from '@supabase/supabase-js';
-import { getSupabaseServiceClient } from '../utils/supabase';
+import { getSupabaseClient } from '../utils/supabase';
 
 export interface StreamingConfig {
   supabaseUrl: string;
@@ -46,7 +46,13 @@ export class ResponseStreamer {
 
   constructor(config: StreamingConfig) {
     this.config = config;
-    this.supabaseClient = getSupabaseServiceClient();
+    // Use the regular (publishable key) client with the user's auth session.
+    // The secret key must NOT be used in the browser — Supabase blocks it.
+    const client = getSupabaseClient();
+    if (!client) {
+      throw new Error('Supabase client not available — cannot start response streamer');
+    }
+    this.supabaseClient = client;
   }
 
   /**

@@ -3,6 +3,8 @@ import GlassChatPiP from './components/GlassChatPiP';
 import { UnifiedIntegrationTest } from './components/UnifiedIntegrationTest';
 import { GrammarlyFix, suppressExtensionWarnings } from './components/GrammarlyFix';
 import { ProviderTest } from './components/ProviderTest';
+import { isWeb } from './utils/platform';
+import { WebAuthGate } from './components/WebAuthGate';
 
 export default function App() {
   const [visible, setVisible] = useState(true);
@@ -99,7 +101,13 @@ export default function App() {
     <div className="min-h-screen bg-transparent">
       <GrammarlyFix />
       
-      {visible && <GlassChatPiP />}
+      {isWeb ? (
+        <WebAuthGate>
+          <GlassChatPiP />
+        </WebAuthGate>
+      ) : (
+        visible && <GlassChatPiP />
+      )}
     </div>
   );
 }

@@ -289,18 +289,22 @@ export class UnifiedToolIntegrationService extends BrowserEventEmitter {
       return;
     }
 
-    // Check if stream handler is enabled in settings
+    // Only connect if stream handler is explicitly enabled in settings
     try {
       const savedSettings = localStorage.getItem('ally-glass-pip-settings');
       if (savedSettings) {
         const settings = JSON.parse(savedSettings);
-        if (settings.network?.enableStreamHandler === false) {
-          console.log('🔒 Stream handler disabled in settings - skipping connection');
+        if (settings.network?.enableStreamHandler !== true) {
+          // Default to NOT connecting — user must opt in
           return;
         }
+      } else {
+        // No settings saved yet — don't auto-connect
+        return;
       }
     } catch (e) {
-      // Ignore parse errors, continue with connection
+      // Can't read settings — don't connect
+      return;
     }
 
     this.state.connectionStatus = 'connecting';
@@ -1123,27 +1127,22 @@ User: ${message}`;
   }
 
   private scheduleReconnect(): void {
-    // Check if stream handler is enabled in settings before reconnecting
+    // Only reconnect if stream handler is explicitly enabled
     try {
       const savedSettings = localStorage.getItem('ally-glass-pip-settings');
-      if (savedSettings) {
-        const settings = JSON.parse(savedSettings);
-        if (settings.network?.enableStreamHandler === false) {
-          console.log('🔒 Stream handler disabled in settings - skipping reconnect');
-          return;
-        }
-      }
+      if (!savedSettings) return;
+      const settings = JSON.parse(savedSettings);
+      if (settings.network?.enableStreamHandler !== true) return;
     } catch (e) {
-      // Ignore parse errors
+      return;
     }
     
     if (this.reconnectAttempts >= this.config.maxReconnectAttempts) {
-      console.error('Max reconnection attempts reached');
+      console.log('Stream handler: max reconnection attempts reached');
       return;
     }
     
     this.reconnectAttempts++;
-    console.log(`Scheduling reconnect attempt ${this.reconnectAttempts}/${this.config.maxReconnectAttempts}`);
     
     this.reconnectTimer = setTimeout(() => {
       this.connect();

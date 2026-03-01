@@ -12,7 +12,6 @@ import {
   Monitor, 
   Globe, 
   User, 
-  Lock, 
   LogIn, 
   Settings,
   Server,
@@ -20,6 +19,8 @@ import {
 } from 'lucide-react';
 import { useRemoteConnection } from '../hooks/useRemoteConnection';
 import { AuthHelper } from './AuthHelper';
+import { isWeb } from '../utils/platform';
+import { SupabaseChatSync } from '../services/supabaseChatSync';
 
 interface RemoteSettingsProps {
   className?: string;
@@ -33,6 +34,10 @@ export const RemoteSettings: React.FC<RemoteSettingsProps> = ({ className = '' }
   const [isSignUp, setIsSignUp] = useState(false);
   const [systemId, setSystemId] = useState(localStorage.getItem('ally-system-id') || 'ally-local-system');
   const [systemName, setSystemName] = useState(localStorage.getItem('ally-system-name') || 'Ally Local System');
+  const [activeSystems, setActiveSystems] = useState<Array<{ id: string; name: string; status: string; lastHeartbeat: string; capabilities: any }>>([]);
+  const [selectedSystem, setSelectedSystem] = useState<string>(() => {
+    try { return localStorage.getItem('ally-selected-system') || 'ally-local-system'; } catch { return 'ally-local-system'; }
+  });
 
   const {
     mode,
@@ -50,6 +55,20 @@ export const RemoteSettings: React.FC<RemoteSettingsProps> = ({ className = '' }
     stopRemoteService,
     refreshStatus
   } = useRemoteConnection();
+
+  // In web mode, poll for active systems
+  useEffect(() => {
+    if (!isWeb) return;
+    const sync = SupabaseChatSync.getInstance();
+    const load = async () => {
+      await sync.init();
+      const systems = await sync.fetchActiveSystems();
+      setActiveSystems(systems);
+    };
+    load();
+    const interval = setInterval(load, 15000); // refresh every 15s
+    return () => clearInterval(interval);
+  }, []);
 
   const getStatusColor = () => {
     if (mode === 'local') return 'text-blue-400';
@@ -134,8 +153,91 @@ export const RemoteSettings: React.FC<RemoteSettingsProps> = ({ className = '' }
               {/* Header */}
               <div className="flex items-center gap-2 pb-2 border-b border-gray-600/30">
                 <Server className="w-4 h-4 text-blue-400" />
-                <h3 className="text-sm font-semibold text-gray-100">Remote Control</h3>
+                <h3 className="text-sm font-semibold text-gray-100">
+                  {isWeb ? 'Connected Systems' : 'Remote Control'}
+                </h3>
               </div>
+
+              {/* Web mode: show active Ally instances */}
+              {isWeb ? (
+                <div className="space-y-3">
+                  {/* User info */}
+                  {user && (
+                    <div className="flex items-center gap-2 p-2 bg-blue-900/20 border border-blue-600/30 rounded-lg">
+                      <User className="w-3 h-3 text-blue-400" />
+                      <span className="text-xs text-blue-400 truncate">{user.email}</span>
+                    </div>
+                  )}
+
+                  {/* Active systems */}
+                  <div>
+                    <label className="text-xs text-gray-400 mb-2 block">
+                      Ally Instances ({activeSystems.length})
+                    </label>
+                    {activeSystems.length === 0 ? (
+                      <div className="p-3 bg-gray-800/50 rounded-lg text-center">
+                        <Monitor className="w-5 h-5 text-gray-500 mx-auto mb-1" />
+                        <p className="text-xs text-gray-500">No desktop instances found</p>
+                        <p className="text-[10px] text-gray-600 mt-1">Start Ally on your desktop to connect</p>
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        {activeSystems.map(sys => {
+                          const isOnline = sys.status === 'online';
+                          const heartbeatAge = Date.now() - new Date(sys.lastHeartbeat).getTime();
+                          const isStale = heartbeatAge > 60000; // >1 min
+                          const isSelected = selectedSystem === sys.id;
+                          const currentModel = sys.capabilities?.currentModel || 'unknown';
+                          return (
+                            <button
+                              key={sys.id}
+                              onClick={() => {
+                                setSelectedSystem(sys.id);
+                                const sync = SupabaseChatSync.getInstance();
+                                sync.selectedSystemId = sys.id;
+                              }}
+                              className={`w-full text-left p-2 rounded-lg border transition-all ${
+                                isSelected
+                                  ? 'bg-blue-900/30 border-blue-500/50 ring-1 ring-blue-500/30'
+                                  : isOnline && !isStale
+                                    ? 'bg-green-900/20 border-green-600/30 hover:border-green-500/50'
+                                    : 'bg-gray-800/50 border-gray-600/30 hover:border-gray-500/50'
+                              }`}
+                            >
+                              <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-2">
+                                  <div className={`w-2 h-2 rounded-full ${isOnline && !isStale ? 'bg-green-400 animate-pulse' : 'bg-gray-500'}`} />
+                                  <span className="text-xs font-medium text-gray-200">{sys.name}</span>
+                                  {isSelected && <span className="text-[9px] bg-blue-500/30 text-blue-300 px-1.5 py-0.5 rounded">Active</span>}
+                                </div>
+                                <span className={`text-[10px] ${isOnline && !isStale ? 'text-green-400' : isStale ? 'text-yellow-400' : 'text-gray-500'}`}>
+                                  {isOnline && !isStale ? 'Online' : isStale ? 'Stale' : 'Offline'}
+                                </span>
+                              </div>
+                              <div className="mt-1 flex justify-between text-[10px] text-gray-500">
+                                <span>Model: <span className="text-gray-400">{currentModel}</span></span>
+                                <span>{new Date(sys.lastHeartbeat).toLocaleTimeString()}</span>
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Sign out */}
+                  {user && (
+                    <button
+                      onClick={signOut}
+                      className="w-full px-3 py-2 text-xs font-medium bg-gray-600/20 border border-gray-600/30 rounded-lg text-gray-400 hover:bg-gray-600/30 transition-colors duration-200"
+                    >
+                      Sign Out
+                    </button>
+                  )}
+                </div>
+              ) : (
+              /* Desktop mode: original Remote Control UI */
+              <>
 
               {/* Mode Selection */}
               <div className="space-y-2">
@@ -427,12 +529,18 @@ export const RemoteSettings: React.FC<RemoteSettingsProps> = ({ className = '' }
                 </>
               )}
 
+              {/* Close the web/desktop ternary */}
+              </>
+              )}
+
               {/* Instructions */}
               <div className="pt-2 border-t border-gray-600/30">
                 <p className="text-xs text-gray-500 leading-relaxed">
-                  {mode === 'local' 
-                    ? 'Local mode: Chat directly with your local Ally system.'
-                    : 'Remote mode: Enable web access to your local Ally system via Supabase.'
+                  {isWeb 
+                    ? 'Web mode: Messages are routed through your desktop Ally instance.'
+                    : mode === 'local' 
+                      ? 'Local mode: Chat directly with your local Ally system.'
+                      : 'Remote mode: Enable web access to your local Ally system via Supabase.'
                   }
                 </p>
               </div>

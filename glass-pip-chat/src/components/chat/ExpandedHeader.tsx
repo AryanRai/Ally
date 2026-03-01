@@ -1,4 +1,5 @@
 import { motion } from 'framer-motion';
+import { isWeb } from '../../utils/platform';
 import {
   Grip,
   Maximize2,
@@ -90,10 +91,14 @@ export default function ExpandedHeader({
           title={sidebarCollapsed ? "Show chats" : "Hide chats"}
         >
           <img
-            src="/allay.png"
-            alt="Allay"
+            src={platform === 'web' ? '/app/allay.png' : '/allay.png'}
+            alt="Ally"
             className="w-4 h-4 flex-shrink-0"
           />
+          {/* Web mode badge */}
+          {isWeb && (
+            <span className="absolute -bottom-1 -right-1 text-[7px] bg-blue-500/80 text-white px-1 rounded-full leading-tight">WEB</span>
+          )}
           {/* Indicator for auto-collapsed sidebar at large sizes */}
           {sidebarCollapsed && size === 'L' && (
             <div className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-orange-400 rounded-full"
@@ -262,7 +267,8 @@ export default function ExpandedHeader({
           onClick={onSizeChange}
           className={cn(
             "p-1 rounded-lg hover:bg-white/10 transition-all duration-200",
-            isResizing && "bg-blue-500/20 scale-110"
+            isResizing && "bg-blue-500/20 scale-110",
+            isWeb && "hidden"
           )}
           title={`Size: ${size}`}
           disabled={isResizing}
@@ -274,7 +280,8 @@ export default function ExpandedHeader({
           onClick={onCollapseToggle}
           className={cn(
             "p-1 rounded-lg hover:bg-white/10 transition-all duration-200",
-            isResizing && "opacity-50"
+            isResizing && "opacity-50",
+            isWeb && "hidden"
           )}
           title="Collapse"
           disabled={isResizing}
@@ -284,7 +291,10 @@ export default function ExpandedHeader({
 
         <button
           onClick={onHide}
-          className="p-1 rounded-lg hover:bg-white/10 transition-colors"
+          className={cn(
+            "p-1 rounded-lg hover:bg-white/10 transition-colors",
+            isWeb && "hidden"
+          )}
           title="Close"
         >
           <X className="w-3 h-3" />

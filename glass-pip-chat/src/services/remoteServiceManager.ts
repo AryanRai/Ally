@@ -87,7 +87,7 @@ export class RemoteServiceManager {
         this.toolCallingService,
         {
           supabaseUrl: config.supabaseUrl,
-          supabaseServiceKey: config.supabaseServiceKey,
+          supabaseServiceKey: '', // Not used — browser client uses publishable key + auth session
           batchSize: 3,
           flushInterval: 100,
           maxRetries: 3,

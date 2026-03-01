@@ -5,6 +5,8 @@ import remarkGfm from 'remark-gfm';
 import { cn } from '../lib/utils';
 import { ThemeUtils } from '../utils/themeUtils';
 import { GreetingUtils } from '../utils/greetingUtils';
+import { isWeb } from '../utils/platform';
+import { SupabaseChatSync } from '../services/supabaseChatSync';
 import { useEditState } from '../hooks/useEditState';
 import { useWindowManagement } from '../hooks/useWindowManagement';
 import { useContextMonitoring } from '../hooks/useContextMonitoring';
@@ -38,6 +40,7 @@ import { useMCPACPIntegration } from '../hooks/useMCPACPIntegration';
 import { useUnifiedToolIntegration } from '../hooks/useUnifiedToolIntegration';
 import { createRemoteChatIntegration } from '../services/remoteChatIntegration';
 import { useRemoteConnection } from '../hooks/useRemoteConnection';
+import { RemoteToolBridge, RemoteToolRequest } from '../services/remoteToolBridge';
 
 // Utils & Types
 import { ChatManager } from '../utils/chatManager';
@@ -68,6 +71,7 @@ export default function GlassChatPiP() {
 
   // Chat management - moved up to be available for hooks
   const [chatManager] = useState(() => ChatManager.getInstance());
+  const [chatSync] = useState(() => SupabaseChatSync.getInstance());
   const [chats, setChats] = useState<Chat[]>([]);
   const [activeChat, setActiveChat] = useState<Chat | null>(null);
   
@@ -256,6 +260,11 @@ export default function GlassChatPiP() {
 
   // Helper function to refresh chat state
   const refreshChatState = () => {
+    if (isWeb) {
+      // On web, chats live in React state only — don't read from localStorage chatManager
+      // Just re-read activeChat from current state (already set)
+      return;
+    }
     setChats(chatManager.getAllChats());
     setActiveChat(chatManager.getActiveChat());
   };
@@ -266,6 +275,11 @@ export default function GlassChatPiP() {
     console.log('🔄 Switching chat - resetting TTS queue');
     speechService.resetTTSQueue();
     
+    if (isWeb) {
+      const selected = chats.find(c => c.id === chatId);
+      if (selected) setActiveChat(selected);
+      return;
+    }
     chatManager.switchToChat(chatId);
     refreshChatState();
   };
@@ -275,41 +289,108 @@ export default function GlassChatPiP() {
     console.log('🆕 Creating new chat - resetting TTS queue');
     speechService.resetTTSQueue();
     
-    chatManager.createNewChat();
+    if (isWeb) {
+      const newChat: Chat = {
+        id: `chat_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        title: 'New Chat',
+        messages: [],
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      };
+      setChats(prev => [newChat, ...prev]);
+      setActiveChat(newChat);
+      // Sync to Supabase
+      chatSync.syncChat(newChat).catch(e => console.warn('Chat create sync failed:', e));
+      return;
+    }
+    const newChat = chatManager.createNewChat();
     refreshChatState();
+    // Sync new chat to Supabase
+    if (newChat) chatSync.syncChat(newChat).catch(e => console.warn('Chat create sync failed:', e));
   };
 
   const handleChatDelete = (chatId: string) => {
+    if (isWeb) {
+      setChats(prev => prev.filter(c => c.id !== chatId));
+      if (activeChat?.id === chatId) {
+        const remaining = chats.filter(c => c.id !== chatId);
+        setActiveChat(remaining[0] || null);
+      }
+      return;
+    }
     if (chatManager.deleteChat(chatId)) {
       refreshChatState();
     }
   };
 
   const handleChatRename = (chatId: string, newTitle: string) => {
+    if (isWeb) {
+      setChats(prev => prev.map(c => c.id === chatId ? { ...c, title: newTitle } : c));
+      if (activeChat?.id === chatId) setActiveChat(prev => prev ? { ...prev, title: newTitle } : prev);
+      return;
+    }
     if (chatManager.updateChatTitle(chatId, newTitle)) {
       refreshChatState();
     }
   };
 
   const addMessageToActiveChat = (message: Message) => {
-    if (activeChat && chatManager.addMessage(activeChat.id, message)) {
+    if (!activeChat) return;
+
+    if (isWeb) {
+      // Web mode: update React state directly, don't use localStorage chatManager
+      const updatedChat = {
+        ...activeChat,
+        messages: [...activeChat.messages, message],
+        updatedAt: Date.now(),
+      };
+      setActiveChat(updatedChat);
+      setChats(prev => prev.map(c => c.id === updatedChat.id ? updatedChat : c));
+      return;
+    }
+
+    if (chatManager.addMessage(activeChat.id, message)) {
       refreshChatState();
+      // Sync to Supabase after assistant responses (desktop mode)
+      if (message.role === 'assistant') {
+        const chat = chatManager.getChatById(activeChat.id);
+        if (chat) chatSync.syncChat(chat).catch(e => console.warn('Chat sync failed:', e));
+      }
     }
   };
 
   const handleMessageEdit = (messageId: string, newContent: string) => {
+    if (isWeb && activeChat) {
+      const updatedChat = {
+        ...activeChat,
+        messages: activeChat.messages.map(m => m.id === messageId ? { ...m, content: newContent } : m),
+      };
+      setActiveChat(updatedChat);
+      setChats(prev => prev.map(c => c.id === updatedChat.id ? updatedChat : c));
+      return;
+    }
     if (activeChat && chatManager.updateMessage(activeChat.id, messageId, newContent)) {
       refreshChatState();
     }
   };
 
   const handleMessageFork = (messageId: string, newContent: string) => {
+    if (isWeb) return; // Not supported on web
     if (activeChat && chatManager.editMessage(activeChat.id, messageId, newContent)) {
       refreshChatState();
     }
   };
 
   const handleMessageDelete = (messageId: string) => {
+    if (isWeb && activeChat) {
+      const updatedChat = {
+        ...activeChat,
+        messages: activeChat.messages.filter(m => m.id !== messageId),
+      };
+      setActiveChat(updatedChat);
+      setChats(prev => prev.map(c => c.id === updatedChat.id ? updatedChat : c));
+      return;
+    }
     if (activeChat && chatManager.deleteMessage(activeChat.id, messageId)) {
       refreshChatState();
     }
@@ -384,8 +465,10 @@ export default function GlassChatPiP() {
     setCurrentResponse('');
 
     try {
-      // Check if tools are enabled - use tool-aware chat
-      if (toolsEnabled) {
+      // Web mode: route through Supabase → desktop poller → Ollama → Supabase
+      if (isWeb) {
+        await handleSendWeb(contextualContent);
+      } else if (toolsEnabled) {
         // Use tool-aware chat flow
         await handleSendWithTools(contextualContent);
       } else {
@@ -409,6 +492,101 @@ export default function GlassChatPiP() {
       setActiveToolExecutions([]); // Clear tool executions when done
       setStreamingThinking(null); // Clear streaming thinking when done
     }
+  };
+
+  // Web mode: send message via Supabase, poll for response from desktop
+  const handleSendWeb = async (contextualContent: string) => {
+    if (!activeChat) return;
+
+    // Ensure session exists in Supabase
+    await chatSync.syncChat(activeChat);
+
+    // Send the message — creates a 'pending' row the desktop poller picks up
+    const msgId = await chatSync.sendRemoteMessage(activeChat.id, contextualContent, chatSync.selectedSystemId);
+    if (!msgId) {
+      throw new Error('Failed to send message to remote service');
+    }
+
+    // Use a stable assistant message ID to prevent duplicates
+    const assistantMsgId = `assistant-${msgId}`;
+    let messageAdded = false;
+
+    setCurrentResponse('⏳ Waiting for desktop to process...');
+
+    // Try realtime subscription first, fall back to polling
+    let resolved = false;
+    const cleanup = chatSync.subscribeToMessage(msgId, (response, status) => {
+      if (resolved) return;
+      if (response) setCurrentResponse(response + (status === 'completed' ? '' : '▋'));
+      if (status === 'completed' || status === 'error') {
+        resolved = true;
+        if (!messageAdded) {
+          messageAdded = true;
+          const assistantMessage: Message = {
+            id: assistantMsgId,
+            role: 'assistant',
+            content: response || 'No response received.',
+            timestamp: Date.now(),
+          };
+          addMessageToActiveChat(assistantMessage);
+        }
+      }
+    });
+
+    // Polling fallback — check every 1.5s in case realtime doesn't fire
+    const pollInterval = setInterval(async () => {
+      if (resolved) { clearInterval(pollInterval); return; }
+      const result = await chatSync.pollMessageResponse(msgId);
+      if (result && (result.status === 'completed' || result.status === 'error')) {
+        resolved = true;
+        clearInterval(pollInterval);
+        cleanup();
+        if (result.response) setCurrentResponse(result.response);
+        if (!messageAdded) {
+          messageAdded = true;
+          const assistantMessage: Message = {
+            id: assistantMsgId,
+            role: 'assistant',
+            content: result.response || 'No response received.',
+            timestamp: Date.now(),
+          };
+          addMessageToActiveChat(assistantMessage);
+        }
+      } else if (result?.response) {
+        setCurrentResponse(result.response + '▋');
+      }
+    }, 1500);
+
+    // Timeout after 2 minutes
+    await new Promise<void>((resolve) => {
+      const timeout = setTimeout(() => {
+        if (!resolved) {
+          resolved = true;
+          clearInterval(pollInterval);
+          cleanup();
+          if (!messageAdded) {
+            messageAdded = true;
+            const assistantMessage: Message = {
+              id: assistantMsgId,
+              role: 'assistant',
+              content: '⏱️ Response timed out. Make sure your desktop Ally is running and connected.',
+              timestamp: Date.now(),
+            };
+            addMessageToActiveChat(assistantMessage);
+          }
+        }
+        resolve();
+      }, 120000);
+
+      // Also resolve early when we get a response
+      const checkDone = setInterval(() => {
+        if (resolved) {
+          clearInterval(checkDone);
+          clearTimeout(timeout);
+          resolve();
+        }
+      }, 500);
+    });
   };
 
   // Regular streaming chat (no tools)
@@ -1303,13 +1481,32 @@ Remember: Output ONLY the JSON tool call when you need to use a tool. No explana
 
   // Initialize chat management
   useEffect(() => {
-    const loadChats = () => {
-      const allChats = chatManager.getAllChats();
-      setChats(allChats);
-      setActiveChat(chatManager.getActiveChat());
+    const loadChats = async () => {
+      // Initialize sync service
+      await chatSync.init();
+
+      if (isWeb) {
+        // Web mode: load chats from Supabase
+        const remoteChats = await chatSync.fetchChats();
+        if (remoteChats.length > 0) {
+          setChats(remoteChats);
+          setActiveChat(remoteChats[0]);
+        } else {
+          // No remote chats yet — show empty state
+          setChats([]);
+          setActiveChat(null);
+        }
+      } else {
+        // Desktop mode: load from local storage, sync to Supabase in background
+        const allChats = chatManager.getAllChats();
+        setChats(allChats);
+        setActiveChat(chatManager.getActiveChat());
+        // Background sync — don't block UI
+        chatSync.syncAllChats(allChats).catch(e => console.warn('Initial chat sync failed:', e));
+      }
     };
     loadChats();
-  }, [chatManager]);
+  }, [chatManager, chatSync]);
 
   // Register demo tools when unified integration is ready
   useEffect(() => {
@@ -1442,6 +1639,130 @@ Remember: Output ONLY the JSON tool call when you need to use a tool. No explana
     };
   }, [remoteConnection.mode, remoteConnection.isAuthenticated, addMessageToActiveChat]);
 
+  // Register the Remote Tool Bridge handler (desktop only)
+  // When a web message requests tool usage, the poller delegates here
+  // so we can process it through the full MCP-aware agentic pipeline
+  useEffect(() => {
+    if (isWeb) return; // Only desktop registers the handler
+
+    const handler = async (request: RemoteToolRequest) => {
+      console.log('🔧 RemoteToolBridge: Processing remote tool request:', request.messageId);
+      const supabase = (await import('../utils/supabase')).getSupabaseClient();
+      if (!supabase) throw new Error('Supabase not available');
+
+      const updateResponse = async (response: string, status: string = 'processing') => {
+        await supabase.from('chat_messages').update({
+          response,
+          status,
+          updated_at: new Date().toISOString(),
+          ...(status === 'completed' ? { completed_at: new Date().toISOString() } : {}),
+        }).eq('id', request.messageId);
+      };
+
+      try {
+        // Get MCP tools
+        const mcpTools = await getMcpToolsForLLM();
+        
+        if (mcpTools.length === 0) {
+          // No tools — just do a regular Ollama chat
+          let fullResponse = '';
+          await ollamaIntegration.sendMessageToOllama(
+            [], request.content,
+            (update) => {
+              if (update.type === 'response' || update.type === 'done') {
+                fullResponse = update.response || '';
+                updateResponse(fullResponse).catch(() => {});
+              }
+            }
+          );
+          await updateResponse(fullResponse, 'completed');
+          return;
+        }
+
+        // Build tool system prompt (same as handleSendWithTools)
+        const savedToolPrompt = localStorage.getItem('ally-prompt-tools') || 
+          `You are an AI assistant with access to powerful tools. You MUST use tools to get real information.
+
+⚠️ CRITICAL RULES:
+1. YOU DO NOT KNOW THE CURRENT TIME OR DATE! You must ALWAYS call get_current_time to get it.
+2. NEVER fabricate, simulate, or make up tool output. If you need to run a command, you MUST call execute_command.
+3. NEVER pretend a tool succeeded without actually calling it.
+4. NEVER guess file contents, directory listings, or command output — use the appropriate tool.
+5. Output the JSON tool call IMMEDIATELY — no explanations before it.
+6. You can use MULTIPLE tools in sequence.
+7. After getting ALL needed info, give your final answer WITHOUT any JSON.
+
+TOOL FORMAT:
+{"name": "tool_name", "parameters": {"key": "value"}}`;
+
+        const toolsSystemPrompt = `${savedToolPrompt}\n\nAVAILABLE TOOLS:\n${mcpTools.map(t => {
+          const params = t.parameters ? ` | params: ${JSON.stringify(t.parameters)}` : ' | no params needed';
+          return `• ${t.name}${params}\n  → ${t.description}`;
+        }).join('\n')}`;
+
+        // Agentic loop — same logic as handleAgenticChat but writes to Supabase
+        const MAX_ITERATIONS = 10;
+        let iteration = 0;
+        const allToolResults: Array<{ tool: string; result: string }> = [];
+        let currentMessage = `[System: ${toolsSystemPrompt}]\n\nUser: ${request.content}`;
+
+        while (iteration < MAX_ITERATIONS) {
+          iteration++;
+          let accumulatedResponse = '';
+          let toolCallDetected = false;
+          let detectedToolCall: { name: string; parameters: any } | null = null;
+
+          const toolResultsContext = allToolResults.length > 0
+            ? `\n\nPrevious tool results:\n${allToolResults.map(tr => `- ${tr.tool}: ${tr.result}`).join('\n')}\n\nProvide your final answer WITHOUT any JSON.`
+            : '';
+
+          await ollamaIntegration.sendMessageToOllama(
+            [], currentMessage + toolResultsContext,
+            (update) => {
+              if (update.type === 'response' || update.type === 'done') {
+                accumulatedResponse = update.response || '';
+                const parsed = parseToolCallFromResponse(accumulatedResponse);
+                if (parsed.toolCall && !toolCallDetected) {
+                  toolCallDetected = true;
+                  detectedToolCall = parsed.toolCall;
+                }
+                if (!toolCallDetected) {
+                  updateResponse(accumulatedResponse).catch(() => {});
+                }
+              }
+            }
+          );
+
+          if (!toolCallDetected || !detectedToolCall) {
+            // Final answer
+            await updateResponse(accumulatedResponse, 'completed');
+            return;
+          }
+
+          // Execute the tool
+          const toolToRun = detectedToolCall as { name: string; parameters: any };
+          try {
+            const result = await executeMcpTool(toolToRun.name, toolToRun.parameters);
+            const resultStr = typeof result === 'string' ? result : JSON.stringify(result);
+            allToolResults.push({ tool: toolToRun.name, result: resultStr });
+            await updateResponse(`🔧 Used ${toolToRun.name}... processing`).catch(() => {});
+          } catch (err) {
+            allToolResults.push({ tool: toolToRun.name, result: `Error: ${err}` });
+          }
+        }
+
+        // If we hit max iterations, send what we have
+        await updateResponse('Reached maximum tool iterations.', 'completed');
+      } catch (error) {
+        console.error('❌ RemoteToolBridge handler error:', error);
+        await updateResponse(`Error: ${error instanceof Error ? error.message : 'Unknown error'}`, 'error');
+      }
+    };
+
+    RemoteToolBridge.registerHandler(handler);
+    return () => RemoteToolBridge.unregisterHandler();
+  }, [ollamaIntegration, getMcpToolsForLLM, executeMcpTool, parseToolCallFromResponse]);
+
   // Handle speech recognition results - automatically send as messages when voice mode is enabled
   const lastProcessedSpeechRef = useRef<string | null>(null);
   useEffect(() => {
@@ -1462,6 +1783,7 @@ Remember: Output ONLY the JSON tool call when you need to use a tool. No explana
 
   // Custom collapse toggle with state cleanup
   const handleCustomCollapseToggle = () => {
+    if (isWeb) return; // Never collapse in web mode
     const willBeCollapsed = !state.collapsed;
 
     // If we're collapsing TO collapsed mode, reset collapsed-specific states immediately
@@ -2029,9 +2351,8 @@ Remember: Output ONLY the JSON tool call when you need to use a tool. No explana
 
   // Sync window size when size state changes
   useEffect(() => {
-    if (!window.pip) {
-      console.warn('window.pip not available');
-      return;
+    if (isWeb || !window.pip) {
+      return; // Web mode uses CSS for sizing, no window.pip needed
     }
 
     setIsResizing(true);
@@ -2067,10 +2388,13 @@ Remember: Output ONLY the JSON tool call when you need to use a tool. No explana
     <motion.div
       className={cn(
         "fixed bg-transparent flex items-center justify-center",
+        isWeb && "inset-0 p-3 bg-gray-900",
         platform === 'win32' && "win32-acrylic",
         platform === 'linux' && "linux-glass-effect"
       )}
-      style={{
+      style={isWeb ? {
+        zIndex: 50
+      } : {
         width: calculateDimensions().width + (padding * 2),
         height: calculateDimensions().height + (padding * 2),
         zIndex: 50
@@ -2083,8 +2407,9 @@ Remember: Output ONLY the JSON tool call when you need to use a tool. No explana
         layout
         className={cn(
           "overflow-hidden relative flex transition-all duration-300 chat-container acrylic-container",
-          ThemeUtils.getBorderRadiusClass(appSettings.ui.borderRadius, platform),
-          "border border-white/20 shadow-[0_8px_40px_rgba(0,0,0,0.4)]",
+          !isWeb && ThemeUtils.getBorderRadiusClass(appSettings.ui.borderRadius, platform),
+          !isWeb && "border border-white/20 shadow-[0_8px_40px_rgba(0,0,0,0.4)]",
+          isWeb && "w-full h-full rounded-2xl border border-white/10 shadow-[0_8px_40px_rgba(0,0,0,0.6)]",
           isResizing && "shadow-lg scale-[1.01]",
           platform === 'win32'
             ? "bg-transparent"
@@ -2095,9 +2420,10 @@ Remember: Output ONLY the JSON tool call when you need to use a tool. No explana
               : theme === 'dark'
                 ? "bg-gradient-to-b from-white/[0.08] to-white/[0.02] backdrop-blur-2xl backdrop-saturate-150"
                 : "bg-gradient-to-b from-black/[0.08] to-black/[0.02] backdrop-blur-2xl backdrop-saturate-150",
+          isWeb && (theme === 'dark' ? "bg-gray-950" : "bg-white"),
           theme === 'dark' ? "text-white/90" : "text-black/90"
         )}
-        style={{
+        style={isWeb ? {} : {
           width: calculateDimensions().width,
           height: calculateDimensions().height,
           margin: `${padding}px`
@@ -2277,6 +2603,13 @@ Remember: Output ONLY the JSON tool call when you need to use a tool. No explana
                   {/* Remote Activity Indicator */}
                   <RemoteActivityIndicator className="mb-2" />
                   
+                  {/* Web mode indicator */}
+                  {isWeb && (
+                    <div className="flex items-center gap-2 px-3 py-1.5 mb-2 bg-blue-500/10 border border-blue-500/20 rounded-lg">
+                      <span className="text-[10px] text-blue-400">🌐 Web Copy — messages routed through your desktop Ally</span>
+                    </div>
+                  )}
+                  
                   {messages.map((message, index) => (
                     <EditableMessage
                       key={message.id}
@@ -2411,13 +2744,13 @@ Remember: Output ONLY the JSON tool call when you need to use a tool. No explana
                   placeholder={currentGreeting}
                   messages={messages}
                   currentModel={ollamaIntegration.currentModel}
-                  toolsEnabled={toolsEnabled}
-                  agenticMode={agenticMode}
-                  autopilotMode={autopilotMode}
-                  mcpToolCount={mcpIntegration.mcpTools.length + 2}
-                  onToolsToggle={() => setToolsEnabled(!toolsEnabled)}
-                  onAgenticModeToggle={() => setAgenticMode(!agenticMode)}
-                  onAutopilotToggle={() => {
+                  toolsEnabled={isWeb ? false : toolsEnabled}
+                  agenticMode={isWeb ? false : agenticMode}
+                  autopilotMode={isWeb ? false : autopilotMode}
+                  mcpToolCount={isWeb ? 0 : mcpIntegration.mcpTools.length + 2}
+                  onToolsToggle={isWeb ? undefined : () => setToolsEnabled(!toolsEnabled)}
+                  onAgenticModeToggle={isWeb ? undefined : () => setAgenticMode(!agenticMode)}
+                  onAutopilotToggle={isWeb ? undefined : () => {
                     const next = !autopilotMode;
                     setAutopilotMode(next);
                     localStorage.setItem('ally-autopilot-mode', String(next));

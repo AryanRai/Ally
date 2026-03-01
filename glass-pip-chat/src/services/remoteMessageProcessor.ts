@@ -180,7 +180,7 @@ export class RemoteMessageProcessor {
       const result = await this.toolCallingService.chatWithTools(
         toolAwareMessages,
         context,
-        'llama3.2', // Default model
+        localStorage.getItem('ally-current-model') || 'llama3.2', // Use desktop's current model
         async (chunk: string, toolCalls?: ToolCall[], currentToolResults?: ToolCallResult[]) => {
           // The chunk from Ollama is already cumulative, don't accumulate again
           fullResponse = chunk;
@@ -246,7 +246,7 @@ export class RemoteMessageProcessor {
       // Use Ollama's streaming with thinking
       await this.ollamaService.streamChatWithThinking(
         messages,
-        'llama3.2', // Default model
+        localStorage.getItem('ally-current-model') || 'llama3.2', // Use desktop's current model
         async (chunk: ThinkingChunk) => {
           if (chunk.type === 'response') {
             // chunk.content is already cumulative from Ollama service

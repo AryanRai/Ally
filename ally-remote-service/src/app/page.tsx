@@ -22,9 +22,9 @@ export default function HomePage() {
 
   useEffect(() => {
     if (user && mounted) {
-      router.push('/chat');
+      window.location.href = '/app/index.html';
     }
-  }, [user, router, mounted]);
+  }, [user, mounted]);
 
   if (loading || !mounted) {
     return (
