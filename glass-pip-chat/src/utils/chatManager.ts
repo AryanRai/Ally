@@ -229,4 +229,12 @@ export class ChatManager {
   getState(): ChatState {
     return { ...this.state };
   }
+
+  /** Import a chat from Supabase if it doesn't already exist locally */
+  importChat(chat: Chat): boolean {
+    if (this.state.chats.some(c => c.id === chat.id)) return false;
+    this.state.chats.push(chat);
+    this.saveState();
+    return true;
+  }
 }

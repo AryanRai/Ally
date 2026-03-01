@@ -1508,6 +1508,37 @@ Remember: Output ONLY the JSON tool call when you need to use a tool. No explana
     loadChats();
   }, [chatManager, chatSync]);
 
+  // Desktop: periodically pull new chats created on web
+  useEffect(() => {
+    if (isWeb) return; // Only desktop syncs inbound
+    if (!remoteConnection.isAuthenticated) return;
+
+    const pullRemoteChats = async () => {
+      try {
+        const localIds = new Set(chatManager.getAllChats().map(c => c.id));
+        const newChats = await chatSync.fetchNewRemoteChats(localIds);
+        if (newChats.length > 0) {
+          let imported = 0;
+          for (const chat of newChats) {
+            if (chatManager.importChat(chat)) imported++;
+          }
+          if (imported > 0) {
+            console.log(`📥 Imported ${imported} new chat(s) from web`);
+            refreshChatState();
+          }
+        }
+      } catch (e) {
+        console.warn('Remote chat pull failed:', e);
+      }
+    };
+
+    // Initial pull
+    pullRemoteChats();
+    // Then every 30s
+    const interval = setInterval(pullRemoteChats, 30000);
+    return () => clearInterval(interval);
+  }, [chatManager, chatSync, remoteConnection.isAuthenticated]);
+
   // Register demo tools when unified integration is ready
   useEffect(() => {
     if (!unifiedIntegration.isReady()) return;

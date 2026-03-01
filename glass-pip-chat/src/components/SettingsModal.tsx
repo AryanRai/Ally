@@ -1,10 +1,12 @@
 import { useEffect, useState, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Sun, Moon, Server, Wifi, WifiOff, RefreshCw, Keyboard, Volume2, Wrench, Activity } from 'lucide-react';
+import { X, Sun, Moon, Server, Wifi, WifiOff, RefreshCw, Keyboard, Volume2, Wrench, Activity, Globe, Monitor } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { useSpeechService } from '../hooks/useSpeechService';
 import { GreetingUtils } from '../utils/greetingUtils';
 import { recheckSupabaseEnabled } from '../utils/supabase';
+import { isWeb } from '../utils/platform';
+import { SupabaseChatSync } from '../services/supabaseChatSync';
 
 
 import { AppSettings } from '../types/settings';
@@ -48,6 +50,14 @@ export default function SettingsModal({
   const [blurAmount, setBlurAmount] = useState(20); // Default blur amount
   const [blurType, setBlurType] = useState<'acrylic' | 'mica' | 'standard'>('acrylic'); // Blur type
   const [showShortcuts, setShowShortcuts] = useState(false);
+  const [remoteSystemInfo, setRemoteSystemInfo] = useState<{
+    name: string;
+    status: string;
+    currentModel: string;
+    models: string[];
+    tools: string[];
+    features: string[];
+  } | null>(null);
 
   const modalRef = useRef<HTMLDivElement>(null);
   
@@ -66,6 +76,28 @@ export default function SettingsModal({
   useEffect(() => {
     setTheme(initialTheme);
   }, [initialTheme]);
+
+  // Web mode: fetch connected desktop system info
+  useEffect(() => {
+    if (!isWeb || !isOpen) return;
+    const sync = SupabaseChatSync.getInstance();
+    const load = async () => {
+      await sync.init();
+      const systems = await sync.fetchActiveSystems();
+      const selected = systems.find(s => s.id === sync.selectedSystemId) || systems[0];
+      if (selected) {
+        setRemoteSystemInfo({
+          name: selected.name,
+          status: selected.status,
+          currentModel: selected.capabilities?.currentModel || 'unknown',
+          models: selected.capabilities?.models || [],
+          tools: selected.capabilities?.tools || [],
+          features: selected.capabilities?.features || [],
+        });
+      }
+    };
+    load();
+  }, [isOpen]);
 
   useEffect(() => {
     if (!window.pip || !isOpen) return;
@@ -647,7 +679,8 @@ export default function SettingsModal({
                     </div>
                   </div>
 
-                  {/* Window Padding */}
+                  {/* Window Padding — desktop only */}
+                  {!isWeb && (<>
                   <div className="space-y-2">
                     <label className={cn(
                       "text-xs font-medium",
@@ -725,9 +758,12 @@ export default function SettingsModal({
                       Rounded corners of chat container
                     </p>
                   </div>
+                  </>)}
                 </div>
+              </div>
 
-                {/* Windows Acrylic Settings */}
+                {/* Windows Acrylic Settings — desktop only */}
+                {!isWeb && (
                 <div className="space-y-3">
                   <h3 className={cn(
                     "text-sm font-medium",
@@ -794,9 +830,10 @@ export default function SettingsModal({
                     </div>
                   )}
                 </div>
-              </div>
+                )}
 
-              {/* Context Section */}
+              {/* Context Section — desktop only */}
+              {!isWeb && (
               <div className="space-y-3">
                 <h3 className={cn(
                   "text-sm font-medium",
@@ -845,8 +882,10 @@ export default function SettingsModal({
                   </div>
                 </div>
               </div>
+              )}
 
-              {/* Ollama Section */}
+              {/* Ollama Section — desktop only */}
+              {!isWeb && (
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
                   <h3 className={cn(
@@ -1043,8 +1082,10 @@ export default function SettingsModal({
                   </button>
                 )}
               </div>
+              )}
 
-              {/* Server Status Section */}
+              {/* Server Status Section — desktop only */}
+              {!isWeb && (
               <div className="space-y-3">
                 <h3 className={cn(
                   "text-sm font-medium",
@@ -1107,8 +1148,10 @@ export default function SettingsModal({
                   </div>
                 )}
               </div>
+              )}
 
-              {/* Network Services Section */}
+              {/* Network Services Section — desktop only */}
+              {!isWeb && (
               <div className="space-y-3">
                 <h3 className={cn(
                   "text-sm font-medium",
@@ -1232,8 +1275,10 @@ export default function SettingsModal({
                   </p>
                 </div>
               </div>
+              )}
 
-              {/* Speech Settings Section */}
+              {/* Speech Settings Section — desktop only */}
+              {!isWeb && (
               <div className="space-y-3">
                 <h3 className={cn(
                   "text-sm font-medium",
@@ -1455,8 +1500,11 @@ export default function SettingsModal({
                     </div>
                   </div>
                 </div>
+              </div>
+              )}
 
-                {/* Greeting Settings */}
+                {/* Greeting Settings — desktop only */}
+                {!isWeb && (
                 <div className={cn(
                   "p-3 rounded-lg border",
                   platform === 'win32'
@@ -1597,9 +1645,117 @@ export default function SettingsModal({
                     )}
                   </div>
                 </div>
-              </div>
+              )}
 
-              {/* Tool Integration Section */}
+              {/* Web: Connected Desktop Info */}
+              {isWeb && remoteSystemInfo && (
+              <div className="space-y-3">
+                <h3 className={cn(
+                  "text-sm font-medium flex items-center gap-2",
+                  theme === 'dark' ? "text-white/80" : "text-black/80"
+                )}>
+                  <Monitor className="w-4 h-4" />
+                  Connected Desktop
+                </h3>
+                <div className={cn(
+                  "p-3 rounded-lg border",
+                  remoteSystemInfo.status === 'online'
+                    ? "bg-green-500/10 border-green-500/20"
+                    : "bg-yellow-500/10 border-yellow-500/20"
+                )}>
+                  <div className="flex items-center gap-2 mb-2">
+                    <div className={cn(
+                      "w-2 h-2 rounded-full",
+                      remoteSystemInfo.status === 'online' ? "bg-green-400 animate-pulse" : "bg-yellow-400"
+                    )} />
+                    <span className="text-xs font-medium">{remoteSystemInfo.name}</span>
+                    <span className={cn(
+                      "text-[10px] px-1.5 py-0.5 rounded",
+                      remoteSystemInfo.status === 'online' ? "bg-green-500/20 text-green-400" : "bg-yellow-500/20 text-yellow-400"
+                    )}>{remoteSystemInfo.status}</span>
+                  </div>
+                  <div className={cn("text-xs space-y-1", theme === 'dark' ? "text-white/60" : "text-black/60")}>
+                    <p>Model: {remoteSystemInfo.currentModel}</p>
+                    <p>Features: {remoteSystemInfo.features.join(', ') || 'none'}</p>
+                  </div>
+                </div>
+              </div>
+              )}
+
+              {/* Web: Desktop Tools (read-only) */}
+              {isWeb && remoteSystemInfo && (
+              <div className="space-y-3">
+                <h3 className={cn(
+                  "text-sm font-medium flex items-center gap-2",
+                  theme === 'dark' ? "text-white/80" : "text-black/80"
+                )}>
+                  <Wrench className="w-4 h-4" />
+                  Desktop Tools
+                  <span className={cn(
+                    "text-[10px] px-1.5 py-0.5 rounded",
+                    theme === 'dark' ? "bg-blue-500/20 text-blue-400" : "bg-blue-500/20 text-blue-600"
+                  )}>synced from desktop</span>
+                </h3>
+                <div className={cn(
+                  "p-3 rounded-lg border",
+                  theme === 'dark' ? "border-white/10 bg-white/5" : "border-black/10 bg-black/5"
+                )}>
+                  <div className="flex flex-wrap gap-1">
+                    {remoteSystemInfo.tools.map((tool) => (
+                      <span key={tool} className={cn(
+                        "px-2 py-0.5 text-xs rounded border",
+                        theme === 'dark' ? "bg-white/5 border-white/10" : "bg-black/5 border-black/10"
+                      )}>
+                        {tool}
+                      </span>
+                    ))}
+                  </div>
+                  <p className={cn(
+                    "text-[10px] mt-2",
+                    theme === 'dark' ? "text-white/40" : "text-black/40"
+                  )}>
+                    Tools are executed on your desktop Ally. Configure them in the desktop app.
+                  </p>
+                </div>
+              </div>
+              )}
+
+              {/* Web: Desktop Models (read-only) */}
+              {isWeb && remoteSystemInfo && (
+              <div className="space-y-3">
+                <h3 className={cn(
+                  "text-sm font-medium flex items-center gap-2",
+                  theme === 'dark' ? "text-white/80" : "text-black/80"
+                )}>
+                  <Globe className="w-4 h-4" />
+                  Available Models
+                  <span className={cn(
+                    "text-[10px] px-1.5 py-0.5 rounded",
+                    theme === 'dark' ? "bg-blue-500/20 text-blue-400" : "bg-blue-500/20 text-blue-600"
+                  )}>synced from desktop</span>
+                </h3>
+                <div className={cn(
+                  "p-3 rounded-lg border",
+                  theme === 'dark' ? "border-white/10 bg-white/5" : "border-black/10 bg-black/5"
+                )}>
+                  <div className="flex flex-wrap gap-1">
+                    {remoteSystemInfo.models.map((model) => (
+                      <span key={model} className={cn(
+                        "px-2 py-0.5 text-xs rounded border",
+                        model === remoteSystemInfo.currentModel
+                          ? "bg-blue-500/20 border-blue-500/40 text-blue-300"
+                          : theme === 'dark' ? "bg-white/5 border-white/10" : "bg-black/5 border-black/10"
+                      )}>
+                        {model} {model === remoteSystemInfo.currentModel && '(active)'}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              </div>
+              )}
+
+              {/* Tool Integration Section — desktop only */}
+              {!isWeb && (
               <div className="space-y-3">
                 <h3 className={cn(
                   "text-sm font-medium flex items-center gap-2",
@@ -1682,8 +1838,10 @@ export default function SettingsModal({
                   )}
                 </div>
               </div>
+              )}
 
-              {/* MCP/ACP Integration Section */}
+              {/* MCP/ACP Integration Section — desktop only */}
+              {!isWeb && (
               <div className="space-y-3">
                 <h3 className={cn(
                   "text-sm font-medium flex items-center gap-2",
@@ -1709,18 +1867,20 @@ export default function SettingsModal({
                   />
                 </div>
               </div>
+              )}
 
-              {/* System Prompts Section */}
+              {/* System Prompts Section — desktop only */}
+              {!isWeb && (
               <div className="space-y-3">
                 <SystemPromptsEditor
                   theme={theme}
                   platform={platform}
                   onPromptUpdate={(promptId, newPrompt) => {
                     console.log(`Updated prompt ${promptId}:`, newPrompt);
-                    // TODO: Apply prompt updates to active services
                   }}
                 />
               </div>
+              )}
 
               {/* Info Section */}
               <div className="space-y-2">
@@ -1736,9 +1896,10 @@ export default function SettingsModal({
                     ? "text-white/60"
                     : theme === 'dark' ? "text-white/60" : "text-black/60"
                 )}>
-                  <p>Glass PiP Chat v1.0.0</p>
-                  <p>Platform: {platform}</p>
-                  <p>Press Ctrl+Shift+C to toggle visibility</p>
+                  <p>Ally {isWeb ? 'Web' : 'Desktop'} v1.0.0</p>
+                  <p>Platform: {isWeb ? 'Web (Remote)' : platform}</p>
+                  {!isWeb && <p>Press Ctrl+Shift+C to toggle visibility</p>}
+                  {isWeb && <p>Connected to desktop Ally for remote access</p>}
                 </div>
               </div>
             </div>

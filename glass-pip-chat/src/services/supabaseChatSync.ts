@@ -271,6 +271,68 @@ export class SupabaseChatSync {
     }));
   }
 
+  /**
+   * Fetch remote chats that don't exist locally (for desktop pull-sync).
+   * Returns full Chat objects for any session IDs not in the provided local set.
+   */
+  async fetchNewRemoteChats(localChatIds: Set<string>): Promise<Chat[]> {
+    if (!this.userId || !isSupabaseEnabled()) return [];
+    const client = getSupabaseClient();
+    if (!client) return [];
+
+    const { data: sessions } = await client
+      .from('chat_sessions')
+      .select('*')
+      .eq('user_id', this.userId)
+      .order('updated_at', { ascending: false });
+
+    if (!sessions) return [];
+
+    const newSessions = sessions.filter(s => !localChatIds.has(s.id));
+    if (newSessions.length === 0) return [];
+
+    const chats: Chat[] = [];
+    for (const s of newSessions) {
+      const { data: msgs } = await client
+        .from('chat_messages')
+        .select('*')
+        .eq('session_id', s.id)
+        .order('created_at', { ascending: true });
+
+      const messages: Message[] = (msgs ?? []).flatMap(m => {
+        const out: Message[] = [];
+        if (m.content) {
+          out.push({
+            id: m.id + '_user',
+            role: 'user',
+            content: m.content,
+            timestamp: new Date(m.created_at).getTime(),
+            metadata: m.metadata,
+          });
+        }
+        if (m.response) {
+          out.push({
+            id: m.id + '_assistant',
+            role: 'assistant',
+            content: m.response,
+            timestamp: new Date(m.updated_at || m.created_at).getTime(),
+            metadata: m.metadata,
+          });
+        }
+        return out;
+      });
+
+      chats.push({
+        id: s.id,
+        title: s.title,
+        messages,
+        createdAt: new Date(s.created_at).getTime(),
+        updatedAt: new Date(s.updated_at).getTime(),
+      });
+    }
+    return chats;
+  }
+
   destroy(): void {
     if (this.realtimeSubscription) {
       const client = getSupabaseClient();
