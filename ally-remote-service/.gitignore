@@ -1,0 +1,23 @@
+# Dependencies
+node_modules
+
+# Build
+.next/
+out/
+
+# Environment / Secrets
+.env
+.env.local
+.env.*.local
+vercel-env-import.env
+
+# Vercel
+.vercel
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS
+.DS_Store
+Thumbs.db

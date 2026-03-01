@@ -6,9 +6,9 @@
 
 export const env = {
   // Supabase Configuration
-  SUPABASE_URL: import.meta.env.VITE_SUPABASE_URL || 'https://delzfrzfwhycdzozxwgp.supabase.co',
-  SUPABASE_ANON_KEY: import.meta.env.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRlbHpmcnpmd2h5Y2R6b3p4d2dwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTcxNjE2NjQsImV4cCI6MjA3MjczNzY2NH0.aWqbefKFuWZHXbmgjp-a0_QoD17PBrxlIDH_hoIYd9g',
-  SUPABASE_SERVICE_KEY: import.meta.env.VITE_SUPABASE_SERVICE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRlbHpmcnpmd2h5Y2R6b3p4d2dwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc1NzE2MTY2NCwiZXhwIjoyMDcyNzM3NjY0fQ.xBgsm4NsZSde7Emm65GWaE0TcLl1xQhx6Uhx2h4tV20',
+  SUPABASE_URL: import.meta.env.VITE_SUPABASE_URL || '',
+  SUPABASE_ANON_KEY: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || '',
+  SUPABASE_SERVICE_KEY: import.meta.env.VITE_SUPABASE_SECRET_KEY || '',
 
   // Local System Configuration
   LOCAL_SYSTEM_ID: import.meta.env.VITE_LOCAL_SYSTEM_ID || 'ally-desktop-system',

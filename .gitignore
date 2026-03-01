@@ -27,3 +27,15 @@ lerna-debug.log*
 .DS_Store
 *.pem
 
+
+.vercel
+.env*.local
+**/vercel-env-import.env
+
+# IDE
+.idea
+*.sw?
+Thumbs.db
+
+# Claude
+.claude/

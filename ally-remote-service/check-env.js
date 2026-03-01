@@ -14,14 +14,14 @@ const requiredEnvVars = [
     example: 'https://your-project.supabase.co'
   },
   {
-    name: 'NEXT_PUBLIC_SUPABASE_ANON_KEY',
-    description: 'Supabase anonymous/public key',
-    example: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...'
+    name: 'NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY',
+    description: 'Supabase publishable (public) key',
+    example: 'sb_publishable_...'
   },
   {
-    name: 'SUPABASE_SERVICE_ROLE_KEY',
-    description: 'Supabase service role key (server-side only)',
-    example: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...'
+    name: 'SUPABASE_SECRET_KEY',
+    description: 'Supabase secret key (server-side only)',
+    example: 'sb_secret_...'
   }
 ];
 
@@ -79,17 +79,17 @@ if (supabaseUrl && !supabaseUrl.match(/^https:\/\/[a-z0-9]+\.supabase\.co$/)) {
   warnings++;
 }
 
-// Validate JWT tokens
-const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+// Validate key format (new Supabase keys start with sb_)
+const publishableKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
+const secretKey = process.env.SUPABASE_SECRET_KEY;
 
-if (anonKey && !anonKey.startsWith('eyJ')) {
-  console.log(`\n⚠️  NEXT_PUBLIC_SUPABASE_ANON_KEY doesn't look like a JWT token`);
+if (publishableKey && !publishableKey.startsWith('sb_publishable_') && !publishableKey.startsWith('eyJ')) {
+  console.log(`\n⚠️  NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY format looks unexpected`);
   warnings++;
 }
 
-if (serviceKey && !serviceKey.startsWith('eyJ')) {
-  console.log(`\n⚠️  SUPABASE_SERVICE_ROLE_KEY doesn't look like a JWT token`);
+if (secretKey && !secretKey.startsWith('sb_secret_') && !secretKey.startsWith('eyJ')) {
+  console.log(`\n⚠️  SUPABASE_SECRET_KEY format looks unexpected`);
   warnings++;
 }
 

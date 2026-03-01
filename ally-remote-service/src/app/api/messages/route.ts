@@ -234,6 +234,30 @@ export async function PUT(request: NextRequest) {
       return NextResponse.json({ error: 'Failed to update message' }, { status: 500 });
     }
 
+    // If this was a Discord-sourced message that just completed, send the response back to Discord
+    if (status === 'completed' && response && data?.metadata?.discord_interaction_id) {
+      try {
+        const discordToken = data.metadata.discord_token;
+        const appId = process.env.DISCORD_APPLICATION_ID;
+        if (discordToken && appId) {
+          const webhookUrl = `https://discord.com/api/v10/webhooks/${appId}/${discordToken}`;
+          let content = response;
+          if (content.length > 1950) {
+            content = content.substring(0, 1950) + '\n\n... (truncated)';
+          }
+          await fetch(webhookUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ content }),
+          });
+          console.log('📨 Discord response sent for message:', message_id);
+        }
+      } catch (discordErr) {
+        console.error('Failed to send Discord callback:', discordErr);
+        // Don't fail the main request
+      }
+    }
+
     return NextResponse.json({ message: data });
   } catch (error) {
     console.error('API error:', error);

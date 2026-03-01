@@ -43,9 +43,9 @@ function checkSupabaseEnabled(): boolean {
     return false;
   }
   
-  // Check if anon key is missing or placeholder
-  if (!env.SUPABASE_ANON_KEY || env.SUPABASE_ANON_KEY.length < 50) {
-    SUPABASE_DISABLED_REASONS.push('Supabase anon key not configured');
+  // Check if publishable key is missing or placeholder
+  if (!env.SUPABASE_ANON_KEY || env.SUPABASE_ANON_KEY.length < 20) {
+    SUPABASE_DISABLED_REASONS.push('Supabase publishable key not configured');
     return false;
   }
   

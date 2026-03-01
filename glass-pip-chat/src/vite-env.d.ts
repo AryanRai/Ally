@@ -2,8 +2,8 @@
 
 interface ImportMetaEnv {
   readonly VITE_SUPABASE_URL: string
-  readonly VITE_SUPABASE_ANON_KEY: string
-  readonly VITE_SUPABASE_SERVICE_KEY: string
+  readonly VITE_SUPABASE_PUBLISHABLE_KEY: string
+  readonly VITE_SUPABASE_SECRET_KEY: string
   readonly VITE_LOCAL_SYSTEM_ID: string
   readonly VITE_LOCAL_SYSTEM_NAME: string
   readonly VITE_POLL_INTERVAL: string

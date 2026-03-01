@@ -17,9 +17,9 @@ function getEnvVar(key) {
       case 'SUPABASE_URL':
         return process.env.NEXT_PUBLIC_SUPABASE_URL;
       case 'SUPABASE_ANON_KEY':
-        return process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+        return process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
       case 'SUPABASE_SERVICE_KEY':
-        return process.env.SUPABASE_SERVICE_ROLE_KEY;
+        return process.env.SUPABASE_SECRET_KEY;
       case 'LOCAL_SYSTEM_ID':
         return process.env.LOCAL_SYSTEM_ID || 'ally-web-system';
       case 'LOCAL_SYSTEM_NAME':
@@ -39,9 +39,9 @@ function getEnvVar(key) {
       case 'SUPABASE_URL':
         return import.meta.env.VITE_SUPABASE_URL;
       case 'SUPABASE_ANON_KEY':
-        return import.meta.env.VITE_SUPABASE_ANON_KEY;
+        return import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
       case 'SUPABASE_SERVICE_KEY':
-        return import.meta.env.VITE_SUPABASE_SERVICE_KEY;
+        return import.meta.env.VITE_SUPABASE_SECRET_KEY;
       case 'LOCAL_SYSTEM_ID':
         return import.meta.env.VITE_LOCAL_SYSTEM_ID || 'ally-desktop-system';
       case 'LOCAL_SYSTEM_NAME':
