@@ -11,7 +11,8 @@ import {
   Check,
   Mic,
   MicOff,
-  Wrench
+  Wrench,
+  Zap
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { ThemeUtils } from '../../utils/themeUtils';
@@ -50,6 +51,9 @@ interface ExpandedHeaderProps {
   toolsEnabled?: boolean;
   onToolsToggle?: () => void;
   mcpServerCount?: number;
+  // Agentic mode toggle
+  agenticMode?: boolean;
+  onAgenticModeToggle?: () => void;
 }
 
 export default function ExpandedHeader({
@@ -82,7 +86,9 @@ export default function ExpandedHeader({
   onSpeechToggle,
   toolsEnabled,
   onToolsToggle,
-  mcpServerCount = 0
+  mcpServerCount = 0,
+  agenticMode,
+  onAgenticModeToggle
 }: ExpandedHeaderProps) {
 
   return (
@@ -261,6 +267,25 @@ export default function ExpandedHeader({
                 <span className="text-[7px] font-bold text-white">{mcpServerCount}</span>
               </div>
             )}
+          </button>
+        )}
+
+        {/* Agentic Mode Toggle - only show when tools are enabled */}
+        {toolsEnabled && onAgenticModeToggle && (
+          <button
+            onClick={onAgenticModeToggle}
+            className={cn(
+              "p-1 rounded-lg transition-colors relative",
+              agenticMode
+                ? "bg-amber-500/20 hover:bg-amber-500/30 text-amber-300"
+                : "hover:bg-white/10 opacity-60"
+            )}
+            title={agenticMode 
+              ? "Agentic Mode: Multi-tool loop" 
+              : "Single Tool Mode"
+            }
+          >
+            <Zap className="w-3 h-3" />
           </button>
         )}
 

@@ -15,6 +15,12 @@ import { ToolRegistry } from '../../../tool-calling-framework/src/registry/ToolR
 import { ToolExecutor } from '../../../tool-calling-framework/src/executor/ToolExecutor';
 import { Message } from '../types/chat';
 
+// Type for OllamaService-like objects (can be the class or a compatible object)
+type OllamaServiceLike = OllamaService | {
+  chat: (messages: any[], model?: string) => Promise<string>;
+  streamChatWithThinking: (messages: any[], model: string, onProgress: (chunk: any) => void) => Promise<string>;
+} | null;
+
 export interface ToolCallingState {
   isEnabled: boolean;
   isExecutingTools: boolean;
@@ -43,7 +49,7 @@ export interface ToolExecutionProgress {
 }
 
 export function useToolCalling(
-  ollamaService: OllamaService,
+  ollamaService: any,
   config: Partial<ToolCallingHookConfig> = {}
 ) {
   // State management

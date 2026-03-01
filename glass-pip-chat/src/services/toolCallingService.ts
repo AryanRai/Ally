@@ -32,6 +32,7 @@ export interface ToolCallResult {
   result: any;
   error?: string;
   executionTime: number;
+  status: 'success' | 'error';
 }
 
 export interface ToolAwareMessage extends ChatMessage {

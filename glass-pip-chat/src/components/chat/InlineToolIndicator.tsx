@@ -59,6 +59,22 @@ export function InlineToolIndicator({ tool, theme }: InlineToolIndicatorProps) {
   };
 
   const formatToolName = (name: string) => {
+    // Special display names for common tools
+    const displayNames: Record<string, string> = {
+      'get_current_time': '🕐 Time',
+      'list_directory': '📁 Files',
+      'read_file': '📄 Read',
+      'read_text_file': '📄 Read',
+      'write_file': '✏️ Write',
+      'calculate': '🔢 Calc',
+      'search_files': '🔍 Search',
+      'create_directory': '📁 Create',
+      'move_file': '📦 Move',
+      'edit_file': '✏️ Edit',
+    };
+    
+    if (displayNames[name]) return displayNames[name];
+    
     return name
       .replace(/_/g, ' ')
       .replace(/([A-Z])/g, ' $1')
@@ -70,13 +86,68 @@ export function InlineToolIndicator({ tool, theme }: InlineToolIndicatorProps) {
   const formatResult = (result: any): string => {
     if (!result) return '';
     if (typeof result === 'string') return result;
-    if (result.formatted) return result.formatted;
-    if (result.result !== undefined) return String(result.result);
+    
+    // Special formatting for time results
+    if (result.time || result.formatted) {
+      if (result.formatted && result.timezone) {
+        return `${result.formatted} (${result.timezone})`;
+      }
+      return result.formatted || result.time;
+    }
+    
+    // Special formatting for calculation results
+    if (result.expression !== undefined && result.result !== undefined) {
+      return `${result.expression} = ${result.result}`;
+    }
+    
+    // Special formatting for directory listings
     if (result.content && Array.isArray(result.content)) {
       const textContent = result.content.find((c: any) => c.type === 'text');
-      if (textContent?.text) return textContent.text;
+      if (textContent?.text) {
+        // Format directory listing more compactly
+        const lines = textContent.text.split('\n').filter((l: string) => l.trim());
+        if (lines.length > 10) {
+          return `${lines.slice(0, 8).join('\n')}\n... and ${lines.length - 8} more items`;
+        }
+        return textContent.text;
+      }
     }
-    return JSON.stringify(result, null, 2);
+    
+    if (result.result !== undefined) return String(result.result);
+    
+    // Compact JSON for other results
+    const jsonStr = JSON.stringify(result, null, 2);
+    if (jsonStr.length > 500) {
+      return jsonStr.substring(0, 500) + '\n... (truncated)';
+    }
+    return jsonStr;
+  };
+
+  // Get a short preview for the pill
+  const getResultPreview = (result: any): string | null => {
+    if (!result) return null;
+    
+    // Time preview
+    if (result.formatted) {
+      const time = result.formatted.split(',')[1]?.trim() || result.formatted;
+      return time.length > 15 ? time.substring(0, 15) + '...' : time;
+    }
+    
+    // Calculation preview
+    if (result.result !== undefined && result.expression) {
+      return `= ${result.result}`;
+    }
+    
+    // File count preview
+    if (result.content && Array.isArray(result.content)) {
+      const textContent = result.content.find((c: any) => c.type === 'text');
+      if (textContent?.text) {
+        const lines = textContent.text.split('\n').filter((l: string) => l.trim());
+        return `${lines.length} items`;
+      }
+    }
+    
+    return null;
   };
 
   const handleCopy = async (e: React.MouseEvent) => {
@@ -88,6 +159,7 @@ export function InlineToolIndicator({ tool, theme }: InlineToolIndicatorProps) {
   };
 
   const resultContent = tool.error || formatResult(tool.result);
+  const resultPreview = getResultPreview(tool.result);
 
   return (
     <motion.div
@@ -108,7 +180,12 @@ export function InlineToolIndicator({ tool, theme }: InlineToolIndicatorProps) {
         {tool.status === 'executing' && (
           <span className="opacity-60 text-[10px]">...</span>
         )}
-        {tool.status === 'success' && tool.endTime && tool.startTime && (
+        {tool.status === 'success' && resultPreview && (
+          <span className="opacity-70 text-[10px] max-w-[100px] truncate">
+            {resultPreview}
+          </span>
+        )}
+        {tool.status === 'success' && !resultPreview && tool.endTime && tool.startTime && (
           <span className="opacity-50 text-[10px]">
             {((tool.endTime - tool.startTime) / 1000).toFixed(1)}s
           </span>

@@ -73,6 +73,8 @@ export default function GlassChatPiP() {
   
   // Tools state - must be declared before hooks that use it
   const [toolsEnabled, setToolsEnabled] = useState(false);
+  // Agentic mode - allows AI to use multiple tools sequentially
+  const [agenticMode, setAgenticMode] = useState(true); // Default to agentic mode when tools are enabled
 
   // Create OllamaService instance for tool calling - must be before unified integration
   const ollamaService = useMemo(() => {
@@ -106,7 +108,7 @@ export default function GlassChatPiP() {
   // Unified Tool Integration (conditional based on toggle)
   const unifiedIntegration = useUnifiedToolIntegration(
     activeChat?.id || `chat_${Date.now()}`,
-    ollamaService, // Now properly passing the OllamaService
+    ollamaService as any, // Type assertion for compatibility
     {
       streamHandlerUrl: 'ws://localhost:3000',
       enableToolExecution: toolsEnabled,
@@ -135,7 +137,7 @@ export default function GlassChatPiP() {
   const [appSettings, setAppSettings] = useState<AppSettings>(() => settingsManager.getSettings());
 
   // Tool calling integration (after appSettings is initialized)
-  const toolCalling = useToolCalling(ollamaService, {
+  const toolCalling = useToolCalling(ollamaService as any, {
     enableToolCalling: appSettings.tools?.enabled || false,
     maxToolCalls: 5,
     toolCallTimeout: 30000,
@@ -469,12 +471,13 @@ export default function GlassChatPiP() {
     }
   };
 
-  // Tool-aware chat flow with MCP integration
+  // Tool-aware chat flow with MCP integration - supports both single-tool and agentic modes
   const handleSendWithTools = async (contextualContent: string) => {
     // Get available MCP tools from the hook
     const mcpTools = await getMcpToolsForLLM();
     
     console.log('🔧 Available MCP tools:', mcpTools);
+    console.log('🤖 Agentic mode:', agenticMode);
     
     if (mcpTools.length === 0) {
       console.log('⚠️ No MCP tools available, falling back to regular chat');
@@ -482,9 +485,30 @@ export default function GlassChatPiP() {
       return;
     }
     
-    // Get saved tool prompt or use default
+    // Get saved tool prompt or use default - different prompts for agentic vs single-tool mode
     const savedToolPrompt = localStorage.getItem('ally-prompt-tools') || 
-      `You are an AI assistant with tool access. When you need information you don't have, use a tool.
+      (agenticMode 
+        ? `You are an AI assistant with access to powerful tools. You MUST use tools to get real information.
+
+CRITICAL RULES - FOLLOW EXACTLY:
+1. NEVER guess or make up information - ALWAYS use a tool to get real data
+2. For ANY question about time/date → use get_current_time IMMEDIATELY
+3. For ANY question about files/directories → use list_directory or read_file IMMEDIATELY  
+4. For ANY math calculation → use calculate IMMEDIATELY
+5. You can chain MULTIPLE tools - use as many as needed to complete the task
+6. After each tool result, decide: need more info? → use another tool. Task complete? → give final answer
+7. NEVER say "I'll use a tool" or "Let me check" - just output the tool call JSON directly
+
+TOOL CALL FORMAT (output this JSON exactly):
+{"name": "tool_name", "parameters": {"param1": "value1"}}
+
+EXAMPLES:
+- User asks "what time is it?" → {"name": "get_current_time", "parameters": {}}
+- User asks "list files" → {"name": "list_directory", "parameters": {"path": "."}}
+- User asks "what's 15 * 23?" → {"name": "calculate", "parameters": {"expression": "15 * 23"}}
+
+WHEN DONE: After you have ALL needed information from tools, write your final response naturally WITHOUT any JSON.`
+        : `You are an AI assistant with tool access. When you need information you don't have, use a tool.
 
 TO USE A TOOL, output ONLY this JSON (nothing else before or after):
 {"name": "tool_name", "parameters": {}}
@@ -492,166 +516,293 @@ TO USE A TOOL, output ONLY this JSON (nothing else before or after):
 RULES:
 - For questions about time, files, calculations - USE A TOOL, don't explain
 - Output the JSON tool call IMMEDIATELY, no explanation needed
-- After getting results, give a natural response incorporating the data`;
+- After getting results, give a natural response incorporating the data`);
 
     // Build the full system prompt with available tools
     const toolsSystemPrompt = `${savedToolPrompt}
 
-Available tools:
-${mcpTools.map(t => `- ${t.name}: ${t.description}${t.parameters ? ` (params: ${JSON.stringify(t.parameters)})` : ''}`).join('\n')}`;
+AVAILABLE TOOLS:
+${mcpTools.map(t => {
+  const params = t.parameters ? ` | params: ${JSON.stringify(t.parameters)}` : ' | no params needed';
+  return `• ${t.name}${params}\n  → ${t.description}`;
+}).join('\n')}
 
-    // Prepend system prompt to the user message
-    const messageWithTools = `[System: ${toolsSystemPrompt}]\n\nUser: ${contextualContent}`;
+Remember: Output ONLY the JSON tool call when you need to use a tool. No explanations before it.`;
+
+    if (agenticMode) {
+      // Use agentic loop for multi-tool execution
+      await handleAgenticChat(contextualContent, toolsSystemPrompt, mcpTools);
+    } else {
+      // Use single-tool mode (original behavior)
+      await handleSingleToolChat(contextualContent, toolsSystemPrompt);
+    }
+  };
+
+  // Agentic chat - allows multiple sequential tool calls
+  const handleAgenticChat = async (
+    contextualContent: string, 
+    systemPrompt: string,
+    _tools: Array<{ name: string; description: string; parameters?: any }>
+  ) => {
+    const MAX_ITERATIONS = 10;
+    const MAX_TOOL_CALLS = 20;
+    
+    let iteration = 0;
+    let totalToolCalls = 0;
+    let conversationContext = '';
+    const allToolExecutions: ToolExecution[] = [];
+    const finalResponseParts: string[] = [];
+    let currentThinking = '';
+    
+    // Initial message with system prompt
+    let currentMessage = `[System: ${systemPrompt}]\n\nUser: ${contextualContent}`;
+    
+    while (iteration < MAX_ITERATIONS && totalToolCalls < MAX_TOOL_CALLS) {
+      iteration++;
+      console.log(`🔄 Agentic iteration ${iteration}`);
+      
+      let accumulatedResponse = '';
+      let toolCallDetected = false;
+      let detectedToolCall: { name: string; parameters: any } | null = null;
+      let beforeToolText = '';
+      
+      // Stream response from LLM
+      await ollamaIntegration.sendMessageToOllama(
+        activeChat?.messages || [],
+        currentMessage + (conversationContext ? `\n\n${conversationContext}` : ''),
+        (update) => {
+          if (update.type === 'response' || update.type === 'done') {
+            accumulatedResponse = update.response || '';
+            
+            // Extract thinking
+            const thinkingMatch = accumulatedResponse.match(/<think>([\s\S]*?)<\/think>/i);
+            if (thinkingMatch) {
+              currentThinking = thinkingMatch[1].trim();
+              setStreamingThinking(currentThinking);
+            }
+            
+            // Parse for tool call
+            const parsed = parseToolCallFromResponse(accumulatedResponse);
+            
+            if (parsed.toolCall && !toolCallDetected) {
+              toolCallDetected = true;
+              detectedToolCall = parsed.toolCall;
+              beforeToolText = parsed.beforeText;
+              
+              // Show text before tool call
+              const displayParts = [...finalResponseParts];
+              if (beforeToolText) displayParts.push(beforeToolText);
+              displayParts.push(`🔧 *Calling ${parsed.toolCall.name}...*`);
+              setCurrentResponse(displayParts.join('\n\n'));
+            } else if (!toolCallDetected) {
+              // No tool call yet, show streaming response
+              const cleanedResponse = accumulatedResponse
+                .replace(/<think>[\s\S]*?<\/think>/gi, '')
+                .trim();
+              const displayParts = [...finalResponseParts, cleanedResponse];
+              setCurrentResponse(displayParts.join('\n\n') + (update.type === 'done' ? '' : '▋'));
+            }
+          }
+        }
+      );
+      
+      // If no tool call detected, we're done
+      if (!toolCallDetected || !detectedToolCall) {
+        console.log('✅ No more tool calls, task complete');
+        
+        // Clean final response
+        const cleanedFinal = accumulatedResponse
+          .replace(/<think>[\s\S]*?<\/think>/gi, '')
+          .trim();
+        
+        if (cleanedFinal && !finalResponseParts.includes(cleanedFinal)) {
+          finalResponseParts.push(cleanedFinal);
+        }
+        break;
+      }
+      
+      // TypeScript needs this assertion after the null check
+      const toolToExecute = detectedToolCall as { name: string; parameters: any };
+      
+      // Add text before tool call to response
+      if (beforeToolText && !finalResponseParts.includes(beforeToolText)) {
+        finalResponseParts.push(beforeToolText);
+      }
+      
+      // Execute the tool
+      totalToolCalls++;
+      const toolExecution: ToolExecution = {
+        id: `tool-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        name: toolToExecute.name,
+        status: 'executing',
+        startTime: Date.now(),
+      };
+      
+      allToolExecutions.push(toolExecution);
+      setActiveToolExecutions([...allToolExecutions]);
+      
+      try {
+        console.log(`🔧 Executing tool: ${toolToExecute.name}`, toolToExecute.parameters);
+        const result = await executeMcpTool(toolToExecute.name, toolToExecute.parameters);
+        
+        toolExecution.status = 'success';
+        toolExecution.result = result;
+        toolExecution.endTime = Date.now();
+        
+        // Format result
+        const resultText = formatToolResultForDisplay(toolToExecute.name, result);
+        
+        // Add tool result to response parts
+        finalResponseParts.push(`🔧 **${toolToExecute.name}**\n\`\`\`\n${resultText}\n\`\`\``);
+        
+        // Update display
+        setActiveToolExecutions([...allToolExecutions]);
+        setCurrentResponse(finalResponseParts.join('\n\n') + '\n\n*Analyzing results...*');
+        
+        // Build context for next iteration
+        conversationContext = `Tool "${toolToExecute.name}" returned:\n${resultText}\n\nBased on this result, continue with the task. If you need more information, use another tool. If the task is complete, provide your final response WITHOUT any tool call JSON.`;
+        
+        // Reset message for next iteration
+        currentMessage = '';
+        
+      } catch (error) {
+        console.error(`❌ Tool execution failed:`, error);
+        toolExecution.status = 'error';
+        toolExecution.error = error instanceof Error ? error.message : String(error);
+        toolExecution.endTime = Date.now();
+        
+        setActiveToolExecutions([...allToolExecutions]);
+        
+        // Add error to response
+        finalResponseParts.push(`❌ **${toolToExecute.name}** failed: ${toolExecution.error}`);
+        
+        // Let the AI know about the error
+        conversationContext = `Tool "${toolToExecute.name}" failed with error: ${toolExecution.error}\n\nYou can try a different approach or explain the issue to the user.`;
+        currentMessage = '';
+      }
+    }
+    
+    // Build final message content
+    let finalContent = '';
+    if (currentThinking) {
+      finalContent = `<think>${currentThinking}</think>\n\n`;
+    }
+    finalContent += finalResponseParts.join('\n\n');
+    
+    // Clear streaming state
+    setStreamingThinking(null);
+    setActiveToolExecutions([]);
+    
+    if (finalContent.trim()) {
+      const assistantMessage: Message = {
+        id: `assistant-${Date.now()}`,
+        role: 'assistant',
+        content: finalContent.trim(),
+        timestamp: Date.now()
+      };
+      addMessageToActiveChat(assistantMessage);
+    }
+  };
+
+  // Helper to parse tool call from response
+  const parseToolCallFromResponse = (text: string): { 
+    toolCall: { name: string; parameters: any } | null;
+    beforeText: string;
+  } => {
+    // Strip thinking blocks
+    const cleanedText = text.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+    
+    // Format 1: Raw JSON - {"name": "...", "parameters": ...}
+    const rawJsonMatch = cleanedText.match(/\{\s*"name"\s*:\s*"([^"]+)"\s*,\s*"parameters"\s*:\s*("[^"]*"|\{[^}]*\}|\[\]|null|\{\})\s*\}/);
+    if (rawJsonMatch) {
+      const name = rawJsonMatch[1];
+      let params = {};
+      const paramsStr = rawJsonMatch[2];
+      if (paramsStr && paramsStr !== '""' && paramsStr !== 'null') {
+        try {
+          params = JSON.parse(paramsStr);
+        } catch {
+          params = {};
+        }
+      }
+      const idx = cleanedText.indexOf(rawJsonMatch[0]);
+      return {
+        toolCall: { name, parameters: params },
+        beforeText: cleanedText.substring(0, idx).trim()
+      };
+    }
+    
+    // Format 2: JSON with tags
+    const jsonTagMatch = cleanedText.match(/<tool_call>\s*(\{[\s\S]*?\})\s*<\/tool_call>/);
+    if (jsonTagMatch) {
+      try {
+        const parsed = JSON.parse(jsonTagMatch[1].trim());
+        const idx = cleanedText.indexOf(jsonTagMatch[0]);
+        return {
+          toolCall: { name: parsed.name, parameters: parsed.parameters || {} },
+          beforeText: cleanedText.substring(0, idx).trim()
+        };
+      } catch { /* continue */ }
+    }
+    
+    return { toolCall: null, beforeText: cleanedText };
+  };
+
+  // Helper to format tool result for display
+  const formatToolResultForDisplay = (toolName: string, result: any): string => {
+    if (!result) return 'No result';
+    
+    // Special formatting for time results
+    if (toolName === 'get_current_time' || result.time || (result.formatted && result.timezone)) {
+      if (result.formatted && result.timezone) {
+        return `${result.formatted} (${result.timezone})`;
+      }
+      return result.formatted || result.time || JSON.stringify(result);
+    }
+    
+    // Special formatting for calculation results
+    if (toolName === 'calculate' || (result.expression !== undefined && result.result !== undefined)) {
+      return `${result.expression} = ${result.result}`;
+    }
+    
+    // Handle MCP content array format
+    if (result.content && Array.isArray(result.content)) {
+      const textContent = result.content.find((c: any) => c.type === 'text');
+      if (textContent?.text) {
+        // For directory listings, format more compactly
+        if (toolName === 'list_directory' || toolName.includes('directory')) {
+          const lines = textContent.text.split('\n').filter((l: string) => l.trim());
+          if (lines.length > 15) {
+            return `${lines.slice(0, 12).join('\n')}\n... and ${lines.length - 12} more items`;
+          }
+        }
+        return textContent.text;
+      }
+    }
+    
+    if (result.formatted) return result.formatted;
+    if (result.result !== undefined) return String(result.result);
+    if (typeof result === 'string') return result;
+    
+    // Truncate long JSON
+    const jsonStr = JSON.stringify(result, null, 2);
+    if (jsonStr.length > 800) {
+      return jsonStr.substring(0, 800) + '\n... (truncated)';
+    }
+    return jsonStr;
+  };
+
+  // Single-tool chat mode (original behavior)
+  const handleSingleToolChat = async (contextualContent: string, systemPrompt: string) => {
+    const messageWithTools = `[System: ${systemPrompt}]\n\nUser: ${contextualContent}`;
 
     let accumulatedResponse = '';
-    let finalResponseWithToolResults = ''; // Track the modified response with tool results
+    let finalResponseWithToolResults = '';
     let pendingToolCall: { name: string; parameters: any } | null = null;
     let toolExecuted = false;
-
-    // Helper to parse different tool call formats (handles multiple formats LLMs use)
-    const parseToolCall = (text: string): { match: RegExpMatchArray | null; toolCall: { name: string; parameters: any } | null } => {
-      // First, strip any <think>...</think> blocks
-      const cleanedText = text.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
-      
-      // Format 1: JSON format with tags - <tool_call>{"name": "...", "parameters": {...}}</tool_call>
-      const jsonMatch = cleanedText.match(/<tool_call>\s*(\{[\s\S]*?\})\s*<\/tool_call>/);
-      if (jsonMatch) {
-        try {
-          const parsed = JSON.parse(jsonMatch[1].trim());
-          return { match: jsonMatch, toolCall: { name: parsed.name, parameters: parsed.parameters || {} } };
-        } catch (e) {
-          console.log('JSON parse failed, trying other formats');
-        }
-      }
-      
-      // Format 2: Function format - <tool_call><function=name>params</function></tool_call>
-      const funcMatch = cleanedText.match(/<tool_call>\s*<function=(\w+)>([\s\S]*?)<\/function>\s*<\/tool_call>/);
-      if (funcMatch) {
-        const name = funcMatch[1];
-        let params = {};
-        const paramsStr = funcMatch[2].trim();
-        if (paramsStr) {
-          try {
-            params = JSON.parse(paramsStr);
-          } catch (e) {
-            // Try to parse as key=value pairs
-            const pairs = paramsStr.match(/(\w+)=["']?([^"'\s]+)["']?/g);
-            if (pairs) {
-              pairs.forEach(pair => {
-                const [key, value] = pair.split('=');
-                (params as any)[key] = value.replace(/["']/g, '');
-              });
-            }
-          }
-        }
-        return { match: funcMatch, toolCall: { name, parameters: params } };
-      }
-      
-      // Format 3: Simple format - <tool_call>tool_name</tool_call>
-      const simpleMatch = cleanedText.match(/<tool_call>\s*(\w+)(?:\s*\(([\s\S]*?)\))?\s*<\/tool_call>/);
-      if (simpleMatch) {
-        const name = simpleMatch[1];
-        let params = {};
-        if (simpleMatch[2]) {
-          try {
-            params = JSON.parse(`{${simpleMatch[2]}}`);
-          } catch (e) {
-            // Ignore parse errors
-          }
-        }
-        return { match: simpleMatch, toolCall: { name, parameters: params } };
-      }
-      
-      // Format 4: Raw JSON without tags - {"name": "...", "parameters": ...}
-      // More flexible regex that handles various parameter formats including empty string
-      const rawJsonMatch = cleanedText.match(/\{\s*"name"\s*:\s*"([^"]+)"\s*,\s*"parameters"\s*:\s*("[^"]*"|\{[^}]*\}|\[\]|null)\s*\}/);
-      if (rawJsonMatch) {
-        try {
-          const name = rawJsonMatch[1];
-          let params = {};
-          const paramsStr = rawJsonMatch[2];
-          // Handle different parameter formats
-          if (paramsStr && paramsStr !== '""' && paramsStr !== 'null') {
-            try {
-              params = JSON.parse(paramsStr);
-            } catch (e) {
-              // If it's an empty string or invalid, use empty object
-              params = {};
-            }
-          }
-          // Create a fake match array for replacement
-          const fakeMatch = [rawJsonMatch[0]] as RegExpMatchArray;
-          fakeMatch.index = cleanedText.indexOf(rawJsonMatch[0]);
-          fakeMatch.input = cleanedText;
-          return { match: fakeMatch, toolCall: { name, parameters: params } };
-        } catch (e) {
-          console.log('Raw JSON parse failed:', e);
-        }
-      }
-      
-      return { match: null, toolCall: null };
-    };
-
-    let toolExecutionPromise: Promise<void> | null = null;
-
-    // Track thinking state for streaming display - use state for UI updates
     let currentThinking = '';
     let thinkingComplete = false;
-
-    // Helper to extract and format thinking for display
-    const extractThinking = (text: string): { thinking: string; isComplete: boolean; rest: string } => {
-      // Check for complete thinking block
-      const completeMatch = text.match(/<think>([\s\S]*?)<\/think>/i);
-      if (completeMatch) {
-        const thinking = completeMatch[1].trim();
-        const rest = text.replace(completeMatch[0], '').trim();
-        return { thinking, isComplete: true, rest };
-      }
-      
-      // Check for incomplete thinking block (still streaming)
-      const incompleteMatch = text.match(/<think>([\s\S]*)$/i);
-      if (incompleteMatch) {
-        const thinking = incompleteMatch[1].trim();
-        const rest = text.substring(0, incompleteMatch.index).trim();
-        return { thinking, isComplete: false, rest };
-      }
-      
-      return { thinking: '', isComplete: false, rest: text };
-    };
-
-    // Helper to clean response for display (handles thinking based on state)
-    // Returns: { displayText: string, thinkingForPill: string | null }
-    const formatResponseForDisplay = (text: string, showThinkingInline: boolean): { displayText: string; thinkingForPill: string | null } => {
-      const { thinking, isComplete, rest } = extractThinking(text);
-      
-      // Update tracking
-      if (thinking) {
-        currentThinking = thinking;
-        thinkingComplete = isComplete;
-      }
-      
-      if (thinking && !isComplete && showThinkingInline) {
-        // Show thinking inline while streaming (with visual indicator) - not yet complete
-        return { 
-          displayText: `💭 *Thinking...*\n\n${thinking}\n\n---\n\n${rest}`.trim(),
-          thinkingForPill: null // Don't show pill yet, still streaming thinking
-        };
-      }
-      
-      if (thinking && isComplete) {
-        // Thinking is complete - return it for pill display, show only rest as text
-        return {
-          displayText: rest.replace(/^\s*\n+/, '').trim(),
-          thinkingForPill: thinking
-        };
-      }
-      
-      // No thinking, just return the rest
-      return { 
-        displayText: rest.replace(/^\s*\n+/, '').trim(),
-        thinkingForPill: null
-      };
-    };
+    let toolExecutionPromise: Promise<void> | null = null;
 
     await ollamaIntegration.sendMessageToOllama(
       activeChat?.messages || [],
@@ -660,142 +811,78 @@ ${mcpTools.map(t => `- ${t.name}: ${t.description}${t.parameters ? ` (params: ${
         if (update.type === 'response' || update.type === 'done') {
           accumulatedResponse = update.response || '';
           
-          // Try to parse tool call from response
-          const { match: toolCallMatch, toolCall } = parseToolCall(accumulatedResponse);
+          // Extract thinking
+          const thinkMatch = accumulatedResponse.match(/<think>([\s\S]*?)<\/think>/i);
+          if (thinkMatch) {
+            currentThinking = thinkMatch[1].trim();
+            thinkingComplete = true;
+            setStreamingThinking(currentThinking);
+          }
           
-          if (toolCallMatch && toolCall && !pendingToolCall && !toolExecuted) {
-            pendingToolCall = toolCall;
+          // Parse for tool call
+          const parsed = parseToolCallFromResponse(accumulatedResponse);
+          
+          if (parsed.toolCall && !pendingToolCall && !toolExecuted) {
+            pendingToolCall = parsed.toolCall;
             toolExecuted = true;
             
-            console.log('🔧 Executing tool:', toolCall);
-            
-            // Show inline tool execution indicator
             setActiveToolExecutions([{
               id: `tool-${Date.now()}`,
-              name: toolCall.name,
+              name: parsed.toolCall.name,
               status: 'executing',
               startTime: Date.now()
             }]);
             
-            // Start tool execution (don't await in callback)
+            const toolCall = parsed.toolCall;
+            const beforeText = parsed.beforeText;
+            
             toolExecutionPromise = (async () => {
               try {
-                // Execute the tool
                 const toolResult = await executeMcpTool(toolCall.name, toolCall.parameters || {});
                 
-                console.log('✅ Tool result:', toolResult);
-                
-                // Update indicator to complete
                 setActiveToolExecutions(prev => prev.map(t => 
                   t.name === toolCall.name ? { ...t, status: 'success' as const, result: toolResult, endTime: Date.now() } : t
                 ));
                 
-                // Format the result for display
-                let resultDisplay = '';
-                if (toolResult.content && Array.isArray(toolResult.content)) {
-                  // MCP tool result format
-                  const textContent = toolResult.content.find((c: any) => c.type === 'text');
-                  resultDisplay = textContent?.text || JSON.stringify(toolResult.content);
-                } else if (toolResult.formatted) {
-                  resultDisplay = toolResult.formatted;
-                } else if (toolResult.time) {
-                  // Time result
-                  resultDisplay = toolResult.formatted || toolResult.time;
-                } else {
-                  resultDisplay = JSON.stringify(toolResult.result || toolResult, null, 2);
-                }
-                
-                // Create the formatted result text
+                const resultDisplay = formatToolResultForDisplay(toolCall.name, toolResult);
                 const resultText = `🔧 **${toolCall.name}**\n\`\`\`\n${resultDisplay}\n\`\`\``;
                 
-                // Clean the response and replace tool call with result
-                const { displayText: cleanedResponse } = formatResponseForDisplay(accumulatedResponse, false);
-                // Replace the tool call JSON or tags with the result
-                if (toolCallMatch[0]) {
-                  finalResponseWithToolResults = cleanedResponse.replace(toolCallMatch[0], resultText);
-                } else {
-                  finalResponseWithToolResults = resultText;
-                }
+                finalResponseWithToolResults = beforeText ? `${beforeText}\n\n${resultText}` : resultText;
                 setCurrentResponse(finalResponseWithToolResults);
                 
               } catch (error) {
-                console.error('❌ Tool execution failed:', error);
                 setActiveToolExecutions(prev => prev.map(t => 
                   t.name === pendingToolCall?.name ? { ...t, status: 'error' as const, error: String(error) } : t
                 ));
                 
-                // Show error in response
                 const errorText = `❌ **Tool Error: ${pendingToolCall?.name}** - ${error}`;
-                const { displayText: cleanedResponse } = formatResponseForDisplay(accumulatedResponse, false);
-                finalResponseWithToolResults = toolCallMatch[0] 
-                  ? cleanedResponse.replace(toolCallMatch[0], errorText)
-                  : errorText;
+                finalResponseWithToolResults = beforeText ? `${beforeText}\n\n${errorText}` : errorText;
                 setCurrentResponse(finalResponseWithToolResults);
               }
             })();
             
-            // Show loading state while tool executes (clean display)
-            const { displayText: cleanedForLoading } = formatResponseForDisplay(accumulatedResponse, false);
-            const loadingDisplay = toolCallMatch[0] 
-              ? cleanedForLoading.replace(toolCallMatch[0], `🔧 *Executing ${toolCall.name}...*`)
-              : `🔧 *Executing ${toolCall.name}...*`;
-            setCurrentResponse(loadingDisplay + '▋');
+            setCurrentResponse(parsed.beforeText ? `${parsed.beforeText}\n\n🔧 *Executing ${parsed.toolCall.name}...*` : `🔧 *Executing ${parsed.toolCall.name}...*`);
             
           } else if (toolExecuted && finalResponseWithToolResults) {
-            // Tool already executed, keep showing the modified response
             setCurrentResponse(finalResponseWithToolResults + (update.type === 'done' ? '' : '▋'));
-          } else if (toolExecuted && !finalResponseWithToolResults) {
-            // Tool is still executing, show loading state
-            const loadingText = pendingToolCall ? `🔧 *Executing ${pendingToolCall.name}...*` : '';
-            setCurrentResponse(loadingText + '▋');
-          } else {
-            // Regular response update (no tool call detected yet)
-            // Show thinking inline while streaming, collapse to pill when complete
-            const { displayText, thinkingForPill } = formatResponseForDisplay(accumulatedResponse, true);
-            
-            // Update streaming thinking state for pill display
-            if (thinkingForPill !== null) {
-              setStreamingThinking(thinkingForPill);
-            }
-            
-            setCurrentResponse(displayText + (update.type === 'done' ? '' : '▋'));
+          } else if (!toolExecuted) {
+            const cleanedResponse = accumulatedResponse.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+            setCurrentResponse(cleanedResponse + (update.type === 'done' ? '' : '▋'));
           }
         }
       }
     );
 
-    // Wait for tool execution to complete if it's in progress
     if (toolExecutionPromise) {
       await toolExecutionPromise;
     }
 
-    // Save the final message - preserve thinking for pill display
-    let finalContent = finalResponseWithToolResults || accumulatedResponse;
+    let finalContent = finalResponseWithToolResults || accumulatedResponse.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
     
-    // If we have thinking, keep it in the content (will be shown as pill)
-    // But clean up the display format
     if (currentThinking && thinkingComplete) {
-      // Keep the <think> tags in the saved content so MessagePills can parse them
-      // Just clean up any streaming artifacts
-      const { rest } = extractThinking(finalContent);
-      finalContent = `<think>${currentThinking}</think>\n\n${rest}`.trim();
-    } else {
-      // No thinking or incomplete - just use the response part
-      const { displayText } = formatResponseForDisplay(finalContent, false);
-      finalContent = displayText;
+      finalContent = `<think>${currentThinking}</think>\n\n${finalContent}`;
     }
     
-    // Also include tool results if any
-    if (finalResponseWithToolResults) {
-      const { rest } = extractThinking(finalResponseWithToolResults);
-      if (currentThinking && thinkingComplete) {
-        finalContent = `<think>${currentThinking}</think>\n\n${rest}`.trim();
-      } else {
-        finalContent = rest;
-      }
-    }
-    
-    // Clear streaming thinking state
     setStreamingThinking(null);
     
     if (finalContent) {
@@ -1184,8 +1271,7 @@ ${mcpTools.map(t => `- ${t.name}: ${t.description}${t.parameters ? ` (params: ${
         id: `remote-${Date.now()}`,
         content: `🌐 Remote: ${latestMessage}`,
         role: 'user',
-        timestamp: new Date(),
-        fromQuickInput: false
+        timestamp: Date.now()
       };
 
       addMessageToActiveChat(remoteMessage);
@@ -1964,7 +2050,6 @@ ${mcpTools.map(t => `- ${t.name}: ${t.description}${t.parameters ? ` (params: ${
                   ollamaIntegration.setCurrentModel(model);
                   ollamaIntegration.setShowModelSelector(false);
                 }}
-                onProviderSettings={() => setShowProviderSettings(true)}
                 voiceModeEnabled={voiceModeEnabled}
                 onVoiceModeToggle={async () => {
                   const newVoiceMode = !voiceModeEnabled;
@@ -2026,6 +2111,8 @@ ${mcpTools.map(t => `- ${t.name}: ${t.description}${t.parameters ? ` (params: ${
                 toolsEnabled={toolsEnabled}
                 onToolsToggle={() => setToolsEnabled(!toolsEnabled)}
                 mcpServerCount={mcpServerCount}
+                agenticMode={agenticMode}
+                onAgenticModeToggle={() => setAgenticMode(!agenticMode)}
               />
             )}
           </div>

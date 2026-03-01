@@ -19,6 +19,12 @@ import {
 import { ToolAwareProcessingProgress } from '../services/toolAwareIntegrationService';
 import { Message } from '../types/chat';
 
+// Type for OllamaService-like objects (can be the class or a compatible object)
+type OllamaServiceLike = OllamaService | {
+  chat: (messages: any[], model?: string) => Promise<string>;
+  streamChatWithThinking: (messages: any[], model: string, onProgress: (chunk: any) => void) => Promise<string>;
+} | null;
+
 export interface UnifiedToolIntegrationHookState {
   // Service state
   service: UnifiedToolIntegrationService | null;
@@ -56,7 +62,7 @@ export interface ProcessMessageOptions {
 
 export function useUnifiedToolIntegration(
   conversationId: string,
-  ollamaService: OllamaService,
+  ollamaService: any,
   config: UnifiedToolIntegrationHookConfig = {}
 ) {
   // Configuration with defaults
