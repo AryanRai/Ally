@@ -1324,16 +1324,10 @@ Remember: Output ONLY the JSON tool call when you need to use a tool. No explana
         const result = await mcpIntegration.executeMCPTool(actualToolName, normalizedParams);
         return result;
       } catch (mcpError) {
-        console.log('MCP integration failed, trying fallback:', mcpError);
+        console.log('MCP integration failed:', mcpError);
       }
       
-      // Last resort fallback to window.pip.mcp API (this is the mock)
-      if (window.pip?.mcp?.executeTool) {
-        console.log('⚠️ Falling back to mock executeTool for:', actualToolName);
-        return await window.pip.mcp.executeTool(actualToolName, normalizedParams);
-      }
-      
-      throw new Error(`Tool ${actualToolName} not found`);
+      throw new Error(`Tool ${actualToolName} not found in any MCP server`);
     } catch (error) {
       console.error(`Failed to execute tool ${actualToolName}:`, error);
       throw error;

@@ -1358,9 +1358,8 @@ ipcMain.handle('mcp:sendMessage', async (_, processId: string, message: string) 
 });
 
 ipcMain.handle('mcp:executeTool', async (_, toolName: string, parameters: any) => {
-  // Mock implementation - would execute actual tool
-  console.log(`Executing MCP tool: ${toolName}`, parameters);
-  return { result: 'Mock MCP tool result' };
+  console.error(`mcp:executeTool called for ${toolName} — this is a deprecated mock handler. Use MCP integration instead.`);
+  throw new Error(`No mock handler for tool: ${toolName}. Use MCP integration.`);
 });
 
 ipcMain.handle('acp:readConfig', async () => {
