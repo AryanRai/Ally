@@ -768,7 +768,17 @@ export default function GlassChatPiP() {
 7. Only give your final answer (plain text, NO JSON) when you have completed ALL steps the user asked for.
 8. Do NOT repeat raw tool results in your final answer — summarize naturally.
 9. ⚠️ NEVER use curl or wget — they don't work on this system. Use fetch_url tool for ALL HTTP requests.
-10. To open a URL in the browser, use execute_command with {"command": "start <url>"}.
+10. To open a URL in the browser, use browser_navigate (preferred) or execute_command with {"command": "start <url>"}.
+11. To interact with web pages (click buttons, type text, read content, send messages), use browser_* tools.
+
+BROWSER TOOL EXAMPLES:
+- Open WhatsApp: {"name": "browser_navigate", "parameters": {"url": "https://web.whatsapp.com"}}
+- Wait for load: {"name": "browser_wait_for", "parameters": {"selector": "div[data-testid='chat-list']", "timeout": 15000}}
+- Search contact: {"name": "browser_click", "parameters": {"selector": "div[data-testid='search']"}}
+- Type name: {"name": "browser_type", "parameters": {"selector": "div[data-testid='search'] input", "text": "Aditya"}}
+- Click result: {"name": "browser_click", "parameters": {"text": "Aditya Solanki"}}
+- Type message: {"name": "browser_type", "parameters": {"selector": "div[data-testid='conversation-compose-box-input']", "text": "hi"}}
+- Send (Enter): {"name": "browser_eval", "parameters": {"code": "document.querySelector('[data-testid=send]').click()"}}
 
 IMPORTANT — ONE TOOL PER RESPONSE:
 - Output exactly ONE tool call JSON, then STOP. Do not output multiple tool calls or any text after the JSON.
@@ -1399,7 +1409,20 @@ Remember: Output ONLY the JSON tool call when you need to use a tool. No explana
         { name: 'fetch_url', description: 'Fetch a URL and return the response body. USE THIS instead of curl for any HTTP requests or internet access.', parameters: { url: 'string', method: 'string (optional)', headers: 'object (optional)', body: 'string (optional)' } },
         { name: 'execute_command', description: 'Execute a system command on Windows. Use "start <url>" to open URLs in browser.', parameters: { command: 'string' } },
         { name: 'list_directory', description: 'List the contents of a directory', parameters: { path: 'string' } },
-        { name: 'read_file', description: 'Read the contents of a file', parameters: { path: 'string' } }
+        { name: 'read_file', description: 'Read the contents of a file', parameters: { path: 'string' } },
+        // Browser tools (require Ally Chrome extension)
+        { name: 'browser_navigate', description: 'Navigate browser to a URL. Use this to open websites.', parameters: { url: 'string' } },
+        { name: 'browser_click', description: 'Click an element on the page by CSS selector or visible text', parameters: { selector: 'string (optional)', text: 'string (optional)' } },
+        { name: 'browser_type', description: 'Type text into an input field on the page', parameters: { selector: 'string', text: 'string' } },
+        { name: 'browser_read_page', description: 'Read the current page content, title, URL and links', parameters: { includeLinks: 'boolean (optional)' } },
+        { name: 'browser_eval', description: 'Run JavaScript in the current page. Use for complex interactions.', parameters: { code: 'string' } },
+        { name: 'browser_find_element', description: 'Find an element on the page by selector or text', parameters: { selector: 'string (optional)', text: 'string (optional)' } },
+        { name: 'browser_get_tabs', description: 'List all open browser tabs', parameters: {} },
+        { name: 'browser_switch_tab', description: 'Switch to a browser tab by URL or title', parameters: { url: 'string (optional)', title: 'string (optional)' } },
+        { name: 'browser_screenshot', description: 'Take a screenshot of the current browser tab', parameters: {} },
+        { name: 'browser_wait_for', description: 'Wait for a CSS selector to appear on the page', parameters: { selector: 'string', timeout: 'number (optional)' } },
+        { name: 'browser_get_url', description: 'Get the current page URL and title', parameters: {} },
+        { name: 'browser_scroll', description: 'Scroll the page or scroll an element into view', parameters: { selector: 'string (optional)', y: 'number (optional)' } },
       );
       
       // Add MCP tools from the integration hook (persisted in store)
@@ -1513,7 +1536,10 @@ Remember: Output ONLY the JSON tool call when you need to use a tool. No explana
     }
 
     // Built-in filesystem/network tools — route through FilesystemToolsService
-    if (['fetch_url', 'execute_command', 'list_directory', 'read_file', 'path_exists', 'get_file_info'].includes(actualToolName)) {
+    if (['fetch_url', 'execute_command', 'list_directory', 'read_file', 'path_exists', 'get_file_info',
+         'browser_navigate', 'browser_click', 'browser_type', 'browser_read_page', 'browser_screenshot',
+         'browser_eval', 'browser_find_element', 'browser_scroll', 'browser_get_tabs', 'browser_switch_tab',
+         'browser_go_back', 'browser_go_forward', 'browser_wait_for', 'browser_get_url'].includes(actualToolName)) {
       try {
         const { getFilesystemToolsService } = await import('../services/filesystemTools');
         const fsService = getFilesystemToolsService();

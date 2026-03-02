@@ -7,6 +7,7 @@ import { promisify } from 'node:util';
 import { OllamaService, ChatMessage } from '../src/services/ollamaService.js';
 import { getSpeechService, SpeechServiceClient } from '../src/services/speechService.js';
 import WebSocket from 'ws';
+import { startBrowserBridgeServer, stopBrowserBridgeServer, callBrowserTool, isBrowserExtensionConnected } from '../src/services/browserBridgeServer.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -996,6 +997,15 @@ ipcMain.handle('system:fetchUrl', async (_, url: string, options?: { method?: st
   }
 });
 
+// Browser bridge IPC handlers
+ipcMain.handle('browser:callTool', async (_, tool: string, params: Record<string, unknown>) => {
+  return await callBrowserTool(tool, params);
+});
+
+ipcMain.handle('browser:isConnected', async () => {
+  return { connected: isBrowserExtensionConnected() };
+});
+
 // Speech service handlers
 ipcMain.handle('speech:connect', async () => {
   try {
@@ -1459,6 +1469,9 @@ ipcMain.handle('acp:reconnectAgent', async (_, agentId: string) => {
 app.whenReady().then(async () => {
   await createWindow();
   createTray(); // Create tray after window is ready
+
+  // Start browser bridge WebSocket server
+  startBrowserBridgeServer();
   
   // Start accessibility service connection
   setTimeout(() => {

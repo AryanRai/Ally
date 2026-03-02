@@ -87,11 +87,12 @@
       "command": "npx",
       "args": [
         "-y",
-        "time-mcp"
+        "@modelcontextprotocol/server-everything"
       ],
       "env": {},
-      "disabled": false,
+      "disabled": true,
       "autoApprove": [
+        "get_current_time",
         "current_time",
         "get_timestamp",
         "convert_time"
@@ -103,7 +104,7 @@
         "terminal_controller"
       ],
       "env": {},
-      "disabled": false,
+      "disabled": true,
       "autoApprove": [
         "execute_command",
         "get_current_directory",

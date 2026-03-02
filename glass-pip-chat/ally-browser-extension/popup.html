@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    body { font-family: system-ui, sans-serif; width: 220px; padding: 16px; margin: 0; background: #1a1a2e; color: #eee; }
+    h3 { margin: 0 0 12px; font-size: 14px; color: #a78bfa; }
+    .status { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; font-size: 13px; }
+    .dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+    .dot.connected { background: #22c55e; box-shadow: 0 0 6px #22c55e; }
+    .dot.disconnected { background: #ef4444; }
+    .dot.connecting { background: #f59e0b; animation: pulse 1s infinite; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+    button { width: 100%; padding: 7px; background: #7c3aed; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 12px; }
+    button:hover { background: #6d28d9; }
+    .hint { font-size: 11px; color: #888; margin-top: 10px; line-height: 1.4; }
+  </style>
+</head>
+<body>
+  <h3>🤖 Ally Browser Bridge</h3>
+  <div class="status">
+    <div class="dot" id="dot"></div>
+    <span id="label">Checking...</span>
+  </div>
+  <button id="btn">Reconnect</button>
+  <p class="hint">Make sure Ally desktop app is running. The bridge connects on port 9009.</p>
+  <script src="popup.js"></script>
+</body>
+</html>

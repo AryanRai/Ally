@@ -116,6 +116,13 @@ const pipAPI = {
       ipcRenderer.invoke('system:fetchUrl', url, options),
   },
 
+  // Browser bridge — talks to Ally Chrome extension
+  browser: {
+    callTool: (tool: string, params: Record<string, unknown>) =>
+      ipcRenderer.invoke('browser:callTool', tool, params),
+    isConnected: () => ipcRenderer.invoke('browser:isConnected'),
+  },
+
   // Speech service
   speech: {
     connect: () => ipcRenderer.invoke('speech:connect'),

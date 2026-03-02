@@ -141,6 +141,48 @@ export class FilesystemToolsService {
       },
       handler: this.fetchUrl.bind(this)
     });
+
+    // Browser tools — require Ally Chrome extension connected
+    const browserTools = [
+      { name: 'browser_navigate', desc: 'Navigate the browser to a URL', params: { url: 'string' } },
+      { name: 'browser_click', desc: 'Click an element by CSS selector or visible text', params: { selector: 'string (optional)', text: 'string (optional)' } },
+      { name: 'browser_type', desc: 'Type text into an input field by CSS selector', params: { selector: 'string', text: 'string', append: 'boolean (optional)' } },
+      { name: 'browser_read_page', desc: 'Read the current page title, URL, and visible text content', params: { includeLinks: 'boolean (optional)', includeHtml: 'boolean (optional)' } },
+      { name: 'browser_screenshot', desc: 'Take a screenshot of the current browser tab', params: {} },
+      { name: 'browser_eval', desc: 'Execute JavaScript in the current page context', params: { code: 'string' } },
+      { name: 'browser_find_element', desc: 'Find an element on the page by selector or text', params: { selector: 'string (optional)', text: 'string (optional)' } },
+      { name: 'browser_scroll', desc: 'Scroll the page or scroll an element into view', params: { x: 'number (optional)', y: 'number (optional)', selector: 'string (optional)' } },
+      { name: 'browser_get_tabs', desc: 'List all open browser tabs', params: {} },
+      { name: 'browser_switch_tab', desc: 'Switch to a browser tab by URL or title', params: { url: 'string (optional)', title: 'string (optional)', tabId: 'number (optional)' } },
+      { name: 'browser_go_back', desc: 'Navigate back in browser history', params: {} },
+      { name: 'browser_go_forward', desc: 'Navigate forward in browser history', params: {} },
+      { name: 'browser_wait_for', desc: 'Wait for a CSS selector to appear on the page', params: { selector: 'string', timeout: 'number (optional, ms)' } },
+      { name: 'browser_get_url', desc: 'Get the current page URL and title', params: {} },
+      { name: 'browser_press_key', desc: 'Press a keyboard key (e.g. Enter, Tab, Escape) on the focused or specified element', params: { key: 'string', selector: 'string (optional)' } },
+      { name: 'browser_new_tab', desc: 'Open a new browser tab, optionally navigating to a URL', params: { url: 'string (optional)' } },
+      { name: 'browser_close_tab', desc: 'Close the current or specified browser tab', params: { tabId: 'number (optional)' } },
+    ];
+
+    for (const bt of browserTools) {
+      this.tools.set(bt.name, {
+        name: bt.name,
+        description: bt.desc + '. Requires Ally Browser Extension in Chrome.',
+        inputSchema: {
+          type: 'object',
+          properties: Object.fromEntries(
+            Object.entries(bt.params).map(([k, v]) => [k, { type: 'string', description: v }])
+          ),
+        },
+        handler: async (parameters: Record<string, any>) => this.callBrowserTool(bt.name, parameters),
+      });
+    }
+  }
+
+  private async callBrowserTool(tool: string, parameters: Record<string, unknown>): Promise<any> {
+    if (typeof window !== 'undefined' && (window.pip as any)?.browser?.callTool) {
+      return await (window.pip as any).browser.callTool(tool, parameters);
+    }
+    return { success: false, error: 'Browser bridge not available (desktop only)' };
   }
 
   private async listDirectory(parameters: { path: string }): Promise<any> {
