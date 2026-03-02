@@ -659,6 +659,7 @@ export default function GlassChatPiP() {
   const handleSendRegular = async (contextualContent: string, historySnapshot?: Message[]) => {
     let lastSentenceIndex = 0;
     let accumulatedResponse = '';
+    let capturedThinking = ''; // capture thinking for saving in message
 
     // Get the basic system prompt
     const basicSystemPrompt = localStorage.getItem('ally-prompt-basic') || 
@@ -671,9 +672,11 @@ export default function GlassChatPiP() {
         let responseContent = '';
 
         if (update.type === 'thinking') {
+          capturedThinking = update.thinking || '';
           responseContent = `💭 **Thinking...**\n\n${update.thinking}${update.thinking.endsWith('.') || update.thinking.endsWith('!') || update.thinking.endsWith('?') ? '' : '▋'}`;
         } else if (update.type === 'response') {
           if (update.thinking) {
+            capturedThinking = update.thinking;
             responseContent = `💭 **Thought Process:**\n\n${update.thinking}\n\n---\n\n**Answer:**\n\n${update.response}${update.response.endsWith('.') || update.response.endsWith('!') || update.response.endsWith('?') ? '' : '▋'}`;
           } else {
             responseContent = `${update.response}${update.response.endsWith('.') || update.response.endsWith('!') || update.response.endsWith('?') ? '' : '▋'}`;
@@ -698,6 +701,7 @@ export default function GlassChatPiP() {
           }
         } else if (update.type === 'done') {
           if (update.thinking) {
+            capturedThinking = update.thinking;
             responseContent = `💭 **Thought Process:**\n\n${update.thinking}\n\n---\n\n**Answer:**\n\n${update.response}`;
           } else {
             responseContent = update.response;
@@ -721,10 +725,14 @@ export default function GlassChatPiP() {
     );
 
     if (response) {
+      // If there was thinking, prepend it as a <think> block so EditableMessage can collapse it
+      const savedContent = capturedThinking
+        ? `<think>${capturedThinking}</think>\n\n${response}`
+        : response;
       const assistantMessage: Message = {
         id: `assistant-${Date.now()}`,
         role: 'assistant',
-        content: response,
+        content: savedContent,
         timestamp: Date.now()
       };
       addMessageToActiveChat(assistantMessage);

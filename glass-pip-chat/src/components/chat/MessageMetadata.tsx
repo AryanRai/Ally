@@ -164,7 +164,7 @@ export default function MessageMetadata({
                         </div>
                         
                         {/* Parameters */}
-                        {Object.keys(toolCall.parameters).length > 0 && (
+                        {Object.keys(toolCall.parameters ?? {}).length > 0 && (
                           <div className="mb-2">
                             <div className={cn(
                               'text-xs font-medium mb-1',
