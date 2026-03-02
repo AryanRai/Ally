@@ -243,9 +243,17 @@ export class RemoteMessageProcessor {
     let fullResponse = '';
 
     try {
+      // Prepend system prompt for identity/context
+      const basicSystemPrompt = localStorage.getItem('ally-prompt-basic') || 
+        'You are Ally, a helpful AI assistant running on the user\'s computer. You have access to their system through tools when enabled. Be concise, friendly, and helpful.';
+      const messagesWithSystem: ChatMessage[] = [
+        { role: 'system', content: basicSystemPrompt },
+        ...messages
+      ];
+
       // Use Ollama's streaming with thinking
       await this.ollamaService.streamChatWithThinking(
-        messages,
+        messagesWithSystem,
         localStorage.getItem('ally-current-model') || 'llama3.2', // Use desktop's current model
         async (chunk: ThinkingChunk) => {
           if (chunk.type === 'response') {

@@ -594,6 +594,10 @@ export default function GlassChatPiP() {
     let lastSentenceIndex = 0;
     let accumulatedResponse = '';
 
+    // Get the basic system prompt
+    const basicSystemPrompt = localStorage.getItem('ally-prompt-basic') || 
+      `You are Ally, a helpful AI assistant running on the user's computer. You have access to their system through tools when enabled. Be concise, friendly, and helpful. If the user asks about files, time, or system info and you don't have tool access, let them know they can enable tools for that.`;
+
     const response = await ollamaIntegration.sendMessageToOllama(
       activeChat?.messages || [],
       contextualContent,
@@ -646,7 +650,8 @@ export default function GlassChatPiP() {
         }
 
         setCurrentResponse(responseContent);
-      }
+      },
+      basicSystemPrompt
     );
 
     if (response) {
@@ -684,24 +689,27 @@ export default function GlassChatPiP() {
 2. NEVER fabricate, simulate, or make up tool output. If you need to run a command, you MUST call execute_command. Do NOT write fake terminal output.
 3. NEVER pretend a tool succeeded without actually calling it. If a tool fails, say it failed.
 4. NEVER guess file contents, directory listings, or command output — use the appropriate tool.
-5. Output the JSON tool call IMMEDIATELY — no explanations before it.
-6. You can use MULTIPLE tools in sequence.
-7. After getting ALL needed info, give your final answer WITHOUT any JSON and WITHOUT repeating raw tool results.
+5. Output EXACTLY ONE JSON tool call per response — no explanations before it, no extra text.
+6. You will be called MULTIPLE times in a loop. Each time you output a tool call, it will be executed and the result given back to you. Then you can call another tool or give your final answer.
+7. Only give your final answer (plain text, NO JSON) when you have completed ALL steps the user asked for.
+8. Do NOT repeat raw tool results in your final answer — summarize naturally.
 
-MANDATORY TOOL USAGE:
-• "time", "what time", "current time", "date", "today", "now" → MUST call: {"name": "get_current_time", "parameters": {}}
-• "files", "directory", "folder", "list", "what's here" → MUST call: {"name": "list_directory", "parameters": {"path": "."}}
-• "read", "show file", "contents of" → MUST call: {"name": "read_file", "parameters": {"path": "filename"}}
-• math expressions, "calculate", numbers → MUST call: {"name": "calculate", "parameters": {"expression": "..."}}
-• "run", "execute", "command", terminal tasks → MUST call: {"name": "execute_command", "parameters": {"command": "..."}}
+IMPORTANT — ONE TOOL PER RESPONSE:
+- Output exactly ONE tool call JSON, then STOP. Do not output multiple tool calls or any text after the JSON.
+- You will get the result back and can then call the next tool.
+- This is a Windows system. Use Windows paths (C:\\Users\\...) not Unix paths (~/...).
 
 TOOL FORMAT:
 {"name": "tool_name", "parameters": {"key": "value"}}
 
-EXAMPLE - User asks "what time is it and list my files":
-Step 1: {"name": "get_current_time", "parameters": {}}
-Step 2 (after getting time): {"name": "list_directory", "parameters": {"path": "."}}
-Step 3 (after getting files): Give final answer with both pieces of info`
+EXAMPLE — User asks "write hello.c on my desktop and compile it":
+Response 1: {"name": "write_file", "parameters": {"path": "C:\\Users\\buzza\\Desktop\\hello.c", "content": "#include <stdio.h>\\nint main() { printf(\\"Hello\\\\n\\"); return 0; }"}}
+(you get result, then...)
+Response 2: {"name": "execute_command", "parameters": {"command": "gcc C:\\Users\\buzza\\Desktop\\hello.c -o C:\\Users\\buzza\\Desktop\\hello.exe"}}
+(you get result, then...)
+Response 3: {"name": "execute_command", "parameters": {"command": "C:\\Users\\buzza\\Desktop\\hello.exe"}}
+(you get result, then...)
+Response 4: Done! I wrote hello.c, compiled it, and ran it. Output was: Hello`
         : `You are an AI assistant with tool access. When you need information you don't have, use a tool.
 
 TO USE A TOOL, output ONLY this JSON (nothing else before or after):
@@ -733,86 +741,89 @@ Remember: Output ONLY the JSON tool call when you need to use a tool. No explana
     }
   };
 
-  // Agentic chat - allows multiple sequential tool calls
-  const handleAgenticChat = async (
-    contextualContent: string, 
+  /**
+   * Shared agentic loop — used by both desktop handleAgenticChat and RemoteToolBridge handler.
+   * Runs the multi-tool agentic loop and returns the final content string.
+   * 
+   * Callbacks:
+   *  - onStreamUpdate: called with streaming text for live display
+   *  - onToolExecutionsUpdate: called with tool execution pills for live display
+   *  - onThinkingUpdate: called with thinking text for live display
+   */
+  const runAgenticLoop = async (
+    contextualContent: string,
     systemPrompt: string,
-    _tools: Array<{ name: string; description: string; parameters?: any }>
-  ) => {
+    chatHistory: Message[],
+    callbacks: {
+      onStreamUpdate?: (text: string) => void;
+      onToolExecutionsUpdate?: (executions: ToolExecution[]) => void;
+      onThinkingUpdate?: (thinking: string) => void;
+    } = {}
+  ): Promise<string> => {
     const MAX_ITERATIONS = 10;
     const MAX_TOOL_CALLS = 20;
-    const MAX_SAME_TOOL_RETRIES = 2; // Max times same tool can fail with same error
+    const MAX_SAME_TOOL_RETRIES = 2;
     
     let iteration = 0;
     let totalToolCalls = 0;
-    const allToolResults: Array<{ tool: string; result: string }> = []; // Track ALL tool results for LLM context
+    const allToolResults: Array<{ tool: string; result: string }> = [];
     const allToolExecutions: ToolExecution[] = [];
-    const toolResultBlocks: string[] = []; // Clean tool result blocks for final message
-    let finalModelSummary = ''; // The model's final text answer (no tool JSON)
+    const toolResultBlocks: string[] = [];
+    let finalModelSummary = '';
     let currentThinking = '';
-    // Retry guard: track consecutive failures of same tool+params
     const failureTracker: Map<string, number> = new Map();
-    
-    // Initial message with system prompt
-    let currentMessage = `[System: ${systemPrompt}]\n\nUser: ${contextualContent}`;
     
     while (iteration < MAX_ITERATIONS && totalToolCalls < MAX_TOOL_CALLS) {
       iteration++;
       console.log(`🔄 Agentic iteration ${iteration}`);
       
-      // Build context from ALL previous tool results
       const toolResultsContext = allToolResults.length > 0
-        ? `\n\nPrevious tool results:\n${allToolResults.map(tr => `- ${tr.tool}: ${tr.result}`).join('\n')}\n\nUse these results to answer the user's question. If you need more information, call another tool. Otherwise, provide your final answer WITHOUT any JSON. IMPORTANT: Do NOT repeat the raw tool results or tool names in your answer — just summarize the information naturally.`
+        ? `\n\nTool results so far:\n${allToolResults.map(tr => `- ${tr.tool}: ${tr.result}`).join('\n')}\n\nContinue working on the user's request. If you need more information or need to perform more actions, call another tool. If you have completed ALL the steps needed, provide your final answer WITHOUT any JSON.`
         : '';
+      
+      // Always include the system prompt + original user request so the model
+      // doesn't lose context about what it's supposed to be doing across iterations
+      const iterationMessage = `[System: ${systemPrompt}]\n\nUser: ${contextualContent}`;
       
       let accumulatedResponse = '';
       let toolCallDetected = false;
       let detectedToolCall: { name: string; parameters: any } | null = null;
       let beforeToolText = '';
       
-      // Stream response from LLM
       await ollamaIntegration.sendMessageToOllama(
-        activeChat?.messages || [],
-        currentMessage + toolResultsContext,
+        chatHistory,
+        iterationMessage + toolResultsContext,
         (update) => {
           if (update.type === 'response' || update.type === 'done') {
             accumulatedResponse = update.response || '';
             
-            // Extract thinking
             const thinkingMatch = accumulatedResponse.match(/<think>([\s\S]*?)<\/think>/i);
             if (thinkingMatch) {
               currentThinking = thinkingMatch[1].trim();
-              setStreamingThinking(currentThinking);
+              callbacks.onThinkingUpdate?.(currentThinking);
             }
             
-            // Parse for tool call
             const parsed = parseToolCallFromResponse(accumulatedResponse);
             
             if (parsed.toolCall && !toolCallDetected) {
               toolCallDetected = true;
               detectedToolCall = parsed.toolCall;
               beforeToolText = parsed.beforeText;
-              
-              // During streaming, just show a brief status — pills handle the rest
-              setCurrentResponse(beforeToolText || `🔧 *Calling ${parsed.toolCall.name}...*`);
+              callbacks.onStreamUpdate?.(beforeToolText || `🔧 *Calling ${parsed.toolCall.name}...*`);
             } else if (!toolCallDetected) {
-              // No tool call yet, show streaming response
               const cleanedResponse = accumulatedResponse
                 .replace(/<think>[\s\S]*?<\/think>/gi, '')
                 .trim();
-              setCurrentResponse(cleanedResponse + (update.type === 'done' ? '' : '▋'));
+              callbacks.onStreamUpdate?.(cleanedResponse + (update.type === 'done' ? '' : '▋'));
             }
           }
         }
       );
       
-      // If no tool call detected, this is the final summary from the model
       if (!toolCallDetected || !detectedToolCall) {
         console.log('✅ No more tool calls, task complete');
-        
         finalModelSummary = accumulatedResponse
           .replace(/<think>[\s\S]*?<\/think>/gi, '')
-          // Strip any tool-result formatting the model echoes back
           .replace(/🔧\s*\*\*(Executed|[^*]+)\*\*:?\s*/g, '')
           .replace(/[✅❌]\s*\*\*(Success|Status|Error)[^*]*\*\*:?\s*/g, '')
           .replace(/\*\*Output:\*\*\s*/g, '')
@@ -820,10 +831,9 @@ Remember: Output ONLY the JSON tool call when you need to use a tool. No explana
         break;
       }
       
-      // TypeScript needs this assertion after the null check
       const toolToExecute = detectedToolCall as { name: string; parameters: any };
       
-      // VALIDATION: Check required params for known tools before executing
+      // VALIDATION: Check required params
       const toolRequiresParams: Record<string, string[]> = {
         'execute_command': ['command'],
         'read_file': ['path'],
@@ -844,12 +854,11 @@ Remember: Output ONLY the JSON tool call when you need to use a tool. No explana
             tool: toolToExecute.name, 
             result: `ERROR: Missing required parameters: ${missingParams.join(', ')}. You must provide these.` 
           });
-          currentMessage = '';
           continue;
         }
       }
       
-      // RETRY GUARD: Check if same tool+params has failed repeatedly
+      // RETRY GUARD
       const toolKey = `${toolToExecute.name}:${JSON.stringify(toolToExecute.parameters)}`;
       const priorFailures = failureTracker.get(toolKey) || 0;
       if (priorFailures >= MAX_SAME_TOOL_RETRIES) {
@@ -868,7 +877,7 @@ Remember: Output ONLY the JSON tool call when you need to use a tool. No explana
       };
       
       allToolExecutions.push(toolExecution);
-      setActiveToolExecutions([...allToolExecutions]);
+      callbacks.onToolExecutionsUpdate?.([...allToolExecutions]);
       
       try {
         console.log(`🔧 Executing tool: ${toolToExecute.name}`, toolToExecute.parameters);
@@ -878,22 +887,12 @@ Remember: Output ONLY the JSON tool call when you need to use a tool. No explana
         toolExecution.result = result;
         toolExecution.endTime = Date.now();
         
-        // Format result
         const resultText = formatToolResultForDisplay(toolToExecute.name, result);
-        
-        // Add to LLM context
         allToolResults.push({ tool: toolToExecute.name, result: resultText });
-        
-        // Add clean tool result block for final message (shown via pills)
         toolResultBlocks.push(`🔧 **${toolToExecute.name}**\n\`\`\`\n${resultText}\n\`\`\``);
         
-        // Update pill display
-        setActiveToolExecutions([...allToolExecutions]);
-        // Show brief status during tool execution — no raw markdown dump
-        setCurrentResponse('*Analyzing results...*');
-        
-        // Reset message for next iteration (context is built from allToolResults)
-        currentMessage = '';
+        callbacks.onToolExecutionsUpdate?.([...allToolExecutions]);
+        callbacks.onStreamUpdate?.('*Analyzing results...*');
         
       } catch (error) {
         console.error(`❌ Tool execution failed:`, error);
@@ -901,24 +900,16 @@ Remember: Output ONLY the JSON tool call when you need to use a tool. No explana
         toolExecution.error = error instanceof Error ? error.message : String(error);
         toolExecution.endTime = Date.now();
         
-        // Track failure for retry guard
         const failKey = `${toolToExecute.name}:${JSON.stringify(toolToExecute.parameters)}`;
         failureTracker.set(failKey, (failureTracker.get(failKey) || 0) + 1);
         
-        setActiveToolExecutions([...allToolExecutions]);
-        
-        // Add error to LLM context
+        callbacks.onToolExecutionsUpdate?.([...allToolExecutions]);
         allToolResults.push({ tool: toolToExecute.name, result: `ERROR: ${toolExecution.error}` });
         toolResultBlocks.push(`❌ **${toolToExecute.name}** failed: ${toolExecution.error}`);
-        
-        // Reset message for next iteration
-        currentMessage = '';
       }
     }
     
-    // Build final message: tool result blocks first, then model's summary
-    // Tool results are compact blocks that the pill parser can pick up
-    // Model summary is the clean final answer
+    // Build final content: tool result blocks + model summary
     let finalContent = '';
     if (currentThinking) {
       finalContent += `<think>${currentThinking}</think>\n\n`;
@@ -930,15 +921,35 @@ Remember: Output ONLY the JSON tool call when you need to use a tool. No explana
       finalContent += finalModelSummary;
     }
     
+    return finalContent.trim();
+  };
+
+  // Agentic chat - allows multiple sequential tool calls (desktop UI wrapper)
+  const handleAgenticChat = async (
+    contextualContent: string, 
+    systemPrompt: string,
+    _tools: Array<{ name: string; description: string; parameters?: any }>
+  ) => {
+    const finalContent = await runAgenticLoop(
+      contextualContent,
+      systemPrompt,
+      activeChat?.messages || [],
+      {
+        onStreamUpdate: (text) => setCurrentResponse(text),
+        onToolExecutionsUpdate: (execs) => setActiveToolExecutions(execs),
+        onThinkingUpdate: (thinking) => setStreamingThinking(thinking),
+      }
+    );
+    
     // Clear streaming state
     setStreamingThinking(null);
     setActiveToolExecutions([]);
     
-    if (finalContent.trim()) {
+    if (finalContent) {
       const assistantMessage: Message = {
         id: `assistant-${Date.now()}`,
         role: 'assistant',
-        content: finalContent.trim(),
+        content: finalContent,
         timestamp: Date.now()
       };
       addMessageToActiveChat(assistantMessage);
@@ -1695,7 +1706,9 @@ Remember: Output ONLY the JSON tool call when you need to use a tool. No explana
         const mcpTools = await getMcpToolsForLLM();
         
         if (mcpTools.length === 0) {
-          // No tools — just do a regular Ollama chat
+          // No tools — just do a regular Ollama chat with system prompt
+          const basicSystemPrompt = localStorage.getItem('ally-prompt-basic') || 
+            `You are Ally, a helpful AI assistant running on the user's computer. You have access to their system through tools when enabled. Be concise, friendly, and helpful.`;
           let fullResponse = '';
           await ollamaIntegration.sendMessageToOllama(
             [], request.content,
@@ -1704,7 +1717,8 @@ Remember: Output ONLY the JSON tool call when you need to use a tool. No explana
                 fullResponse = update.response || '';
                 updateResponse(fullResponse).catch(() => {});
               }
-            }
+            },
+            basicSystemPrompt
           );
           await updateResponse(fullResponse, 'completed');
           return;
@@ -1719,9 +1733,10 @@ Remember: Output ONLY the JSON tool call when you need to use a tool. No explana
 2. NEVER fabricate, simulate, or make up tool output. If you need to run a command, you MUST call execute_command.
 3. NEVER pretend a tool succeeded without actually calling it.
 4. NEVER guess file contents, directory listings, or command output — use the appropriate tool.
-5. Output the JSON tool call IMMEDIATELY — no explanations before it.
-6. You can use MULTIPLE tools in sequence.
-7. After getting ALL needed info, give your final answer WITHOUT any JSON.
+5. Output EXACTLY ONE JSON tool call per response — no explanations before it, no extra text.
+6. You will be called MULTIPLE times in a loop. Each time you output a tool call, it will be executed and the result given back to you.
+7. Only give your final answer (plain text, NO JSON) when you have completed ALL steps.
+8. This is a Windows system. Use Windows paths (C:\\Users\\...) not Unix paths.
 
 TOOL FORMAT:
 {"name": "tool_name", "parameters": {"key": "value"}}`;
@@ -1731,59 +1746,23 @@ TOOL FORMAT:
           return `• ${t.name}${params}\n  → ${t.description}`;
         }).join('\n')}`;
 
-        // Agentic loop — same logic as handleAgenticChat but writes to Supabase
-        const MAX_ITERATIONS = 10;
-        let iteration = 0;
-        const allToolResults: Array<{ tool: string; result: string }> = [];
-        let currentMessage = `[System: ${toolsSystemPrompt}]\n\nUser: ${request.content}`;
-
-        while (iteration < MAX_ITERATIONS) {
-          iteration++;
-          let accumulatedResponse = '';
-          let toolCallDetected = false;
-          let detectedToolCall: { name: string; parameters: any } | null = null;
-
-          const toolResultsContext = allToolResults.length > 0
-            ? `\n\nPrevious tool results:\n${allToolResults.map(tr => `- ${tr.tool}: ${tr.result}`).join('\n')}\n\nProvide your final answer WITHOUT any JSON.`
-            : '';
-
-          await ollamaIntegration.sendMessageToOllama(
-            [], currentMessage + toolResultsContext,
-            (update) => {
-              if (update.type === 'response' || update.type === 'done') {
-                accumulatedResponse = update.response || '';
-                const parsed = parseToolCallFromResponse(accumulatedResponse);
-                if (parsed.toolCall && !toolCallDetected) {
-                  toolCallDetected = true;
-                  detectedToolCall = parsed.toolCall;
-                }
-                if (!toolCallDetected) {
-                  updateResponse(accumulatedResponse).catch(() => {});
-                }
-              }
-            }
-          );
-
-          if (!toolCallDetected || !detectedToolCall) {
-            // Final answer
-            await updateResponse(accumulatedResponse, 'completed');
-            return;
+        // Use the shared agentic loop — same pipeline as desktop
+        const finalContent = await runAgenticLoop(
+          request.content,
+          toolsSystemPrompt,
+          [], // No chat history for remote messages (each is standalone)
+          {
+            onStreamUpdate: (text) => {
+              // Stream partial responses to Supabase so web sees live updates
+              updateResponse(text).catch(() => {});
+            },
+            // No pill/thinking callbacks needed — the final content has tool blocks
+            // that parseMessageForPills will pick up on the web side
           }
+        );
 
-          // Execute the tool
-          const toolToRun = detectedToolCall as { name: string; parameters: any };
-          try {
-            const result = await executeMcpTool(toolToRun.name, toolToRun.parameters);
-            const resultStr = typeof result === 'string' ? result : JSON.stringify(result);
-            allToolResults.push({ tool: toolToRun.name, result: resultStr });
-            await updateResponse(`🔧 Used ${toolToRun.name}... processing`).catch(() => {});
-          } catch (err) {
-            allToolResults.push({ tool: toolToRun.name, result: `Error: ${err}` });
-          }
-        }
-
-        // If we hit max iterations, send what we have
-        await updateResponse('Reached maximum tool iterations.', 'completed');
+        // Write the final structured response (with tool blocks) to Supabase
+        await updateResponse(finalContent || 'No response generated.', 'completed');
       } catch (error) {
         console.error('❌ RemoteToolBridge handler error:', error);
         await updateResponse(`Error: ${error instanceof Error ? error.message : 'Unknown error'}`, 'error');
@@ -1792,7 +1771,7 @@ TOOL FORMAT:
 
     RemoteToolBridge.registerHandler(handler);
     return () => RemoteToolBridge.unregisterHandler();
-  }, [ollamaIntegration, getMcpToolsForLLM, executeMcpTool, parseToolCallFromResponse]);
+  }, [ollamaIntegration, getMcpToolsForLLM, executeMcpTool, parseToolCallFromResponse, runAgenticLoop]);
 
   // Handle speech recognition results - automatically send as messages when voice mode is enabled
   const lastProcessedSpeechRef = useRef<string | null>(null);
@@ -2775,9 +2754,9 @@ TOOL FORMAT:
                   placeholder={currentGreeting}
                   messages={messages}
                   currentModel={ollamaIntegration.currentModel}
-                  toolsEnabled={isWeb ? false : toolsEnabled}
-                  agenticMode={isWeb ? false : agenticMode}
-                  autopilotMode={isWeb ? false : autopilotMode}
+                  toolsEnabled={isWeb ? true : toolsEnabled}
+                  agenticMode={isWeb ? true : agenticMode}
+                  autopilotMode={isWeb ? true : autopilotMode}
                   mcpToolCount={isWeb ? 0 : mcpIntegration.mcpTools.length + 2}
                   onToolsToggle={isWeb ? undefined : () => setToolsEnabled(!toolsEnabled)}
                   onAgenticModeToggle={isWeb ? undefined : () => setAgenticMode(!agenticMode)}

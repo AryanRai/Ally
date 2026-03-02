@@ -122,7 +122,8 @@ export function useOllamaIntegration() {
   const sendMessageToOllama = async (
     messages: Message[],
     messageContent: string,
-    onStreamUpdate: (chunk: any) => void
+    onStreamUpdate: (chunk: any) => void,
+    systemPrompt?: string
   ): Promise<string> => {
     if (!ollamaAvailable || !window.pip?.ollama || !currentModel) {
       throw new Error('Ollama not available');
@@ -130,11 +131,21 @@ export function useOllamaIntegration() {
 
     console.log('🚀 Sending message with model:', currentModel);
 
+    // Build chat history with optional system prompt
+    const chatHistory: Array<{ role: string; content: string }> = [];
+
+    // Add system prompt if provided
+    if (systemPrompt) {
+      chatHistory.push({ role: 'system', content: systemPrompt });
+    }
+
     // Convert our messages to Ollama format
-    const chatHistory = messages.map(msg => ({
-      role: msg.role as 'user' | 'assistant',
-      content: msg.content
-    }));
+    for (const msg of messages) {
+      chatHistory.push({
+        role: msg.role as 'user' | 'assistant',
+        content: msg.content
+      });
+    }
 
     // Add current message
     chatHistory.push({

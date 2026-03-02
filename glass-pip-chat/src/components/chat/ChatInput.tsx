@@ -197,7 +197,7 @@ const ChatInput = forwardRef<HTMLInputElement, ChatInputProps>(({
             </button>
 
             {/* Tools toggle */}
-            {onToolsToggle && (
+            {onToolsToggle ? (
               <button
                 onClick={onToolsToggle}
                 className={cn(
@@ -211,7 +211,15 @@ const ChatInput = forwardRef<HTMLInputElement, ChatInputProps>(({
                 <Wrench className="w-3 h-3" />
                 Tools{toolsEnabled && mcpToolCount > 0 ? ` (${mcpToolCount})` : ''}
               </button>
-            )}
+            ) : toolsEnabled ? (
+              <span
+                className="inline-flex items-center gap-1 px-2 py-1 text-[10px] rounded-lg border bg-purple-500/15 border-purple-500/20 text-purple-300/70 cursor-default"
+                title="Tools enabled on desktop"
+              >
+                <Wrench className="w-3 h-3" />
+                Tools (Desktop)
+              </span>
+            ) : null}
 
             {/* Agentic toggle */}
             {toolsEnabled && onAgenticModeToggle && (
@@ -228,6 +236,15 @@ const ChatInput = forwardRef<HTMLInputElement, ChatInputProps>(({
                 <Zap className="w-3 h-3" />
                 Agentic
               </button>
+            )}
+            {toolsEnabled && !onAgenticModeToggle && agenticMode && (
+              <span
+                className="inline-flex items-center gap-1 px-2 py-1 text-[10px] rounded-lg border bg-amber-500/15 border-amber-500/20 text-amber-300/70 cursor-default"
+                title="Agentic mode enabled on desktop"
+              >
+                <Zap className="w-3 h-3" />
+                Agentic
+              </span>
             )}
 
             {/* Model indicator */}
