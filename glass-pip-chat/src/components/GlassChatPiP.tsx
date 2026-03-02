@@ -339,13 +339,24 @@ export default function GlassChatPiP() {
 
     if (isWeb) {
       // Web mode: update React state directly, don't use localStorage chatManager
-      const updatedChat = {
-        ...activeChat,
-        messages: [...activeChat.messages, message],
-        updatedAt: Date.now(),
-      };
-      setActiveChat(updatedChat);
-      setChats(prev => prev.map(c => c.id === updatedChat.id ? updatedChat : c));
+      // Use functional updaters to avoid stale closure — activeChat in the closure
+      // may be outdated when the assistant response arrives after an async wait
+      setActiveChat(prev => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          messages: [...prev.messages, message],
+          updatedAt: Date.now(),
+        };
+      });
+      setChats(prev => prev.map(c => {
+        if (c.id !== activeChat.id) return c;
+        return {
+          ...c,
+          messages: [...c.messages, message],
+          updatedAt: Date.now(),
+        };
+      }));
       return;
     }
 
@@ -361,12 +372,20 @@ export default function GlassChatPiP() {
 
   const handleMessageEdit = (messageId: string, newContent: string) => {
     if (isWeb && activeChat) {
-      const updatedChat = {
-        ...activeChat,
-        messages: activeChat.messages.map(m => m.id === messageId ? { ...m, content: newContent } : m),
-      };
-      setActiveChat(updatedChat);
-      setChats(prev => prev.map(c => c.id === updatedChat.id ? updatedChat : c));
+      setActiveChat(prev => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          messages: prev.messages.map(m => m.id === messageId ? { ...m, content: newContent } : m),
+        };
+      });
+      setChats(prev => prev.map(c => {
+        if (c.id !== activeChat.id) return c;
+        return {
+          ...c,
+          messages: c.messages.map(m => m.id === messageId ? { ...m, content: newContent } : m),
+        };
+      }));
       return;
     }
     if (activeChat && chatManager.updateMessage(activeChat.id, messageId, newContent)) {
@@ -383,12 +402,20 @@ export default function GlassChatPiP() {
 
   const handleMessageDelete = (messageId: string) => {
     if (isWeb && activeChat) {
-      const updatedChat = {
-        ...activeChat,
-        messages: activeChat.messages.filter(m => m.id !== messageId),
-      };
-      setActiveChat(updatedChat);
-      setChats(prev => prev.map(c => c.id === updatedChat.id ? updatedChat : c));
+      setActiveChat(prev => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          messages: prev.messages.filter(m => m.id !== messageId),
+        };
+      });
+      setChats(prev => prev.map(c => {
+        if (c.id !== activeChat.id) return c;
+        return {
+          ...c,
+          messages: c.messages.filter(m => m.id !== messageId),
+        };
+      }));
       return;
     }
     if (activeChat && chatManager.deleteMessage(activeChat.id, messageId)) {
@@ -763,6 +790,7 @@ Remember: Output ONLY the JSON tool call when you need to use a tool. No explana
     const MAX_ITERATIONS = 10;
     const MAX_TOOL_CALLS = 20;
     const MAX_SAME_TOOL_RETRIES = 2;
+    const MAX_TOOL_NAME_FAILURES = 3; // Max total failures for any single tool name
     
     let iteration = 0;
     let totalToolCalls = 0;
@@ -771,7 +799,8 @@ Remember: Output ONLY the JSON tool call when you need to use a tool. No explana
     const toolResultBlocks: string[] = [];
     let finalModelSummary = '';
     let currentThinking = '';
-    const failureTracker: Map<string, number> = new Map();
+    const failureTracker: Map<string, number> = new Map(); // exact tool+params failures
+    const toolNameFailures: Map<string, number> = new Map(); // per-tool-name total failures
     
     while (iteration < MAX_ITERATIONS && totalToolCalls < MAX_TOOL_CALLS) {
       iteration++;
@@ -781,9 +810,10 @@ Remember: Output ONLY the JSON tool call when you need to use a tool. No explana
         ? `\n\nTool results so far:\n${allToolResults.map(tr => `- ${tr.tool}: ${tr.result}`).join('\n')}\n\nContinue working on the user's request. If you need more information or need to perform more actions, call another tool. If you have completed ALL the steps needed, provide your final answer WITHOUT any JSON.`
         : '';
       
-      // Always include the system prompt + original user request so the model
-      // doesn't lose context about what it's supposed to be doing across iterations
-      const iterationMessage = `[System: ${systemPrompt}]\n\nUser: ${contextualContent}`;
+      // Pass the user's message + tool context as the content,
+      // and the system prompt properly via the systemPrompt parameter
+      // so the LLM sees the full chat history for context
+      const userContent = contextualContent + toolResultsContext;
       
       let accumulatedResponse = '';
       let toolCallDetected = false;
@@ -792,7 +822,7 @@ Remember: Output ONLY the JSON tool call when you need to use a tool. No explana
       
       await ollamaIntegration.sendMessageToOllama(
         chatHistory,
-        iterationMessage + toolResultsContext,
+        userContent,
         (update) => {
           if (update.type === 'response' || update.type === 'done') {
             accumulatedResponse = update.response || '';
@@ -817,7 +847,8 @@ Remember: Output ONLY the JSON tool call when you need to use a tool. No explana
               callbacks.onStreamUpdate?.(cleanedResponse + (update.type === 'done' ? '' : '▋'));
             }
           }
-        }
+        },
+        systemPrompt
       );
       
       if (!toolCallDetected || !detectedToolCall) {
@@ -841,7 +872,7 @@ Remember: Output ONLY the JSON tool call when you need to use a tool. No explana
         'write_file': ['path', 'content'],
         'edit_file': ['path'],
         'move_file': ['source', 'destination'],
-        'search_files': ['pattern'],
+        'search_files': ['path', 'pattern'],
       };
       
       const requiredParams = toolRequiresParams[toolToExecute.name];
@@ -850,6 +881,7 @@ Remember: Output ONLY the JSON tool call when you need to use a tool. No explana
         const missingParams = requiredParams.filter(p => !params[p] && params[p] !== 0 && params[p] !== false);
         if (missingParams.length > 0) {
           console.warn(`⚠️ Tool ${toolToExecute.name} missing required params: ${missingParams.join(', ')} — skipping`);
+          toolNameFailures.set(toolToExecute.name, (toolNameFailures.get(toolToExecute.name) || 0) + 1);
           allToolResults.push({ 
             tool: toolToExecute.name, 
             result: `ERROR: Missing required parameters: ${missingParams.join(', ')}. You must provide these.` 
@@ -858,13 +890,19 @@ Remember: Output ONLY the JSON tool call when you need to use a tool. No explana
         }
       }
       
-      // RETRY GUARD
+      // RETRY GUARD — check both exact match and per-tool-name totals
       const toolKey = `${toolToExecute.name}:${JSON.stringify(toolToExecute.parameters)}`;
       const priorFailures = failureTracker.get(toolKey) || 0;
+      const toolTotalFailures = toolNameFailures.get(toolToExecute.name) || 0;
       if (priorFailures >= MAX_SAME_TOOL_RETRIES) {
-        console.warn(`🛑 Tool ${toolToExecute.name} has failed ${priorFailures} times with same params — breaking loop`);
-        toolResultBlocks.push(`⚠️ ${toolToExecute.name} failed repeatedly, stopped retrying.`);
-        break;
+        console.warn(`🛑 Tool ${toolToExecute.name} has failed ${priorFailures} times with same params — skipping`);
+        allToolResults.push({ tool: toolToExecute.name, result: `ERROR: ${toolToExecute.name} failed repeatedly with same parameters. Try a different approach.` });
+        continue; // Let the model try something else instead of breaking
+      }
+      if (toolTotalFailures >= MAX_TOOL_NAME_FAILURES) {
+        console.warn(`🛑 Tool ${toolToExecute.name} has failed ${toolTotalFailures} total times — skipping`);
+        allToolResults.push({ tool: toolToExecute.name, result: `ERROR: ${toolToExecute.name} keeps failing. Use a different tool or approach.` });
+        continue;
       }
       
       // Execute the tool
@@ -902,6 +940,7 @@ Remember: Output ONLY the JSON tool call when you need to use a tool. No explana
         
         const failKey = `${toolToExecute.name}:${JSON.stringify(toolToExecute.parameters)}`;
         failureTracker.set(failKey, (failureTracker.get(failKey) || 0) + 1);
+        toolNameFailures.set(toolToExecute.name, (toolNameFailures.get(toolToExecute.name) || 0) + 1);
         
         callbacks.onToolExecutionsUpdate?.([...allToolExecutions]);
         allToolResults.push({ tool: toolToExecute.name, result: `ERROR: ${toolExecution.error}` });
@@ -1082,8 +1121,6 @@ Remember: Output ONLY the JSON tool call when you need to use a tool. No explana
 
   // Single-tool chat mode (original behavior)
   const handleSingleToolChat = async (contextualContent: string, systemPrompt: string) => {
-    const messageWithTools = `[System: ${systemPrompt}]\n\nUser: ${contextualContent}`;
-
     let accumulatedResponse = '';
     let finalResponseWithToolResults = '';
     let pendingToolCall: { name: string; parameters: any } | null = null;
@@ -1094,7 +1131,7 @@ Remember: Output ONLY the JSON tool call when you need to use a tool. No explana
 
     await ollamaIntegration.sendMessageToOllama(
       activeChat?.messages || [],
-      messageWithTools,
+      contextualContent,
       (update) => {
         if (update.type === 'response' || update.type === 'done') {
           accumulatedResponse = update.response || '';
@@ -1158,7 +1195,8 @@ Remember: Output ONLY the JSON tool call when you need to use a tool. No explana
             setCurrentResponse(cleanedResponse + (update.type === 'done' ? '' : '▋'));
           }
         }
-      }
+      },
+      systemPrompt
     );
 
     if (toolExecutionPromise) {
@@ -2392,9 +2430,9 @@ TOOL FORMAT:
     <motion.div
       className={cn(
         "fixed bg-transparent flex items-center justify-center",
-        isWeb && "inset-0 p-3 bg-gray-900",
-        platform === 'win32' && "win32-acrylic",
-        platform === 'linux' && "linux-glass-effect"
+        isWeb && "inset-0 bg-[#030712]",
+        !isWeb && platform === 'win32' && "win32-acrylic",
+        !isWeb && platform === 'linux' && "linux-glass-effect"
       )}
       style={isWeb ? {
         zIndex: 50
@@ -2407,25 +2445,35 @@ TOOL FORMAT:
       animate={{ opacity: 1, scale: isResizing ? 1.02 : 1 }}
       transition={{ type: 'spring', stiffness: 400, damping: 35 }}
     >
+      {/* Animated blob background for web mode */}
+      {isWeb && (
+        <div className="absolute inset-0 overflow-hidden pointer-events-none" aria-hidden="true">
+          <div className="blob-1 absolute top-[-20%] left-[-10%] w-[60vw] h-[60vw] max-w-[700px] max-h-[700px] rounded-full bg-purple-600/25 blur-[80px]" />
+          <div className="blob-2 absolute top-[10%] right-[-15%] w-[50vw] h-[50vw] max-w-[600px] max-h-[600px] rounded-full bg-blue-500/20 blur-[80px]" />
+          <div className="blob-3 absolute bottom-[-10%] left-[20%] w-[55vw] h-[55vw] max-w-[650px] max-h-[650px] rounded-full bg-indigo-500/15 blur-[80px]" />
+          <div className="blob-4 absolute bottom-[20%] right-[5%] w-[35vw] h-[35vw] max-w-[400px] max-h-[400px] rounded-full bg-violet-400/15 blur-[60px]" />
+        </div>
+      )}
       <motion.div
         layout
         className={cn(
           "overflow-hidden relative flex transition-all duration-300 chat-container acrylic-container",
           !isWeb && ThemeUtils.getBorderRadiusClass(appSettings.ui.borderRadius, platform),
           !isWeb && "border border-white/20 shadow-[0_8px_40px_rgba(0,0,0,0.4)]",
-          isWeb && "w-full h-full rounded-2xl border border-white/10 shadow-[0_8px_40px_rgba(0,0,0,0.6)]",
+          isWeb && "w-full h-full",
           isResizing && "shadow-lg scale-[1.01]",
-          platform === 'win32'
-            ? "bg-transparent"
-            : platform === 'linux'
-              ? theme === 'dark'
-                ? "linux-blur bg-gradient-to-b from-white/[0.06] to-white/[0.01]"
-                : "linux-blur-light bg-gradient-to-b from-black/[0.06] to-black/[0.01]"
-              : theme === 'dark'
-                ? "bg-gradient-to-b from-white/[0.08] to-white/[0.02] backdrop-blur-2xl backdrop-saturate-150"
-                : "bg-gradient-to-b from-black/[0.08] to-black/[0.02] backdrop-blur-2xl backdrop-saturate-150",
-          isWeb && (theme === 'dark' ? "bg-gray-950" : "bg-white"),
-          theme === 'dark' ? "text-white/90" : "text-black/90"
+          isWeb
+            ? (theme === 'dark' ? "web-glass-bg text-white/90" : "bg-white/80 backdrop-blur-2xl text-black/90")
+            : platform === 'win32'
+              ? "bg-transparent"
+              : platform === 'linux'
+                ? theme === 'dark'
+                  ? "linux-blur bg-gradient-to-b from-white/[0.06] to-white/[0.01]"
+                  : "linux-blur-light bg-gradient-to-b from-black/[0.06] to-black/[0.01]"
+                : theme === 'dark'
+                  ? "bg-gradient-to-b from-white/[0.08] to-white/[0.02] backdrop-blur-2xl backdrop-saturate-150"
+                  : "bg-gradient-to-b from-black/[0.08] to-black/[0.02] backdrop-blur-2xl backdrop-saturate-150",
+          !isWeb && (theme === 'dark' ? "text-white/90" : "text-black/90")
         )}
         style={isWeb ? {} : {
           width: calculateDimensions().width,
@@ -2457,20 +2505,23 @@ TOOL FORMAT:
           <div
             className={cn(
               "flex items-center gap-2 px-3 py-2 border-b transition-all duration-200",
-              "cursor-grab active:cursor-grabbing relative z-10 min-h-[44px]",
+              !isWeb && "cursor-grab active:cursor-grabbing",
+              "relative z-10 min-h-[44px]",
               state.collapsed && "flex-col items-stretch gap-2 pb-3 border-b-0",
-              platform === 'win32'
-                ? "border-white/10 hover:bg-white/5 hover:border-blue-500/30"
-                : theme === 'dark'
+              isWeb
+                ? "border-white/5 bg-black/40 backdrop-blur-sm"
+                : platform === 'win32'
                   ? "border-white/10 hover:bg-white/5 hover:border-blue-500/30"
-                  : "border-black/10 hover:bg-black/5 hover:border-blue-500/30"
+                  : theme === 'dark'
+                    ? "border-white/10 hover:bg-white/5 hover:border-blue-500/30"
+                    : "border-black/10 hover:bg-black/5 hover:border-blue-500/30"
             )}
-            style={{
+            style={isWeb ? {} : {
               WebkitAppRegion: state.collapsed ? 'no-drag' : 'drag',
               WebkitUserSelect: 'none',
               userSelect: 'none'
             } as React.CSSProperties}
-            title={state.collapsed ? "" : "Drag to move window"}
+            title={state.collapsed ? "" : isWeb ? "" : "Drag to move window"}
           >
             {state.collapsed ? (
               <CollapsedHeader
@@ -2598,6 +2649,7 @@ TOOL FORMAT:
                 {/* Messages */}
                 <div className={cn(
                   "flex-1 overflow-y-auto p-3 select-text",
+                  isWeb && "px-6 md:px-12 lg:px-24 xl:px-32",
                   appSettings.ui.messageSpacing === 'compact' ? 'space-y-2' :
                     appSettings.ui.messageSpacing === 'normal' ? 'space-y-3' : 'space-y-4',
                   platform === 'win32'
@@ -2610,7 +2662,7 @@ TOOL FORMAT:
                   {/* Web mode indicator */}
                   {isWeb && (
                     <div className="flex items-center gap-2 px-3 py-1.5 mb-2 bg-blue-500/10 border border-blue-500/20 rounded-lg">
-                      <span className="text-[10px] text-blue-400">🌐 Web Copy — messages routed through your desktop Ally</span>
+                      <span className="text-[10px] text-blue-400">🌐 Connected to your desktop Ally</span>
                     </div>
                   )}
                   
@@ -2852,15 +2904,17 @@ TOOL FORMAT:
         className="fixed inset-0 z-40"
       />
 
-      {/* Remote Settings - Floating */}
-      <div className={cn(
-        "fixed z-40",
-        state.collapsed
-          ? "top-4 -right-32" // Position to the right of the control buttons when collapsed
-          : "top-16 right-4"   // Position below the header buttons when expanded
-      )}>
-        <RemoteSettings />
-      </div>
+      {/* Remote Settings - Floating (desktop only, web has it in header) */}
+      {!isWeb && (
+        <div className={cn(
+          "fixed z-40",
+          state.collapsed
+            ? "top-4 -right-32"
+            : "top-16 right-4"
+        )}>
+          <RemoteSettings />
+        </div>
+      )}
 
       {/* Settings Modal */}
       <SettingsModal

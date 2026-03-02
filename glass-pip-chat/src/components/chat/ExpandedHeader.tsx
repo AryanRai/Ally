@@ -11,7 +11,9 @@ import {
   Clipboard,
   Check,
   Mic,
-  MicOff
+  MicOff,
+  LogOut,
+  Globe
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { ThemeUtils } from '../../utils/themeUtils';
@@ -81,7 +83,8 @@ export default function ExpandedHeader({
   return (
     <>
       <div className="flex items-center gap-1 flex-1 min-w-0">
-        <Grip className="w-3 h-3 opacity-50 flex-shrink-0" />
+        <Grip className={cn("w-3 h-3 opacity-50 flex-shrink-0", isWeb && "hidden")} />
+        {isWeb && <Globe className="w-3 h-3 text-blue-400 flex-shrink-0" />}
         <button
           onClick={onSidebarToggle}
           className={cn(
@@ -211,7 +214,8 @@ export default function ExpandedHeader({
           windowSize={size as 'S' | 'M' | 'L'}
         />
 
-        {/* Combined Context Control - Eye + Clipboard with smart indicators */}
+        {/* Combined Context Control - Eye + Clipboard with smart indicators (desktop only) */}
+        {!isWeb && (
         <button
           onClick={onContextToggle}
           onContextMenu={(e) => {
@@ -236,8 +240,24 @@ export default function ExpandedHeader({
             <div className="absolute -top-0.5 -left-0.5 w-2 h-2 bg-blue-400 rounded-full animate-pulse" />
           )}
         </button>
+        )}
 
         {/* Simple Tool Toggle - moved to footer ChatInput */}
+
+        {/* Web: sign out */}
+        {isWeb && (
+          <button
+            onClick={async () => {
+              const { getSupabaseClient } = await import('../../utils/supabase');
+              const client = getSupabaseClient();
+              if (client) await client.auth.signOut();
+            }}
+            className="p-1 rounded-lg hover:bg-white/10 transition-colors"
+            title="Sign out"
+          >
+            <LogOut className="w-3 h-3 text-gray-400" />
+          </button>
+        )}
 
         <button
           onClick={onSpeechToggle}
@@ -245,7 +265,8 @@ export default function ExpandedHeader({
             "p-1 rounded-lg transition-colors relative",
             showSpeechControls
               ? "bg-blue-500/20 hover:bg-blue-500/30 text-blue-300"
-              : "hover:bg-white/10"
+              : "hover:bg-white/10",
+            isWeb && "hidden"
           )}
           title={`Speech: ${showSpeechControls ? 'ON' : 'OFF'}`}
         >

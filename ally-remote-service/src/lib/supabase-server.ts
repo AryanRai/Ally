@@ -1,15 +1,9 @@
 import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
-import { createMockClient } from './supabase-mock';
 
 export function createClient() {
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
-
-  if (!supabaseUrl || !supabaseAnonKey) {
-    return createMockClient() as any;
-  }
-
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!;
   const cookieStore = cookies();
 
   return createServerClient(supabaseUrl, supabaseAnonKey, {
@@ -21,18 +15,14 @@ export function createClient() {
         try {
           cookieStore.set({ name, value, ...options });
         } catch (error) {
-          // The `set` method was called from a Server Component.
-          // This can be ignored if you have middleware refreshing
-          // user sessions.
+          // Called from Server Component — safe to ignore
         }
       },
       remove(name: string, options: any) {
         try {
           cookieStore.set({ name, value: '', ...options });
         } catch (error) {
-          // The `delete` method was called from a Server Component.
-          // This can be ignored if you have middleware refreshing
-          // user sessions.
+          // Called from Server Component — safe to ignore
         }
       },
     },

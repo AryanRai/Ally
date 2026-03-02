@@ -5,6 +5,7 @@ import { GrammarlyFix, suppressExtensionWarnings } from './components/GrammarlyF
 import { ProviderTest } from './components/ProviderTest';
 import { isWeb } from './utils/platform';
 import { WebAuthGate } from './components/WebAuthGate';
+import { cn } from './lib/utils';
 
 export default function App() {
   const [visible, setVisible] = useState(true);
@@ -98,7 +99,7 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-transparent">
+    <div className={cn("bg-transparent", isWeb ? "h-screen" : "min-h-screen")}>
       <GrammarlyFix />
       
       {isWeb ? (

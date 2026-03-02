@@ -629,7 +629,8 @@ export class OllamaService {
   private async chatOpenRouter(
     messages: ChatMessage[],
     model: string,
-    onProgress?: (chunk: string) => void
+    onProgress?: (chunk: string) => void,
+    abortSignal?: AbortSignal
   ): Promise<string> {
     try {
       if (!this.config.openRouterApiKey) {
@@ -648,6 +649,12 @@ export class OllamaService {
 
       console.log(`🚀 Sending OpenRouter request with axios - Model: ${model}`);
 
+      // Create axios cancel token from abort signal
+      const cancelSource = axios.CancelToken.source();
+      if (abortSignal) {
+        abortSignal.addEventListener('abort', () => cancelSource.cancel('Request aborted by user'));
+      }
+
       // Use non-streaming request with axios (more reliable in Electron)
       const response = await axios.post(`${this.config.openRouterBaseUrl}/chat/completions`, {
         model,
@@ -662,7 +669,8 @@ export class OllamaService {
           'HTTP-Referer': 'https://glass-pip-chat.local',
           'X-Title': 'Glass PiP Chat'
         },
-        timeout: this.config.openRouterTimeout
+        timeout: this.config.openRouterTimeout,
+        cancelToken: cancelSource.token
       });
 
       const content = response.data.choices?.[0]?.message?.content || '';
@@ -672,6 +680,7 @@ export class OllamaService {
         const words = content.split(' ');
         let accumulatedContent = '';
         for (const word of words) {
+          if (abortSignal?.aborted) break;
           accumulatedContent += word + ' ';
           onProgress(accumulatedContent);
           // Small delay to simulate streaming
@@ -682,6 +691,10 @@ export class OllamaService {
       return content;
     } catch (error: any) {
       console.error('OpenRouter axios request failed:', error);
+      
+      if (axios.isCancel(error)) {
+        throw Object.assign(new Error('Request aborted by user'), { name: 'AbortError' });
+      }
       
       if (error.response) {
         const status = error.response.status;
@@ -841,7 +854,7 @@ export class OllamaService {
           content: cumulativeContent,
           isComplete: false
         });
-      });
+      }, abortSignal);
       
       // Send final completion
       onProgress({
