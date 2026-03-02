@@ -4,7 +4,7 @@ export interface Message {
   content: string;
   timestamp: number;
   metadata?: {
-    source?: 'speech' | 'text';
+    source?: 'speech' | 'text' | 'remote';
     context?: string;
     toolCalls?: ToolCall[];
     toolResults?: ToolResult[];

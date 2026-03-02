@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS chat_messages (
   source TEXT DEFAULT 'web' CHECK (source IN ('web', 'discord', 'phone', 'desktop')),
   is_remote BOOLEAN DEFAULT false,
   local_system_id TEXT NOT NULL DEFAULT 'default',
+  discord_delivered BOOLEAN DEFAULT false,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW(),
   processed_at TIMESTAMPTZ,

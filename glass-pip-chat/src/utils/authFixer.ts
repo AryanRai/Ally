@@ -271,7 +271,7 @@ export async function autoFixAuth(): Promise<AuthFixResult> {
 }
 
 // Make utilities available globally in development
-if (typeof window !== 'undefined' && process.env.NODE_ENV === 'development') {
+if (typeof window !== 'undefined' && import.meta.env.DEV) {
   (window as any).authFixer = {
     clearCorruptedAuth,
     testAuthHealth,

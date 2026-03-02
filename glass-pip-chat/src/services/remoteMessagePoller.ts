@@ -23,6 +23,7 @@ export interface RemoteMessage {
   status: 'pending' | 'processing' | 'completed' | 'error';
   error_message?: string;
   metadata: Record<string, any>;
+  source?: string;
   is_remote: boolean;
   local_system_id: string;
   created_at: string;
@@ -422,12 +423,20 @@ export class RemoteMessagePoller {
       console.log(`✅ RemoteMessagePoller: Marking message ${message.id} as completed`);
       await this.updateMessageStatus(message.id, 'completed');
       
+      // Trigger Discord delivery if this was a Discord message
+      if (message.source === 'discord') {
+        this.triggerDiscordDelivery();
+      }
+      
       console.log(`🎉 RemoteMessagePoller: Successfully processed message ${message.id} in ${result.processingTime}ms`);
       
     } catch (error) {
       console.error(`❌ RemoteMessagePoller: Failed to process message ${message.id}:`, error);
       await this.updateMessageStatus(message.id, 'error');
       await this.logMessageError(message.id, error as Error);
+      if (message.source === 'discord') {
+        this.triggerDiscordDelivery();
+      }
     }
   }
 
@@ -539,6 +548,14 @@ export class RemoteMessagePoller {
     if (updateError) {
       console.error('Failed to log message error:', updateError);
     }
+  }
+
+  /** Fire-and-forget: ping the Vercel deliver endpoint to push Discord responses */
+  private triggerDiscordDelivery(): void {
+    const remoteUrl = 'https://ally-taupe.vercel.app';
+    fetch(`${remoteUrl}/api/discord/deliver`, { method: 'POST' })
+      .then(r => console.log('📨 Discord delivery triggered:', r.status))
+      .catch(e => console.warn('Discord delivery trigger failed:', e));
   }
 
 

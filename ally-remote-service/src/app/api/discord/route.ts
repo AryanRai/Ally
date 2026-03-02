@@ -281,6 +281,7 @@ async function handleChatCommand(
     status: 'pending',
     source: 'discord',
     metadata: {
+      useTools: true,
       discord_user_id: discordUserId,
       discord_username: discordUsername,
       discord_interaction_id: interaction.id,

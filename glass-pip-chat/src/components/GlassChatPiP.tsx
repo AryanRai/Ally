@@ -258,6 +258,19 @@ export default function GlassChatPiP() {
     }
   });
 
+  /** Strip tool blocks and thinking tags from assistant messages before sending to LLM as history */
+  const cleanMessagesForLLM = (messages: Message[]): Message[] =>
+    messages.map(m => {
+      if (m.role !== 'assistant') return m;
+      const clean = m.content
+        .replace(/🔧 \*\*[\s\S]*?```[\s\S]*?```\n*/g, '')
+        .replace(/❌ \*\*[\s\S]*?\n/g, '')
+        .replace(/<think>[\s\S]*?<\/think>/gi, '')
+        .replace(/💭 \*\*Thought Process:\*\*[\s\S]*?---\n\n\*\*Answer:\*\*\n\n/g, '')
+        .trim();
+      return clean ? { ...m, content: clean } : m;
+    }).filter(m => m.content.trim().length > 0);
+
   // Helper function to refresh chat state
   const refreshChatState = () => {
     if (isWeb) {
@@ -473,6 +486,11 @@ export default function GlassChatPiP() {
       contextMonitoring.clearNewContextFlag();
     }
 
+    // Capture history snapshot BEFORE adding the new user message
+    // (activeChat state won't update synchronously, so closures in send functions
+    //  would see stale messages without this snapshot)
+    const historySnapshot = cleanMessagesForLLM(activeChat?.messages || []);
+
     // Create user message
     const userMessage: Message = {
       id: `user-${Date.now()}`,
@@ -497,10 +515,10 @@ export default function GlassChatPiP() {
         await handleSendWeb(contextualContent);
       } else if (toolsEnabled) {
         // Use tool-aware chat flow
-        await handleSendWithTools(contextualContent);
+        await handleSendWithTools(contextualContent, historySnapshot);
       } else {
         // Use regular streaming chat
-        await handleSendRegular(contextualContent);
+        await handleSendRegular(contextualContent, historySnapshot);
       }
     } catch (error) {
       console.error('Error sending message:', error);
@@ -542,20 +560,34 @@ export default function GlassChatPiP() {
 
     // Try realtime subscription first, fall back to polling
     let resolved = false;
-    const cleanup = chatSync.subscribeToMessage(msgId, (response, status) => {
+    let lastActivityAt = Date.now();
+    let cleanupCalled = false;
+
+    const onActivity = () => { lastActivityAt = Date.now(); };
+
+    // Safe cleanup — only call once
+    let realtimeCleanup: (() => void) | null = null;
+    const doCleanup = () => {
+      if (cleanupCalled) return;
+      cleanupCalled = true;
+      realtimeCleanup?.();
+    };
+
+    realtimeCleanup = chatSync.subscribeToMessage(msgId, (response, status) => {
       if (resolved) return;
+      onActivity();
       if (response) setCurrentResponse(response + (status === 'completed' ? '' : '▋'));
       if (status === 'completed' || status === 'error') {
         resolved = true;
+        doCleanup();
         if (!messageAdded) {
           messageAdded = true;
-          const assistantMessage: Message = {
+          addMessageToActiveChat({
             id: assistantMsgId,
             role: 'assistant',
             content: response || 'No response received.',
             timestamp: Date.now(),
-          };
-          addMessageToActiveChat(assistantMessage);
+          });
         }
       }
     });
@@ -564,60 +596,58 @@ export default function GlassChatPiP() {
     const pollInterval = setInterval(async () => {
       if (resolved) { clearInterval(pollInterval); return; }
       const result = await chatSync.pollMessageResponse(msgId);
+      if (resolved) { clearInterval(pollInterval); return; } // re-check after await
       if (result && (result.status === 'completed' || result.status === 'error')) {
         resolved = true;
         clearInterval(pollInterval);
-        cleanup();
-        if (result.response) setCurrentResponse(result.response);
+        doCleanup();
         if (!messageAdded) {
           messageAdded = true;
-          const assistantMessage: Message = {
+          addMessageToActiveChat({
             id: assistantMsgId,
             role: 'assistant',
             content: result.response || 'No response received.',
             timestamp: Date.now(),
-          };
-          addMessageToActiveChat(assistantMessage);
+          });
         }
       } else if (result?.response) {
+        onActivity();
         setCurrentResponse(result.response + '▋');
       }
     }, 1500);
 
-    // Timeout after 2 minutes
+    // Activity-based timeout: only fire if no updates for 45s
+    const INACTIVITY_TIMEOUT = 45000;
     await new Promise<void>((resolve) => {
-      const timeout = setTimeout(() => {
-        if (!resolved) {
+      const checkInterval = setInterval(() => {
+        if (resolved) {
+          clearInterval(checkInterval);
+          resolve();
+          return;
+        }
+        const silent = Date.now() - lastActivityAt;
+        if (silent >= INACTIVITY_TIMEOUT) {
           resolved = true;
+          clearInterval(checkInterval);
           clearInterval(pollInterval);
-          cleanup();
+          doCleanup();
           if (!messageAdded) {
             messageAdded = true;
-            const assistantMessage: Message = {
+            addMessageToActiveChat({
               id: assistantMsgId,
               role: 'assistant',
-              content: '⏱️ Response timed out. Make sure your desktop Ally is running and connected.',
+              content: '⏱️ No response for 45 seconds. Make sure your desktop Ally is running and connected.',
               timestamp: Date.now(),
-            };
-            addMessageToActiveChat(assistantMessage);
+            });
           }
-        }
-        resolve();
-      }, 120000);
-
-      // Also resolve early when we get a response
-      const checkDone = setInterval(() => {
-        if (resolved) {
-          clearInterval(checkDone);
-          clearTimeout(timeout);
           resolve();
         }
-      }, 500);
+      }, 2000);
     });
   };
 
   // Regular streaming chat (no tools)
-  const handleSendRegular = async (contextualContent: string) => {
+  const handleSendRegular = async (contextualContent: string, historySnapshot?: Message[]) => {
     let lastSentenceIndex = 0;
     let accumulatedResponse = '';
 
@@ -626,7 +656,7 @@ export default function GlassChatPiP() {
       `You are Ally, a helpful AI assistant running on the user's computer. You have access to their system through tools when enabled. Be concise, friendly, and helpful. If the user asks about files, time, or system info and you don't have tool access, let them know they can enable tools for that.`;
 
     const response = await ollamaIntegration.sendMessageToOllama(
-      activeChat?.messages || [],
+      historySnapshot ?? cleanMessagesForLLM(activeChat?.messages || []),
       contextualContent,
       (update) => {
         let responseContent = '';
@@ -693,7 +723,7 @@ export default function GlassChatPiP() {
   };
 
   // Tool-aware chat flow with MCP integration - supports both single-tool and agentic modes
-  const handleSendWithTools = async (contextualContent: string) => {
+  const handleSendWithTools = async (contextualContent: string, historySnapshot?: Message[]) => {
     // Get available MCP tools from the hook
     const mcpTools = await getMcpToolsForLLM();
     
@@ -702,7 +732,7 @@ export default function GlassChatPiP() {
     
     if (mcpTools.length === 0) {
       console.log('⚠️ No MCP tools available, falling back to regular chat');
-      await handleSendRegular(contextualContent);
+      await handleSendRegular(contextualContent, historySnapshot);
       return;
     }
     
@@ -761,10 +791,10 @@ Remember: Output ONLY the JSON tool call when you need to use a tool. No explana
 
     if (agenticMode) {
       // Use agentic loop for multi-tool execution
-      await handleAgenticChat(contextualContent, toolsSystemPrompt, mcpTools);
+      await handleAgenticChat(contextualContent, toolsSystemPrompt, mcpTools, historySnapshot);
     } else {
       // Use single-tool mode (original behavior)
-      await handleSingleToolChat(contextualContent, toolsSystemPrompt);
+      await handleSingleToolChat(contextualContent, toolsSystemPrompt, historySnapshot);
     }
   };
 
@@ -967,12 +997,13 @@ Remember: Output ONLY the JSON tool call when you need to use a tool. No explana
   const handleAgenticChat = async (
     contextualContent: string, 
     systemPrompt: string,
-    _tools: Array<{ name: string; description: string; parameters?: any }>
+    _tools: Array<{ name: string; description: string; parameters?: any }>,
+    historySnapshot?: Message[]
   ) => {
     const finalContent = await runAgenticLoop(
       contextualContent,
       systemPrompt,
-      activeChat?.messages || [],
+      historySnapshot ?? cleanMessagesForLLM(activeChat?.messages || []),
       {
         onStreamUpdate: (text) => setCurrentResponse(text),
         onToolExecutionsUpdate: (execs) => setActiveToolExecutions(execs),
@@ -1120,7 +1151,7 @@ Remember: Output ONLY the JSON tool call when you need to use a tool. No explana
   };
 
   // Single-tool chat mode (original behavior)
-  const handleSingleToolChat = async (contextualContent: string, systemPrompt: string) => {
+  const handleSingleToolChat = async (contextualContent: string, systemPrompt: string, historySnapshot?: Message[]) => {
     let accumulatedResponse = '';
     let finalResponseWithToolResults = '';
     let pendingToolCall: { name: string; parameters: any } | null = null;
@@ -1130,7 +1161,7 @@ Remember: Output ONLY the JSON tool call when you need to use a tool. No explana
     let toolExecutionPromise: Promise<void> | null = null;
 
     await ollamaIntegration.sendMessageToOllama(
-      activeChat?.messages || [],
+      historySnapshot ?? cleanMessagesForLLM(activeChat?.messages || []),
       contextualContent,
       (update) => {
         if (update.type === 'response' || update.type === 'done') {
@@ -1582,6 +1613,35 @@ Remember: Output ONLY the JSON tool call when you need to use a tool. No explana
     return () => clearInterval(interval);
   }, [chatManager, chatSync, remoteConnection.isAuthenticated]);
 
+  // Web: periodically refresh chats from Supabase to pick up desktop responses
+  useEffect(() => {
+    if (!isWeb) return;
+
+    const refreshWebChats = async () => {
+      // Don't refresh while a response is being awaited — it would overwrite
+      // the "⏳ Waiting..." currentResponse and could cause stuck state
+      if (isTyping) return;
+
+      try {
+        const remoteChats = await chatSync.fetchChats();
+        if (remoteChats.length === 0) return;
+        setChats(remoteChats);
+        // Update activeChat if it's in the refreshed list (preserves selection)
+        setActiveChat(prev => {
+          if (!prev) return remoteChats[0];
+          const updated = remoteChats.find(c => c.id === prev.id);
+          return updated || prev;
+        });
+      } catch (e) {
+        console.warn('Web chat refresh failed:', e);
+      }
+    };
+
+    // Refresh every 15s to pick up desktop-side changes
+    const interval = setInterval(refreshWebChats, 15000);
+    return () => clearInterval(interval);
+  }, [chatSync, isTyping]);
+
   // Register demo tools when unified integration is ready
   useEffect(() => {
     if (!unifiedIntegration.isReady()) return;
@@ -1733,7 +1793,38 @@ Remember: Output ONLY the JSON tool call when you need to use a tool. No explana
         }).eq('id', request.messageId);
       };
 
+      // Fetch prior messages in this session for conversation context
+      const fetchSessionHistory = async (): Promise<Message[]> => {
+        try {
+          const { data } = await supabase
+            .from('chat_messages')
+            .select('content, response, status')
+            .eq('session_id', request.sessionId)
+            .eq('status', 'completed')
+            .neq('id', request.messageId)
+            .order('created_at', { ascending: true })
+            .limit(20);
+          if (!data) return [];
+          const history: Message[] = [];
+          for (const row of data) {
+            if (row.content) history.push({ id: row.content, role: 'user', content: row.content, timestamp: 0 });
+            if (row.response) {
+              // Strip tool blocks — only keep the final summary text
+              const clean = row.response
+                .replace(/🔧 \*\*[\s\S]*?```[\s\S]*?```/g, '')
+                .replace(/❌ \*\*[\s\S]*?\n/g, '')
+                .replace(/<think>[\s\S]*?<\/think>/gi, '')
+                .trim();
+              if (clean) history.push({ id: row.response, role: 'assistant', content: clean, timestamp: 0 });
+            }
+          }
+          return history;
+        } catch { return []; }
+      };
+
       try {
+        const sessionHistory = await fetchSessionHistory();
+
         // Get MCP tools
         const mcpTools = await getMcpToolsForLLM();
         
@@ -1743,7 +1834,7 @@ Remember: Output ONLY the JSON tool call when you need to use a tool. No explana
             `You are Ally, a helpful AI assistant running on the user's computer. You have access to their system through tools when enabled. Be concise, friendly, and helpful.`;
           let fullResponse = '';
           await ollamaIntegration.sendMessageToOllama(
-            [], request.content,
+            sessionHistory, request.content,
             (update) => {
               if (update.type === 'response' || update.type === 'done') {
                 fullResponse = update.response || '';
@@ -1753,6 +1844,9 @@ Remember: Output ONLY the JSON tool call when you need to use a tool. No explana
             basicSystemPrompt
           );
           await updateResponse(fullResponse, 'completed');
+          // Trigger Discord delivery if applicable
+          const remoteUrl = localStorage.getItem('ally-remote-url') || 'https://ally-taupe.vercel.app';
+          fetch(`${remoteUrl}/api/discord/deliver`, { method: 'POST' }).catch(() => {});
           return;
         }
 
@@ -1782,22 +1876,67 @@ TOOL FORMAT:
         const finalContent = await runAgenticLoop(
           request.content,
           toolsSystemPrompt,
-          [], // No chat history for remote messages (each is standalone)
+          sessionHistory,
           {
             onStreamUpdate: (text) => {
               // Stream partial responses to Supabase so web sees live updates
               updateResponse(text).catch(() => {});
             },
-            // No pill/thinking callbacks needed — the final content has tool blocks
-            // that parseMessageForPills will pick up on the web side
           }
         );
 
         // Write the final structured response (with tool blocks) to Supabase
         await updateResponse(finalContent || 'No response generated.', 'completed');
+
+        // Also add to desktop local chat so it shows in the desktop UI
+        // This lays the groundwork for streaming remote responses in the desktop UI
+        let remoteChat = chatManager.getChatById(request.sessionId);
+        if (!remoteChat) {
+          // Session was created on web — import it locally so desktop can track it
+          const imported: import('../types/chat').Chat = {
+            id: request.sessionId,
+            title: request.content.slice(0, 40) || 'Remote Chat',
+            messages: [],
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+          };
+          chatManager.importChat(imported);
+          remoteChat = chatManager.getChatById(request.sessionId);
+        }
+        if (remoteChat) {
+          chatManager.addMessage(request.sessionId, {
+            id: `remote-user-${request.messageId}`,
+            role: 'user',
+            content: request.content,
+            timestamp: Date.now() - 1000,
+            metadata: { source: 'remote' as const },
+          });
+          chatManager.addMessage(request.sessionId, {
+            id: `remote-assistant-${request.messageId}`,
+            role: 'assistant',
+            content: finalContent || 'No response generated.',
+            timestamp: Date.now(),
+            metadata: { source: 'remote' as const },
+          });
+          refreshChatState();
+          // Sync updated chat back to Supabase
+          const updated = chatManager.getChatById(request.sessionId);
+          if (updated) chatSync.syncChat(updated).catch(() => {});
+        }
+
+        // If this was a Discord message, trigger delivery
+        if (request.messageId) {
+          const remoteUrl =
+            localStorage.getItem('ally-remote-url') ||
+            'https://ally-taupe.vercel.app';
+          fetch(`${remoteUrl}/api/discord/deliver`, { method: 'POST' }).catch(() => {});
+        }
       } catch (error) {
         console.error('❌ RemoteToolBridge handler error:', error);
         await updateResponse(`Error: ${error instanceof Error ? error.message : 'Unknown error'}`, 'error');
+        // Trigger delivery even on error so Discord doesn't hang
+        const remoteUrl = localStorage.getItem('ally-remote-url') || 'https://ally-taupe.vercel.app';
+        fetch(`${remoteUrl}/api/discord/deliver`, { method: 'POST' }).catch(() => {});
       }
     };
 

@@ -116,7 +116,8 @@ export class FilesystemToolsService {
   private async listDirectory(parameters: { path: string }): Promise<any> {
     try {
       if (typeof window !== 'undefined' && window.pip?.system) {
-        const command = process.platform === 'win32' ? 'dir' : 'ls -la';
+        const isWin = navigator.platform.toLowerCase().includes('win') || navigator.userAgent.includes('Windows');
+        const command = isWin ? 'dir' : 'ls -la';
         const result = await window.pip.system.executeCommand(`${command} "${parameters.path}"`);
         
         return {
@@ -146,7 +147,8 @@ export class FilesystemToolsService {
   private async readFile(parameters: { path: string }): Promise<any> {
     try {
       if (typeof window !== 'undefined' && window.pip?.system) {
-        const command = process.platform === 'win32' ? 'type' : 'cat';
+        const isWin = navigator.platform.toLowerCase().includes('win') || navigator.userAgent.includes('Windows');
+        const command = isWin ? 'type' : 'cat';
         const result = await window.pip.system.executeCommand(`${command} "${parameters.path}"`);
         
         return {
@@ -176,7 +178,8 @@ export class FilesystemToolsService {
   private async pathExists(parameters: { path: string }): Promise<any> {
     try {
       if (typeof window !== 'undefined' && window.pip?.system) {
-        const command = process.platform === 'win32' 
+        const isWin = navigator.platform.toLowerCase().includes('win') || navigator.userAgent.includes('Windows');
+        const command = isWin
           ? `if exist "${parameters.path}" echo EXISTS`
           : `test -e "${parameters.path}" && echo EXISTS || echo NOT_EXISTS`;
         
@@ -210,7 +213,8 @@ export class FilesystemToolsService {
   private async getFileInfo(parameters: { path: string }): Promise<any> {
     try {
       if (typeof window !== 'undefined' && window.pip?.system) {
-        const command = process.platform === 'win32' 
+        const isWin = navigator.platform.toLowerCase().includes('win') || navigator.userAgent.includes('Windows');
+        const command = isWin
           ? `dir "${parameters.path}"`
           : `ls -la "${parameters.path}"`;
         
