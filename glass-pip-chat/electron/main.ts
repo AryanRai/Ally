@@ -961,6 +961,41 @@ ipcMain.handle('system:executeCommand', async (_, command: string) => {
   }
 });
 
+ipcMain.handle('system:fetchUrl', async (_, url: string, options?: { method?: string; headers?: Record<string, string>; body?: string }) => {
+  try {
+    const { net } = await import('electron');
+    return await new Promise<{ success: boolean; status: number; body: string; headers: Record<string, string> }>((resolve, reject) => {
+      const request = net.request({
+        method: options?.method || 'GET',
+        url,
+      });
+      if (options?.headers) {
+        for (const [key, value] of Object.entries(options.headers)) {
+          request.setHeader(key, value);
+        }
+      }
+      request.setHeader('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36');
+      let body = '';
+      const responseHeaders: Record<string, string> = {};
+      let statusCode = 0;
+      request.on('response', (response) => {
+        statusCode = response.statusCode;
+        for (const [k, v] of Object.entries(response.headers)) {
+          responseHeaders[k] = Array.isArray(v) ? v.join(', ') : String(v);
+        }
+        response.on('data', (chunk) => { body += chunk.toString(); });
+        response.on('end', () => resolve({ success: true, status: statusCode, body, headers: responseHeaders }));
+        response.on('error', reject);
+      });
+      request.on('error', (err) => reject(err));
+      if (options?.body) request.write(options.body);
+      request.end();
+    });
+  } catch (error: any) {
+    return { success: false, status: 0, body: '', error: error.message };
+  }
+});
+
 // Speech service handlers
 ipcMain.handle('speech:connect', async () => {
   try {

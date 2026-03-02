@@ -111,7 +111,9 @@ const pipAPI = {
 
   // System commands
   system: {
-    executeCommand: (command: string) => ipcRenderer.invoke('system:executeCommand', command)
+    executeCommand: (command: string) => ipcRenderer.invoke('system:executeCommand', command),
+    fetchUrl: (url: string, options?: { method?: string; headers?: Record<string, string>; body?: string }) =>
+      ipcRenderer.invoke('system:fetchUrl', url, options),
   },
 
   // Speech service

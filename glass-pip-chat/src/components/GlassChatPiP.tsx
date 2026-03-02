@@ -41,6 +41,13 @@ import { useUnifiedToolIntegration } from '../hooks/useUnifiedToolIntegration';
 import { createRemoteChatIntegration } from '../services/remoteChatIntegration';
 import { useRemoteConnection } from '../hooks/useRemoteConnection';
 import { RemoteToolBridge, RemoteToolRequest } from '../services/remoteToolBridge';
+import {
+  buildPTCScriptPrompt,
+  buildPTCSummaryPrompt,
+  executeScript,
+  extractScriptFromResponse,
+  PTCTool,
+} from '../services/ptcExecutor';
 
 // Utils & Types
 import { ChatManager } from '../utils/chatManager';
@@ -79,6 +86,8 @@ export default function GlassChatPiP() {
   const [toolsEnabled, setToolsEnabled] = useState(false);
   // Agentic mode - allows AI to use multiple tools sequentially
   const [agenticMode, setAgenticMode] = useState(true); // Default to agentic mode when tools are enabled
+  // PTC mode - Programmatic Tool Calling: LLM writes a JS script, 2 LLM calls instead of N+1
+  const [ptcMode, setPtcMode] = useState(() => localStorage.getItem('ally-ptc-mode') === 'true');
   // Autopilot mode - auto-approve all tool executions without confirmation
   const [autopilotMode, setAutopilotMode] = useState(() => {
     const saved = localStorage.getItem('ally-autopilot-mode');
@@ -750,6 +759,8 @@ export default function GlassChatPiP() {
 6. You will be called MULTIPLE times in a loop. Each time you output a tool call, it will be executed and the result given back to you. Then you can call another tool or give your final answer.
 7. Only give your final answer (plain text, NO JSON) when you have completed ALL steps the user asked for.
 8. Do NOT repeat raw tool results in your final answer — summarize naturally.
+9. ⚠️ NEVER use curl or wget — they don't work on this system. Use fetch_url tool for ALL HTTP requests.
+10. To open a URL in the browser, use execute_command with {"command": "start <url>"}.
 
 IMPORTANT — ONE TOOL PER RESPONSE:
 - Output exactly ONE tool call JSON, then STOP. Do not output multiple tool calls or any text after the JSON.
@@ -766,7 +777,12 @@ Response 2: {"name": "execute_command", "parameters": {"command": "gcc C:\\Users
 (you get result, then...)
 Response 3: {"name": "execute_command", "parameters": {"command": "C:\\Users\\buzza\\Desktop\\hello.exe"}}
 (you get result, then...)
-Response 4: Done! I wrote hello.c, compiled it, and ran it. Output was: Hello`
+Response 4: Done! I wrote hello.c, compiled it, and ran it. Output was: Hello
+
+EXAMPLE — User asks "what's the weather?":
+Response 1: {"name": "fetch_url", "parameters": {"url": "https://wttr.in/?format=3"}}
+(you get result, then...)
+Response 2: The weather is [result from fetch_url]`
         : `You are an AI assistant with tool access. When you need information you don't have, use a tool.
 
 TO USE A TOOL, output ONLY this JSON (nothing else before or after):
@@ -776,6 +792,7 @@ RULES:
 - For questions about time, files, calculations - USE A TOOL, don't explain
 - Output the JSON tool call IMMEDIATELY, no explanation needed
 - NEVER fabricate or simulate tool output — always call the tool
+- NEVER use curl or wget — use fetch_url tool for HTTP requests instead
 - After getting results, give a natural response incorporating the data`);
 
     // Build the full system prompt with available tools
@@ -789,12 +806,121 @@ ${mcpTools.map(t => {
 
 Remember: Output ONLY the JSON tool call when you need to use a tool. No explanations before it.`;
 
-    if (agenticMode) {
+    if (agenticMode && ptcMode) {
+      // PTC mode: LLM writes a JS script, execute it, summarize stdout — 2 LLM calls total
+      await runPTCLoop(contextualContent, mcpTools, historySnapshot);
+    } else if (agenticMode) {
       // Use agentic loop for multi-tool execution
       await handleAgenticChat(contextualContent, toolsSystemPrompt, mcpTools, historySnapshot);
     } else {
       // Use single-tool mode (original behavior)
       await handleSingleToolChat(contextualContent, toolsSystemPrompt, historySnapshot);
+    }
+  };
+
+  /**
+   * PTC loop — Programmatic Tool Calling.
+   * LLM call 1: write a JS script. Execute it (N tool calls, no LLM). LLM call 2: summarize stdout.
+   * Falls back to handleAgenticChat if script extraction fails.
+   */
+  const runPTCLoop = async (
+    userQuery: string,
+    mcpTools: PTCTool[],
+    historySnapshot?: Message[]
+  ) => {
+    setIsTyping(true);
+    setCurrentResponse('⚙️ Writing tool script…');
+
+    try {
+      // --- LLM call 1: generate script ---
+      const history = cleanMessagesForLLM(historySnapshot ?? activeChat?.messages ?? []);
+      // Pass the last assistant message as prior context for follow-up queries
+      const lastAssistant = [...history].reverse().find(m => m.role === 'assistant');
+      const priorContext = lastAssistant?.content?.slice(0, 2000);
+      const scriptSystemPrompt = buildPTCScriptPrompt(mcpTools, userQuery, platform, priorContext);
+
+      let scriptResponse = '';
+      await ollamaIntegration.sendMessageToOllama(
+        history,
+        userQuery,
+        (update) => {
+          if (update.type === 'response' || update.type === 'done') {
+            scriptResponse = update.response || '';
+          }
+          setCurrentResponse('⚙️ Writing tool script…');
+        },
+        scriptSystemPrompt
+      );
+
+      const script = extractScriptFromResponse(scriptResponse);
+      if (!script) {
+        // Fallback: no valid script — run agentic loop instead
+        console.warn('[PTC] No valid script extracted, falling back to agentic loop');
+        setCurrentResponse('');
+        const savedToolPrompt = localStorage.getItem('ally-prompt-tools') || '';
+        const toolsSystemPrompt = `${savedToolPrompt}\n\nAVAILABLE TOOLS:\n${mcpTools.map((t) => `• ${t.name} → ${t.description}`).join('\n')}`;
+        await handleAgenticChat(userQuery, toolsSystemPrompt, mcpTools, historySnapshot);
+        return;
+      }
+
+      setCurrentResponse(`⚙️ Running script…`);
+
+      // --- Execute script ---
+      const execResult = await executeScript(
+        script,
+        mcpTools,
+        async (toolName, params) => executeMcpTool(toolName, params as Record<string, unknown>),
+        {
+          onToolCall: (tool) => setCurrentResponse(`⚙️ Calling \`${tool}\`…`),
+        }
+      );
+
+      // --- LLM call 2: summarize ---
+      setCurrentResponse('⚙️ Summarizing results…');
+      const summaryPrompt = buildPTCSummaryPrompt(
+        userQuery,
+        execResult.stdout,
+        execResult.stderr,
+        execResult.toolCallLog
+      );
+
+      let finalContent = '';
+      await ollamaIntegration.sendMessageToOllama(
+        [],
+        summaryPrompt,
+        (update) => {
+          if (update.type === 'response' || update.type === 'done') {
+            finalContent = update.response || '';
+            setCurrentResponse(finalContent);
+          }
+        },
+        'You are a helpful assistant. Summarize the tool results naturally.'
+      );
+
+      const finalAnswer = finalContent || 'Done.';
+      setCurrentResponse('');
+      addMessageToActiveChat({
+        id: `assistant-ptc-${Date.now()}`,
+        role: 'assistant',
+        content: finalAnswer,
+        timestamp: Date.now(),
+        metadata: {
+          toolCalls: execResult.toolCallLog.map((t) => ({ name: t.tool, parameters: t.params as Record<string, unknown> })),
+        },
+      });
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      setCurrentResponse('');
+      addMessageToActiveChat({
+        id: `assistant-ptc-err-${Date.now()}`,
+        role: 'assistant',
+        content: `Error in PTC loop: ${errMsg}`,
+        timestamp: Date.now(),
+      });
+    } finally {
+      setIsTyping(false);
+      setCurrentResponse('');
+      setActiveToolExecutions([]);
     }
   };
 
@@ -1261,7 +1387,11 @@ Remember: Output ONLY the JSON tool call when you need to use a tool. No explana
       // Always add built-in tools that work without MCP
       tools.push(
         { name: 'get_current_time', description: 'Get the current date and time. USE THIS for any time/date questions!', parameters: {} },
-        { name: 'calculate', description: 'Perform a mathematical calculation', parameters: { expression: 'string (e.g., "2 + 2", "sqrt(16)")' } }
+        { name: 'calculate', description: 'Perform a mathematical calculation', parameters: { expression: 'string (e.g., "2 + 2", "sqrt(16)")' } },
+        { name: 'fetch_url', description: 'Fetch a URL and return the response body. USE THIS instead of curl for any HTTP requests or internet access.', parameters: { url: 'string', method: 'string (optional)', headers: 'object (optional)', body: 'string (optional)' } },
+        { name: 'execute_command', description: 'Execute a system command on Windows. Use "start <url>" to open URLs in browser.', parameters: { command: 'string' } },
+        { name: 'list_directory', description: 'List the contents of a directory', parameters: { path: 'string' } },
+        { name: 'read_file', description: 'Read the contents of a file', parameters: { path: 'string' } }
       );
       
       // Add MCP tools from the integration hook (persisted in store)
@@ -1371,6 +1501,18 @@ Remember: Output ONLY the JSON tool call when you need to use a tool. No explana
         return { expression: expr, result };
       } catch (e) {
         return { error: `Invalid expression: ${e}` };
+      }
+    }
+
+    // Built-in filesystem/network tools — route through FilesystemToolsService
+    if (['fetch_url', 'execute_command', 'list_directory', 'read_file', 'path_exists', 'get_file_info'].includes(actualToolName)) {
+      try {
+        const { getFilesystemToolsService } = await import('../services/filesystemTools');
+        const fsService = getFilesystemToolsService();
+        return await fsService.executeTool(actualToolName, normalizedParams);
+      } catch (fsErr) {
+        console.warn(`FilesystemToolsService failed for ${actualToolName}:`, fsErr);
+        // fall through to MCP
       }
     }
     
@@ -1863,6 +2005,7 @@ Remember: Output ONLY the JSON tool call when you need to use a tool. No explana
 6. You will be called MULTIPLE times in a loop. Each time you output a tool call, it will be executed and the result given back to you.
 7. Only give your final answer (plain text, NO JSON) when you have completed ALL steps.
 8. This is a Windows system. Use Windows paths (C:\\Users\\...) not Unix paths.
+9. ⚠️ NEVER use curl or wget — use fetch_url tool for ALL HTTP requests instead.
 
 TOOL FORMAT:
 {"name": "tool_name", "parameters": {"key": "value"}}`;
@@ -1872,18 +2015,60 @@ TOOL FORMAT:
           return `• ${t.name}${params}\n  → ${t.description}`;
         }).join('\n')}`;
 
-        // Use the shared agentic loop — same pipeline as desktop
-        const finalContent = await runAgenticLoop(
-          request.content,
-          toolsSystemPrompt,
-          sessionHistory,
-          {
-            onStreamUpdate: (text) => {
-              // Stream partial responses to Supabase so web sees live updates
-              updateResponse(text).catch(() => {});
-            },
+        // Use PTC or agentic loop depending on mode
+        let finalContent: string;
+        if (ptcMode) {
+          // PTC: LLM writes script, execute, summarize — 2 LLM calls
+          let ptcResult = '';
+          const ptcScript = await (async () => {
+            let scriptResponse = '';
+            await ollamaIntegration.sendMessageToOllama(
+              sessionHistory,
+              request.content,
+              (update) => { if (update.type === 'response' || update.type === 'done') scriptResponse = update.response || ''; },
+              buildPTCScriptPrompt(mcpTools, request.content, 'Windows',
+                [...sessionHistory].reverse().find(m => m.role === 'assistant')?.content?.slice(0, 2000))
+            );
+            return extractScriptFromResponse(scriptResponse);
+          })();
+
+          if (ptcScript) {
+            const execResult = await executeScript(
+              ptcScript,
+              mcpTools,
+              async (toolName, params) => executeMcpTool(toolName, params as Record<string, unknown>),
+              { onToolCall: (tool) => updateResponse(`⚙️ Calling ${tool}…`).catch(() => {}) }
+            );
+            await ollamaIntegration.sendMessageToOllama(
+              [],
+              buildPTCSummaryPrompt(request.content, execResult.stdout, execResult.stderr, execResult.toolCallLog),
+              (update) => { if (update.type === 'response' || update.type === 'done') { ptcResult = update.response || ''; updateResponse(ptcResult).catch(() => {}); } },
+              'You are a helpful assistant. Summarize the tool results naturally.'
+            );
+            finalContent = ptcResult || 'Done.';
+          } else {
+            // Fallback to agentic loop
+            finalContent = await runAgenticLoop(
+              request.content,
+              toolsSystemPrompt,
+              sessionHistory,
+              { onStreamUpdate: (text) => updateResponse(text).catch(() => {}) }
+            );
           }
-        );
+        } else {
+          // Use the shared agentic loop — same pipeline as desktop
+          finalContent = await runAgenticLoop(
+            request.content,
+            toolsSystemPrompt,
+            sessionHistory,
+            {
+              onStreamUpdate: (text) => {
+                // Stream partial responses to Supabase so web sees live updates
+                updateResponse(text).catch(() => {});
+              },
+            }
+          );
+        }
 
         // Write the final structured response (with tool blocks) to Supabase
         await updateResponse(finalContent || 'No response generated.', 'completed');
@@ -1942,7 +2127,7 @@ TOOL FORMAT:
 
     RemoteToolBridge.registerHandler(handler);
     return () => RemoteToolBridge.unregisterHandler();
-  }, [ollamaIntegration, getMcpToolsForLLM, executeMcpTool, parseToolCallFromResponse, runAgenticLoop]);
+  }, [ollamaIntegration, getMcpToolsForLLM, executeMcpTool, parseToolCallFromResponse, runAgenticLoop, ptcMode]);
 
   // Handle speech recognition results - automatically send as messages when voice mode is enabled
   const lastProcessedSpeechRef = useRef<string | null>(null);
@@ -2949,6 +3134,12 @@ TOOL FORMAT:
                     const next = !autopilotMode;
                     setAutopilotMode(next);
                     localStorage.setItem('ally-autopilot-mode', String(next));
+                  }}
+                  ptcMode={isWeb ? false : ptcMode}
+                  onPtcModeToggle={isWeb ? undefined : () => {
+                    const next = !ptcMode;
+                    setPtcMode(next);
+                    localStorage.setItem('ally-ptc-mode', String(next));
                   }}
                 />
 

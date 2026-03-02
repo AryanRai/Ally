@@ -111,6 +111,36 @@ export class FilesystemToolsService {
       },
       handler: this.executeCommand.bind(this)
     });
+
+    // Fetch a URL via Electron's net module (bypasses curl/wget issues)
+    this.tools.set('fetch_url', {
+      name: 'fetch_url',
+      description: 'Fetch a URL and return the response body. Use this instead of curl for HTTP requests.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          url: {
+            type: 'string',
+            description: 'URL to fetch'
+          },
+          method: {
+            type: 'string',
+            description: 'HTTP method (GET, POST, etc.)',
+            default: 'GET'
+          },
+          headers: {
+            type: 'object',
+            description: 'Optional request headers'
+          },
+          body: {
+            type: 'string',
+            description: 'Optional request body for POST/PUT'
+          }
+        },
+        required: ['url']
+      },
+      handler: this.fetchUrl.bind(this)
+    });
   }
 
   private async listDirectory(parameters: { path: string }): Promise<any> {
@@ -278,6 +308,33 @@ export class FilesystemToolsService {
         success: false,
         error: error instanceof Error ? error.message : 'Command execution failed',
         command: parameters.command
+      };
+    }
+  }
+
+  private async fetchUrl(parameters: { url: string; method?: string; headers?: Record<string, string>; body?: string }): Promise<any> {
+    try {
+      if (typeof window !== 'undefined' && (window.pip?.system as any)?.fetchUrl) {
+        const result = await (window.pip.system as any).fetchUrl(parameters.url, {
+          method: parameters.method,
+          headers: parameters.headers,
+          body: parameters.body,
+        });
+        return result;
+      }
+      // Fallback: try native fetch (works in web mode)
+      const response = await fetch(parameters.url, {
+        method: parameters.method || 'GET',
+        headers: parameters.headers,
+        body: parameters.body,
+      });
+      const body = await response.text();
+      return { success: true, status: response.status, body };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Fetch failed',
+        url: parameters.url,
       };
     }
   }

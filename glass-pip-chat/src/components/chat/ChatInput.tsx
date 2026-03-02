@@ -10,7 +10,8 @@ import {
   Wrench,
   Zap,
   ShieldCheck,
-  ShieldAlert
+  ShieldAlert,
+  Code2
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { ThemeUtils } from '../../utils/themeUtils';
@@ -39,6 +40,8 @@ interface ChatInputProps {
   onToolsToggle?: () => void;
   onAgenticModeToggle?: () => void;
   onAutopilotToggle?: () => void;
+  ptcMode?: boolean;
+  onPtcModeToggle?: () => void;
 }
 
 const ChatInput = forwardRef<HTMLInputElement, ChatInputProps>(({
@@ -62,43 +65,83 @@ const ChatInput = forwardRef<HTMLInputElement, ChatInputProps>(({
   mcpToolCount = 0,
   onToolsToggle,
   onAgenticModeToggle,
-  onAutopilotToggle
+  onAutopilotToggle,
+  ptcMode = false,
+  onPtcModeToggle,
 }, ref) => {
   const [showToolbar, setShowToolbar] = useState(false);
   const [copied, setCopied] = useState(false);
 
   const handleCopyChatDebug = async () => {
-    const timestamp = new Date().toISOString();
     const lines: string[] = [
-      `=== CHAT DEBUG EXPORT ===`,
+      `=== CHAT EXPORT ===`,
       `Exported: ${new Date().toLocaleString()}`,
       `Model: ${currentModel}`,
-      `Tools Enabled: ${toolsEnabled}`,
-      `Agentic Mode: ${agenticMode}`,
-      `Messages: ${messages.length}`,
-      `Platform: ${navigator.platform}`,
-      `---`,
-      ''
+      `Tools: ${toolsEnabled ? 'ON' : 'OFF'} | Agentic: ${agenticMode ? 'ON' : 'OFF'} | PTC: ${ptcMode ? 'ON' : 'OFF'}`,
+      `Messages: ${messages.length} | Platform: ${navigator.platform}`,
+      ``,
     ];
 
     for (const msg of messages) {
       const time = new Date(msg.timestamp).toLocaleTimeString();
       const role = msg.role.toUpperCase();
-      lines.push(`[${time}] ${role}:`);
-      lines.push(msg.content);
-      if (msg.metadata?.toolCalls?.length) {
-        lines.push(`  Tool Calls: ${JSON.stringify(msg.metadata.toolCalls)}`);
-      }
-      if (msg.metadata?.toolResults?.length) {
-        lines.push(`  Tool Results: ${JSON.stringify(msg.metadata.toolResults)}`);
-      }
-      if (msg.metadata?.source) {
-        lines.push(`  Source: ${msg.metadata.source}`);
-      }
+      lines.push(`── [${time}] ${role} ──────────────────────`);
+
+      // Extract collapsible sections from content
+      let text = msg.content;
+      const collapsibles: string[] = [];
+
+      // thinking / think blocks
+      text = text.replace(/<(?:thinking|think)>([\s\S]*?)<\/(?:thinking|think)>/gi, (_, inner) => {
+        collapsibles.push(`  [THINKING]\n${inner.trim().split('\n').map((l: string) => '    ' + l).join('\n')}`);
+        return '';
+      });
+
+      // <tool_use> XML blocks
+      text = text.replace(/<tool_use>([\s\S]*?)<\/tool_use>/gi, (_, inner) => {
+        const nameMatch = inner.match(/<tool_name>([\s\S]*?)<\/tool_name>/i);
+        const toolName = nameMatch ? nameMatch[1].trim() : 'tool';
+        const params: Record<string, string> = {};
+        const paramRegex = /<tool_parameter name="([^"]+)">([\s\S]*?)<\/tool_parameter>/gi;
+        let pm;
+        while ((pm = paramRegex.exec(inner)) !== null) params[pm[1]] = pm[2].trim();
+        collapsibles.push(`  [TOOL CALL: ${toolName}]\n    ${JSON.stringify(params, null, 2).split('\n').join('\n    ')}`);
+        return '';
+      });
+
+      // JSON tool calls
+      text = text.replace(/\{"name"\s*:\s*"([^"]+)"[\s\S]*?"parameters"\s*:\s*(\{[\s\S]*?\})\s*\}/g, (match, name) => {
+        try {
+          const parsed = JSON.parse(match);
+          collapsibles.push(`  [TOOL CALL: ${name}]\n    ${JSON.stringify(parsed.parameters || {}, null, 2).split('\n').join('\n    ')}`);
+          return '';
+        } catch { return match; }
+      });
+
+      // Tool result blocks
+      text = text.replace(/🔧 \*\*([^*\n]+)\*\*\s*\n```[^\n]*\n([\s\S]*?)\n?```/g, (_, name, result) => {
+        collapsibles.push(`  [TOOL RESULT: ${name.trim()}]\n${result.trim().split('\n').map((l: string) => '    ' + l).join('\n')}`);
+        return '';
+      });
+
+      // PTC scripts
+      text = text.replace(/```(?:javascript|js)\s*\n([\s\S]*?)```/g, (match, code) => {
+        if (code.includes('await ') || code.includes('print(')) {
+          collapsibles.push(`  [PTC SCRIPT]\n${code.trim().split('\n').map((l: string) => '    ' + l).join('\n')}`);
+          return '';
+        }
+        return match;
+      });
+
+      const cleanText = text.replace(/\n{3,}/g, '\n\n').trim();
+      if (cleanText) lines.push(cleanText);
+      if (collapsibles.length > 0) lines.push(...collapsibles);
+
+      if (msg.metadata?.source) lines.push(`  [source: ${msg.metadata.source}]`);
       lines.push('');
     }
 
-    lines.push(`=== END EXPORT ===`);
+    lines.push(`=== END ===`);
 
     try {
       await navigator.clipboard.writeText(lines.join('\n'));
@@ -245,6 +288,23 @@ const ChatInput = forwardRef<HTMLInputElement, ChatInputProps>(({
                 <Zap className="w-3 h-3" />
                 Agentic
               </span>
+            )}
+
+            {/* PTC toggle — only shown when tools + agentic are both on */}
+            {toolsEnabled && agenticMode && onPtcModeToggle && (
+              <button
+                onClick={onPtcModeToggle}
+                className={cn(
+                  "inline-flex items-center gap-1 px-2 py-1 text-[10px] rounded-lg transition-colors border",
+                  ptcMode
+                    ? "bg-cyan-500/20 border-cyan-500/30 text-cyan-300"
+                    : "bg-white/5 hover:bg-white/10 border-white/10 text-white/60"
+                )}
+                title={ptcMode ? "PTC ON — LLM writes a script (2 LLM calls)" : "PTC OFF — standard agentic loop"}
+              >
+                <Code2 className="w-3 h-3" />
+                PTC
+              </button>
             )}
 
             {/* Model indicator */}
