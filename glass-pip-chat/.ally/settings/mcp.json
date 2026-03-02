@@ -113,6 +113,27 @@
         "read_file",
         "write_file"
       ]
+    },
+    "comet-bridge": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "perplexity-comet-mcp"
+      ],
+      "env": {
+        "COMET_PORT": "9223"
+      },
+      "disabled": false,
+      "autoApprove": [
+        "comet_connect",
+        "comet_ask",
+        "comet_poll",
+        "comet_stop",
+        "comet_screenshot",
+        "comet_tabs",
+        "comet_mode",
+        "comet_upload"
+      ]
     }
   }
 }

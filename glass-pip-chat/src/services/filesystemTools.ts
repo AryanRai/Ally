@@ -176,6 +176,9 @@ export class FilesystemToolsService {
         handler: async (parameters: Record<string, any>) => this.callBrowserTool(bt.name, parameters),
       });
     }
+
+    // Comet tools are provided by the comet-bridge MCP server (perplexity-comet-mcp)
+    // and loaded dynamically — no built-in registration needed here.
   }
 
   private async callBrowserTool(tool: string, parameters: Record<string, unknown>): Promise<any> {

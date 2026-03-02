@@ -770,15 +770,21 @@ export default function GlassChatPiP() {
 9. ⚠️ NEVER use curl or wget — they don't work on this system. Use fetch_url tool for ALL HTTP requests.
 10. To open a URL in the browser, use browser_navigate (preferred) or execute_command with {"command": "start <url>"}.
 11. To interact with web pages (click buttons, type text, read content, send messages), use browser_* tools.
+12. For complex multi-step browser tasks (research, booking, shopping, sending messages on WhatsApp/email, form filling), use comet_* tools — Perplexity Comet is a full agentic browser controlled via CDP.
 
-BROWSER TOOL EXAMPLES:
-- Open WhatsApp: {"name": "browser_navigate", "parameters": {"url": "https://web.whatsapp.com"}}
-- Wait for load: {"name": "browser_wait_for", "parameters": {"selector": "div[data-testid='chat-list']", "timeout": 15000}}
-- Search contact: {"name": "browser_click", "parameters": {"selector": "div[data-testid='search']"}}
-- Type name: {"name": "browser_type", "parameters": {"selector": "div[data-testid='search'] input", "text": "Aditya"}}
-- Click result: {"name": "browser_click", "parameters": {"text": "Aditya Solanki"}}
-- Type message: {"name": "browser_type", "parameters": {"selector": "div[data-testid='conversation-compose-box-input']", "text": "hi"}}
-- Send (Enter): {"name": "browser_eval", "parameters": {"code": "document.querySelector('[data-testid=send]').click()"}}
+PERPLEXITY COMET — use for any autonomous browser task:
+- Connect first: {"name": "comet_connect", "parameters": {}}
+- Send task: {"name": "comet_ask", "parameters": {"prompt": "Go to amazon.com and find the cheapest iPhone 15 case under $10"}}
+- Check progress: {"name": "comet_poll", "parameters": {}}
+- Stop if needed: {"name": "comet_stop", "parameters": {}}
+- Comet handles all browsing, clicking, typing, and multi-step work autonomously
+
+GENERIC BROWSER TOOL EXAMPLES (for quick/simple interactions):
+- Navigate: {"name": "browser_navigate", "parameters": {"url": "https://example.com"}}
+- Click by text: {"name": "browser_click", "parameters": {"text": "Sign In"}}
+- Type + submit: {"name": "browser_type", "parameters": {"selector": "input[name='q']", "text": "hello", "pressEnter": true}}
+- Read page: {"name": "browser_read_page", "parameters": {"includeLinks": true}}
+- Run JS: {"name": "browser_eval", "parameters": {"code": "document.title"}}
 
 IMPORTANT — ONE TOOL PER RESPONSE:
 - Output exactly ONE tool call JSON, then STOP. Do not output multiple tool calls or any text after the JSON.
@@ -1412,8 +1418,8 @@ Remember: Output ONLY the JSON tool call when you need to use a tool. No explana
         { name: 'read_file', description: 'Read the contents of a file', parameters: { path: 'string' } },
         // Browser tools (require Ally Chrome extension)
         { name: 'browser_navigate', description: 'Navigate browser to a URL. Use this to open websites.', parameters: { url: 'string' } },
-        { name: 'browser_click', description: 'Click an element on the page by CSS selector or visible text', parameters: { selector: 'string (optional)', text: 'string (optional)' } },
-        { name: 'browser_type', description: 'Type text into an input field on the page', parameters: { selector: 'string', text: 'string' } },
+        { name: 'browser_click', description: 'Click an element on the page by CSS selector or visible text', parameters: { selector: 'string (optional)', text: 'string (optional)', index: 'number (optional)' } },
+        { name: 'browser_type', description: 'Type text into an input field on the page', parameters: { selector: 'string', text: 'string', pressEnter: 'boolean (optional)' } },
         { name: 'browser_read_page', description: 'Read the current page content, title, URL and links', parameters: { includeLinks: 'boolean (optional)' } },
         { name: 'browser_eval', description: 'Run JavaScript in the current page. Use for complex interactions.', parameters: { code: 'string' } },
         { name: 'browser_find_element', description: 'Find an element on the page by selector or text', parameters: { selector: 'string (optional)', text: 'string (optional)' } },
@@ -1423,6 +1429,16 @@ Remember: Output ONLY the JSON tool call when you need to use a tool. No explana
         { name: 'browser_wait_for', description: 'Wait for a CSS selector to appear on the page', parameters: { selector: 'string', timeout: 'number (optional)' } },
         { name: 'browser_get_url', description: 'Get the current page URL and title', parameters: {} },
         { name: 'browser_scroll', description: 'Scroll the page or scroll an element into view', parameters: { selector: 'string (optional)', y: 'number (optional)' } },
+        { name: 'browser_press_key', description: 'Press a keyboard key on the focused element', parameters: { key: 'string', selector: 'string (optional)' } },
+        { name: 'browser_new_tab', description: 'Open a new browser tab', parameters: { url: 'string (optional)' } },
+        // Perplexity Comet MCP — agentic browser via CDP (preferred for complex tasks)
+        { name: 'comet_connect', description: 'Connect to Perplexity Comet browser. Call this first before any comet_* tool.', parameters: {} },
+        { name: 'comet_ask', description: 'Send a task to Perplexity Comet — an agentic AI browser. Use for web research, form filling, booking, shopping, sending messages, or any multi-step browser task. Comet handles all browsing autonomously.', parameters: { prompt: 'string', newChat: 'boolean (optional)', timeout: 'number (optional, ms)' } },
+        { name: 'comet_poll', description: 'Check status/progress of an ongoing Comet task. Returns IDLE/WORKING/COMPLETED and current steps.', parameters: {} },
+        { name: 'comet_stop', description: 'Stop the current Comet task.', parameters: {} },
+        { name: 'comet_screenshot', description: 'Take a screenshot of the current Comet browser view.', parameters: {} },
+        { name: 'comet_tabs', description: 'List, switch, or close Comet browser tabs.', parameters: { action: 'string (optional: list|switch|close)', domain: 'string (optional)', tabId: 'string (optional)' } },
+        { name: 'comet_mode', description: 'Switch Perplexity search mode: search, research, labs, or learn.', parameters: { mode: 'string (optional)' } },
       );
       
       // Add MCP tools from the integration hook (persisted in store)
@@ -1539,7 +1555,9 @@ Remember: Output ONLY the JSON tool call when you need to use a tool. No explana
     if (['fetch_url', 'execute_command', 'list_directory', 'read_file', 'path_exists', 'get_file_info',
          'browser_navigate', 'browser_click', 'browser_type', 'browser_read_page', 'browser_screenshot',
          'browser_eval', 'browser_find_element', 'browser_scroll', 'browser_get_tabs', 'browser_switch_tab',
-         'browser_go_back', 'browser_go_forward', 'browser_wait_for', 'browser_get_url'].includes(actualToolName)) {
+         'browser_go_back', 'browser_go_forward', 'browser_wait_for', 'browser_get_url',
+         'browser_press_key', 'browser_new_tab', 'browser_close_tab',
+        ].includes(actualToolName)) {
       try {
         const { getFilesystemToolsService } = await import('../services/filesystemTools');
         const fsService = getFilesystemToolsService();
