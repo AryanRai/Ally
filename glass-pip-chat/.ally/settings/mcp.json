@@ -134,6 +134,63 @@
         "comet_mode",
         "comet_upload"
       ]
+    },
+    "computer-control": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "computer-control-mcp"
+      ],
+      "env": {},
+      "disabled": false,
+      "autoApprove": [
+        "screenshot",
+        "click",
+        "double_click",
+        "right_click",
+        "move_mouse",
+        "drag",
+        "scroll",
+        "type_text",
+        "key_press",
+        "get_screen_size",
+        "get_cursor_position",
+        "find_on_screen",
+        "get_clipboard",
+        "set_clipboard",
+        "open_application",
+        "close_window",
+        "get_active_window",
+        "list_windows",
+        "focus_window"
+      ]
+    },
+    "spotify": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@darrenjaws/spotify-mcp"
+      ],
+      "env": {
+        "SPOTIFY_CLIENT_ID": "YOUR_SPOTIFY_CLIENT_ID",
+        "SPOTIFY_CLIENT_SECRET": "YOUR_SPOTIFY_CLIENT_SECRET",
+        "SPOTIFY_REDIRECT_URI": "http://127.0.0.1:8888/callback"
+      },
+      "disabled": false,
+      "autoApprove": [
+        "play",
+        "pause",
+        "next",
+        "previous",
+        "search",
+        "get_current_track",
+        "get_playback_state",
+        "set_volume",
+        "get_playlists",
+        "play_track",
+        "play_playlist",
+        "queue_track"
+      ]
     }
   }
 }
