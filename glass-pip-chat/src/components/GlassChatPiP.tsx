@@ -770,14 +770,18 @@ export default function GlassChatPiP() {
 9. ⚠️ NEVER use curl or wget — they don't work on this system. Use fetch_url tool for ALL HTTP requests.
 10. To open a URL in the browser, use browser_navigate (preferred) or execute_command with {"command": "start <url>"}.
 11. To interact with web pages (click buttons, type text, read content, send messages), use browser_* tools.
-12. For complex multi-step browser tasks (research, booking, shopping, sending messages on WhatsApp/email, form filling), use comet_* tools — Perplexity Comet is a full agentic browser controlled via CDP.
+12. For complex multi-step browser tasks (research, booking, shopping, sending messages on WhatsApp/email, form filling), use comet_run — it handles everything automatically.
 
-PERPLEXITY COMET — use for any autonomous browser task:
-- Connect first: {"name": "comet_connect", "parameters": {}}
-- Send task: {"name": "comet_ask", "parameters": {"prompt": "Go to amazon.com and find the cheapest iPhone 15 case under $10"}}
-- Check progress: {"name": "comet_poll", "parameters": {}}
-- Stop if needed: {"name": "comet_stop", "parameters": {}}
-- Comet handles all browsing, clicking, typing, and multi-step work autonomously
+PERPLEXITY COMET — always use comet_run (not comet_ask directly):
+- {"name": "comet_run", "parameters": {"prompt": "your full task here"}}
+  → Fires the task, polls every 20s automatically, waits until COMPLETED, returns the result.
+  → You just call it once and get the answer. No manual polling needed.
+- Only use comet_poll manually if comet_run itself times out (rare, >3 min tasks).
+- comet_stop to cancel a running task if needed.
+
+EXAMPLE — "send a WhatsApp message to Srijan saying hi":
+Response 1: {"name": "comet_run", "parameters": {"prompt": "Open WhatsApp Web and send a message to Srijan saying hi"}}
+→ Returns when done (30-120s). Report the result.
 
 GENERIC BROWSER TOOL EXAMPLES (for quick/simple interactions):
 - Navigate: {"name": "browser_navigate", "parameters": {"url": "https://example.com"}}
@@ -1433,12 +1437,14 @@ Remember: Output ONLY the JSON tool call when you need to use a tool. No explana
         { name: 'browser_new_tab', description: 'Open a new browser tab', parameters: { url: 'string (optional)' } },
         // Perplexity Comet MCP — agentic browser via CDP (preferred for complex tasks)
         { name: 'comet_connect', description: 'Connect to Perplexity Comet browser. Call this first before any comet_* tool.', parameters: {} },
-        { name: 'comet_ask', description: 'Send a task to Perplexity Comet — an agentic AI browser. Use for web research, form filling, booking, shopping, sending messages, or any multi-step browser task. Comet handles all browsing autonomously.', parameters: { prompt: 'string', newChat: 'boolean (optional)', timeout: 'number (optional, ms)' } },
-        { name: 'comet_poll', description: 'Check status/progress of an ongoing Comet task. Returns IDLE/WORKING/COMPLETED and current steps.', parameters: {} },
+        { name: 'comet_run', description: 'Send a task to Perplexity Comet and automatically wait for completion. Polls every 20s, extends if still working, returns the final result. USE THIS instead of comet_ask for all tasks.', parameters: { prompt: 'string', maxWaitSeconds: 'number (optional, default 180)' } },
+        { name: 'comet_ask', description: 'Send a task to Perplexity Comet agentic browser. Blocks until complete (up to 2 min) and returns the full result. Use for web research, form filling, booking, shopping, sending messages, or any multi-step browser task.', parameters: { prompt: 'string', newChat: 'boolean (optional)', timeout: 'number (optional, ms, default 120000)' } },
+        { name: 'comet_poll', description: 'Check status of the current Comet task. Use only if comet_ask timed out. Returns IDLE/WORKING/COMPLETED and steps taken.', parameters: {} },
         { name: 'comet_stop', description: 'Stop the current Comet task.', parameters: {} },
         { name: 'comet_screenshot', description: 'Take a screenshot of the current Comet browser view.', parameters: {} },
         { name: 'comet_tabs', description: 'List, switch, or close Comet browser tabs.', parameters: { action: 'string (optional: list|switch|close)', domain: 'string (optional)', tabId: 'string (optional)' } },
         { name: 'comet_mode', description: 'Switch Perplexity search mode: search, research, labs, or learn.', parameters: { mode: 'string (optional)' } },
+        { name: 'wait', description: 'Sleep for N seconds. Use this after comet_ask (timeout:5000) to give Comet time to complete its task before calling comet_poll. Use 30-60s for most tasks.', parameters: { seconds: 'number (1-60)' } },
       );
       
       // Add MCP tools from the integration hook (persisted in store)
@@ -1551,8 +1557,103 @@ Remember: Output ONLY the JSON tool call when you need to use a tool. No explana
       }
     }
 
+    // comet_run — fire comet_ask then auto-poll until done
+    if (actualToolName === 'comet_run') {
+      const prompt = normalizedParams.prompt as string;
+      if (!prompt) return { error: 'comet_run requires a prompt parameter' };
+      const maxWait = Math.min(Number(normalizedParams.maxWaitSeconds) || 240, 360);
+      const pollIntervalMs = 20000;
+      const startTime = Date.now();
+
+      // Fire comet_ask via the short-timeout alias — returns in ~10s regardless
+      // The task keeps running in Comet even after the MCP call times out
+      setCurrentResponse(`🚀 Sending task to Comet…`);
+      mcpIntegration.executeMCPTool('comet_ask_fire', { prompt }).catch(() => {
+        // Expected — 10s MCP timeout fires the task then times out. Task still runs.
+      });
+
+      // Give Comet a moment to register the task before first poll
+      await new Promise(r => setTimeout(r, 12000));
+      setCurrentResponse(`⚙️ Comet is working on: "${prompt.slice(0, 60)}${prompt.length > 60 ? '...' : ''}"`);
+
+      // Poll loop — keep going as long as task is WORKING, even past maxWait
+      let seenWorking = false;
+      let lastStatus = 'UNKNOWN';
+      let lastSteps: string[] = [];
+      let finalResponse = '';
+      let consecutiveIdle = 0;
+
+      while (true) {
+        const elapsed = Math.round((Date.now() - startTime) / 1000);
+
+        // Hard stop: if we never saw WORKING after maxWait, give up
+        if (!seenWorking && elapsed > maxWait) break;
+        // If we saw WORKING but it's been very long, give up at 2x maxWait
+        if (seenWorking && elapsed > maxWait * 2) break;
+
+        let pollResult: any;
+        try {
+          pollResult = await mcpIntegration.executeMCPTool('comet_poll', {});
+        } catch (_) {
+          await new Promise(r => setTimeout(r, pollIntervalMs));
+          continue;
+        }
+
+        const raw = Array.isArray(pollResult?.content)
+          ? pollResult.content.map((c: any) => c.text || '').join('\n')
+          : typeof pollResult === 'string' ? pollResult : JSON.stringify(pollResult ?? '');
+
+        const upperRaw = raw.toUpperCase();
+        const elapsedNow = Math.round((Date.now() - startTime) / 1000);
+
+        if (upperRaw.includes('WORKING')) {
+          seenWorking = true;
+          consecutiveIdle = 0;
+          lastStatus = 'WORKING';
+          lastSteps = raw.split('\n').filter((l: string) => l.trim()).slice(0, 6);
+          setCurrentResponse(`⚙️ Comet working… (${elapsedNow}s)\n${lastSteps.join('\n')}`);
+        } else if (upperRaw.includes('COMPLETED')) {
+          finalResponse = raw;
+          lastStatus = 'COMPLETED';
+          break;
+        } else if (upperRaw.includes('IDLE')) {
+          consecutiveIdle++;
+          // IDLE right after firing = task not started yet, keep waiting
+          // IDLE after we saw WORKING = task finished
+          if (seenWorking && consecutiveIdle >= 2) {
+            // Two consecutive IDLE polls after WORKING = definitely done
+            finalResponse = raw;
+            lastStatus = 'COMPLETED';
+            break;
+          }
+          if (seenWorking && consecutiveIdle >= 1) {
+            // One IDLE after WORKING — poll once more quickly to confirm
+            setCurrentResponse(`⚙️ Comet finishing… (${elapsedNow}s)`);
+          }
+        }
+
+        await new Promise(r => setTimeout(r, pollIntervalMs));
+      }
+
+      const elapsed = Math.round((Date.now() - startTime) / 1000);
+      if (lastStatus === 'COMPLETED') {
+        return { success: true, status: 'completed', elapsed: `${elapsed}s`, result: finalResponse };
+      }
+      // Timed out — but task may still be running. Tell LLM to poll manually.
+      return {
+        success: false,
+        status: seenWorking ? 'still_working' : 'unknown',
+        elapsed: `${elapsed}s`,
+        lastSteps,
+        message: seenWorking
+          ? `Task is still running after ${elapsed}s. Call comet_poll to check when it finishes.`
+          : `Could not confirm task started after ${elapsed}s. Call comet_poll to check status.`,
+      };
+    }
+
     // Built-in filesystem/network tools — route through FilesystemToolsService
     if (['fetch_url', 'execute_command', 'list_directory', 'read_file', 'path_exists', 'get_file_info',
+         'wait',
          'browser_navigate', 'browser_click', 'browser_type', 'browser_read_page', 'browser_screenshot',
          'browser_eval', 'browser_find_element', 'browser_scroll', 'browser_get_tabs', 'browser_switch_tab',
          'browser_go_back', 'browser_go_forward', 'browser_wait_for', 'browser_get_url',

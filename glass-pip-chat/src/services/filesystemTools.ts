@@ -177,6 +177,27 @@ export class FilesystemToolsService {
       });
     }
 
+    // Wait / sleep tool — lets the LLM pause between fire-and-poll steps
+    this.tools.set('wait', {
+      name: 'wait',
+      description: 'Wait (sleep) for a number of seconds before continuing. Use after firing comet_ask to give Perplexity time to respond.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          seconds: {
+            type: 'number',
+            description: 'Number of seconds to wait (max 60)',
+          },
+        },
+        required: ['seconds'],
+      },
+      handler: async (parameters: Record<string, any>) => {
+        const secs = Math.min(Math.max(Number(parameters.seconds) || 5, 1), 60);
+        await new Promise(r => setTimeout(r, secs * 1000));
+        return { success: true, waited: secs, message: `Waited ${secs} seconds.` };
+      },
+    });
+
     // Comet tools are provided by the comet-bridge MCP server (perplexity-comet-mcp)
     // and loaded dynamically — no built-in registration needed here.
   }
@@ -188,22 +209,21 @@ export class FilesystemToolsService {
     return { success: false, error: 'Browser bridge not available (desktop only)' };
   }
 
-  private async listDirectory(parameters: { path: string }): Promise<any> {
+  private async listDirectory(parameters: Record<string, any>): Promise<any> {
     try {
       if (typeof window !== 'undefined' && window.pip?.system) {
-        const isWin = navigator.platform.toLowerCase().includes('win') || navigator.userAgent.includes('Windows');
+        const isWin = navigator.userAgent.includes('Windows');
         const command = isWin ? 'dir' : 'ls -la';
         const result = await window.pip.system.executeCommand(`${command} "${parameters.path}"`);
         
         return {
           success: true,
           path: parameters.path,
-          contents: result.stdout || result.output || 'Directory listing completed',
+          contents: result.stdout || 'Directory listing completed',
           error: result.stderr || null
         };
       }
       
-      // Fallback for demo
       return {
         success: true,
         path: parameters.path,
@@ -219,22 +239,21 @@ export class FilesystemToolsService {
     }
   }
 
-  private async readFile(parameters: { path: string }): Promise<any> {
+  private async readFile(parameters: Record<string, any>): Promise<any> {
     try {
       if (typeof window !== 'undefined' && window.pip?.system) {
-        const isWin = navigator.platform.toLowerCase().includes('win') || navigator.userAgent.includes('Windows');
+        const isWin = navigator.userAgent.includes('Windows');
         const command = isWin ? 'type' : 'cat';
         const result = await window.pip.system.executeCommand(`${command} "${parameters.path}"`);
         
         return {
           success: true,
           path: parameters.path,
-          content: result.stdout || result.output || '',
+          content: result.stdout || '',
           error: result.stderr || null
         };
       }
       
-      // Fallback for demo
       return {
         success: true,
         path: parameters.path,
@@ -250,16 +269,16 @@ export class FilesystemToolsService {
     }
   }
 
-  private async pathExists(parameters: { path: string }): Promise<any> {
+  private async pathExists(parameters: Record<string, any>): Promise<any> {
     try {
       if (typeof window !== 'undefined' && window.pip?.system) {
-        const isWin = navigator.platform.toLowerCase().includes('win') || navigator.userAgent.includes('Windows');
+        const isWin = navigator.userAgent.includes('Windows');
         const command = isWin
           ? `if exist "${parameters.path}" echo EXISTS`
           : `test -e "${parameters.path}" && echo EXISTS || echo NOT_EXISTS`;
         
         const result = await window.pip.system.executeCommand(command);
-        const exists = (result.stdout || result.output || '').includes('EXISTS');
+        const exists = (result.stdout || '').includes('EXISTS');
         
         return {
           success: true,
@@ -269,7 +288,6 @@ export class FilesystemToolsService {
         };
       }
       
-      // Fallback for demo
       return {
         success: true,
         path: parameters.path,
@@ -285,10 +303,10 @@ export class FilesystemToolsService {
     }
   }
 
-  private async getFileInfo(parameters: { path: string }): Promise<any> {
+  private async getFileInfo(parameters: Record<string, any>): Promise<any> {
     try {
       if (typeof window !== 'undefined' && window.pip?.system) {
-        const isWin = navigator.platform.toLowerCase().includes('win') || navigator.userAgent.includes('Windows');
+        const isWin = navigator.userAgent.includes('Windows');
         const command = isWin
           ? `dir "${parameters.path}"`
           : `ls -la "${parameters.path}"`;
@@ -298,12 +316,11 @@ export class FilesystemToolsService {
         return {
           success: true,
           path: parameters.path,
-          info: result.stdout || result.output || 'File info retrieved',
+          info: result.stdout || 'File info retrieved',
           error: result.stderr || null
         };
       }
       
-      // Fallback for demo
       return {
         success: true,
         path: parameters.path,
@@ -321,11 +338,11 @@ export class FilesystemToolsService {
     }
   }
 
-  private async executeCommand(parameters: { command: string; args?: string[] }): Promise<any> {
+  private async executeCommand(parameters: Record<string, any>): Promise<any> {
     try {
       if (typeof window !== 'undefined' && window.pip?.system) {
         const fullCommand = parameters.args 
-          ? `${parameters.command} ${parameters.args.join(' ')}`
+          ? `${parameters.command} ${(parameters.args as string[]).join(' ')}`
           : parameters.command;
         
         console.log(`Executing command: ${fullCommand}`);
@@ -334,13 +351,12 @@ export class FilesystemToolsService {
         return {
           success: true,
           command: fullCommand,
-          stdout: result.stdout || result.output || '',
+          stdout: result.stdout || '',
           stderr: result.stderr || '',
-          exitCode: result.exitCode || 0
+          exitCode: 0
         };
       }
       
-      // Fallback for demo
       return {
         success: true,
         command: parameters.command,
@@ -357,7 +373,7 @@ export class FilesystemToolsService {
     }
   }
 
-  private async fetchUrl(parameters: { url: string; method?: string; headers?: Record<string, string>; body?: string }): Promise<any> {
+  private async fetchUrl(parameters: Record<string, any>): Promise<any> {
     try {
       if (typeof window !== 'undefined' && (window.pip?.system as any)?.fetchUrl) {
         const result = await (window.pip.system as any).fetchUrl(parameters.url, {
@@ -367,7 +383,6 @@ export class FilesystemToolsService {
         });
         return result;
       }
-      // Fallback: try native fetch (works in web mode)
       const response = await fetch(parameters.url, {
         method: parameters.method || 'GET',
         headers: parameters.headers,

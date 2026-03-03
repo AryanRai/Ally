@@ -197,7 +197,7 @@ export class MCPClient extends BrowserEventEmitter {
   /**
    * Send a request to MCP server through IPC
    */
-  private async sendServerRequest(server: MCPServerProcess, method: string, params: any): Promise<any> {
+  private async sendServerRequest(server: MCPServerProcess, method: string, params: any, timeoutMs = 30000): Promise<any> {
     return new Promise(async (resolve, reject) => {
       const id = ++server.messageId;
       const message: MCPMessage = {
@@ -210,7 +210,7 @@ export class MCPClient extends BrowserEventEmitter {
       const timeout = setTimeout(() => {
         server.pendingRequests.delete(id);
         reject(new Error(`Request timeout for ${server.name}:${method}`));
-      }, 30000);
+      }, timeoutMs);
 
       server.pendingRequests.set(id, { resolve, reject, timeout });
 
@@ -295,11 +295,19 @@ export class MCPClient extends BrowserEventEmitter {
       throw new Error(`Server ${serverName} not connected`);
     }
 
+    // comet_ask can take up to 2 minutes — give it 150s. Other tools keep 30s.
+    // comet_ask_fire is a special internal alias used by comet_run to fire without blocking.
+    const timeoutMs = toolName === 'comet_ask' ? 150000
+      : toolName === 'comet_ask_fire' ? 10000
+      : 30000;
+    // Resolve alias
+    const actualName = toolName === 'comet_ask_fire' ? 'comet_ask' : toolName;
+
     try {
       const result = await this.sendServerRequest(server, 'tools/call', {
-        name: toolName,
+        name: actualName,
         arguments: parameters
-      });
+      }, timeoutMs);
 
       console.log(`Tool ${toolName} executed on ${serverName}:`, result);
       return result;
