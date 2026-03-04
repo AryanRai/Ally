@@ -1576,7 +1576,7 @@ Remember: Output ONLY the JSON tool call when you need to use a tool. No explana
       await new Promise(r => setTimeout(r, 12000));
       setCurrentResponse(`⚙️ Comet is working on: "${prompt.slice(0, 60)}${prompt.length > 60 ? '...' : ''}"`);
 
-      // Poll loop — keep going as long as task is WORKING, even past maxWait
+      // Poll loop — keep going as long as task is WORKING, no timeout while active
       let seenWorking = false;
       let lastStatus = 'UNKNOWN';
       let lastSteps: string[] = [];
@@ -1586,10 +1586,9 @@ Remember: Output ONLY the JSON tool call when you need to use a tool. No explana
       while (true) {
         const elapsed = Math.round((Date.now() - startTime) / 1000);
 
-        // Hard stop: if we never saw WORKING after maxWait, give up
+        // Hard stop: if we never saw WORKING after maxWait, give up (task never started)
         if (!seenWorking && elapsed > maxWait) break;
-        // If we saw WORKING but it's been very long, give up at 2x maxWait
-        if (seenWorking && elapsed > maxWait * 2) break;
+        // Never stop while task is actively WORKING — only stop on IDLE/COMPLETED
 
         let pollResult: any;
         try {
