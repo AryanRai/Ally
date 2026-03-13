@@ -96,11 +96,22 @@ class SpeechConfig:
 
 class DeepgramSTTService:
     """
-    Real-time STT using Deepgram Nova-2 streaming WebSocket API.
-    Emits interim and final transcripts via async callbacks.
+    Real-time streaming STT using Deepgram Nova-2 WebSocket API.
+
+    Lifecycle:
+        1. Instantiate with API key and callbacks.
+        2. Call ``await start(loop)`` to open the Deepgram connection and begin
+           capturing microphone audio.  The event loop is required so the PyAudio
+           callback thread can schedule coroutines on it.
+        3. Call ``await stop()`` to close the stream and release all resources.
+
+    Callbacks (all async):
+        on_interim(text)        -- called for every partial transcript word-by-word
+        on_final(text)          -- called when Deepgram marks a transcript as final
+        on_speech_started()     -- called on VAD speech-start events (used for barge-in)
 
     Requires: deepgram-sdk>=3.0.0
-    Env: DEEPGRAM_API_KEY
+    Env:      DEEPGRAM_API_KEY
     """
 
     def __init__(
@@ -220,11 +231,23 @@ class DeepgramSTTService:
 
 class ElevenLabsTTSService:
     """
-    Real-time TTS using ElevenLabs Flash v2.5 streaming WebSocket API.
-    Accepts a plain string; yields raw MP3 audio chunks via callback.
+    Real-time streaming TTS using ElevenLabs Flash v2.5 WebSocket API.
+
+    Protocol:
+        1. Connect to the model-specific WebSocket URL.
+        2. Send a BOS (beginning-of-stream) message with voice settings.
+        3. Send the text payload.
+        4. Send an EOS (end-of-stream) message (``{"text": ""}``) to signal
+           that no more text will arrive.
+        5. Receive base64-encoded MP3 audio chunks until the connection closes.
+
+    Stop mechanism:
+        Call ``stop()`` to set the ``_stop_flag``.  The receive loop checks this
+        flag before processing each incoming chunk so that playback can be
+        interrupted mid-stream (barge-in support).
 
     Requires: websockets>=12.0
-    Env: ELEVENLABS_API_KEY, ELEVENLABS_VOICE_ID
+    Env:      ELEVENLABS_API_KEY, ELEVENLABS_VOICE_ID
     """
 
     WS_URL_TEMPLATE = (
@@ -1222,13 +1245,9 @@ class SpeechService:
         """Stop TTS and notify clients of interruption (sync wrapper)."""
         # Stop ElevenLabs streaming if active
         self.tts_router.stop()
-        # Clear queue
-        while not self.tts_queue.empty():
-            try:
-                self.tts_queue.get_nowait()
-            except queue.Empty:
-                break
+        # Clear queue in one operation while holding the lock
         with self.tts_lock:
+            self.tts_queue.queue.clear()
             self.is_processing_tts = False
             self.current_tts_id = None
         # Broadcast to UI
