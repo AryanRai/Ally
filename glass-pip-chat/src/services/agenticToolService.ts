@@ -285,3 +285,67 @@ export class AgenticToolService {
 }
 
 export default AgenticToolService;
+
+// ---------------------------------------------------------------------------
+// LangGraph-backed runAgenticTask
+// ---------------------------------------------------------------------------
+
+import type { Message } from '../types/chat';
+
+/**
+ * A single step update emitted while the graph is running.
+ * Consumers can surface these in the UI as live progress indicators.
+ */
+export interface AgentStepUpdate {
+  type: 'thinking' | 'tool_call' | 'tool_result' | 'response' | 'done';
+  content: string;
+  toolName?: string;
+  toolResult?: string;
+}
+
+/**
+ * Run an agentic task using the LangGraph StateGraph defined in agenticGraph.ts.
+ *
+ * This replaces the old manual while-loop with a proper graph that:
+ *  - Hard-caps execution at 8 steps.
+ *  - Feeds actual tool results (including errors) back into model context.
+ *  - Always uses a capable cloud model for tool calling.
+ *
+ * Existing call sites (GlassChatPiP.tsx, UnifiedChatInterface.tsx) can migrate
+ * to this function when ready; the function signature is intentionally simple.
+ */
+export async function runAgenticTask(
+  userMessage: string,
+  conversationHistory: Message[],
+  onStepUpdate: (step: AgentStepUpdate) => void
+): Promise<string> {
+  // Dynamic import keeps the heavy LangGraph bundle out of the critical path
+  // for components that don't use the agentic feature.
+  const { agenticGraph, toCoreMsgs, extractFinalResponse } = await import('./agenticGraph');
+
+  onStepUpdate({ type: 'thinking', content: 'Starting agentic task…' });
+
+  const messages = toCoreMsgs(conversationHistory, userMessage);
+
+  const result = await agenticGraph.invoke({ messages });
+
+  // Surface tool call results to the caller for optional UI display
+  if (result.toolCallResults?.length) {
+    for (const r of result.toolCallResults as Array<{
+      toolName: string;
+      result: string;
+      isError: boolean;
+    }>) {
+      onStepUpdate({
+        type: 'tool_result',
+        content: r.isError ? `Tool error: ${r.result}` : r.result,
+        toolName: r.toolName,
+        toolResult: r.result,
+      });
+    }
+  }
+
+  const finalResponse = extractFinalResponse(result.messages);
+  onStepUpdate({ type: 'done', content: finalResponse });
+  return finalResponse;
+}
