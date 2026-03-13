@@ -922,7 +922,7 @@ Remember: Output ONLY the JSON tool call when you need to use a tool. No explana
             setCurrentResponse(finalContent);
           }
         },
-        'You are a helpful assistant. Summarize the tool results naturally.'
+        'You are a helpful assistant. Answer the user\'s question directly based on the tool output. Respond in first person. Never say "the script returned" or "the tool responded" — just give the answer naturally.'
       );
 
       const finalAnswer = finalContent || 'Done.';
@@ -2195,7 +2195,7 @@ TOOL FORMAT:
               [],
               buildPTCSummaryPrompt(request.content, execResult.stdout, execResult.stderr, execResult.toolCallLog),
               (update) => { if (update.type === 'response' || update.type === 'done') { ptcResult = update.response || ''; updateResponse(ptcResult).catch(() => {}); } },
-              'You are a helpful assistant. Summarize the tool results naturally.'
+              'You are a helpful assistant. Answer the user\'s question directly based on the tool output. Respond in first person. Never say "the script returned" or "the tool responded" — just give the answer naturally.'
             );
             finalContent = ptcResult || 'Done.';
           } else {
