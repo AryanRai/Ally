@@ -1538,13 +1538,17 @@ ipcMain.handle('terminal:executeInSession', async (event, sessionId: string, com
   const session = terminalSessions.get(sessionId);
   if (!session) throw new Error(`Terminal session ${sessionId} not found`);
 
+  // Basic validation — reject empty or whitespace-only commands
+  const trimmed = (command || '').trim();
+  if (!trimmed) throw new Error('Command must not be empty');
+
   session.status = 'running';
   session.lastUsed = Date.now();
   win?.webContents.send('terminal:sessionUpdate', { ...session });
 
   return new Promise<void>((resolve, reject) => {
     const shell = process.platform === 'win32' ? 'cmd.exe' : '/bin/sh';
-    const args = process.platform === 'win32' ? ['/c', command] : ['-c', command];
+    const args = process.platform === 'win32' ? ['/c', trimmed] : ['-c', trimmed];
     const child = spawn(shell, args, { stdio: ['ignore', 'pipe', 'pipe'] });
 
     session.pid = child.pid;
@@ -1554,11 +1558,12 @@ ipcMain.handle('terminal:executeInSession', async (event, sessionId: string, com
       win?.webContents.send('terminal:output', { sessionId, line });
     };
 
+    // Split on both Unix (\n) and Windows (\r\n) line endings
     child.stdout?.on('data', (chunk: Buffer) => {
-      chunk.toString().split('\n').filter(Boolean).forEach(sendLine);
+      chunk.toString('utf8').split(/\r?\n/).filter(Boolean).forEach(sendLine);
     });
     child.stderr?.on('data', (chunk: Buffer) => {
-      chunk.toString().split('\n').filter(Boolean).forEach(sendLine);
+      chunk.toString('utf8').split(/\r?\n/).filter(Boolean).forEach(sendLine);
     });
 
     child.on('close', (code) => {

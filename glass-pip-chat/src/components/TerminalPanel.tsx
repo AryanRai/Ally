@@ -222,7 +222,7 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = ({
             <span className="text-white/20 text-xs">No output yet.</span>
           ) : (
             activeSession.outputBuffer.map((line, i) => (
-              <div key={i} className="text-xs text-green-300 leading-5 whitespace-pre-wrap break-all">
+              <div key={i} className="text-xs text-green-300 leading-5 whitespace-pre-wrap break-words overflow-x-auto">
                 {line}
               </div>
             ))

@@ -95,6 +95,8 @@ export default function GlassChatPiP() {
   const [agenticMode, setAgenticMode] = useState(true); // Default to agentic mode when tools are enabled
   // PTC mode - Programmatic Tool Calling: LLM writes a JS script, 2 LLM calls instead of N+1
   const [ptcMode, setPtcMode] = useState(() => localStorage.getItem('ally-ptc-mode') === 'true');
+  // Robot Control Mode — use DroidCore/Comms v4.0 system prompt, overrides basic prompt
+  const [robotMode, setRobotMode] = useState(() => localStorage.getItem('ally-robot-mode') === 'true');
   // Autopilot mode - auto-approve all tool executions without confirmation
   const [autopilotMode, setAutopilotMode] = useState(() => {
     const saved = localStorage.getItem('ally-autopilot-mode');
@@ -708,8 +710,8 @@ export default function GlassChatPiP() {
     let accumulatedResponse = '';
     let capturedThinking = ''; // capture thinking for saving in message
 
-    // Get the basic system prompt
-    const basicSystemPrompt = getPrompt('basic');
+    // Get the basic system prompt — use robot prompt when robot mode is active
+    const basicSystemPrompt = robotMode ? getPrompt('robot') : getPrompt('basic');
 
     const response = await ollamaIntegration.sendMessageToOllama(
       historySnapshot ?? cleanMessagesForLLM(activeChat?.messages || []),
@@ -3403,6 +3405,14 @@ Remember: Output ONLY the JSON tool call when you need to use a tool. No explana
                     setPtcMode(next);
                     localStorage.setItem('ally-ptc-mode', String(next));
                   }}
+                  robotMode={isWeb ? false : robotMode}
+                  onRobotModeToggle={isWeb ? undefined : () => {
+                    const next = !robotMode;
+                    setRobotMode(next);
+                    localStorage.setItem('ally-robot-mode', String(next));
+                  }}
+                  showTerminal={showTerminal}
+                  onTerminalToggle={isWeb ? undefined : () => setShowTerminal(!showTerminal)}
                 />
 
                 {/* Tool Approval Dialog */}

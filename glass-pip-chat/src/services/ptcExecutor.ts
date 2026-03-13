@@ -220,7 +220,7 @@ const DANGEROUS_PATTERNS: Array<{ re: RegExp; reason: string }> = [
   { re: /\brequire\s*\(/, reason: 'require() is not available in the sandbox' },
   { re: /\bimport\s+/, reason: 'import statements are not allowed in the sandbox' },
   { re: /\bprocess\s*\./, reason: 'process object access is not allowed' },
-  { re: /\b__dirname\b|\b__filename\b/, reason: '__dirname/__filename are not available' },
+  { re: /\b__dirname\b|\b__filename\b/, reason: '__dirname and __filename are not available in the sandbox' },
   { re: /\beval\s*\(/, reason: 'eval() is not allowed in the sandbox' },
   { re: /new\s+Function\s*\(/, reason: 'new Function() is not allowed in the sandbox' },
   { re: /\bsetInterval\s*\(|\bsetTimeout\s*\(/, reason: 'Timer functions are not allowed' },
