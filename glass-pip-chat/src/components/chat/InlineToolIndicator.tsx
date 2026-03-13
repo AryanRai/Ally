@@ -5,7 +5,7 @@
  * Click to expand and see full content, easy to copy.
  */
 
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Loader2, Check, X, Wrench, Brain, Copy, ChevronDown, ChevronUp } from 'lucide-react';
 import { cn } from '../../lib/utils';
@@ -13,11 +13,23 @@ import { cn } from '../../lib/utils';
 export interface ToolExecution {
   id: string;
   name: string;
+  /** Tool input parameters — stored so the pill can show input on expand */
+  parameters?: Record<string, unknown>;
   status: 'pending' | 'executing' | 'success' | 'error';
   result?: any;
   error?: string;
   startTime: number;
   endTime?: number;
+}
+
+/**
+ * A streaming segment — either a text chunk or a tool pill.
+ * Used to interleave assistant text with tool calls inline (Cursor-style).
+ */
+export interface Segment {
+  type: 'text' | 'tool';
+  content?: string;
+  toolExecution?: ToolExecution;
 }
 
 interface InlineToolIndicatorProps {
@@ -391,6 +403,155 @@ export function parseMessageForPills(content: string): {
     toolResults,
     thinking
   };
+}
+
+/**
+ * InlineToolPill — Cursor-style pill that shows tool status inline with text.
+ * Supports spinner (executing), ✓ (success), ✗ (error), and expands to show
+ * input parameters and output result on click.
+ */
+const TOOL_ICONS: Record<string, string> = {
+  list_directory: '📁',
+  read_file: '📄',
+  read_text_file: '📄',
+  write_file: '✏️',
+  edit_file: '✏️',
+  execute_command: '⚡',
+  fetch_url: '🌐',
+  web_search: '🌐',
+  browser_navigate: '🌐',
+  calculate: '🔢',
+  get_current_time: '🕐',
+  search_files: '🔍',
+  create_directory: '📁',
+  move_file: '📦',
+  sendRobotIntent: '🤖',
+  robot_get_sensor_state: '📡',
+  ros2_topic: '🔗',
+};
+
+export function InlineToolPill({ execution, theme = 'dark' }: { execution: ToolExecution; theme?: 'light' | 'dark' }) {
+  const [expanded, setExpanded] = useState(false);
+
+  const icon = TOOL_ICONS[execution.name] ?? '🔧';
+
+  const label = execution.name
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+
+  const durationMs = execution.endTime && execution.startTime
+    ? execution.endTime - execution.startTime
+    : undefined;
+
+  const resultPreview = useMemo(() => {
+    if (execution.status !== 'success' || !execution.result) return null;
+    const out = execution.result;
+    if (typeof out === 'string') return out.slice(0, 60);
+    if (Array.isArray(out)) return `${out.length} items`;
+    if (out && typeof out === 'object') {
+      if (out.content && Array.isArray(out.content)) {
+        const textContent = out.content.find((c: any) => c.type === 'text');
+        if (textContent?.text) {
+          const lines = String(textContent.text).split('\n').filter(Boolean);
+          return `${lines.length} lines`;
+        }
+      }
+      const keys = Object.keys(out);
+      return keys.slice(0, 2).join(', ');
+    }
+    return null;
+  }, [execution.result, execution.status]);
+
+  const isRunning = execution.status === 'executing' || execution.status === 'pending';
+  const isError = execution.status === 'error';
+  const isSuccess = execution.status === 'success';
+
+  const pillClass = isRunning
+    ? 'bg-blue-500/10 border-blue-400/30 text-blue-300'
+    : isError
+    ? 'bg-red-500/10 border-red-400/30 text-red-300'
+    : 'bg-green-500/10 border-green-400/30 text-green-300';
+
+  const formatOutput = (result: any): string => {
+    if (!result) return '';
+    if (typeof result === 'string') return result;
+    if (result.content && Array.isArray(result.content)) {
+      const textContent = result.content.find((c: any) => c.type === 'text');
+      if (textContent?.text) return String(textContent.text);
+    }
+    if (result.formatted) return String(result.formatted);
+    if (result.result !== undefined) return String(result.result);
+    const json = JSON.stringify(result, null, 2);
+    return json.length > 800 ? json.slice(0, 800) + '\n…(truncated)' : json;
+  };
+
+  return (
+    <span className="inline-flex flex-col mx-1 my-0.5 align-middle">
+      <motion.button
+        onClick={() => setExpanded((e) => !e)}
+        className={cn(
+          'inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-xs font-mono',
+          'border transition-all cursor-pointer select-none',
+          pillClass
+        )}
+        animate={isError ? { x: [0, -3, 3, -3, 3, 0] } : {}}
+        transition={{ duration: 0.4 }}
+      >
+        <span>{icon}</span>
+        <span className="text-white/70">{label}</span>
+        {isRunning && (
+          <Loader2 className="w-3 h-3 animate-spin text-blue-400" />
+        )}
+        {isSuccess && <Check className="w-3 h-3 text-green-400" />}
+        {isError && <X className="w-3 h-3 text-red-400" />}
+        {durationMs !== undefined && isSuccess && (
+          <span className="text-white/30 text-[10px]">{durationMs}ms</span>
+        )}
+        {resultPreview && !expanded && (
+          <span className="text-white/40 max-w-[120px] truncate text-[10px]">· {resultPreview}</span>
+        )}
+        {expanded ? <ChevronUp className="w-3 h-3 opacity-50" /> : <ChevronDown className="w-3 h-3 opacity-50" />}
+      </motion.button>
+
+      <AnimatePresence>
+        {expanded && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            exit={{ opacity: 0, height: 0 }}
+            className="mt-1 rounded-md border border-white/10 bg-black/30 backdrop-blur-sm text-xs font-mono overflow-hidden"
+          >
+            {/* Input section */}
+            {execution.parameters && Object.keys(execution.parameters).length > 0 && (
+              <div className="p-2 border-b border-white/5">
+                <div className="text-white/30 text-[10px] mb-1">INPUT</div>
+                <pre className="text-white/60 whitespace-pre-wrap break-all max-h-24 overflow-y-auto">
+                  {JSON.stringify(execution.parameters, null, 2)}
+                </pre>
+              </div>
+            )}
+            {/* Output / Error section */}
+            <div className="p-2">
+              <div className="text-white/30 text-[10px] mb-1">
+                {isError ? 'ERROR' : 'OUTPUT'}
+              </div>
+              {isRunning ? (
+                <span className="text-blue-300/60 italic">running…</span>
+              ) : isError ? (
+                <pre className="text-red-400/80 whitespace-pre-wrap break-all max-h-32 overflow-y-auto">
+                  {execution.error || 'Unknown error'}
+                </pre>
+              ) : (
+                <pre className="text-white/60 whitespace-pre-wrap break-all max-h-32 overflow-y-auto">
+                  {formatOutput(execution.result)}
+                </pre>
+              )}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </span>
+  );
 }
 
 /**

@@ -8,6 +8,10 @@ export interface Message {
     context?: string;
     toolCalls?: ToolCall[];
     toolResults?: ToolResult[];
+    /** Persisted streaming segments (interleaved text + tool pills) for agentic messages.
+     *  Typed as `any[]` to avoid a circular import with InlineToolIndicator.tsx.
+     *  At runtime these are `Segment[]` (see src/components/chat/InlineToolIndicator.tsx). */
+    segments?: any[];
   };
 }
 

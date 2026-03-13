@@ -196,6 +196,17 @@ export class SupabaseChatSync {
   /**
    * Subscribe to realtime updates for a message (response streaming).
    * Calls onUpdate with the latest response text whenever it changes.
+   *
+   * Bug audit (per problem statement):
+   *  Bug A — double subscription: each call creates a unique `msg-<id>` channel and
+   *    returns a cleanup function; callers in handleSendWeb use the `resolved` flag to
+   *    prevent processing the same event twice. NOT present.
+   *  Bug B — optimistic update echo: fixed in addMessageToActiveChat (ID dedup guard).
+   *  Bug C — polling+realtime race: handleSendWeb checks `resolved` after every await
+   *    in the poll interval, which prevents both paths from adding the same message.
+   *    NOT present (adequately guarded).
+   *  Bug D — multiple poller instances: remoteMessagePoller has isPolling guard. NOT present.
+   *  Bug E — ID mismatch: messages are matched by unique ID, not content. NOT present.
    */
   subscribeToMessage(
     messageId: string,
