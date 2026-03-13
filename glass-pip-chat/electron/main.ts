@@ -273,65 +273,52 @@ function saveTheme(theme: 'light' | 'dark'): void {
 
 function setupLinuxBlur(window: BrowserWindow): void {
   try {
-    // Get the native window handle
+    // Detect Wayland: on Wayland, xprop-based blur setup is not applicable.
+    // backdrop-filter CSS works natively in Chromium on Wayland, so no X11 setup needed.
+    const isWayland = !!(process.env.WAYLAND_DISPLAY || process.env.XDG_SESSION_TYPE === 'wayland');
+    if (isWayland) {
+      console.log('Running on Wayland - CSS backdrop-filter blur will be used');
+      return;
+    }
+
+    // X11 session: get this window's XID from the native handle
     const nativeWindowHandle = window.getNativeWindowHandle();
-    
-    // Try to set blur effects using X11 properties for common compositors
-    
-    // Get window ID for X11 operations
-    exec(`xprop -root _NET_ACTIVE_WINDOW`, (error, stdout) => {
-      if (error) {
-        console.warn('Could not get active window for blur setup:', error);
-        return;
-      }
-      
-      // Extract window ID and apply blur
-      const windowId = stdout.match(/0x[0-9a-f]+/i)?.[0];
-      if (windowId) {
-        // Try different compositor blur methods
-        
-        // KWin (KDE) blur
-        exec(`xprop -id ${windowId} -f _KDE_NET_WM_BLUR_BEHIND_REGION 32c -set _KDE_NET_WM_BLUR_BEHIND_REGION 0`, (kwinError) => {
-          if (kwinError) {
-            console.log('KWin blur not available, trying other methods...');
-          } else {
-            console.log('Applied KWin blur effects');
-          }
-        });
-        
-        // Compiz blur
-        exec(`xprop -id ${windowId} -f _COMPIZ_WM_WINDOW_BLUR 32c -set _COMPIZ_WM_WINDOW_BLUR 1`, (compizError) => {
-          if (compizError) {
-            console.log('Compiz blur not available');
-          } else {
-            console.log('Applied Compiz blur effects');
-          }
-        });
-        
-        // Picom blur (for i3, bspwm, etc.)
-        exec(`xprop -id ${windowId} -f _PICOM_BLUR 32c -set _PICOM_BLUR 1`, (picomError) => {
-          if (picomError) {
-            console.log('Picom blur not available');
-          } else {
-            console.log('Applied Picom blur effects');
-          }
-        });
+    // On X11, the native handle contains the XID as a little-endian 32-bit integer
+    const xid = nativeWindowHandle.readUInt32LE(0);
+    if (!xid) {
+      console.warn('Could not read window XID from native handle');
+      return;
+    }
+    const windowId = '0x' + xid.toString(16);
+    console.log(`Setting up X11 blur for window ${windowId}`);
+
+    // KWin (KDE Plasma) blur
+    exec(`xprop -id ${windowId} -f _KDE_NET_WM_BLUR_BEHIND_REGION 32c -set _KDE_NET_WM_BLUR_BEHIND_REGION 0`, (kwinError) => {
+      if (kwinError) {
+        console.log('KWin blur not available, trying other methods...');
+      } else {
+        console.log('Applied KWin blur effects');
       }
     });
-    
-    // Alternative method: Set window class for compositor rules
-    window.webContents.executeJavaScript(`
-      if (typeof window !== 'undefined' && window.require) {
-        const { remote } = window.require('electron');
-        if (remote && remote.getCurrentWindow) {
-          const win = remote.getCurrentWindow();
-          win.setTitle('Glass PiP Chat - Blur');
-        }
+
+    // Picom blur (used with i3, bspwm, openbox, and some GNOME X11 setups)
+    exec(`xprop -id ${windowId} -f _PICOM_BLUR 32c -set _PICOM_BLUR 1`, (picomError) => {
+      if (picomError) {
+        console.log('Picom blur not available');
+      } else {
+        console.log('Applied Picom blur effects');
       }
-    `).catch(() => {
-      // Ignore errors in renderer context
     });
-    
+
+    // Compiz blur (Ubuntu Unity / older GNOME)
+    exec(`xprop -id ${windowId} -f _COMPIZ_WM_WINDOW_BLUR 32c -set _COMPIZ_WM_WINDOW_BLUR 1`, (compizError) => {
+      if (compizError) {
+        console.log('Compiz blur not available');
+      } else {
+        console.log('Applied Compiz blur effects');
+      }
+    });
+
   } catch (error) {
     console.warn('Error setting up Linux blur:', error);
   }
@@ -1464,6 +1451,19 @@ ipcMain.handle('acp:reconnectAgent', async (_, agentId: string) => {
   console.log(`Reconnecting ACP agent: ${agentId}`);
   return { success: true };
 });
+
+// Enable GPU transparency / compositing support on Linux
+if (process.platform === 'linux') {
+  // Allow transparent windows to render correctly with compositing
+  app.commandLine.appendSwitch('enable-transparent-visuals');
+  // Use the correct Ozone platform depending on the session type
+  const sessionType = process.env.XDG_SESSION_TYPE;
+  if (sessionType === 'wayland' || process.env.WAYLAND_DISPLAY) {
+    app.commandLine.appendSwitch('ozone-platform', 'wayland');
+  } else {
+    app.commandLine.appendSwitch('ozone-platform', 'x11');
+  }
+}
 
 // App event handlers
 app.whenReady().then(async () => {
