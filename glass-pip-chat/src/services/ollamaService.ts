@@ -1,6 +1,6 @@
 import axios from 'axios';
-import { streamText, type CoreMessage } from 'ai';
-import { getModel, type ProviderMode } from './providers';
+import { streamText, type ModelMessage } from 'ai';
+import { getModel, type ProviderMode, type ProviderKeys } from './providers.js';
 
 export interface OllamaModel {
   name: string;
@@ -99,7 +99,7 @@ export interface ThinkingChunk {
  * System messages are removed from the array — pass them via the `system`
  * parameter in streamText() instead.
  */
-function toAISDKMessages(messages: ChatMessage[]): CoreMessage[] {
+function toAISDKMessages(messages: ChatMessage[]): ModelMessage[] {
   return messages
     .filter((m) => m.role !== 'system')
     .filter((m): m is ChatMessage & { role: 'user' | 'assistant' } =>
@@ -510,10 +510,15 @@ export class OllamaService {
   ): Promise<string> {
     const systemPrompt = extractSystemPrompt(messages);
     const coreMessages = toAISDKMessages(messages);
+    const keys: ProviderKeys = {
+      openRouterApiKey: this.config.openRouterApiKey,
+      geminiApiKey: this.config.geminiApiKey,
+      ollamaBaseUrl: this.config.ollamaBaseUrl,
+    };
 
     try {
       const result = streamText({
-        model: getModel(providerMode, model, 'chat'),
+        model: getModel(providerMode, model, 'chat', keys),
         system: systemPrompt,
         messages: coreMessages,
         abortSignal,
@@ -549,10 +554,15 @@ export class OllamaService {
   ): Promise<string> {
     const systemPrompt = extractSystemPrompt(messages);
     const coreMessages = toAISDKMessages(messages);
+    const keys: ProviderKeys = {
+      openRouterApiKey: this.config.openRouterApiKey,
+      geminiApiKey: this.config.geminiApiKey,
+      ollamaBaseUrl: this.config.ollamaBaseUrl,
+    };
 
     try {
       const result = streamText({
-        model: getModel(providerMode, model, 'chat'),
+        model: getModel(providerMode, model, 'chat', keys),
         system: systemPrompt,
         messages: coreMessages,
         abortSignal,
