@@ -301,6 +301,15 @@ export interface AgentStepUpdate {
   content: string;
   toolName?: string;
   toolResult?: string;
+  // Phase 2 additions — Cursor-style inline status
+  /** True when this tool call fired as part of a parallel batch. */
+  isParallel?: boolean;
+  /** How many tools fired in parallel with this one (present when isParallel). */
+  parallelBatchSize?: number;
+  /** Error class from errorRecovery.ts when status === 'error'. */
+  errorClass?: string;
+  /** True when context was compressed before this step. */
+  wasCompressed?: boolean;
 }
 
 /**
@@ -335,17 +344,22 @@ export async function runAgenticTask(
       toolName: string;
       result: string;
       isError: boolean;
+      errorClass?: string;
+      isParallel?: boolean;
     }>) {
       onStepUpdate({
         type: 'tool_result',
         content: r.isError ? `Tool error: ${r.result}` : r.result,
         toolName: r.toolName,
         toolResult: r.result,
+        isParallel: r.isParallel,
+        parallelBatchSize: r.isParallel ? result.toolCallResults.length : undefined,
+        errorClass: r.errorClass,
       });
     }
   }
 
-  const finalResponse = extractFinalResponse(result.messages);
+  const finalResponse = extractFinalResponse(result.messages).replace(/<done>/g, '').trim();
   onStepUpdate({ type: 'done', content: finalResponse });
   return finalResponse;
 }

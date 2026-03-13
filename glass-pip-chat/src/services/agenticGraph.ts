@@ -11,10 +11,17 @@
  *  - Local models on agentic paths: planner always uses Claude Sonnet via
  *    OpenRouter (see providers.ts getModel(..., 'agent')).
  *
+ * Phase 2 additions (Cursor-style ReAct loop):
+ *  - Parallel tool dispatch via Promise.allSettled for independent tool calls.
+ *  - Context window compression before every planner call (contextCompressor.ts).
+ *  - Explicit <done> termination signal checked in routeAfterPlanner.
+ *  - Typed error classification with recovery instructions (errorRecovery.ts).
+ *  - Hard-stop routing for permission_denied and mcp_server_unavailable errors.
+ *
  * Topology:
  *   START → planner → tool_executor → result_verifier → (planner | END)
  *                ↓
- *              END (when model emits text with no tool calls)
+ *              END (when model emits <done> or text with no tool calls)
  */
 
 import { Annotation, StateGraph, START, END } from '@langchain/langgraph';
@@ -22,6 +29,8 @@ import { generateText, jsonSchema, tool as aiTool, type CoreMessage } from 'ai';
 import { MultiServerMCPClient } from '@langchain/mcp-adapters';
 import { getModel } from './providers';
 import { getMCPIntegrationService } from './mcpIntegrationService';
+import { classifyToolError, HARD_STOP_ERRORS, type ErrorClass } from './errorRecovery';
+import { compressContext } from './contextCompressor';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -32,6 +41,10 @@ export interface ToolCallResult {
   toolName: string;
   result: string;
   isError: boolean;
+  /** Populated when isError is true. */
+  errorClass?: ErrorClass;
+  /** True if this tool fired as part of a parallel batch. */
+  isParallel?: boolean;
 }
 
 /** Type of the Electron preload bridge exposed on window.pip.mcp. */
@@ -80,6 +93,20 @@ type AllyAgentStateType = typeof AllyAgentState.State;
 
 const MAX_STEPS = 8;
 
+/**
+ * System prompt for the planner LLM.
+ * Includes the <done> termination instruction required for Change 3.
+ */
+const PLANNER_SYSTEM_PROMPT = `You are an AI assistant (Ally) with access to tools. Use them when needed.
+
+RULES:
+1. Use tools to gather information or perform actions when required.
+2. After receiving tool results, analyse them and decide if more tools are needed.
+3. When the task is fully complete and no more tool calls are needed, output your final response followed by exactly: <done>
+4. Do not output <done> if there are remaining steps, errors to handle, or tool calls to make.
+5. If a tool failed and you cannot complete the task, explain what failed and output <done>.
+6. Never invent tool results — only use what was actually returned.`;
+
 // ---------------------------------------------------------------------------
 // Tool discovery helpers
 // ---------------------------------------------------------------------------
@@ -123,11 +150,15 @@ async function buildToolSet(): Promise<Record<string, ReturnType<typeof aiTool>>
       for (const lcTool of langchainTools) {
         if (toolSet[lcTool.name]) continue; // already registered
 
-        // Convert Zod schema to Vercel AI SDK tool
+        // LangChain StructuredTool exposes a `.schema` Zod schema that is not
+        // typed in the public interface but is always present at runtime.
+        // We use a narrowing cast via an intermediate `unknown` rather than
+        // a direct `any` cast to make the assertion explicit.
+        const schema = (lcTool as unknown as { schema: Parameters<typeof aiTool>[0]['parameters'] }).schema;
+
         toolSet[lcTool.name] = aiTool({
           description: lcTool.description ?? lcTool.name,
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          parameters: (lcTool as any).schema,
+          parameters: schema,
         });
       }
 
@@ -179,6 +210,21 @@ async function executeToolWithServices(
   throw new Error(`Tool "${toolName}" is not available in the current context.`);
 }
 
+/**
+ * Determine whether two tool calls are independent (safe to run in parallel).
+ *
+ * A call is considered dependent if its serialised args string contains a
+ * reference to another call's toolCallId — a common pattern used by models
+ * that chain outputs explicitly.
+ */
+function argsReferenceAnyId(
+  args: Record<string, unknown>,
+  ids: string[]
+): boolean {
+  const serialised = JSON.stringify(args);
+  return ids.some((id) => serialised.includes(id));
+}
+
 // ---------------------------------------------------------------------------
 // Graph nodes
 // ---------------------------------------------------------------------------
@@ -188,9 +234,18 @@ async function plannerNode(
 ): Promise<Partial<AllyAgentStateType>> {
   const tools = await buildToolSet();
 
+  // Phase 2 — Change 2: compress context before every LLM call
+  const { messages: compressedMessages, wasCompressed, droppedSteps } =
+    await compressContext(state.messages);
+
+  const systemSuffix = wasCompressed
+    ? `\n\n[Note: ${droppedSteps} earlier tool results were summarised to save context. Full results available in conversation history.]`
+    : '';
+
   const result = await generateText({
     model: getModel('openrouter', 'anthropic/claude-sonnet-4-5', 'agent'),
-    messages: state.messages,
+    system: PLANNER_SYSTEM_PROMPT + systemSuffix,
+    messages: compressedMessages,
     tools: Object.keys(tools).length > 0 ? tools : undefined,
     maxTokens: 4000,
   });
@@ -215,10 +270,11 @@ async function plannerNode(
     };
   }
 
-  // No tool calls → task is complete
+  // No tool calls → check for explicit <done> or treat as complete
+  const responseText = result.text ?? '';
   newMessages.push({
     role: 'assistant',
-    content: result.text ?? '',
+    content: responseText,
   });
 
   return {
@@ -249,10 +305,66 @@ async function toolExecutorNode(
       p.type === 'tool-call'
   );
 
+  // ----- Phase 2 — Change 1: parallel dispatch --------------------------------
+  // Identify independent vs dependent calls.
+  // A call is dependent if its args reference a prior call's ID in the same batch.
+  const priorIds: string[] = [];
+  const independent: typeof toolCallParts = [];
+  const dependent: typeof toolCallParts = [];
+
+  for (const tc of toolCallParts) {
+    if (argsReferenceAnyId(tc.args, priorIds)) {
+      dependent.push(tc);
+    } else {
+      independent.push(tc);
+    }
+    priorIds.push(tc.toolCallId);
+  }
+
+  const isParallelBatch = independent.length > 1;
+
+  // Execute independent calls in parallel
+  const settled = await Promise.allSettled(
+    independent.map(async (tc) => {
+      const raw = await executeToolWithServices(tc.toolName, tc.args);
+      const resultStr =
+        typeof raw === 'string' ? raw : JSON.stringify(raw, null, 2);
+      return { tc, resultStr, success: true as const };
+    })
+  );
+
   const results: ToolCallResult[] = [];
   let lastError: string | null = null;
 
-  for (const tc of toolCallParts) {
+  for (let i = 0; i < settled.length; i++) {
+    const s = settled[i];
+    const tc = independent[i];
+    if (s.status === 'fulfilled') {
+      results.push({
+        toolCallId: tc.toolCallId,
+        toolName: tc.toolName,
+        result: s.value.resultStr,
+        isError: false,
+        isParallel: isParallelBatch,
+      });
+    } else {
+      const errorStr =
+        s.reason instanceof Error ? s.reason.message : String(s.reason);
+      const classified = classifyToolError(errorStr, tc.toolName);
+      lastError = classified.class;
+      results.push({
+        toolCallId: tc.toolCallId,
+        toolName: tc.toolName,
+        result: `ERROR [${classified.class}]: ${classified.originalError}\n\nRECOVERY: ${classified.recoveryInstruction}`,
+        isError: true,
+        errorClass: classified.class,
+        isParallel: isParallelBatch,
+      });
+    }
+  }
+
+  // Execute dependent calls sequentially after the parallel batch
+  for (const tc of dependent) {
     try {
       const raw = await executeToolWithServices(tc.toolName, tc.args);
       const resultStr =
@@ -262,18 +374,24 @@ async function toolExecutorNode(
         toolName: tc.toolName,
         result: resultStr,
         isError: false,
+        isParallel: false,
       });
     } catch (err) {
       const errorStr = err instanceof Error ? err.message : String(err);
-      lastError = errorStr;
+      const classified = classifyToolError(errorStr, tc.toolName);
+      // Later errors override lastError (last write wins)
+      lastError = classified.class;
       results.push({
         toolCallId: tc.toolCallId,
         toolName: tc.toolName,
-        result: `ERROR: ${errorStr}`,
+        result: `ERROR [${classified.class}]: ${classified.originalError}\n\nRECOVERY: ${classified.recoveryInstruction}`,
         isError: true,
+        errorClass: classified.class,
+        isParallel: false,
       });
     }
   }
+  // ---------------------------------------------------------------------------
 
   // Append a ToolMessage so the model sees the actual results on the next call
   const toolMessage: CoreMessage = {
@@ -291,6 +409,8 @@ async function toolExecutorNode(
     messages: [toolMessage],
     toolCallResults: results,
     stepCount: state.stepCount + 1,
+    // lastError holds the ErrorClass string so result_verifier can route
+    // based on error type (e.g. hard-stop for permission_denied).
     lastToolError: lastError,
   };
 }
@@ -324,17 +444,28 @@ function resultVerifierNode(
 function routeAfterPlanner(
   state: AllyAgentStateType
 ): 'tool_executor' | typeof END {
-  if (state.taskComplete) return END;
-
   const lastMsg = state.messages[state.messages.length - 1];
+  const content =
+    lastMsg && typeof lastMsg.content === 'string' ? lastMsg.content : '';
+
+  // Phase 2 — Change 3: check for explicit <done> termination signal first
+  if (content.includes('<done>')) {
+    return END;
+  }
+
+  // Check for tool calls in the last assistant message
   if (
     lastMsg?.role === 'assistant' &&
     Array.isArray(lastMsg.content) &&
-    lastMsg.content.some((p) => p.type === 'tool-call')
+    lastMsg.content.some((p: { type?: string }) => p.type === 'tool-call')
   ) {
     return 'tool_executor';
   }
 
+  // taskComplete flag set by planner when no tool calls were emitted
+  if (state.taskComplete) return END;
+
+  // No tool calls and no <done> — force END to prevent drift
   return END;
 }
 
@@ -342,6 +473,15 @@ function routeAfterVerifier(
   state: AllyAgentStateType
 ): 'planner' | typeof END {
   if (state.taskComplete || state.stepCount >= MAX_STEPS) return END;
+
+  // Phase 2 — Change 4: hard-stop for specific error classes
+  if (
+    state.lastToolError &&
+    HARD_STOP_ERRORS.includes(state.lastToolError as ErrorClass)
+  ) {
+    return END;
+  }
+
   return 'planner';
 }
 
@@ -387,18 +527,21 @@ export function toCoreMsgs(
 
 /**
  * Extract the final text response from the completed graph state messages.
+ * Strips any <done> signal before returning.
  */
 export function extractFinalResponse(messages: CoreMessage[]): string {
   for (let i = messages.length - 1; i >= 0; i--) {
     const msg = messages[i];
     if (msg.role === 'assistant') {
-      if (typeof msg.content === 'string') return msg.content;
+      if (typeof msg.content === 'string') {
+        return msg.content.replace(/<done>/g, '').trim();
+      }
       if (Array.isArray(msg.content)) {
         const textParts = msg.content
           .filter((p): p is { type: 'text'; text: string } => p.type === 'text')
           .map((p) => p.text)
           .join('');
-        if (textParts) return textParts;
+        if (textParts) return textParts.replace(/<done>/g, '').trim();
       }
     }
   }
