@@ -1,11 +1,12 @@
 {
+  "// NOTE": "The filesystem path uses '~' as a placeholder. It will be automatically replaced with the appropriate home directory for your platform (Windows: %USERPROFILE%, Linux/Mac: $HOME)",
   "mcpServers": {
     "filesystem": {
       "command": "npx",
       "args": [
         "-y",
         "@modelcontextprotocol/server-filesystem",
-        "C:\\"
+        "~"
       ],
       "env": {
         "FASTMCP_LOG_LEVEL": "ERROR"

@@ -1237,6 +1237,39 @@ function setupSpeechServiceEvents() {
 }
 
 // MCP/ACP Integration handlers
+// Helper function to adjust MCP config for current platform
+function adjustMCPConfigForPlatform(config: any): any {
+  if (!config || !config.mcpServers) return config;
+  
+  const adjustedConfig = JSON.parse(JSON.stringify(config)); // Deep clone
+  
+  // Adjust filesystem server path based on platform
+  if (adjustedConfig.mcpServers.filesystem && adjustedConfig.mcpServers.filesystem.args) {
+    const args = adjustedConfig.mcpServers.filesystem.args;
+    
+    // Find the path argument (usually the last one after the package name)
+    for (let i = 0; i < args.length; i++) {
+      const arg = args[i];
+      
+      // Check if this looks like a filesystem path
+      if (arg.includes(':\\') || arg.startsWith('/') || arg.startsWith('~')) {
+        // Replace with platform-appropriate path
+        if (process.platform === 'win32') {
+          // Windows: use C:\Users\username or C:\
+          args[i] = process.env.USERPROFILE || 'C:\\';
+        } else {
+          // Linux/Mac: use home directory
+          args[i] = app.getPath('home');
+        }
+        console.log(`Adjusted filesystem path for ${process.platform}: ${args[i]}`);
+        break;
+      }
+    }
+  }
+  
+  return adjustedConfig;
+}
+
 ipcMain.handle('mcp:readConfig', async () => {
   try {
     const userConfigPath = path.join(app.getPath('home'), '.ally', 'settings', 'mcp.json');
@@ -1250,7 +1283,10 @@ ipcMain.handle('mcp:readConfig', async () => {
     
     if (fs.existsSync(configPath)) {
       const configData = fs.readFileSync(configPath, 'utf8');
-      return JSON.parse(configData);
+      const config = JSON.parse(configData);
+      
+      // Adjust config for current platform
+      return adjustMCPConfigForPlatform(config);
     }
     
     return null;
