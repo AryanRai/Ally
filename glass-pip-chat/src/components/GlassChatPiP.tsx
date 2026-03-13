@@ -32,7 +32,7 @@ import { ProviderConfig } from '../config/providers';
 
 // Tool Execution UI Components
 import { ToolExecutionStatus } from './chat/ToolExecutionStatus';
-import { InlineToolExecutions, ToolExecution } from './chat/InlineToolIndicator';
+import { InlineToolExecutions, InlineToolPill, Segment, ToolExecution } from './chat/InlineToolIndicator';
 import { useToolCalling } from '../hooks/useToolCalling';
 import { useMCPACPIntegration } from '../hooks/useMCPACPIntegration';
 
@@ -190,6 +190,8 @@ export default function GlassChatPiP() {
   
   // Active tool executions for inline display during streaming
   const [activeToolExecutions, setActiveToolExecutions] = useState<ToolExecution[]>([]);
+  /** Segments for inline text+pill interleaving (agentic mode streaming) */
+  const [streamingSegments, setStreamingSegments] = useState<Segment[]>([]);
   const [mcpServerCount, setMcpServerCount] = useState(0);
   // Streaming thinking state - for showing thinking as pill during streaming
   const [streamingThinking, setStreamingThinking] = useState<string | null>(null);
@@ -362,9 +364,14 @@ export default function GlassChatPiP() {
     if (isWeb) {
       // Web mode: update React state directly, don't use localStorage chatManager
       // Use functional updaters to avoid stale closure — activeChat in the closure
-      // may be outdated when the assistant response arrives after an async wait
+      // may be outdated when the assistant response arrives after an async wait.
+      //
+      // Bug B fix: check for duplicate IDs before adding. The realtime + polling
+      // paths both guard with `messageAdded`, but this provides an extra safety net
+      // in case the same message ID reaches this function from two code paths.
       setActiveChat(prev => {
         if (!prev) return prev;
+        if (prev.messages.some(m => m.id === message.id)) return prev; // dedup by ID
         return {
           ...prev,
           messages: [...prev.messages, message],
@@ -373,6 +380,7 @@ export default function GlassChatPiP() {
       });
       setChats(prev => prev.map(c => {
         if (c.id !== activeChat.id) return c;
+        if (c.messages.some(m => m.id === message.id)) return c; // dedup by ID
         return {
           ...c,
           messages: [...c.messages, message],
@@ -545,6 +553,7 @@ export default function GlassChatPiP() {
       setCurrentResponse('');
       setActiveToolExecutions([]); // Clear tool executions when done
       setStreamingThinking(null); // Clear streaming thinking when done
+      setStreamingSegments([]); // Clear streaming segments when done
     }
   };
 
@@ -960,6 +969,7 @@ Remember: Output ONLY the JSON tool call when you need to use a tool. No explana
    *  - onStreamUpdate: called with streaming text for live display
    *  - onToolExecutionsUpdate: called with tool execution pills for live display
    *  - onThinkingUpdate: called with thinking text for live display
+   *  - onSegmentUpdate: called with interleaved text+tool segments (Cursor-style inline pills)
    */
   const runAgenticLoop = async (
     contextualContent: string,
@@ -969,6 +979,7 @@ Remember: Output ONLY the JSON tool call when you need to use a tool. No explana
       onStreamUpdate?: (text: string) => void;
       onToolExecutionsUpdate?: (executions: ToolExecution[]) => void;
       onThinkingUpdate?: (thinking: string) => void;
+      onSegmentUpdate?: (segments: Segment[]) => void;
     } = {}
   ): Promise<string> => {
     const MAX_ITERATIONS = 10;
@@ -985,6 +996,21 @@ Remember: Output ONLY the JSON tool call when you need to use a tool. No explana
     let currentThinking = '';
     const failureTracker: Map<string, number> = new Map(); // exact tool+params failures
     const toolNameFailures: Map<string, number> = new Map(); // per-tool-name total failures
+
+    // Segment tracking for inline pill rendering (Cursor-style)
+    const currentSegments: Segment[] = [];
+    const emitSegments = () => callbacks.onSegmentUpdate?.([...currentSegments]);
+    /** Update (or append) the trailing text segment during streaming. */
+    const updateTrailingTextSegment = (text: string) => {
+      if (!text) return;
+      const last = currentSegments[currentSegments.length - 1];
+      if (last?.type === 'text') {
+        last.content = text;
+      } else {
+        currentSegments.push({ type: 'text', content: text });
+      }
+      emitSegments();
+    };
     
     while (iteration < MAX_ITERATIONS && totalToolCalls < MAX_TOOL_CALLS) {
       iteration++;
@@ -1028,7 +1054,11 @@ Remember: Output ONLY the JSON tool call when you need to use a tool. No explana
               const cleanedResponse = accumulatedResponse
                 .replace(/<think>[\s\S]*?<\/think>/gi, '')
                 .trim();
-              callbacks.onStreamUpdate?.(cleanedResponse + (update.type === 'done' ? '' : '▋'));
+              const displayText = cleanedResponse + (update.type === 'done' ? '' : '▋');
+              callbacks.onStreamUpdate?.(displayText);
+              // The segment stores the clean text without the ▋ cursor so that what
+              // gets persisted to metadata matches the final text, not the streaming display.
+              updateTrailingTextSegment(cleanedResponse + (update.type === 'done' ? '' : ' '));
             }
           }
         },
@@ -1043,6 +1073,8 @@ Remember: Output ONLY the JSON tool call when you need to use a tool. No explana
           .replace(/[✅❌]\s*\*\*(Success|Status|Error)[^*]*\*\*:?\s*/g, '')
           .replace(/\*\*Output:\*\*\s*/g, '')
           .trim();
+        // Flush final text into last segment
+        updateTrailingTextSegment(finalModelSummary);
         break;
       }
       
@@ -1094,12 +1126,26 @@ Remember: Output ONLY the JSON tool call when you need to use a tool. No explana
       const toolExecution: ToolExecution = {
         id: `tool-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
         name: toolToExecute.name,
+        parameters: toolToExecute.parameters,
         status: 'executing',
         startTime: Date.now(),
       };
       
       allToolExecutions.push(toolExecution);
       callbacks.onToolExecutionsUpdate?.([...allToolExecutions]);
+
+      // Segment: flush any pending before-text, then push a tool pill segment
+      if (beforeToolText) {
+        // Replace trailing text segment with the committed before-text
+        const last = currentSegments[currentSegments.length - 1];
+        if (last?.type === 'text') {
+          last.content = beforeToolText;
+        } else {
+          currentSegments.push({ type: 'text', content: beforeToolText });
+        }
+      }
+      currentSegments.push({ type: 'tool', toolExecution });
+      emitSegments();
       
       try {
         console.log(`🔧 Executing tool: ${toolToExecute.name}`, toolToExecute.parameters);
@@ -1115,6 +1161,8 @@ Remember: Output ONLY the JSON tool call when you need to use a tool. No explana
         
         callbacks.onToolExecutionsUpdate?.([...allToolExecutions]);
         callbacks.onStreamUpdate?.('*Analyzing results...*');
+        // Refresh segment with updated (success) tool execution
+        emitSegments();
         
       } catch (error) {
         console.error(`❌ Tool execution failed:`, error);
@@ -1129,6 +1177,8 @@ Remember: Output ONLY the JSON tool call when you need to use a tool. No explana
         callbacks.onToolExecutionsUpdate?.([...allToolExecutions]);
         allToolResults.push({ tool: toolToExecute.name, result: `ERROR: ${toolExecution.error}` });
         toolResultBlocks.push(`❌ **${toolToExecute.name}** failed: ${toolExecution.error}`);
+        // Refresh segment with updated (error) tool execution
+        emitSegments();
       }
     }
     
@@ -1154,6 +1204,9 @@ Remember: Output ONLY the JSON tool call when you need to use a tool. No explana
     _tools: Array<{ name: string; description: string; parameters?: any }>,
     historySnapshot?: Message[]
   ) => {
+    // Capture the final segments so they can be persisted in message metadata
+    let lastSegments: Segment[] = [];
+
     const finalContent = await runAgenticLoop(
       contextualContent,
       systemPrompt,
@@ -1162,19 +1215,31 @@ Remember: Output ONLY the JSON tool call when you need to use a tool. No explana
         onStreamUpdate: (text) => setCurrentResponse(text),
         onToolExecutionsUpdate: (execs) => setActiveToolExecutions(execs),
         onThinkingUpdate: (thinking) => setStreamingThinking(thinking),
+        onSegmentUpdate: (segs) => {
+          lastSegments = segs;
+          setStreamingSegments(segs);
+        },
       }
     );
     
     // Clear streaming state
     setStreamingThinking(null);
     setActiveToolExecutions([]);
+    setStreamingSegments([]);
     
     if (finalContent) {
+      // Deep-copy segments to prevent the persisted metadata from being mutated
+      // if the underlying ToolExecution objects are referenced elsewhere.
+      const persistedSegments = lastSegments.length > 0
+        ? JSON.parse(JSON.stringify(lastSegments)) as Segment[]
+        : undefined;
       const assistantMessage: Message = {
         id: `assistant-${Date.now()}`,
         role: 'assistant',
         content: finalContent,
-        timestamp: Date.now()
+        timestamp: Date.now(),
+        // Persist segments so they re-render correctly in chat history
+        metadata: persistedSegments ? { segments: persistedSegments } : undefined,
       };
       addMessageToActiveChat(assistantMessage);
     }
@@ -1339,6 +1404,7 @@ Remember: Output ONLY the JSON tool call when you need to use a tool. No explana
             setActiveToolExecutions([{
               id: `tool-${Date.now()}`,
               name: parsed.toolCall.name,
+              parameters: parsed.toolCall.parameters || {},
               status: 'executing',
               startTime: Date.now()
             }]);
@@ -3174,7 +3240,7 @@ TOOL FORMAT:
                   )}
                   
                   {/* Show streaming response in expanded mode */}
-                  {isTyping && currentResponse && (
+                  {isTyping && (currentResponse || streamingSegments.length > 0) && (
                     <motion.div
                       initial={{ opacity: 0, y: 10 }}
                       animate={{ opacity: 1, y: 0 }}
@@ -3187,44 +3253,94 @@ TOOL FORMAT:
                               appSettings.ui.fontSize === 'lg' ? 'text-lg' : 'text-xl'
                       )}
                     >
-                      {/* Inline tool executions and thinking pill - shown during streaming */}
-                      {(activeToolExecutions.length > 0 || streamingThinking) && (
-                        <InlineToolExecutions tools={activeToolExecutions} theme={theme} thinking={streamingThinking || undefined} />
-                      )}
-                      
-                      <div className={cn(
-                        "prose max-w-none prose-invert",
-                        appSettings.ui.fontSize === 'xs' ? 'prose-xs' :
-                          appSettings.ui.fontSize === 'sm' ? 'prose-sm' :
-                            appSettings.ui.fontSize === 'base' ? 'prose-base' :
-                              appSettings.ui.fontSize === 'lg' ? 'prose-lg' : 'prose-xl'
-                      )}>
-                        <ReactMarkdown
-                          remarkPlugins={[remarkGfm]}
-                          components={{
-                            p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
-                            code: ({ inline, className, children, ...props }: any) => {
-                              if (inline) {
-                                return (
-                                  <code className="px-1 py-0.5 bg-white/10 rounded text-sm" {...props}>
-                                    {children}
-                                  </code>
-                                );
-                              }
+                      {streamingSegments.length > 0 ? (
+                        /* Segmented render: tool pills interleaved inline with text (Cursor-style) */
+                        <div className={cn(
+                          "prose max-w-none prose-invert",
+                          appSettings.ui.fontSize === 'xs' ? 'prose-xs' :
+                            appSettings.ui.fontSize === 'sm' ? 'prose-sm' :
+                              appSettings.ui.fontSize === 'base' ? 'prose-base' :
+                                appSettings.ui.fontSize === 'lg' ? 'prose-lg' : 'prose-xl'
+                        )}>
+                          {streamingSegments.map((seg, i) => {
+                            if (seg.type === 'tool' && seg.toolExecution) {
                               return (
-                                <pre className="bg-black/20 rounded-lg overflow-x-auto my-2 p-3">
-                                  <code className={cn("text-sm", className)} {...props}>
-                                    {children}
-                                  </code>
-                                </pre>
+                                <InlineToolPill
+                                  key={seg.toolExecution.id ?? i}
+                                  execution={seg.toolExecution}
+                                  theme={theme}
+                                />
                               );
                             }
-                          }}
-                        >
-                          {currentResponse}
-                        </ReactMarkdown>
-                        <span className="inline-block w-2 h-4 bg-current animate-pulse ml-1 align-text-bottom" />
-                      </div>
+                            const isLastSeg = i === streamingSegments.length - 1;
+                            return (
+                              <ReactMarkdown
+                                key={i}
+                                remarkPlugins={[remarkGfm]}
+                                components={{
+                                  p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
+                                  code: ({ inline, className, children, ...props }: any) => {
+                                    if (inline) {
+                                      return <code className="px-1 py-0.5 bg-white/10 rounded text-sm" {...props}>{children}</code>;
+                                    }
+                                    return (
+                                      <pre className="bg-black/20 rounded-lg overflow-x-auto my-2 p-3">
+                                        <code className={cn("text-sm", className)} {...props}>{children}</code>
+                                      </pre>
+                                    );
+                                  }
+                                }}
+                              >
+                                {(seg.content ?? '') + (isLastSeg ? '▋' : '')}
+                              </ReactMarkdown>
+                            );
+                          })}
+                          {/* Cursor shown when last segment is a tool pill (no trailing text yet) */}
+                          {streamingSegments[streamingSegments.length - 1]?.type === 'tool' && (
+                            <span className="inline-block w-2 h-4 bg-current animate-pulse ml-1 align-text-bottom" />
+                          )}
+                        </div>
+                      ) : (
+                        /* Legacy render: pills above text (non-agentic / thinking modes) */
+                        <>
+                          {(activeToolExecutions.length > 0 || streamingThinking) && (
+                            <InlineToolExecutions tools={activeToolExecutions} theme={theme} thinking={streamingThinking || undefined} />
+                          )}
+                          <div className={cn(
+                            "prose max-w-none prose-invert",
+                            appSettings.ui.fontSize === 'xs' ? 'prose-xs' :
+                              appSettings.ui.fontSize === 'sm' ? 'prose-sm' :
+                                appSettings.ui.fontSize === 'base' ? 'prose-base' :
+                                  appSettings.ui.fontSize === 'lg' ? 'prose-lg' : 'prose-xl'
+                          )}>
+                            <ReactMarkdown
+                              remarkPlugins={[remarkGfm]}
+                              components={{
+                                p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
+                                code: ({ inline, className, children, ...props }: any) => {
+                                  if (inline) {
+                                    return (
+                                      <code className="px-1 py-0.5 bg-white/10 rounded text-sm" {...props}>
+                                        {children}
+                                      </code>
+                                    );
+                                  }
+                                  return (
+                                    <pre className="bg-black/20 rounded-lg overflow-x-auto my-2 p-3">
+                                      <code className={cn("text-sm", className)} {...props}>
+                                        {children}
+                                      </code>
+                                    </pre>
+                                  );
+                                }
+                              }}
+                            >
+                              {currentResponse}
+                            </ReactMarkdown>
+                            <span className="inline-block w-2 h-4 bg-current animate-pulse ml-1 align-text-bottom" />
+                          </div>
+                        </>
+                      )}
                       <div className="text-xs opacity-50 mt-2 text-left">
                         {new Date().toLocaleTimeString()}
                       </div>

@@ -23,7 +23,7 @@ import { cn } from '../lib/utils';
 import { Message } from '../types/chat';
 import { UISettings } from '../types/settings';
 import MessageMetadata from './chat/MessageMetadata';
-import { MessagePills, parseMessageForPills } from './chat/InlineToolIndicator';
+import { MessagePills, parseMessageForPills, InlineToolPill, Segment } from './chat/InlineToolIndicator';
 
 interface EditableMessageProps {
   message: Message;
@@ -458,6 +458,49 @@ export default function EditableMessage({
 
     // For assistant messages: parse all collapsible sections
     const { cleanText, sections } = parseCollapsibleSections(content);
+
+    // --- Persisted segments: if the message was saved with interleaved text+tool pills,
+    // render from those segments instead of plain markdown (backward compat: falls back
+    // to the collapsible-section path when metadata.segments is absent).
+    if (message.metadata?.segments && message.metadata.segments.length > 0) {
+      const savedSegments = message.metadata.segments as Segment[];
+      return (
+        <div className="space-y-1">
+          {/* Still show collapsible thinking blocks if present */}
+          {sections.filter(s => s.type === 'thinking').length > 0 && (
+            <div className="flex flex-wrap gap-1 mb-1">
+              {sections.filter(s => s.type === 'thinking').map((section, i) => (
+                <CollapsibleBlock key={i} section={section} theme={theme} platform={platform} />
+              ))}
+            </div>
+          )}
+          {/* Segmented text + inline tool pills */}
+          <div className="space-y-0.5">
+            {savedSegments.map((seg, i) => {
+              if (seg.type === 'tool' && seg.toolExecution) {
+                return (
+                  <InlineToolPill
+                    key={seg.toolExecution.id ?? i}
+                    execution={seg.toolExecution}
+                    theme={theme}
+                  />
+                );
+              }
+              if (!seg.content) return null;
+              return (
+                <ReactMarkdown
+                  key={i}
+                  remarkPlugins={[remarkGfm]}
+                  components={{ p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>, code: CodeBlock }}
+                >
+                  {seg.content}
+                </ReactMarkdown>
+              );
+            })}
+          </div>
+        </div>
+      );
+    }
 
     // Also run the existing pill parser for legacy tool result formats
     const { toolResults, thinking: legacyThinking } = parseMessageForPills(cleanText);
