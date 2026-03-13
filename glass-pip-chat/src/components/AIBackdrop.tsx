@@ -14,14 +14,6 @@ export interface AIBackdropProps {
   intensity?: number; // 0–1 multiplier applied on top of per-state opacity
 }
 
-// Per-state Framer Motion variants for each orb layer.
-// "color" is a Tailwind background class (no bg- prefix) used in className.
-const ORB_DEFS = [
-  { key: 'a', left: '-10%', top: '60%' },
-  { key: 'b', right: '-5%', top: '30%' },
-  { key: 'c', left: '35%', top: '-5%' },
-] as const;
-
 type OrbState = AIBackdropProps['state'];
 
 interface OrbStyle {
@@ -165,12 +157,12 @@ export default function AIBackdrop({ state, intensity = 1 }: AIBackdropProps) {
         pointerEvents: 'none',
       }}
     >
-      {ORB_DEFS.map((pos, i) => {
+      {ORB_POSITIONS.map((pos, i) => {
         const v = variants[i];
         const opacityArr = Array.isArray(v.opacity) ? v.opacity.map((o) => o * intensity) : v.opacity * intensity;
         return (
           <motion.div
-            key={pos.key}
+            key={i}
             style={{
               position: 'absolute',
               width: '24rem', // w-96
@@ -179,7 +171,7 @@ export default function AIBackdrop({ state, intensity = 1 }: AIBackdropProps) {
               background: v.background,
               filter: 'blur(64px)', // blur-3xl
               mixBlendMode: 'screen',
-              ...ORB_POSITIONS[i],
+              ...pos,
             }}
             animate={{
               opacity: opacityArr,

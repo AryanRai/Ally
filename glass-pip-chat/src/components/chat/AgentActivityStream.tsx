@@ -29,6 +29,7 @@ export interface AgentActivityStreamProps {
   steps: AgentStep[];
   isActive: boolean;
   stepCount: number;
+  /** Maximum expected steps for progress bar calculation — not a display limit. Defaults to 8. */
   maxSteps?: number;
   onToggleExpand?: () => void;
   theme?: 'light' | 'dark';

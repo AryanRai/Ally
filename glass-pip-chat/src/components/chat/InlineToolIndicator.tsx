@@ -10,6 +10,12 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Loader2, Check, X, Wrench, Brain, Copy, ChevronDown, ChevronUp } from 'lucide-react';
 import { cn } from '../../lib/utils';
 
+/** Format a millisecond duration into a human-readable string. */
+function formatDuration(ms: number): string {
+  if (ms < 1000) return `${ms}ms`;
+  return `${(ms / 1000).toFixed(1)}s`;
+}
+
 export interface ToolExecution {
   id: string;
   name: string;
@@ -543,7 +549,7 @@ export function InlineToolPill({ execution, theme = 'dark' }: { execution: ToolE
         {isSuccess && <Check className="w-3 h-3 text-green-400" />}
         {isError && <X className="w-3 h-3 text-red-400" />}
         {durationMs !== undefined && isSuccess && (
-          <span className="text-white/30 text-[10px]">{durationMs}ms</span>
+          <span className="text-white/30 text-[10px]">{formatDuration(durationMs)}</span>
         )}
         {resultPreview && !expanded && (
           <span className="text-white/40 max-w-[120px] truncate text-[10px]">· {resultPreview}</span>
@@ -575,7 +581,7 @@ export function InlineToolPill({ execution, theme = 'dark' }: { execution: ToolE
                   {isError ? 'ERROR' : 'OUTPUT'}
                 </span>
                 {durationMs !== undefined && (
-                  <span className="text-white/30 text-[10px] font-mono">{durationMs}ms</span>
+                  <span className="text-white/30 text-[10px] font-mono">{formatDuration(durationMs)}</span>
                 )}
               </div>
               {isRunning ? (
