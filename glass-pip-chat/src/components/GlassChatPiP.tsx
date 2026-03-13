@@ -3101,7 +3101,7 @@ Remember: Output ONLY the JSON tool call when you need to use a tool. No explana
                 speechServiceConnected={speechService.isConnected}
                 isContextExpanded={isContextExpanded}
                 onContextExpandedChange={setIsContextExpanded}
-                isSpeaking={false} // TODO: Track TTS state
+                isSpeaking={speechService.isSpeaking}
                 isListening={speechService.isListening}
                 placeholder={currentGreeting}
                 orbState={orbState}
@@ -3385,7 +3385,7 @@ Remember: Output ONLY the JSON tool call when you need to use a tool. No explana
                     contextMonitoring.clearNewContextFlag();
                   }}
                   onRunCommand={() => setInput('/run ')}
-                  placeholder={currentGreeting}
+                  placeholder={speechService.interimTranscript ? `🎤 ${speechService.interimTranscript}` : currentGreeting}
                   messages={messages}
                   currentModel={ollamaIntegration.currentModel}
                   toolsEnabled={isWeb ? true : toolsEnabled}

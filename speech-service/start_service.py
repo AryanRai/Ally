@@ -19,10 +19,23 @@ logger = logging.getLogger(__name__)
 
 def check_dependencies():
     """Check if required dependencies are installed"""
+    # Core packages always required
     required_packages = [
-        'numpy', 'pyaudio', 'whisper', 'webrtcvad', 
-        'TTS', 'torch', 'ggwave', 'websockets'
+        'numpy', 'pyaudio', 'webrtcvad', 'ggwave', 'websockets'
     ]
+    
+    stt_mode = os.getenv('STT_MODE', 'whisper')
+    tts_mode = os.getenv('TTS_MODE', 'coqui')
+
+    if stt_mode == 'deepgram':
+        required_packages.append('deepgram')
+    else:
+        required_packages += ['whisper', 'torch']
+
+    if tts_mode == 'elevenlabs':
+        required_packages.append('elevenlabs')
+    else:
+        required_packages += ['TTS', 'torch']
     
     missing_packages = []
     for package in required_packages:
@@ -41,6 +54,12 @@ def check_dependencies():
 
 def setup_environment():
     """Setup environment variables and paths"""
+    # STT / TTS backend selection
+    if not os.getenv('STT_MODE'):
+        os.environ['STT_MODE'] = 'whisper'
+    if not os.getenv('TTS_MODE'):
+        os.environ['TTS_MODE'] = 'coqui'
+
     # Set default models if not specified
     if not os.getenv('WHISPER_MODEL'):
         os.environ['WHISPER_MODEL'] = 'base'
@@ -51,6 +70,18 @@ def setup_environment():
     if not os.getenv('WEBSOCKET_PORT'):
         os.environ['WEBSOCKET_PORT'] = '8765'
     
+    # Warn if cloud keys are missing when cloud backends are requested
+    if os.getenv('STT_MODE') == 'deepgram' and not os.getenv('DEEPGRAM_API_KEY'):
+        logger.warning(
+            "STT_MODE=deepgram but DEEPGRAM_API_KEY is not set. "
+            "The service will fall back to Whisper."
+        )
+    if os.getenv('TTS_MODE') == 'elevenlabs' and not os.getenv('ELEVENLABS_API_KEY'):
+        logger.warning(
+            "TTS_MODE=elevenlabs but ELEVENLABS_API_KEY is not set. "
+            "The service will fall back to Coqui."
+        )
+
     # Set CUDA environment if available
     try:
         import torch

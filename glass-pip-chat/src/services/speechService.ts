@@ -215,6 +215,18 @@ export class SpeechServiceClient extends EventEmitter {
         this.emit('speechRecognized', payload as SpeechRecognitionResult);
         break;
         
+      case 'speech_interim':
+        this.emit('speechInterim', payload as { text: string });
+        break;
+
+      case 'speech_interrupted':
+        this.emit('speechInterrupted');
+        // Also clear the local TTS queue since the backend already stopped
+        this.clearTTSQueue();
+        this.isProcessingTTS = false;
+        this.currentTTSId = null;
+        break;
+        
       case 'speech_generated':
         this.emit('speechGenerated', payload);
         break;

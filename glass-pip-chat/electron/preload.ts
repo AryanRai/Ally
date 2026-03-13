@@ -152,6 +152,15 @@ const pipAPI = {
       ipcRenderer.on('speech:recognized', handler);
       return () => ipcRenderer.removeListener('speech:recognized', handler);
     },
+    onSpeechInterim: (callback: (data: { text: string }) => void) => {
+      const handler = (_: any, data: any) => callback(data);
+      ipcRenderer.on('speech:interim', handler);
+      return () => ipcRenderer.removeListener('speech:interim', handler);
+    },
+    onSpeechInterrupted: (callback: () => void) => {
+      ipcRenderer.on('speech:interrupted', callback);
+      return () => ipcRenderer.removeListener('speech:interrupted', callback);
+    },
     onSpeechGenerated: (callback: (data: any) => void) => {
       const handler = (_: any, data: any) => callback(data);
       ipcRenderer.on('speech:generated', handler);

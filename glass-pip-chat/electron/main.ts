@@ -1168,6 +1168,18 @@ function setupSpeechServiceEvents() {
     }
   });
 
+  speechService.on('speechInterim', (data) => {
+    if (win && !win.isDestroyed()) {
+      win.webContents.send('speech:interim', data);
+    }
+  });
+
+  speechService.on('speechInterrupted', () => {
+    if (win && !win.isDestroyed()) {
+      win.webContents.send('speech:interrupted');
+    }
+  });
+
   speechService.on('speechGenerated', (data) => {
     if (win && !win.isDestroyed()) {
       win.webContents.send('speech:generated', data);
