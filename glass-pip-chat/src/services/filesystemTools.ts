@@ -3,6 +3,8 @@
  * Provides MCP-compatible filesystem operations through Electron
  */
 
+import { terminalSessionManager } from './terminalSessionManager';
+
 interface FileSystemTool {
   name: string;
   description: string;
@@ -105,6 +107,10 @@ export class FilesystemToolsService {
             type: 'array',
             items: { type: 'string' },
             description: 'Command arguments'
+          },
+          session_name: {
+            type: 'string',
+            description: 'Optional terminal session name to run the command in (e.g. "build", "test", "robot", "python"). Defaults to "general".'
           }
         },
         required: ['command']
@@ -339,36 +345,61 @@ export class FilesystemToolsService {
   }
 
   private async executeCommand(parameters: Record<string, any>): Promise<any> {
+    const fullCommand = parameters.args
+      ? `${parameters.command} ${(parameters.args as string[]).join(' ')}`
+      : parameters.command;
+
+    const sessionName: string = parameters.session_name || 'general';
+
     try {
+      if (typeof window !== 'undefined' && (window as any).pip?.terminal) {
+        // Route through named terminal session (Cursor-style)
+        const session = await terminalSessionManager.getOrCreateSession(sessionName);
+        const outputLines: string[] = [];
+        const unsubscribe = terminalSessionManager.onOutput(session.id, (line) => {
+          outputLines.push(line);
+        });
+        console.log(`[terminal:${sessionName}] $ ${fullCommand}`);
+        try {
+          await terminalSessionManager.executeInSession(session.id, fullCommand);
+        } finally {
+          unsubscribe();
+        }
+        return {
+          success: true,
+          command: fullCommand,
+          session: sessionName,
+          stdout: outputLines.join('\n'),
+          stderr: '',
+          exitCode: 0,
+        };
+      }
+
       if (typeof window !== 'undefined' && window.pip?.system) {
-        const fullCommand = parameters.args 
-          ? `${parameters.command} ${(parameters.args as string[]).join(' ')}`
-          : parameters.command;
-        
+        // Fallback: use legacy system.executeCommand (no session tracking)
         console.log(`Executing command: ${fullCommand}`);
         const result = await window.pip.system.executeCommand(fullCommand);
-        
         return {
           success: true,
           command: fullCommand,
           stdout: result.stdout || '',
           stderr: result.stderr || '',
-          exitCode: 0
+          exitCode: 0,
         };
       }
-      
+
       return {
         success: true,
-        command: parameters.command,
-        stdout: `Demo execution of: ${parameters.command}`,
+        command: fullCommand,
+        stdout: `Demo execution of: ${fullCommand}`,
         stderr: '',
-        exitCode: 0
+        exitCode: 0,
       };
     } catch (error) {
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Command execution failed',
-        command: parameters.command
+        command: fullCommand,
       };
     }
   }

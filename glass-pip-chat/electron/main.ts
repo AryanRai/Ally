@@ -2,7 +2,7 @@ import { app, BrowserWindow, globalShortcut, ipcMain, clipboard, screen, Tray, M
 import path from 'node:path';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { exec } from 'node:child_process';
+import { exec, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { OllamaService, ChatMessage } from '../src/services/ollamaService.js';
 import { getSpeechService, SpeechServiceClient } from '../src/services/speechService.js';
@@ -1488,7 +1488,110 @@ ipcMain.handle('acp:reconnectAgent', async (_, agentId: string) => {
   return { success: true };
 });
 
-// Enable GPU transparency / compositing support on Linux
+// ---------------------------------------------------------------------------
+// Terminal Session Manager — main-process side
+// ---------------------------------------------------------------------------
+
+interface MainTerminalSession {
+  id: string;
+  name: string;
+  pid?: number;
+  status: 'idle' | 'running' | 'error' | 'done';
+  createdAt: number;
+  lastUsed: number;
+  color: string;
+}
+
+const terminalSessions = new Map<string, MainTerminalSession>();
+
+ipcMain.handle('terminal:createSession', async (event, name: string) => {
+  // Reuse an existing session with the same name
+  const existing = [...terminalSessions.values()].find((s) => s.name === name);
+  if (existing) return existing.id;
+
+  const id = `session-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+  const presetColors: Record<string, string> = {
+    general: 'text-white/60',
+    build:   'text-yellow-400',
+    robot:   'text-cyan-400',
+    python:  'text-green-400',
+    test:    'text-purple-400',
+  };
+  const session: MainTerminalSession = {
+    id,
+    name,
+    status: 'idle',
+    createdAt: Date.now(),
+    lastUsed: Date.now(),
+    color: presetColors[name] ?? 'text-white/60',
+  };
+  terminalSessions.set(id, session);
+  win?.webContents.send('terminal:sessionUpdate', session);
+  return id;
+});
+
+ipcMain.handle('terminal:listSessions', async () => {
+  return [...terminalSessions.values()];
+});
+
+ipcMain.handle('terminal:executeInSession', async (event, sessionId: string, command: string) => {
+  const session = terminalSessions.get(sessionId);
+  if (!session) throw new Error(`Terminal session ${sessionId} not found`);
+
+  session.status = 'running';
+  session.lastUsed = Date.now();
+  win?.webContents.send('terminal:sessionUpdate', { ...session });
+
+  return new Promise<void>((resolve, reject) => {
+    const shell = process.platform === 'win32' ? 'cmd.exe' : '/bin/sh';
+    const args = process.platform === 'win32' ? ['/c', command] : ['-c', command];
+    const child = spawn(shell, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+
+    session.pid = child.pid;
+    win?.webContents.send('terminal:sessionUpdate', { ...session });
+
+    const sendLine = (line: string) => {
+      win?.webContents.send('terminal:output', { sessionId, line });
+    };
+
+    child.stdout?.on('data', (chunk: Buffer) => {
+      chunk.toString().split('\n').filter(Boolean).forEach(sendLine);
+    });
+    child.stderr?.on('data', (chunk: Buffer) => {
+      chunk.toString().split('\n').filter(Boolean).forEach(sendLine);
+    });
+
+    child.on('close', (code) => {
+      session.status = code === 0 ? 'done' : 'error';
+      session.pid = undefined;
+      win?.webContents.send('terminal:sessionUpdate', { ...session });
+      resolve();
+    });
+
+    child.on('error', (err) => {
+      session.status = 'error';
+      session.pid = undefined;
+      win?.webContents.send('terminal:sessionUpdate', { ...session });
+      sendLine(`Error: ${err.message}`);
+      reject(err);
+    });
+  });
+});
+
+ipcMain.handle('terminal:killSession', async (_, sessionId: string) => {
+  const session = terminalSessions.get(sessionId);
+  if (!session) return;
+  if (session.pid) {
+    try {
+      process.kill(session.pid, 'SIGTERM');
+    } catch { /* already exited */ }
+  }
+  session.status = 'idle';
+  session.pid = undefined;
+  win?.webContents.send('terminal:sessionUpdate', { ...session });
+});
+
+
 if (process.platform === 'linux') {
   // Allow transparent windows to render correctly with compositing
   app.commandLine.appendSwitch('enable-transparent-visuals');
@@ -1613,6 +1716,21 @@ app.whenReady().then(async () => {
 
   if (!speechRegistered) {
     console.error('Failed to register speech toggle shortcut');
+  }
+
+  // Register terminal panel toggle shortcut (Ctrl+Shift+`)
+  const terminalShortcut = 'CommandOrControl+Shift+`';
+  const terminalRegistered = globalShortcut.register(terminalShortcut, () => {
+    if (!win) return;
+    if (!win.isVisible()) {
+      win.show();
+      win.focus();
+    }
+    win.webContents.send('toggle-terminal');
+  });
+
+  if (!terminalRegistered) {
+    console.error('Failed to register terminal panel shortcut');
   }
 
   // Setup speech service event forwarding
