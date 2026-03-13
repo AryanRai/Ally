@@ -11,14 +11,14 @@ console.log('Building Electron files...');
 // Ensure dist directory exists
 mkdirSync(join(rootDir, 'dist', 'electron'), { recursive: true });
 
-// Compile main process + src/services together so imports resolve correctly
-execSync('npx tsc --project tsconfig.electron.json', {
+// Compile main process (ESNext modules)
+execSync('npx tsc electron/main.ts --outDir dist --module esnext --target es2022 --moduleResolution node --esModuleInterop true', {
   cwd: rootDir,
   stdio: 'inherit'
 });
 
 // Compile preload script (CommonJS for Electron compatibility)  
-execSync('npx tsc electron/preload.ts --outDir dist --module commonjs --target es2022 --moduleResolution node --esModuleInterop true --skipLibCheck true', {
+execSync('npx tsc electron/preload.ts --outDir dist --module commonjs --target es2022 --moduleResolution node --esModuleInterop true', {
   cwd: rootDir,
   stdio: 'inherit'
 });
