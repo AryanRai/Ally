@@ -243,71 +243,81 @@
 
 /* Linux blur effects */
 .linux-blur {
-  /* Enhanced backdrop filter for Linux compositors */
+  /* Enhanced backdrop filter for Linux compositors (GNOME/Mutter, KWin, Wayland) */
   backdrop-filter: blur(24px) saturate(180%) brightness(1.1);
   -webkit-backdrop-filter: blur(24px) saturate(180%) brightness(1.1);
-  
-  /* Fallback for compositors without backdrop-filter support */
-  background: rgba(0, 0, 0, 0.15) !important;
-  
+
+  /* Tint layer — kept semi-transparent so backdrop-filter shows through */
+  background-color: rgba(0, 0, 0, 0.45);
+
   /* Additional effects for better glass appearance on Linux */
   box-shadow: 
     inset 0 1px 0 rgba(255, 255, 255, 0.1),
     inset 0 -1px 0 rgba(255, 255, 255, 0.05),
     0 8px 32px rgba(0, 0, 0, 0.3),
     0 4px 16px rgba(0, 0, 0, 0.2);
-  
+
   /* Better border for Linux window managers */
   border: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+/* When backdrop-filter is NOT supported, use a more opaque background so the
+   UI remains readable instead of being nearly invisible */
+@supports not (backdrop-filter: blur(1px)) {
+  .linux-blur {
+    background-color: rgba(15, 15, 20, 0.92) !important;
+  }
+
+  .linux-blur-light {
+    background-color: rgba(240, 240, 245, 0.92) !important;
+  }
 }
 
 /* Linux light theme blur */
 .linux-blur-light {
   backdrop-filter: blur(24px) saturate(180%) brightness(0.95);
   -webkit-backdrop-filter: blur(24px) saturate(180%) brightness(0.95);
-  
-  background: rgba(255, 255, 255, 0.25) !important;
-  
+
+  background-color: rgba(255, 255, 255, 0.45);
+
   box-shadow: 
     inset 0 1px 0 rgba(255, 255, 255, 0.4),
     inset 0 -1px 0 rgba(0, 0, 0, 0.05),
     0 8px 32px rgba(0, 0, 0, 0.15),
     0 4px 16px rgba(0, 0, 0, 0.1);
-  
+
   border: 1px solid rgba(0, 0, 0, 0.1);
 }
 
-/* Enhanced glass effect for Linux */
-@supports (backdrop-filter: blur(24px)) {
-  .linux-glass-effect {
-    backdrop-filter: blur(24px) saturate(180%) brightness(1.1) contrast(1.05);
-    -webkit-backdrop-filter: blur(24px) saturate(180%) brightness(1.1) contrast(1.05);
-  }
-  
-  .linux-glass-effect-light {
-    backdrop-filter: blur(24px) saturate(180%) brightness(0.95) contrast(1.05);
-    -webkit-backdrop-filter: blur(24px) saturate(180%) brightness(0.95) contrast(1.05);
-  }
+/* Enhanced glass effect for Linux — applied to the outer wrapper */
+.linux-glass-effect {
+  backdrop-filter: blur(24px) saturate(180%) brightness(1.1) contrast(1.05);
+  -webkit-backdrop-filter: blur(24px) saturate(180%) brightness(1.1) contrast(1.05);
+}
+
+.linux-glass-effect-light {
+  backdrop-filter: blur(24px) saturate(180%) brightness(0.95) contrast(1.05);
+  -webkit-backdrop-filter: blur(24px) saturate(180%) brightness(0.95) contrast(1.05);
 }
 
 /* Compositor-specific optimizations */
 .kwin-blur {
   /* KDE Plasma specific optimizations */
-  background: rgba(0, 0, 0, 0.1) !important;
+  background-color: rgba(0, 0, 0, 0.1);
   backdrop-filter: blur(20px) saturate(150%);
   -webkit-backdrop-filter: blur(20px) saturate(150%);
 }
 
 .picom-blur {
   /* Picom compositor optimizations */
-  background: rgba(0, 0, 0, 0.2) !important;
+  background-color: rgba(0, 0, 0, 0.2);
   backdrop-filter: blur(16px) saturate(140%);
   -webkit-backdrop-filter: blur(16px) saturate(140%);
 }
 
 .compiz-blur {
   /* Compiz compositor optimizations */
-  background: rgba(0, 0, 0, 0.15) !important;
+  background-color: rgba(0, 0, 0, 0.15);
   backdrop-filter: blur(18px) saturate(160%);
   -webkit-backdrop-filter: blur(18px) saturate(160%);
 }
