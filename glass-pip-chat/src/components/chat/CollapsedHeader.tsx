@@ -67,6 +67,7 @@ interface CollapsedHeaderProps {
   isSpeaking?: boolean;
   isListening?: boolean;
   placeholder?: string;
+  orbState?: 'idle' | 'listening' | 'thinking' | 'speaking' | 'processing' | 'ggwave';
 }
 
 export default function CollapsedHeader({
@@ -114,7 +115,8 @@ export default function CollapsedHeader({
   onContextExpandedChange,
   isSpeaking,
   isListening,
-  placeholder = 'Balalalala'
+  placeholder = 'Balalalala',
+  orbState
 }: CollapsedHeaderProps) {
   const modelButtonRef = useRef<HTMLButtonElement>(null);
   const contextExpanded = isContextExpanded ?? false;
@@ -157,11 +159,13 @@ export default function CollapsedHeader({
             isActive={isTyping || voiceModeEnabled || isSpeaking || isListening} 
             size="sm" 
             state={
-              isTyping ? 'thinking' : 
-              isSpeaking ? 'speaking' :
-              isListening ? 'listening' :
-              voiceModeEnabled && speechServiceConnected ? 'listening' : 
-              'idle'
+              orbState ?? (
+                isTyping ? 'thinking' : 
+                isSpeaking ? 'speaking' :
+                isListening ? 'listening' :
+                voiceModeEnabled && speechServiceConnected ? 'listening' : 
+                'idle'
+              )
             }
           />
 

@@ -36,6 +36,11 @@ import { InlineToolExecutions, InlineToolPill, Segment, ToolExecution } from './
 import { useToolCalling } from '../hooks/useToolCalling';
 import { useMCPACPIntegration } from '../hooks/useMCPACPIntegration';
 
+// New agentic UI components
+import AIBackdrop, { AIBackdropProps } from './AIBackdrop';
+import AgentActivityStream, { AgentStep } from './chat/AgentActivityStream';
+import LiveThinkingPanel from './chat/LiveThinkingPanel';
+
 // Unified Tool Integration
 import { useUnifiedToolIntegration } from '../hooks/useUnifiedToolIntegration';
 import { createRemoteChatIntegration } from '../services/remoteChatIntegration';
@@ -196,6 +201,12 @@ export default function GlassChatPiP() {
   // Streaming thinking state - for showing thinking as pill during streaming
   const [streamingThinking, setStreamingThinking] = useState<string | null>(null);
 
+  // Agentic activity stream state
+  const [agentSteps, setAgentSteps] = useState<AgentStep[]>([]);
+  // Real-time thinking text (shown via LiveThinkingPanel while streaming)
+  const [streamingThoughtText, setStreamingThoughtText] = useState('');
+  const [thoughtExpanded, setThoughtExpanded] = useState(true);
+
   // Refresh greeting periodically when random mode is enabled
   useEffect(() => {
     if (appSettings.greeting?.useRandomGreeting) {
@@ -254,6 +265,27 @@ export default function GlassChatPiP() {
   }, [voiceModeEnabled, speechService.isConnected, speechService.isListening, speechService.startListening, speechService.stopListening]);
   // Copy functionality state
   // Local state no longer needed here
+
+  // Derive orb state from agentic activity (Change 6)
+  const orbState = useMemo((): 'idle' | 'listening' | 'thinking' | 'speaking' | 'processing' | 'ggwave' => {
+    if (isTyping && agenticMode && agentSteps.some((s) => s.type === 'tool_call' && s.status === 'running'))
+      return 'processing';
+    if (isTyping && streamingThoughtText.length > 0) return 'thinking';
+    if (isTyping) return 'thinking';
+    if (voiceModeEnabled && speechService.isListening) return 'listening';
+    if (droidModeEnabled && speechService.isSpeaking) return 'speaking';
+    return 'idle';
+  }, [isTyping, agenticMode, agentSteps, streamingThoughtText, voiceModeEnabled, droidModeEnabled, speechService.isListening, speechService.isSpeaking]);
+
+  // Derive AIBackdrop state
+  const backdropState = useMemo((): AIBackdropProps['state'] => {
+    if (isTyping && agenticMode && agentSteps.some((s) => s.type === 'tool_call' && s.status === 'running'))
+      return 'tool_executing';
+    if (isTyping && streamingThoughtText.length > 0) return 'thinking';
+    if (isTyping) return 'streaming';
+    if (droidModeEnabled && speechService.isSpeaking) return 'speaking';
+    return 'idle';
+  }, [isTyping, agenticMode, agentSteps, streamingThoughtText, droidModeEnabled, speechService.isSpeaking]);
 
   // Refs
   const inputRef = useRef<HTMLInputElement>(null);
@@ -525,6 +557,8 @@ export default function GlassChatPiP() {
 
     setIsTyping(true);
     setCurrentResponse('');
+    setAgentSteps([]); // Reset agent steps for each new conversation turn
+    setStreamingThoughtText(''); // Reset live thinking text
 
     try {
       // Web mode: route through Supabase → desktop poller → Ollama → Supabase
@@ -554,6 +588,7 @@ export default function GlassChatPiP() {
       setActiveToolExecutions([]); // Clear tool executions when done
       setStreamingThinking(null); // Clear streaming thinking when done
       setStreamingSegments([]); // Clear streaming segments when done
+      setStreamingThoughtText(''); // Clear live thinking text when done
     }
   };
 
@@ -682,11 +717,13 @@ export default function GlassChatPiP() {
 
         if (update.type === 'thinking') {
           capturedThinking = update.thinking || '';
-          responseContent = `💭 **Thinking...**\n\n${update.thinking}${update.thinking.endsWith('.') || update.thinking.endsWith('!') || update.thinking.endsWith('?') ? '' : '▋'}`;
+          setStreamingThoughtText(capturedThinking);
+          responseContent = ''; // don't show thinking in legacy response area; LiveThinkingPanel handles it
         } else if (update.type === 'response') {
           if (update.thinking) {
             capturedThinking = update.thinking;
-            responseContent = `💭 **Thought Process:**\n\n${update.thinking}\n\n---\n\n**Answer:**\n\n${update.response}${update.response.endsWith('.') || update.response.endsWith('!') || update.response.endsWith('?') ? '' : '▋'}`;
+            setStreamingThoughtText(capturedThinking);
+            responseContent = `${update.response}${update.response.endsWith('.') || update.response.endsWith('!') || update.response.endsWith('?') ? '' : '▋'}`;
           } else {
             responseContent = `${update.response}${update.response.endsWith('.') || update.response.endsWith('!') || update.response.endsWith('?') ? '' : '▋'}`;
           }
@@ -711,7 +748,8 @@ export default function GlassChatPiP() {
         } else if (update.type === 'done') {
           if (update.thinking) {
             capturedThinking = update.thinking;
-            responseContent = `💭 **Thought Process:**\n\n${update.thinking}\n\n---\n\n**Answer:**\n\n${update.response}`;
+            setStreamingThoughtText(capturedThinking);
+            responseContent = update.response;
           } else {
             responseContent = update.response;
           }
@@ -1214,7 +1252,10 @@ Remember: Output ONLY the JSON tool call when you need to use a tool. No explana
       {
         onStreamUpdate: (text) => setCurrentResponse(text),
         onToolExecutionsUpdate: (execs) => setActiveToolExecutions(execs),
-        onThinkingUpdate: (thinking) => setStreamingThinking(thinking),
+        onThinkingUpdate: (thinking) => {
+          setStreamingThinking(thinking);
+          setStreamingThoughtText(thinking);
+        },
         onSegmentUpdate: (segs) => {
           lastSegments = segs;
           setStreamingSegments(segs);
@@ -3023,6 +3064,9 @@ TOOL FORMAT:
           margin: `${padding}px`
         } as React.CSSProperties}
       >
+        {/* AI Backdrop — Gemini-style animated glow (Behind everything else) */}
+        <AIBackdrop state={backdropState} />
+
         {/* Chat Sidebar */}
         {!state.collapsed && (
           <div className={cn("chat-sidebar", sidebarCollapsed && "collapsed")}>
@@ -3131,6 +3175,7 @@ TOOL FORMAT:
                 isSpeaking={false} // TODO: Track TTS state
                 isListening={speechService.isListening}
                 placeholder={currentGreeting}
+                orbState={orbState}
               />
             ) : (
               <ExpandedHeader
@@ -3238,7 +3283,29 @@ TOOL FORMAT:
                       showDetails={true}
                     />
                   )}
-                  
+
+                  {/* Agent Activity Stream — Cursor-style live step feed */}
+                  {(agentSteps.length > 0 || (isTyping && agenticMode)) && (
+                    <AgentActivityStream
+                      steps={agentSteps}
+                      isActive={isTyping && agenticMode}
+                      stepCount={agentSteps.length}
+                      maxSteps={8}
+                      theme={theme}
+                    />
+                  )}
+
+                  {/* Live Thinking Panel — real-time thought tokens */}
+                  {(streamingThoughtText || (isTyping && streamingThinking)) && (
+                    <LiveThinkingPanel
+                      text={streamingThoughtText}
+                      isStreaming={isTyping}
+                      isExpanded={thoughtExpanded}
+                      onToggle={() => setThoughtExpanded((v) => !v)}
+                      theme={theme}
+                    />
+                  )}
+
                   {/* Show streaming response in expanded mode */}
                   {isTyping && (currentResponse || streamingSegments.length > 0) && (
                     <motion.div

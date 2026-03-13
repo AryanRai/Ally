@@ -152,11 +152,32 @@ const ChatInput = forwardRef<HTMLInputElement, ChatInputProps>(({
     }
   };
 
+  // Derive mode label and colour for the indicator bar
+  const modeBarInfo = (() => {
+    if (toolsEnabled && agenticMode && ptcMode)
+      return { dot: 'bg-cyan-400', label: 'PTC', extra: `· ${currentModel}${mcpToolCount > 0 ? ` · ${mcpToolCount} tools` : ''}` };
+    if (toolsEnabled && agenticMode)
+      return { dot: 'bg-amber-400', label: 'Agentic', extra: `· ${currentModel}${mcpToolCount > 0 ? ` · ${mcpToolCount} tools` : ''}` };
+    if (toolsEnabled)
+      return { dot: 'bg-green-400', label: 'Ask', extra: `· ${currentModel}${mcpToolCount > 0 ? ` · ${mcpToolCount} tools` : ''}` };
+    return { dot: 'bg-gray-400', label: 'Basic', extra: `· ${currentModel}` };
+  })();
+
   return (
     <div className={cn(
       "border-t p-3",
       ThemeUtils.getBorderClass(platform, theme)
     )}>
+      {/* Mode indicator bar */}
+      <div className="flex items-center gap-1.5 mb-2 px-0.5">
+        <span className={cn('w-1.5 h-1.5 rounded-full flex-shrink-0', modeBarInfo.dot)} />
+        <span className="text-[10px] text-white/50 truncate">
+          <span className="text-white/70 font-medium">{modeBarInfo.label}</span>
+          {' '}
+          <span className="text-white/30">{modeBarInfo.extra}</span>
+        </span>
+      </div>
+
       {/* Quick context actions */}
       <div className="flex flex-wrap gap-1 mb-2">
         {/* Context actions */}

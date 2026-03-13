@@ -20,6 +20,8 @@ export interface ToolExecution {
   error?: string;
   startTime: number;
   endTime?: number;
+  /** When true this tool ran in a parallel batch alongside siblings */
+  isParallel?: boolean;
 }
 
 /**
@@ -277,6 +279,9 @@ export function ThinkingPill({ thinking, theme }: ThinkingPillProps) {
       >
         <Brain className="w-3 h-3 text-purple-400" />
         <span className="font-medium">Thinking</span>
+        {!expanded && thinking.length > 0 && (
+          <span className="text-[10px] opacity-50">· {thinking.length.toLocaleString()} chars</span>
+        )}
         {expanded ? <ChevronUp className="w-3 h-3 opacity-50" /> : <ChevronDown className="w-3 h-3 opacity-50" />}
       </button>
       
@@ -318,15 +323,35 @@ interface InlineToolExecutionsProps {
   thinking?: string;
 }
 
+/**
+ * Container for multiple tool executions shown inline.
+ * Parallel tool calls are grouped under a "Running N in parallel" label.
+ */
 export function InlineToolExecutions({ tools, theme, thinking }: InlineToolExecutionsProps) {
   if (tools.length === 0 && !thinking) return null;
+
+  // Separate parallel from sequential tools
+  const parallelTools = tools.filter((t) => t.isParallel);
+  const sequentialTools = tools.filter((t) => !t.isParallel);
 
   return (
     <div className="flex flex-wrap items-center gap-1 my-2">
       {thinking && <ThinkingPill thinking={thinking} theme={theme} />}
-      {tools.map(tool => (
+      {sequentialTools.map((tool) => (
         <InlineToolIndicator key={tool.id} tool={tool} theme={theme} />
       ))}
+      {parallelTools.length > 0 && (
+        <div className="w-full">
+          <div className="text-[10px] text-white/30 mb-1 font-mono">
+            ⚡ Running {parallelTools.length} in parallel
+          </div>
+          <div className="flex flex-wrap gap-1 border-b border-white/10 pb-2">
+            {parallelTools.map((tool) => (
+              <InlineToolIndicator key={tool.id} tool={tool} theme={theme} />
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -490,13 +515,26 @@ export function InlineToolPill({ execution, theme = 'dark' }: { execution: ToolE
       <motion.button
         onClick={() => setExpanded((e) => !e)}
         className={cn(
-          'inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-xs font-mono',
+          'relative inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-xs font-mono overflow-hidden',
           'border transition-all cursor-pointer select-none',
           pillClass
         )}
         animate={isError ? { x: [0, -3, 3, -3, 3, 0] } : {}}
         transition={{ duration: 0.4 }}
       >
+        {/* Shimmer overlay for running state */}
+        {isRunning && (
+          <motion.span
+            aria-hidden="true"
+            className="absolute inset-0 pointer-events-none"
+            style={{
+              background: 'linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.12) 50%, transparent 100%)',
+              backgroundSize: '200% 100%',
+            }}
+            animate={{ backgroundPosition: ['200% 0%', '-200% 0%'] }}
+            transition={{ duration: 1.5, repeat: Infinity, ease: 'linear' }}
+          />
+        )}
         <span>{icon}</span>
         <span className="text-white/70">{label}</span>
         {isRunning && (
@@ -532,8 +570,13 @@ export function InlineToolPill({ execution, theme = 'dark' }: { execution: ToolE
             )}
             {/* Output / Error section */}
             <div className="p-2">
-              <div className="text-white/30 text-[10px] mb-1">
-                {isError ? 'ERROR' : 'OUTPUT'}
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-white/30 text-[10px]">
+                  {isError ? 'ERROR' : 'OUTPUT'}
+                </span>
+                {durationMs !== undefined && (
+                  <span className="text-white/30 text-[10px] font-mono">{durationMs}ms</span>
+                )}
               </div>
               {isRunning ? (
                 <span className="text-blue-300/60 italic">running…</span>
