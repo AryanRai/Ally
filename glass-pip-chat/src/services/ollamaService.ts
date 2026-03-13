@@ -1,6 +1,5 @@
 import axios from 'axios';
-import { streamText, type ModelMessage } from 'ai';
-import { getModel, type ProviderMode, type ProviderKeys } from './providers.js';
+import { GoogleGenAI } from '@google/genai';
 
 export interface OllamaModel {
   name: string;
@@ -89,34 +88,6 @@ export interface ThinkingChunk {
   content: string;
   isComplete: boolean;
 }
-
-// ---------------------------------------------------------------------------
-// Vercel AI SDK helpers
-// ---------------------------------------------------------------------------
-
-/**
- * Convert internal ChatMessage[] to CoreMessage[] for Vercel AI SDK.
- * System messages are removed from the array — pass them via the `system`
- * parameter in streamText() instead.
- */
-function toAISDKMessages(messages: ChatMessage[]): ModelMessage[] {
-  return messages
-    .filter((m) => m.role !== 'system')
-    .filter((m): m is ChatMessage & { role: 'user' | 'assistant' } =>
-      m.role === 'user' || m.role === 'assistant'
-    )
-    .map((m) => ({
-      role: m.role,
-      content: m.content,
-    }));
-}
-
-/** Extract the system prompt from a ChatMessage array. */
-function extractSystemPrompt(messages: ChatMessage[]): string | undefined {
-  return messages.find((m) => m.role === 'system')?.content;
-}
-
-// ---------------------------------------------------------------------------
 
 export class OllamaService {
   private config: ServiceConfig;
@@ -344,28 +315,182 @@ export class OllamaService {
     ];
   }
 
-  // Chat with Gemini — delegates to unified Vercel AI SDK streaming
+  // Chat with Gemini using the SDK
   private async chatGemini(
     messages: ChatMessage[],
     model: string,
     onProgress?: (chunk: string) => void
   ): Promise<string> {
-    if (!this.config.geminiApiKey) {
-      throw new Error('Gemini API key not configured');
+    try {
+      if (!this.config.geminiApiKey) {
+        throw new Error('Gemini API key not configured');
+      }
+
+      const ai = new GoogleGenAI({ apiKey: this.config.geminiApiKey });
+
+      // Extract system instruction
+      const systemMsg = messages.find(m => m.role === 'system');
+      
+      // Build contents array for multi-turn conversation
+      const nonSystemMessages = messages.filter(m => m.role !== 'system');
+      
+      // For simple single message, use direct content
+      if (nonSystemMessages.length === 1) {
+        console.log(`🚀 Sending Gemini request (simple) - Model: ${model}`);
+        
+        const response = await ai.models.generateContent({
+          model,
+          contents: nonSystemMessages[0].content,
+          config: {
+            ...(systemMsg && { systemInstruction: systemMsg.content }),
+            temperature: 0.7,
+          }
+        });
+
+        const content = response.text || '';
+        
+        if (onProgress && content) {
+          onProgress(content);
+        }
+
+        return content;
+      }
+
+      // For multi-turn, build proper contents array
+      const contents: Array<{ role: string; parts: Array<{ text: string }> }> = [];
+      for (const msg of nonSystemMessages) {
+        const role = msg.role === 'assistant' ? 'model' : 'user';
+        const lastContent = contents[contents.length - 1];
+        
+        if (lastContent && lastContent.role === role) {
+          lastContent.parts[0].text += '\n\n' + msg.content;
+        } else {
+          contents.push({ role, parts: [{ text: msg.content }] });
+        }
+      }
+
+      // Ensure first message is from user
+      if (contents.length > 0 && contents[0].role === 'model') {
+        contents.unshift({ role: 'user', parts: [{ text: 'Hello' }] });
+      }
+
+      console.log(`🚀 Sending Gemini request (multi-turn) - Model: ${model}, Messages: ${contents.length}`);
+
+      const response = await ai.models.generateContent({
+        model,
+        contents,
+        config: {
+          ...(systemMsg && { systemInstruction: systemMsg.content }),
+          temperature: 0.7,
+        }
+      });
+
+      const content = response.text || '';
+      
+      if (onProgress && content) {
+        onProgress(content);
+      }
+
+      return content;
+    } catch (error: any) {
+      console.error('Gemini request failed:', error);
+      
+      let errorMessage = `Gemini API Error: ${error.message}`;
+      
+      if (error.message?.includes('404')) {
+        errorMessage += `\n\n🔍 Model Not Found:\n• Model "${model}" may not exist\n• Try: gemini-2.0-flash or gemini-1.5-flash`;
+      } else if (error.message?.includes('401') || error.message?.includes('403')) {
+        errorMessage += '\n\n🔑 Authentication Error:\n• Your API key is invalid\n• Get a new key from https://aistudio.google.com/apikey';
+      } else if (error.message?.includes('429')) {
+        errorMessage += '\n\n⏱️ Rate Limited:\n• Too many requests\n• Wait a moment and try again';
+      }
+      
+      throw new Error(errorMessage);
     }
-    return this.streamChatWithAI(messages, model, 'gemini', onProgress);
   }
 
-  // Stream chat with Gemini — delegates to unified Vercel AI SDK streaming
+  // Stream chat with Gemini using the SDK
   async streamChatGemini(
     messages: ChatMessage[],
     model: string,
     onProgress: (chunk: ThinkingChunk) => void
   ): Promise<string> {
-    if (!this.config.geminiApiKey) {
-      throw new Error('Gemini API key not configured');
+    try {
+      if (!this.config.geminiApiKey) {
+        throw new Error('Gemini API key not configured');
+      }
+
+      const ai = new GoogleGenAI({ apiKey: this.config.geminiApiKey });
+
+      // Extract system instruction
+      const systemMsg = messages.find(m => m.role === 'system');
+      
+      // Build contents
+      const nonSystemMessages = messages.filter(m => m.role !== 'system');
+      
+      // For simple single message
+      let contents: string | Array<{ role: string; parts: Array<{ text: string }> }>;
+      
+      if (nonSystemMessages.length === 1) {
+        contents = nonSystemMessages[0].content;
+      } else {
+        // Build multi-turn contents
+        const contentArray: Array<{ role: string; parts: Array<{ text: string }> }> = [];
+        for (const msg of nonSystemMessages) {
+          const role = msg.role === 'assistant' ? 'model' : 'user';
+          const lastContent = contentArray[contentArray.length - 1];
+          
+          if (lastContent && lastContent.role === role) {
+            lastContent.parts[0].text += '\n\n' + msg.content;
+          } else {
+            contentArray.push({ role, parts: [{ text: msg.content }] });
+          }
+        }
+
+        // Ensure first message is from user
+        if (contentArray.length > 0 && contentArray[0].role === 'model') {
+          contentArray.unshift({ role: 'user', parts: [{ text: 'Hello' }] });
+        }
+        
+        contents = contentArray;
+      }
+
+      console.log(`🚀 Streaming Gemini request - Model: ${model}`);
+
+      const responseStream = await ai.models.generateContentStream({
+        model,
+        contents,
+        config: {
+          ...(systemMsg && { systemInstruction: systemMsg.content }),
+          temperature: 0.7,
+        }
+      });
+
+      let fullResponse = '';
+
+      for await (const chunk of responseStream) {
+        const text = chunk.text || '';
+        if (text) {
+          fullResponse += text;
+          onProgress({
+            type: 'response',
+            content: fullResponse,
+            isComplete: false
+          });
+        }
+      }
+
+      onProgress({
+        type: 'done',
+        content: fullResponse,
+        isComplete: true
+      });
+
+      return fullResponse;
+    } catch (error: any) {
+      console.error('Gemini streaming failed:', error);
+      throw new Error(`Gemini streaming error: ${error.message}`);
     }
-    return this.streamChatWithThinkingViaAI(messages, model, 'gemini', onProgress);
   }
 
   // Get Ollama models specifically
@@ -455,156 +580,236 @@ export class OllamaService {
     }
   }
 
-  // Chat with Ollama — delegates to unified Vercel AI SDK streaming
+  // Chat with Ollama
   private async chatOllama(
     messages: ChatMessage[],
     model: string,
     onProgress?: (chunk: string) => void
   ): Promise<string> {
-    console.log(`Sending chat request to Ollama with model: ${model}`);
-    return this.streamChatWithAI(messages, model, 'ollama', onProgress);
+    try {
+      console.log(`Sending chat request to Ollama with model: ${model}`);
+      console.log('Messages:', messages);
+      
+      // Always use streaming for better UX
+      return this.streamChatOllama(messages, model, onProgress);
+      
+    } catch (error: any) {
+      console.error('Ollama chat request failed:', {
+        message: error.message,
+        status: error.response?.status,
+        statusText: error.response?.statusText,
+        data: error.response?.data,
+        code: error.code,
+        url: `${this.config.ollamaBaseUrl}/api/chat`,
+        model
+      });
+      
+      if (axios.isAxiosError(error)) {
+        if (error.response?.status === 404) {
+          throw new Error(`Model "${model}" not found. Please check if the model is installed using: ollama list`);
+        }
+        if (error.code === 'ECONNREFUSED') {
+          throw new Error('Cannot connect to Ollama. Make sure Ollama is running on http://localhost:11434');
+        }
+        if (error.response?.status === 400) {
+          throw new Error(`Bad request to Ollama: ${error.response.data?.error || 'Invalid request format'}`);
+        }
+        if (error.code === 'ENOTFOUND') {
+          throw new Error('Ollama server not found. Check if Ollama is installed and running.');
+        }
+        if (error.code === 'ECONNABORTED' || error.message.includes('timeout')) {
+          throw new Error(`Request timeout after ${this.config.ollamaStreamTimeout / 1000}s. Try increasing timeout in settings or using a smaller model.`);
+        }
+      }
+      throw new Error(`Failed to get response from Ollama: ${error.message}`);
+    }
   }
 
-  // Chat with OpenRouter — delegates to unified Vercel AI SDK streaming
+  // Chat with OpenRouter using axios (more reliable in Electron)
   private async chatOpenRouter(
     messages: ChatMessage[],
     model: string,
     onProgress?: (chunk: string) => void,
     abortSignal?: AbortSignal
   ): Promise<string> {
-    if (!this.config.openRouterApiKey) {
-      throw new Error('OpenRouter API key not configured');
-    }
-
-    if (!this.config.openRouterApiKey.startsWith('sk-or-')) {
-      throw new Error('Invalid OpenRouter API key format. Key should start with "sk-or-"');
-    }
-
-    if (!model.includes('/')) {
-      throw new Error(
-        `❌ Invalid OpenRouter model format: "${model}"\n\n` +
-        `✅ OpenRouter models should be in format "provider/model-name"\n\n` +
-        `Examples:\n• anthropic/claude-3.5-sonnet\n• openai/gpt-4o\n• google/gemini-pro-1.5\n\n` +
-        `Please select a valid model from the dropdown in Provider Settings.`
-      );
-    }
-
-    console.log(`🚀 Sending OpenRouter request via Vercel AI SDK - Model: ${model}`);
-    return this.streamChatWithAI(messages, model, 'openrouter', onProgress, abortSignal);
-  }
-
-  // ---------------------------------------------------------------------------
-  // Unified Vercel AI SDK streaming — replaces all provider-specific fetch loops
-  // ---------------------------------------------------------------------------
-
-  /**
-   * Stream a chat response via Vercel AI SDK's streamText.
-   * Handles all three providers (Ollama, OpenRouter, Gemini) with a single implementation.
-   */
-  private async streamChatWithAI(
-    messages: ChatMessage[],
-    model: string,
-    providerMode: ProviderMode,
-    onProgress?: (chunk: string) => void,
-    abortSignal?: AbortSignal
-  ): Promise<string> {
-    const systemPrompt = extractSystemPrompt(messages);
-    const coreMessages = toAISDKMessages(messages);
-    const keys: ProviderKeys = {
-      openRouterApiKey: this.config.openRouterApiKey,
-      geminiApiKey: this.config.geminiApiKey,
-      ollamaBaseUrl: this.config.ollamaBaseUrl,
-    };
-
     try {
-      const result = streamText({
-        model: getModel(providerMode, model, 'chat', keys),
-        system: systemPrompt,
-        messages: coreMessages,
-        abortSignal,
+      if (!this.config.openRouterApiKey) {
+        throw new Error('OpenRouter API key not configured');
+      }
+
+      if (!this.config.openRouterApiKey.startsWith('sk-or-')) {
+        throw new Error('Invalid OpenRouter API key format. Key should start with "sk-or-"');
+      }
+
+      // Validate model name for OpenRouter
+      if (!model.includes('/')) {
+        console.error(`Invalid OpenRouter model format: "${model}"`);
+        throw new Error(`❌ Invalid OpenRouter model format: "${model}"\n\n✅ OpenRouter models should be in format "provider/model-name"\n\nExamples:\n• anthropic/claude-3.5-sonnet\n• openai/gpt-4o\n• google/gemini-pro-1.5\n\nPlease select a valid model from the dropdown in Provider Settings.`);
+      }
+
+      console.log(`🚀 Sending OpenRouter request with axios - Model: ${model}`);
+
+      // Create axios cancel token from abort signal
+      const cancelSource = axios.CancelToken.source();
+      if (abortSignal) {
+        abortSignal.addEventListener('abort', () => cancelSource.cancel('Request aborted by user'));
+      }
+
+      // Use non-streaming request with axios (more reliable in Electron)
+      const response = await axios.post(`${this.config.openRouterBaseUrl}/chat/completions`, {
+        model,
+        messages: messages.map(msg => ({ role: msg.role, content: msg.content })),
+        stream: false,
+        temperature: 0.7,
+        max_tokens: 4000
+      }, {
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${this.config.openRouterApiKey}`,
+          'HTTP-Referer': 'https://glass-pip-chat.local',
+          'X-Title': 'Glass PiP Chat'
+        },
+        timeout: this.config.openRouterTimeout,
+        cancelToken: cancelSource.token
       });
 
-      let fullResponse = '';
-      for await (const chunk of result.textStream) {
-        fullResponse += chunk;
-        onProgress?.(fullResponse);
+      const content = response.data.choices?.[0]?.message?.content || '';
+      
+      // Simulate streaming by sending the content in chunks
+      if (onProgress && content) {
+        const words = content.split(' ');
+        let accumulatedContent = '';
+        for (const word of words) {
+          if (abortSignal?.aborted) break;
+          accumulatedContent += word + ' ';
+          onProgress(accumulatedContent);
+          // Small delay to simulate streaming
+          await new Promise(resolve => setTimeout(resolve, 50));
+        }
       }
-      return fullResponse;
+
+      return content;
     } catch (error: any) {
-      if (error?.name === 'AbortError') {
+      console.error('OpenRouter axios request failed:', error);
+      
+      if (axios.isCancel(error)) {
         throw Object.assign(new Error('Request aborted by user'), { name: 'AbortError' });
       }
-      throw error;
+      
+      if (error.response) {
+        const status = error.response.status;
+        const errorData = error.response.data;
+        
+        let errorMessage = `OpenRouter API Error (${status}): ${errorData?.error?.message || error.response.statusText}`;
+        
+        if (status === 400) {
+          errorMessage += '\n\n🔧 Troubleshooting:\n• Check if the model name is correct\n• Verify your API key is valid\n• Ensure you have sufficient credits';
+        } else if (status === 401) {
+          errorMessage += '\n\n🔑 Authentication Error:\n• Your API key is invalid or expired\n• Get a new key from https://openrouter.ai/keys';
+        } else if (status === 402) {
+          errorMessage += '\n\n💳 Payment Required:\n• Insufficient credits in your OpenRouter account\n• Add credits at https://openrouter.ai/credits';
+        }
+        
+        throw new Error(errorMessage);
+      }
+      
+      throw new Error(`Network error: ${error.message}\n\nTroubleshooting:\n• Check your internet connection\n• Verify OpenRouter API is accessible`);
     }
   }
 
-  /**
-   * Stream a chat response with thinking/response phase detection,
-   * using Vercel AI SDK's streamText for all providers.
-   *
-   * Handles <think>…</think> blocks emitted by some models (e.g. QwQ, DeepSeek)
-   * and maps them to ThinkingChunk events.
-   */
-  private async streamChatWithThinkingViaAI(
+  // Stream chat response for Ollama
+  private async streamChatOllama(
     messages: ChatMessage[],
     model: string,
-    providerMode: ProviderMode,
-    onProgress: (chunk: ThinkingChunk) => void,
-    abortSignal?: AbortSignal
+    onProgress?: (chunk: string) => void
   ): Promise<string> {
-    const systemPrompt = extractSystemPrompt(messages);
-    const coreMessages = toAISDKMessages(messages);
-    const keys: ProviderKeys = {
-      openRouterApiKey: this.config.openRouterApiKey,
-      geminiApiKey: this.config.geminiApiKey,
-      ollamaBaseUrl: this.config.ollamaBaseUrl,
-    };
-
     try {
-      const result = streamText({
-        model: getModel(providerMode, model, 'chat', keys),
-        system: systemPrompt,
-        messages: coreMessages,
-        abortSignal,
+      console.log('Starting streaming request...');
+      
+      // Create abort controller for timeout handling
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => {
+        controller.abort();
+      }, this.config.ollamaStreamTimeout);
+
+      const response = await fetch(`${this.config.ollamaBaseUrl}/api/chat`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model,
+          messages,
+          stream: true,
+        }),
+        signal: controller.signal,
       });
 
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        if (response.status === 404) {
+          throw new Error(`Model "${model}" not found. Please check if the model is installed using: ollama list`);
+        }
+        throw new Error(`HTTP error! status: ${response.status} - ${response.statusText}`);
+      }
+
+      const reader = response.body?.getReader();
+      if (!reader) {
+        throw new Error('Failed to get response reader');
+      }
+
       let fullResponse = '';
-      let inThinkBlock = false;
 
-      for await (const chunk of result.textStream) {
-        fullResponse += chunk;
-
-        // Detect open/close <think> tags in the accumulated buffer
-        if (!inThinkBlock && fullResponse.includes('<think>')) {
-          inThinkBlock = true;
-        }
-        if (inThinkBlock && fullResponse.includes('</think>')) {
-          inThinkBlock = false;
-        }
-
-        // Extract parts
-        const thinkMatch = fullResponse.match(/<think>([\s\S]*?)<\/think>/);
-        if (thinkMatch) {
-          const afterThink = fullResponse.replace(thinkMatch[0], '').trim();
-          onProgress({ type: 'thinking', content: thinkMatch[1], isComplete: !inThinkBlock });
-          if (afterThink) {
-            onProgress({ type: 'response', content: afterThink, isComplete: false });
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          
+          if (done) {
+            console.log('Stream completed');
+            break;
           }
-        } else if (inThinkBlock) {
-          const thinkContent = fullResponse.replace('<think>', '');
-          onProgress({ type: 'thinking', content: thinkContent, isComplete: false });
-        } else {
-          onProgress({ type: 'response', content: fullResponse, isComplete: false });
+
+          const chunk = new TextDecoder().decode(value);
+          const lines = chunk.split('\n').filter(line => line.trim());
+
+          for (const line of lines) {
+            try {
+              const data: ChatResponse = JSON.parse(line);
+              
+              if (data.message?.content) {
+                const content = data.message.content;
+                fullResponse += content;
+                onProgress?.(fullResponse);
+              }
+              
+              if (data.done) {
+                console.log('Stream marked as done');
+                break;
+              }
+            } catch (parseError) {
+              console.warn('Failed to parse streaming chunk:', parseError, 'Line:', line);
+            }
+          }
         }
+      } finally {
+        reader.releaseLock();
       }
 
-      onProgress({ type: 'done', content: fullResponse, isComplete: true });
+      console.log('Final response length:', fullResponse.length);
       return fullResponse;
+      
     } catch (error: any) {
-      if (error?.name === 'AbortError') {
-        onProgress({ type: 'done', content: 'Stopped by user', isComplete: false });
-        return 'Stopped by user';
+      console.error('Streaming chat failed:', error);
+      
+      if (error.name === 'AbortError') {
+        throw new Error(`Request timeout after ${this.config.ollamaStreamTimeout / 1000}s. Try using a smaller model or increase timeout in settings.`);
       }
+      
+      if (error.message.includes('fetch')) {
+        throw new Error('Cannot connect to Ollama. Make sure Ollama is running on http://localhost:11434');
+      }
+      
       throw error;
     }
   }
@@ -638,11 +843,214 @@ export class OllamaService {
     });
     
     if (useGemini) {
-      return this.streamChatWithThinkingViaAI(messages, mappedModel, 'gemini', onProgress, abortSignal);
+      // Use Gemini streaming
+      return this.streamChatGemini(messages, mappedModel, onProgress);
     } else if (useOpenRouter) {
-      return this.streamChatWithThinkingViaAI(messages, mappedModel, 'openrouter', onProgress, abortSignal);
+      // Use axios-based approach for OpenRouter with thinking simulation
+      const response = await this.chatOpenRouter(messages, mappedModel, (cumulativeContent) => {
+        // Convert regular progress to thinking chunks - content is already cumulative
+        onProgress({
+          type: 'response',
+          content: cumulativeContent,
+          isComplete: false
+        });
+      }, abortSignal);
+      
+      // Send final completion
+      onProgress({
+        type: 'done',
+        content: response,
+        isComplete: true
+      });
+      
+      return response;
     } else {
-      return this.streamChatWithThinkingViaAI(messages, mappedModel, 'ollama', onProgress, abortSignal);
+      return this.streamChatWithThinkingOllama(messages, mappedModel, onProgress, abortSignal);
+    }
+  }
+
+  // Enhanced streaming with thinking for Ollama
+  private async streamChatWithThinkingOllama(
+    messages: ChatMessage[],
+    model: string,
+    onProgress: (chunk: ThinkingChunk) => void,
+    abortSignal?: AbortSignal
+  ): Promise<string> {
+    try {
+      console.log('Starting enhanced Ollama streaming with thinking detection...');
+      
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => {
+        controller.abort();
+      }, this.config.ollamaStreamTimeout);
+
+      if (abortSignal) {
+        abortSignal.addEventListener('abort', () => {
+          controller.abort();
+        });
+      }
+
+      const response = await fetch(`${this.config.ollamaBaseUrl}/api/chat`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model,
+          messages,
+          stream: true,
+          options: {
+            temperature: 0.7,
+            top_p: 0.9,
+            num_predict: -1
+          }
+        }),
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const reader = response.body?.getReader();
+      if (!reader) {
+        throw new Error('Failed to get response reader');
+      }
+
+      let fullResponse = '';
+      let thinkingContent = '';
+      let responseContent = '';
+      let isInThinking = false;
+      let responseStarted = false;
+      let buffer = '';
+
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          
+          if (done) {
+            console.log('Stream completed');
+            onProgress({ type: 'done', content: fullResponse, isComplete: true });
+            break;
+          }
+
+          const chunk = new TextDecoder().decode(value);
+          const lines = chunk.split('\n').filter(line => line.trim());
+
+          for (const line of lines) {
+            try {
+              const data: ChatResponse = JSON.parse(line);
+              
+              if (data.message?.content) {
+                const content = data.message.content;
+                buffer += content;
+                
+                // Enhanced thinking detection patterns
+                const thinkingPatterns = [
+                  /let me think/i, /i need to/i, /first,?\s/i, /considering/i, /analyzing/i,
+                  /looking at/i, /examining/i, /hmm,?\s/i, /well,?\s/i, /actually,?\s/i,
+                  /wait,?\s/i, /hold on/i, /thinking about/i, /let's see/i, /i should/i,
+                  /i would/i, /i could/i, /perhaps/i, /maybe/i, /it seems/i, /it appears/i,
+                  /based on/i, /given that/i, /since/i, /because/i, /due to/i, /as a result/i,
+                  /therefore/i, /thus/i, /so/i, /hence/i, /consequently/i
+                ];
+
+                const responsePatterns = [
+                  /^(here's|here is)/i, /^(the answer)/i, /^(to answer)/i, /^(in summary)/i,
+                  /^(in conclusion)/i, /^(finally)/i, /^(ultimately)/i, /^(overall)/i,
+                  /^(basically)/i, /^(simply put)/i, /^(in other words)/i, /^(that means)/i,
+                  /^(this means)/i, /^(so the)/i, /^(therefore the)/i, /^(thus the)/i
+                ];
+
+                // Detect thinking phase
+                if (!responseStarted && !isInThinking) {
+                  for (const pattern of thinkingPatterns) {
+                    if (pattern.test(buffer)) {
+                      isInThinking = true;
+                      console.log('Detected thinking phase with pattern:', pattern);
+                      break;
+                    }
+                  }
+                }
+
+                // Detect response phase
+                if (isInThinking && !responseStarted) {
+                  for (const pattern of responsePatterns) {
+                    if (pattern.test(content)) {
+                      isInThinking = false;
+                      responseStarted = true;
+                      console.log('Detected response phase with pattern:', pattern);
+                      break;
+                    }
+                  }
+                  
+                  if (content.includes('.') || content.includes('!') || content.includes('?')) {
+                    const sentences = buffer.split(/[.!?]+/);
+                    if (sentences.length > 2) {
+                      isInThinking = false;
+                      responseStarted = true;
+                      console.log('Detected response phase after multiple sentences');
+                    }
+                  }
+                }
+
+                // Auto-transition to response after reasonable thinking length
+                if (isInThinking && thinkingContent.length > 300 && !responseStarted) {
+                  isInThinking = false;
+                  responseStarted = true;
+                  console.log('Auto-transitioning to response phase after long thinking');
+                }
+
+                // Send real-time updates
+                if (isInThinking) {
+                  thinkingContent += content;
+                  onProgress({ 
+                    type: 'thinking', 
+                    content: thinkingContent, 
+                    isComplete: false 
+                  });
+                } else {
+                  responseContent += content;
+                  onProgress({ 
+                    type: 'response', 
+                    content: responseContent, 
+                    isComplete: false 
+                  });
+                }
+
+                fullResponse += content;
+                
+                // Add small delay for real-time effect
+                await new Promise(resolve => setTimeout(resolve, 5));
+              }
+              
+              if (data.done) {
+                onProgress({ type: 'done', content: fullResponse, isComplete: true });
+                break;
+              }
+            } catch (parseError) {
+              console.warn('Failed to parse streaming chunk:', parseError);
+            }
+          }
+        }
+      } finally {
+        reader.releaseLock();
+      }
+
+      return fullResponse;
+      
+    } catch (error: any) {
+      console.error('Enhanced streaming failed:', error);
+      
+      if (error.name === 'AbortError') {
+        console.log('Streaming was aborted by user');
+        onProgress({ type: 'done', content: 'Stopped by user', isComplete: false });
+        return 'Stopped by user';
+      }
+      
+      throw error;
     }
   }
 
