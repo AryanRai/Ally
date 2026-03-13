@@ -185,25 +185,25 @@ export function buildPTCSummaryPrompt(
   toolCallLog: PTCToolCallLog[]
 ): string {
   const outputSection = stdout.trim()
-    ? `SCRIPT OUTPUT:\n${stdout.slice(0, MAX_STDOUT_CHARS)}`
-    : '(script produced no output)';
+    ? `TOOL OUTPUT:\n${stdout.slice(0, MAX_STDOUT_CHARS)}`
+    : '(no output from tools)';
 
   const errorSection = stderr.trim()
-    ? `\nSCRIPT ERRORS:\n${stderr.slice(0, 2000)}`
+    ? `\nERRORS:\n${stderr.slice(0, 2000)}`
     : '';
 
-  const toolSummary =
-    toolCallLog.length > 0
-      ? `\nTOOLS CALLED: ${toolCallLog.map((t) => t.tool).join(', ')}`
-      : '';
+  return `You are a helpful assistant. Answer the user's question directly using the tool output below.
 
-  return `You ran a script to answer the user's query. Summarize the results naturally.
+USER QUESTION: ${userQuery}
 
-USER QUERY: ${userQuery}
+${outputSection}${errorSection}
 
-${outputSection}${errorSection}${toolSummary}
-
-Provide a clear, concise answer based on the script output. Do not repeat raw JSON — summarize naturally.`;
+RULES:
+- Answer in first person, directly and naturally. Do NOT say "the script returned" or "the tool responded".
+- Do NOT narrate what happened — just give the answer.
+- If the output contains the answer, state it plainly (e.g. "It's 3:45 PM" not "The time tool returned 3:45 PM").
+- If there were errors, explain what went wrong simply.
+- Be concise.`;
 }
 
 // ---------------------------------------------------------------------------
@@ -353,6 +353,7 @@ export function extractScriptFromResponse(response: string): string | null {
 
 /**
  * Serialize MCP tool results — unwraps content arrays to plain text.
+ * Also handles built-in tool result shapes for readable stdout.
  */
 export function serializeToolResult(result: unknown): unknown {
   if (result === null || result === undefined) return null;
@@ -363,6 +364,40 @@ export function serializeToolResult(result: unknown): unknown {
       .filter((c) => c.type === 'text')
       .map((c) => c.text);
     if (textParts.length > 0) return textParts.join('\n');
+  }
+
+  if (typeof result === 'object' && result !== null) {
+    const r = result as Record<string, unknown>;
+
+    // MCP content wrapper: { content: [{ type: 'text', text: '...' }] }
+    if (Array.isArray(r.content)) {
+      const textParts = (r.content as Array<{ type: string; text: string }>)
+        .filter((c) => c.type === 'text')
+        .map((c) => c.text);
+      if (textParts.length > 0) return textParts.join('\n');
+    }
+
+    // Built-in: get_current_time → { formatted, timezone }
+    if (r.formatted && r.timezone) return `${r.formatted} (${r.timezone})`;
+
+    // Built-in: calculate → { expression, result }
+    if (r.expression !== undefined && r.result !== undefined)
+      return `${r.expression} = ${r.result}`;
+
+    // Built-in: execute_command → { stdout, stderr, success }
+    if (r.stdout !== undefined) {
+      const out = String(r.stdout).trim();
+      const err = String(r.stderr || '').trim();
+      if (out) return err ? `${out}\n${err}` : out;
+      if (err) return err;
+      return r.success ? 'Command completed successfully.' : `Command failed.`;
+    }
+
+    // fetch_url → { body, status }
+    if (r.body !== undefined) return String(r.body);
+
+    // Error shape
+    if (r.error) return `Error: ${r.error}`;
   }
 
   return result;

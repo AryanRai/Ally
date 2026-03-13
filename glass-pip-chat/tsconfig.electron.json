@@ -1,0 +1,22 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "node",
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "skipLibCheck": true,
+    "strict": false,
+    "outDir": "dist",
+    "resolveJsonModule": true,
+    "allowJs": true,
+    "declaration": false
+  },
+  "files": [
+    "electron/main.ts",
+    "src/services/ollamaService.ts",
+    "src/services/providers.ts",
+    "src/services/speechService.ts",
+    "src/services/browserBridgeServer.ts"
+  ]
+}
