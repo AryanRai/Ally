@@ -207,16 +207,70 @@ Provide a clear, concise answer based on the script output. Do not repeat raw JS
 }
 
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Sandbox security helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Patterns that indicate dangerous or prohibited script content.
+ * These are checked BEFORE the script is executed so we never even pass
+ * dangerous code to the Function constructor.
+ */
+const DANGEROUS_PATTERNS: Array<{ re: RegExp; reason: string }> = [
+  { re: /\brequire\s*\(/, reason: 'require() is not available in the sandbox' },
+  { re: /\bimport\s+/, reason: 'import statements are not allowed in the sandbox' },
+  { re: /\bprocess\s*\./, reason: 'process object access is not allowed' },
+  { re: /\b__dirname\b|\b__filename\b/, reason: '__dirname and __filename are not available in the sandbox' },
+  { re: /\beval\s*\(/, reason: 'eval() is not allowed in the sandbox' },
+  { re: /new\s+Function\s*\(/, reason: 'new Function() is not allowed in the sandbox' },
+  { re: /\bsetInterval\s*\(|\bsetTimeout\s*\(/, reason: 'Timer functions are not allowed' },
+];
+
+/**
+ * Validate a PTC script before execution.
+ * Returns an error string if the script contains disallowed patterns, or null if safe.
+ */
+export function validateScript(script: string): string | null {
+  for (const { re, reason } of DANGEROUS_PATTERNS) {
+    if (re.test(script)) {
+      return reason;
+    }
+  }
+  return null;
+}
+
+/**
+ * Build the shadow object used to mask Node/browser globals inside the sandbox.
+ * These names are passed as argument names to the Function constructor; the
+ * corresponding values are all `undefined`, effectively preventing access to
+ * the real globals even if the script references them.
+ */
+const SHADOWED_GLOBALS = [
+  'require', 'process', 'global', 'globalThis',
+  'Buffer', '__dirname', '__filename',
+  'module', 'exports',
+  'setInterval', 'setTimeout', 'clearInterval', 'clearTimeout',
+  'fetch', 'XMLHttpRequest', 'WebSocket',
+  'eval', 'Function',
+  'window', 'document', 'navigator', 'location',
+] as const;
+
+// ---------------------------------------------------------------------------
 // Script executor
 // ---------------------------------------------------------------------------
 
 /**
- * Execute a PTC script in a sandboxed AsyncFunction.
+ * Execute a PTC script in a hardened sandboxed AsyncFunction.
  *
  * The script body has access to:
  *   - await tool_name(params) for each registered tool
  *   - print(value) to capture output
  *   - Standard JS (no require, no fetch, no fs, no global)
+ *
+ * Security measures:
+ *   - Pre-execution static validator (DANGEROUS_PATTERNS)
+ *   - All known dangerous globals shadowed as undefined arguments
+ *   - Errors are sanitised — internal file paths are stripped from messages
  */
 export async function executeScript(
   script: string,
@@ -229,6 +283,18 @@ export async function executeScript(
   const stderrLines: string[] = [];
   const toolCallLog: PTCToolCallLog[] = [];
   let toolCallCount = 0;
+
+  // --- Static validation ---
+  const validationError = validateScript(script);
+  if (validationError) {
+    return {
+      stdout: '',
+      stderr: `Script rejected by sandbox validator: ${validationError}`,
+      success: false,
+      toolCallLog: [],
+      executionTimeMs: Date.now() - startTime,
+    };
+  }
 
   // Build tool stubs — each is an async function that calls toolExecutor
   const toolStubs: Record<string, (params?: unknown) => Promise<unknown>> = {};
@@ -283,18 +349,21 @@ export async function executeScript(
   `;
 
   try {
-    // Create sandboxed async function
+    // Create sandboxed async function.
+    // Shadow dangerous globals by declaring them as named parameters whose
+    // values are all `undefined` — they override any outer bindings.
     // eslint-disable-next-line no-new-func
     const fn = new Function(
       'print',
       '__ptcStderr',
       ...toolNames,
+      ...SHADOWED_GLOBALS,
       `return (async () => { ${wrappedScript} })()`
     );
 
     // Execute with timeout
     await Promise.race([
-      fn(printFn, stderrFn, ...toolValues) as Promise<void>,
+      fn(printFn, stderrFn, ...toolValues, ...SHADOWED_GLOBALS.map(() => undefined)) as Promise<void>,
       new Promise<void>((_, reject) =>
         setTimeout(
           () => reject(new Error(`Script timed out after ${SCRIPT_TIMEOUT_MS / 1000}s`)),
@@ -303,8 +372,15 @@ export async function executeScript(
       ),
     ]);
   } catch (err) {
-    const errMsg = err instanceof Error ? err.message : String(err);
-    stderrLines.push(errMsg);
+    // Sanitise the error message — strip internal file paths that may leak
+    // information about the host environment.
+    // Match Windows paths: (C:\...:123:456) or Unix paths: (/path/to/file:123:456)
+    const raw = err instanceof Error ? err.message : String(err);
+    const sanitized = raw
+      .replace(/\([A-Za-z]:[/\\][^)]*?:\d+:\d+\)/g, '')  // Windows paths
+      .replace(/\(\/[^)]*?:\d+:\d+\)/g, '')               // Unix paths
+      .trim();
+    stderrLines.push(sanitized);
   }
 
   return {

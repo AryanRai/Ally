@@ -152,6 +152,15 @@ const pipAPI = {
       ipcRenderer.on('speech:recognized', handler);
       return () => ipcRenderer.removeListener('speech:recognized', handler);
     },
+    onSpeechInterim: (callback: (data: { text: string }) => void) => {
+      const handler = (_: any, data: any) => callback(data);
+      ipcRenderer.on('speech:interim', handler);
+      return () => ipcRenderer.removeListener('speech:interim', handler);
+    },
+    onSpeechInterrupted: (callback: () => void) => {
+      ipcRenderer.on('speech:interrupted', callback);
+      return () => ipcRenderer.removeListener('speech:interrupted', callback);
+    },
     onSpeechGenerated: (callback: (data: any) => void) => {
       const handler = (_: any, data: any) => callback(data);
       ipcRenderer.on('speech:generated', handler);
@@ -215,6 +224,12 @@ const pipAPI = {
     return () => ipcRenderer.removeListener('toggle-speech', callback);
   },
 
+  // Listen for terminal panel toggle event
+  onToggleTerminal: (callback: () => void) => {
+    ipcRenderer.on('toggle-terminal', callback);
+    return () => ipcRenderer.removeListener('toggle-terminal', callback);
+  },
+
   // MCP/ACP Integration
   mcp: {
     readConfig: () => ipcRenderer.invoke('mcp:readConfig'),
@@ -270,6 +285,27 @@ const pipAPI = {
       ipcRenderer.on('accessibility-context-update', handler);
       return () => ipcRenderer.removeListener('accessibility-context-update', handler);
     }
+  },
+
+  // Terminal session manager bridge
+  terminal: {
+    createSession: (name: string) => ipcRenderer.invoke('terminal:createSession', name),
+    listSessions: () => ipcRenderer.invoke('terminal:listSessions'),
+    executeInSession: (sessionId: string, command: string) =>
+      ipcRenderer.invoke('terminal:executeInSession', sessionId, command),
+    killSession: (sessionId: string) => ipcRenderer.invoke('terminal:killSession', sessionId),
+
+    onOutput: (callback: (data: { sessionId: string; line: string }) => void) => {
+      const handler = (_: any, data: { sessionId: string; line: string }) => callback(data);
+      ipcRenderer.on('terminal:output', handler);
+      return () => ipcRenderer.removeListener('terminal:output', handler);
+    },
+
+    onSessionUpdate: (callback: (session: any) => void) => {
+      const handler = (_: any, session: any) => callback(session);
+      ipcRenderer.on('terminal:sessionUpdate', handler);
+      return () => ipcRenderer.removeListener('terminal:sessionUpdate', handler);
+    },
   }
 };
 

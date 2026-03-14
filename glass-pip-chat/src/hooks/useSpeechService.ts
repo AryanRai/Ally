@@ -22,6 +22,7 @@ export interface UseSpeechServiceReturn {
   status: SpeechStatus;
   isConnected: boolean;
   isListening: boolean;
+  isSpeaking: boolean;
   
   // Actions
   connect: () => Promise<void>;
@@ -34,6 +35,7 @@ export interface UseSpeechServiceReturn {
   
   // Events
   lastRecognizedText: string | null;
+  interimTranscript: string | null;
   speechError: string | null;
   
   // Audio playback
@@ -64,7 +66,9 @@ export function useSpeechService(): UseSpeechServiceReturn {
   });
   
   const [lastRecognizedText, setLastRecognizedText] = useState<string | null>(null);
+  const [interimTranscript, setInterimTranscript] = useState<string | null>(null);
   const [speechError, setSpeechError] = useState<string | null>(null);
+  const [isSpeaking, setIsSpeaking] = useState<boolean>(false);
   const [voiceModeEnabled, setVoiceModeEnabled] = useState<boolean>(false);
   const [droidModeEnabled, setDroidModeEnabled] = useState<boolean>(false);
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -113,9 +117,36 @@ export function useSpeechService(): UseSpeechServiceReturn {
     cleanupFunctions.push(
       window.pip.speech.onSpeechRecognized((result: SpeechRecognitionResult) => {
         setLastRecognizedText(result.text);
+        setInterimTranscript(null);  // Clear interim on final result
         setSpeechError(null);
       })
     );
+
+    // Interim transcript (Deepgram streaming STT)
+    if (window.pip.speech.onSpeechInterim) {
+      cleanupFunctions.push(
+        window.pip.speech.onSpeechInterim((data: { text: string }) => {
+          setInterimTranscript(data.text);
+        })
+      );
+    }
+
+    // Speech interrupted (barge-in)
+    if (window.pip.speech.onSpeechInterrupted) {
+      cleanupFunctions.push(
+        window.pip.speech.onSpeechInterrupted(() => {
+          setIsSpeaking(false);
+          audioQueueRef.current = [];
+          pendingChunksRef.current.clear();
+          currentStreamIdRef.current = null;
+          isPlayingRef.current = false;
+          if (currentAudioSourceRef.current) {
+            try { currentAudioSourceRef.current.stop(); } catch (_) {}
+            currentAudioSourceRef.current = null;
+          }
+        })
+      );
+    }
 
     cleanupFunctions.push(
       window.pip.speech.onSpeechError((error: string) => {
@@ -164,6 +195,7 @@ export function useSpeechService(): UseSpeechServiceReturn {
     cleanupFunctions.push(
       window.pip.speech.onTTSStreamStart((data: any) => {
         console.log('🎵 TTS streaming started:', data.message_id);
+        setIsSpeaking(true);
         const messageId = data.message_id || 'default';
         
         // Check if we have a stale current stream that's not actually playing
@@ -219,10 +251,12 @@ export function useSpeechService(): UseSpeechServiceReturn {
         
         // If this was the current stream, prepare to start next
         if (currentStreamIdRef.current === messageId) {
-          // Wait for current audio to finish, then start next stream
           const checkAndStartNext = () => {
             if (!isPlayingRef.current && audioQueueRef.current.length === 0) {
               startNextPendingStream();
+              if (pendingChunksRef.current.size === 0) {
+                setIsSpeaking(false);
+              }
             } else {
               setTimeout(checkAndStartNext, 100);
             }
@@ -236,6 +270,7 @@ export function useSpeechService(): UseSpeechServiceReturn {
       window.pip.speech.onTTSStreamError((error: string) => {
         console.error('❌ TTS streaming error:', error);
         setSpeechError(`TTS streaming error: ${error}`);
+        setIsSpeaking(false);
         
         // Clear current stream and start next
         currentStreamIdRef.current = null;
@@ -510,7 +545,6 @@ export function useSpeechService(): UseSpeechServiceReturn {
       }
     }
 
-    // Clear all queues and reset state
     const hadPendingStreams = pendingChunksRef.current.size > 0;
     const hadQueuedAudio = audioQueueRef.current.length > 0;
     const hadCurrentStream = currentStreamIdRef.current !== null;
@@ -519,8 +553,8 @@ export function useSpeechService(): UseSpeechServiceReturn {
     pendingChunksRef.current.clear();
     currentStreamIdRef.current = null;
     isPlayingRef.current = false;
+    setIsSpeaking(false);
 
-    // Also tell the speech service to clear its queue
     if (window.pip?.speech) {
       window.pip.speech.clearTTSQueue?.();
     }
@@ -560,6 +594,7 @@ export function useSpeechService(): UseSpeechServiceReturn {
     status,
     isConnected: status.connected,
     isListening: status.listening,
+    isSpeaking,
     
     // Actions
     connect,
@@ -572,6 +607,7 @@ export function useSpeechService(): UseSpeechServiceReturn {
     
     // Events
     lastRecognizedText,
+    interimTranscript,
     speechError,
     
     // Audio playback

@@ -1,12 +1,22 @@
 /**
  * System Prompts Editor Component
- * 
- * Allows viewing and editing system prompts for different chat modes
+ *
+ * Allows viewing and editing system prompts for all five chat modes.
+ * Prompts are defined in systemPrompts.ts; this editor only handles
+ * display and localStorage persistence.
  */
 
 import React, { useState, useEffect } from 'react';
-import { Save, RotateCcw, Copy, Check, Wrench, MessageSquare } from 'lucide-react';
+import { Save, RotateCcw, Copy, Check, Wrench, MessageSquare, Bot, Terminal, Cpu } from 'lucide-react';
 import { cn } from '../lib/utils';
+import {
+  PromptMode,
+  DEFAULT_PROMPTS,
+  STORAGE_KEYS,
+  getPrompt,
+  savePrompt,
+  resetPrompt,
+} from '../services/systemPrompts';
 
 interface SystemPromptsEditorProps {
   className?: string;
@@ -15,80 +25,101 @@ interface SystemPromptsEditorProps {
   onPromptUpdate?: (promptId: string, newPrompt: string) => void;
 }
 
-// Storage keys
-const STORAGE_KEYS = {
-  basicPrompt: 'ally-prompt-basic',
-  toolPrompt: 'ally-prompt-tools'
-};
+interface TabDef {
+  id: PromptMode;
+  label: string;
+  icon: React.ReactNode;
+  description: string;
+  accentClass: string;
+}
 
-// Default prompts
-const DEFAULT_PROMPTS = {
-  basic: `You are Ally, a helpful AI assistant running on the user's computer. You have access to their system through tools when enabled. Be concise, friendly, and helpful. If the user asks about files, time, or system info and you don't have tool access, let them know they can enable tools for that.`,
-  
-  tools: `You are an AI assistant with tool access. When you need information you don't have, use a tool.
-
-TO USE A TOOL, output ONLY this JSON (nothing else before or after):
-{"name": "tool_name", "parameters": {}}
-
-RULES:
-- For questions about time, files, calculations - USE A TOOL, don't explain
-- Output the JSON tool call IMMEDIATELY, no explanation needed
-- After getting results, give a natural response incorporating the data
-- For casual chat (greetings, opinions) - just respond normally, no tools`
-};
+const TABS: TabDef[] = [
+  {
+    id: 'basic',
+    label: 'Basic Chat',
+    icon: <MessageSquare className="w-3 h-3" />,
+    description: 'Used for regular conversations without tool access.',
+    accentClass: 'bg-blue-500/20 text-blue-400 border-blue-500/30',
+  },
+  {
+    id: 'tool',
+    label: 'Tool Mode',
+    icon: <Wrench className="w-3 h-3" />,
+    description: 'Used when a single tool call is needed. Defines when to use (and not use) tools.',
+    accentClass: 'bg-purple-500/20 text-purple-400 border-purple-500/30',
+  },
+  {
+    id: 'agentic',
+    label: 'Agentic',
+    icon: <Bot className="w-3 h-3" />,
+    description: 'Multi-step agentic loop. Controls planning, step limits, and error handling.',
+    accentClass: 'bg-green-500/20 text-green-400 border-green-500/30',
+  },
+  {
+    id: 'ptc',
+    label: 'PTC',
+    icon: <Terminal className="w-3 h-3" />,
+    description: 'Programmatic Tool Calling — LLM writes a JS script, sandbox executes it.',
+    accentClass: 'bg-amber-500/20 text-amber-400 border-amber-500/30',
+  },
+  {
+    id: 'robot',
+    label: 'Robot',
+    icon: <Cpu className="w-3 h-3" />,
+    description: 'Robot Control Mode. Safety contract + DroidCore Comms v4.0 intent list.',
+    accentClass: 'bg-red-500/20 text-red-400 border-red-500/30',
+  },
+];
 
 export const SystemPromptsEditor: React.FC<SystemPromptsEditorProps> = ({
   className = '',
   theme,
   platform,
-  onPromptUpdate
+  onPromptUpdate,
 }) => {
-  const [activeTab, setActiveTab] = useState<'basic' | 'tools'>('basic');
-  const [basicPrompt, setBasicPrompt] = useState(DEFAULT_PROMPTS.basic);
-  const [toolPrompt, setToolPrompt] = useState(DEFAULT_PROMPTS.tools);
+  const [activeTab, setActiveTab] = useState<PromptMode>('basic');
+  const [prompts, setPrompts] = useState<Record<PromptMode, string>>(() => ({
+    basic: DEFAULT_PROMPTS.basic,
+    tool: DEFAULT_PROMPTS.tool,
+    agentic: DEFAULT_PROMPTS.agentic,
+    ptc: DEFAULT_PROMPTS.ptc,
+    robot: DEFAULT_PROMPTS.robot,
+  }));
   const [hasChanges, setHasChanges] = useState(false);
   const [copied, setCopied] = useState(false);
   const [saved, setSaved] = useState(false);
 
   // Load saved prompts on mount
   useEffect(() => {
-    const savedBasic = localStorage.getItem(STORAGE_KEYS.basicPrompt);
-    const savedTool = localStorage.getItem(STORAGE_KEYS.toolPrompt);
-    
-    if (savedBasic) setBasicPrompt(savedBasic);
-    if (savedTool) setToolPrompt(savedTool);
+    const loaded: Record<PromptMode, string> = {
+      basic: getPrompt('basic'),
+      tool: getPrompt('tool'),
+      agentic: getPrompt('agentic'),
+      ptc: getPrompt('ptc'),
+      robot: getPrompt('robot'),
+    };
+    setPrompts(loaded);
   }, []);
 
-  const currentPrompt = activeTab === 'basic' ? basicPrompt : toolPrompt;
-  const setCurrentPrompt = activeTab === 'basic' ? setBasicPrompt : setToolPrompt;
+  const currentPrompt = prompts[activeTab];
 
   const handleChange = (value: string) => {
-    setCurrentPrompt(value);
+    setPrompts((prev) => ({ ...prev, [activeTab]: value }));
     setHasChanges(true);
     setSaved(false);
   };
 
   const handleSave = () => {
-    if (activeTab === 'basic') {
-      localStorage.setItem(STORAGE_KEYS.basicPrompt, basicPrompt);
-      onPromptUpdate?.('basic', basicPrompt);
-    } else {
-      localStorage.setItem(STORAGE_KEYS.toolPrompt, toolPrompt);
-      onPromptUpdate?.('tools', toolPrompt);
-    }
+    savePrompt(activeTab, prompts[activeTab]);
+    onPromptUpdate?.(activeTab, prompts[activeTab]);
     setHasChanges(false);
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
   };
 
   const handleReset = () => {
-    if (activeTab === 'basic') {
-      setBasicPrompt(DEFAULT_PROMPTS.basic);
-      localStorage.removeItem(STORAGE_KEYS.basicPrompt);
-    } else {
-      setToolPrompt(DEFAULT_PROMPTS.tools);
-      localStorage.removeItem(STORAGE_KEYS.toolPrompt);
-    }
+    resetPrompt(activeTab);
+    setPrompts((prev) => ({ ...prev, [activeTab]: DEFAULT_PROMPTS[activeTab] }));
     setHasChanges(false);
   };
 
@@ -98,59 +129,39 @@ export const SystemPromptsEditor: React.FC<SystemPromptsEditorProps> = ({
     setTimeout(() => setCopied(false), 2000);
   };
 
+  const isDark = platform === 'win32' || theme === 'dark';
+  const activeTabDef = TABS.find((t) => t.id === activeTab)!;
+
   return (
     <div className={cn('space-y-3', className)}>
-      <h3 className={cn(
-        'text-sm font-medium',
-        platform === 'win32' ? 'text-white/80' : theme === 'dark' ? 'text-white/80' : 'text-black/80'
-      )}>
+      <h3 className={cn('text-sm font-medium', isDark ? 'text-white/80' : 'text-black/80')}>
         System Prompts
       </h3>
 
       {/* Tab Selector */}
-      <div className="flex gap-2">
-        <button
-          onClick={() => setActiveTab('basic')}
-          className={cn(
-            'flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg transition-colors',
-            activeTab === 'basic'
-              ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30'
-              : platform === 'win32'
-                ? 'border border-white/10 text-white/60 hover:bg-white/5'
-                : theme === 'dark'
-                  ? 'border border-white/10 text-white/60 hover:bg-white/5'
-                  : 'border border-black/10 text-black/60 hover:bg-black/5'
-          )}
-        >
-          <MessageSquare className="w-3 h-3" />
-          Basic Chat
-        </button>
-        <button
-          onClick={() => setActiveTab('tools')}
-          className={cn(
-            'flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg transition-colors',
-            activeTab === 'tools'
-              ? 'bg-purple-500/20 text-purple-400 border border-purple-500/30'
-              : platform === 'win32'
-                ? 'border border-white/10 text-white/60 hover:bg-white/5'
-                : theme === 'dark'
-                  ? 'border border-white/10 text-white/60 hover:bg-white/5'
-                  : 'border border-black/10 text-black/60 hover:bg-black/5'
-          )}
-        >
-          <Wrench className="w-3 h-3" />
-          Tool Calling
-        </button>
+      <div className="flex flex-wrap gap-1.5">
+        {TABS.map((tab) => (
+          <button
+            key={tab.id}
+            onClick={() => { setActiveTab(tab.id); setHasChanges(false); }}
+            className={cn(
+              'flex items-center gap-1.5 px-2.5 py-1 text-xs rounded-lg transition-colors border',
+              activeTab === tab.id
+                ? tab.accentClass
+                : isDark
+                  ? 'border-white/10 text-white/60 hover:bg-white/5'
+                  : 'border-black/10 text-black/60 hover:bg-black/5',
+            )}
+          >
+            {tab.icon}
+            {tab.label}
+          </button>
+        ))}
       </div>
 
       {/* Description */}
-      <p className={cn(
-        'text-xs',
-        platform === 'win32' ? 'text-white/50' : theme === 'dark' ? 'text-gray-400' : 'text-gray-500'
-      )}>
-        {activeTab === 'basic' 
-          ? 'Used for regular conversations without tool access.'
-          : 'Used when tools are enabled. Defines how the AI should use tools.'}
+      <p className={cn('text-xs', isDark ? 'text-white/50' : 'text-gray-500')}>
+        {activeTabDef.description}
       </p>
 
       {/* Editor */}
@@ -159,16 +170,14 @@ export const SystemPromptsEditor: React.FC<SystemPromptsEditorProps> = ({
           value={currentPrompt}
           onChange={(e) => handleChange(e.target.value)}
           className={cn(
-            'w-full h-40 p-3 rounded-lg border text-xs font-mono resize-y',
-            platform === 'win32'
+            'w-full h-48 p-3 rounded-lg border text-xs font-mono resize-y',
+            isDark
               ? 'bg-black/30 border-white/20 text-white/90 placeholder-white/40'
-              : theme === 'dark'
-                ? 'bg-gray-800 border-gray-600 text-white placeholder-gray-400'
-                : 'bg-white border-gray-300 text-gray-900 placeholder-gray-500'
+              : 'bg-white border-gray-300 text-gray-900 placeholder-gray-500',
           )}
           placeholder="Enter system prompt..."
         />
-        
+
         {/* Action buttons */}
         <div className="absolute top-2 right-2 flex gap-1">
           <button
@@ -177,11 +186,9 @@ export const SystemPromptsEditor: React.FC<SystemPromptsEditorProps> = ({
               'p-1.5 rounded transition-colors',
               copied
                 ? 'bg-green-500/20 text-green-400'
-                : platform === 'win32'
+                : isDark
                   ? 'bg-black/30 hover:bg-white/10 text-white/60'
-                  : theme === 'dark'
-                    ? 'bg-gray-700 hover:bg-gray-600 text-gray-400'
-                    : 'bg-gray-100 hover:bg-gray-200 text-gray-600'
+                  : 'bg-gray-100 hover:bg-gray-200 text-gray-600',
             )}
             title="Copy"
           >
@@ -196,17 +203,13 @@ export const SystemPromptsEditor: React.FC<SystemPromptsEditorProps> = ({
           onClick={handleReset}
           className={cn(
             'flex items-center gap-1 px-2 py-1 text-xs rounded transition-colors',
-            platform === 'win32'
-              ? 'text-white/60 hover:bg-white/10'
-              : theme === 'dark'
-                ? 'text-gray-400 hover:bg-gray-700'
-                : 'text-gray-600 hover:bg-gray-100'
+            isDark ? 'text-white/60 hover:bg-white/10' : 'text-gray-600 hover:bg-gray-100',
           )}
         >
           <RotateCcw className="w-3 h-3" />
           Reset to Default
         </button>
-        
+
         <button
           onClick={handleSave}
           disabled={!hasChanges}
@@ -216,11 +219,9 @@ export const SystemPromptsEditor: React.FC<SystemPromptsEditorProps> = ({
               ? 'bg-green-500/20 text-green-400'
               : hasChanges
                 ? 'bg-blue-500 text-white hover:bg-blue-600'
-                : platform === 'win32'
+                : isDark
                   ? 'bg-white/10 text-white/40 cursor-not-allowed'
-                  : theme === 'dark'
-                    ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
-                    : 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                  : 'bg-gray-200 text-gray-400 cursor-not-allowed',
           )}
         >
           {saved ? <Check className="w-3 h-3" /> : <Save className="w-3 h-3" />}
@@ -231,22 +232,27 @@ export const SystemPromptsEditor: React.FC<SystemPromptsEditorProps> = ({
       {/* Info */}
       <div className={cn(
         'p-2 rounded text-xs',
-        platform === 'win32'
+        isDark
           ? 'bg-blue-500/10 border border-blue-500/20 text-blue-300'
-          : theme === 'dark'
-            ? 'bg-blue-900/20 border border-blue-800/30 text-blue-300'
-            : 'bg-blue-50 border border-blue-200 text-blue-700'
+          : 'bg-blue-50 border border-blue-200 text-blue-700',
       )}>
-        💡 {activeTab === 'tools' 
-          ? 'The tool list is automatically added when tools are enabled. Edit the instructions above to change how the AI uses tools.'
-          : 'This prompt is used when the tool toggle is disabled.'}
+        💡 Changes are saved to localStorage and take effect on the next message.
+        {activeTab === 'tool' || activeTab === 'agentic'
+          ? ' The available tool list is appended automatically.'
+          : ''}
       </div>
     </div>
   );
 };
 
-// Export helper to get the current prompts
+// ---------------------------------------------------------------------------
+// Backwards-compatible helper (used by GlassChatPiP legacy code)
+// ---------------------------------------------------------------------------
 export const getSystemPrompts = () => ({
-  basic: localStorage.getItem(STORAGE_KEYS.basicPrompt) || DEFAULT_PROMPTS.basic,
-  tools: localStorage.getItem(STORAGE_KEYS.toolPrompt) || DEFAULT_PROMPTS.tools
+  basic: getPrompt('basic'),
+  tools: getPrompt('tool'),
+  agentic: getPrompt('agentic'),
+  ptc: getPrompt('ptc'),
+  robot: getPrompt('robot'),
 });
+

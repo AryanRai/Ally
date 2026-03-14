@@ -110,6 +110,8 @@ export interface PipAPI {
     onConnected: (callback: () => void) => () => void;
     onDisconnected: (callback: () => void) => () => void;
     onSpeechRecognized: (callback: (result: any) => void) => () => void;
+    onSpeechInterim: (callback: (data: { text: string }) => void) => () => void;
+    onSpeechInterrupted: (callback: () => void) => () => void;
     onSpeechGenerated: (callback: (data: any) => void) => () => void;
     onSpeechError: (callback: (error: string) => void) => () => void;
     onGGWaveSent: (callback: (data: any) => void) => () => void;

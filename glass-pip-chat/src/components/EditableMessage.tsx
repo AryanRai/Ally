@@ -192,6 +192,9 @@ function CollapsibleBlock({ section, theme, platform }: CollapsibleBlockProps) {
       >
         {iconEl}
         <span className="font-medium">{section.label}</span>
+        {!open && section.type === 'thinking' && section.content.length > 0 && (
+          <span className="opacity-50 text-[10px]">· {section.content.length.toLocaleString()} chars</span>
+        )}
         {open
           ? <ChevronDown className="w-3 h-3 opacity-50" />
           : <ChevronRight className="w-3 h-3 opacity-50" />}

@@ -11,7 +11,9 @@ import {
   Zap,
   ShieldCheck,
   ShieldAlert,
-  Code2
+  Code2,
+  Terminal,
+  Cpu
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { ThemeUtils } from '../../utils/themeUtils';
@@ -42,6 +44,14 @@ interface ChatInputProps {
   onAutopilotToggle?: () => void;
   ptcMode?: boolean;
   onPtcModeToggle?: () => void;
+  /** Robot Control Mode — uses DroidCore/Comms v4.0 system prompt */
+  robotMode?: boolean;
+  onRobotModeToggle?: () => void;
+  /** HowYouSeeMe perception system availability */
+  howYouSeeMeAvailable?: boolean;
+  /** Terminal panel visibility + toggle */
+  showTerminal?: boolean;
+  onTerminalToggle?: () => void;
 }
 
 const ChatInput = forwardRef<HTMLInputElement, ChatInputProps>(({
@@ -68,6 +78,11 @@ const ChatInput = forwardRef<HTMLInputElement, ChatInputProps>(({
   onAutopilotToggle,
   ptcMode = false,
   onPtcModeToggle,
+  robotMode = false,
+  onRobotModeToggle,
+  howYouSeeMeAvailable = false,
+  showTerminal = false,
+  onTerminalToggle,
 }, ref) => {
   const [showToolbar, setShowToolbar] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -152,11 +167,34 @@ const ChatInput = forwardRef<HTMLInputElement, ChatInputProps>(({
     }
   };
 
+  // Derive mode label and colour for the indicator bar
+  const modeBarInfo = (() => {
+    if (robotMode)
+      return { dot: 'bg-red-400', label: 'Robot', extra: `· ${currentModel} · DroidCore` };
+    if (toolsEnabled && agenticMode && ptcMode)
+      return { dot: 'bg-cyan-400', label: 'PTC', extra: `· ${currentModel}${mcpToolCount > 0 ? ` · ${mcpToolCount} tools` : ''}` };
+    if (toolsEnabled && agenticMode)
+      return { dot: 'bg-amber-400', label: 'Agentic', extra: `· ${currentModel}${mcpToolCount > 0 ? ` · ${mcpToolCount} tools` : ''}` };
+    if (toolsEnabled)
+      return { dot: 'bg-green-400', label: 'Ask', extra: `· ${currentModel}${mcpToolCount > 0 ? ` · ${mcpToolCount} tools` : ''}` };
+    return { dot: 'bg-gray-400', label: 'Basic', extra: `· ${currentModel}` };
+  })();
+
   return (
     <div className={cn(
       "border-t p-3",
       ThemeUtils.getBorderClass(platform, theme)
     )}>
+      {/* Mode indicator bar */}
+      <div className="flex items-center gap-1.5 mb-2 px-0.5">
+        <span className={cn('w-1.5 h-1.5 rounded-full flex-shrink-0', modeBarInfo.dot)} />
+        <span className="text-[10px] text-white/50 truncate">
+          <span className="text-white/70 font-medium">{modeBarInfo.label}</span>
+          {' '}
+          <span className="text-white/30">{modeBarInfo.extra}</span>
+        </span>
+      </div>
+
       {/* Quick context actions */}
       <div className="flex flex-wrap gap-1 mb-2">
         {/* Context actions */}
@@ -304,6 +342,52 @@ const ChatInput = forwardRef<HTMLInputElement, ChatInputProps>(({
               >
                 <Code2 className="w-3 h-3" />
                 PTC
+              </button>
+            )}
+
+            {/* Robot mode toggle */}
+            {onRobotModeToggle && (
+              <button
+                onClick={onRobotModeToggle}
+                className={cn(
+                  "inline-flex items-center gap-1 px-2 py-1 text-[10px] rounded-lg transition-colors border",
+                  robotMode
+                    ? "bg-red-500/20 border-red-500/30 text-red-300"
+                    : "bg-white/5 hover:bg-white/10 border-white/10 text-white/60"
+                )}
+                title={
+                  robotMode
+                    ? `Robot Mode ON — DroidCore Comms v4.0${howYouSeeMeAvailable ? ' + HowYouSeeMe online' : ' (HowYouSeeMe offline)'}`
+                    : "Robot Mode OFF — enable for DroidCore + HowYouSeeMe perception"
+                }
+              >
+                <Cpu className="w-3 h-3" />
+                Robot
+                {robotMode && (
+                  <span
+                    className={cn(
+                      "w-1.5 h-1.5 rounded-full",
+                      howYouSeeMeAvailable ? "bg-green-400" : "bg-yellow-400"
+                    )}
+                  />
+                )}
+              </button>
+            )}
+
+            {/* Terminal toggle */}
+            {onTerminalToggle && (
+              <button
+                onClick={onTerminalToggle}
+                className={cn(
+                  "inline-flex items-center gap-1 px-2 py-1 text-[10px] rounded-lg transition-colors border",
+                  showTerminal
+                    ? "bg-green-500/20 border-green-500/30 text-green-300"
+                    : "bg-white/5 hover:bg-white/10 border-white/10 text-white/60"
+                )}
+                title={showTerminal ? "Hide terminal panel" : "Show terminal panel (Ctrl+Shift+`)"}
+              >
+                <Terminal className="w-3 h-3" />
+                Terminal
               </button>
             )}
 

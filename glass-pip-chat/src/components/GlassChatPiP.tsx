@@ -36,6 +36,12 @@ import { InlineToolExecutions, InlineToolPill, Segment, ToolExecution } from './
 import { useToolCalling } from '../hooks/useToolCalling';
 import { useMCPACPIntegration } from '../hooks/useMCPACPIntegration';
 
+// New agentic UI components
+import AIBackdrop, { AIBackdropProps } from './AIBackdrop';
+import AgentActivityStream, { AgentStep } from './chat/AgentActivityStream';
+import LiveThinkingPanel from './chat/LiveThinkingPanel';
+import TerminalPanel from './TerminalPanel';
+
 // Unified Tool Integration
 import { useUnifiedToolIntegration } from '../hooks/useUnifiedToolIntegration';
 import { createRemoteChatIntegration } from '../services/remoteChatIntegration';
@@ -54,6 +60,8 @@ import { ChatManager } from '../utils/chatManager';
 import { SettingsManager } from '../utils/settingsManager';
 import { Chat, Message } from '../types/chat';
 import { AppSettings } from '../types/settings';
+import { getPrompt } from '../services/systemPrompts';
+import { useHowYouSeeMe } from '../hooks/useHowYouSeeMe';
 
 export default function GlassChatPiP() {
   // Window and UI management
@@ -88,6 +96,12 @@ export default function GlassChatPiP() {
   const [agenticMode, setAgenticMode] = useState(true); // Default to agentic mode when tools are enabled
   // PTC mode - Programmatic Tool Calling: LLM writes a JS script, 2 LLM calls instead of N+1
   const [ptcMode, setPtcMode] = useState(() => localStorage.getItem('ally-ptc-mode') === 'true');
+  // Robot Control Mode — use DroidCore/Comms v4.0 system prompt, overrides basic prompt
+  const [robotMode, setRobotMode] = useState(() => localStorage.getItem('ally-robot-mode') === 'true');
+
+  // HowYouSeeMe perception integration — polls robot state when robot mode is active
+  const howYouSeeMe = useHowYouSeeMe(robotMode);
+
   // Autopilot mode - auto-approve all tool executions without confirmation
   const [autopilotMode, setAutopilotMode] = useState(() => {
     const saved = localStorage.getItem('ally-autopilot-mode');
@@ -185,6 +199,7 @@ export default function GlassChatPiP() {
   const [inputHistory, setInputHistory] = useState<string[]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
   const [showSpeechControls, setShowSpeechControls] = useState(false);
+  const [showTerminal, setShowTerminal] = useState(false);
   const [isContextExpanded, setIsContextExpanded] = useState(false);
   const [currentGreeting, setCurrentGreeting] = useState(() => GreetingUtils.getCurrentGreeting(appSettings));
   
@@ -195,6 +210,12 @@ export default function GlassChatPiP() {
   const [mcpServerCount, setMcpServerCount] = useState(0);
   // Streaming thinking state - for showing thinking as pill during streaming
   const [streamingThinking, setStreamingThinking] = useState<string | null>(null);
+
+  // Agentic activity stream state
+  const [agentSteps, setAgentSteps] = useState<AgentStep[]>([]);
+  // Real-time thinking text (shown via LiveThinkingPanel while streaming)
+  const [streamingThoughtText, setStreamingThoughtText] = useState('');
+  const [thoughtExpanded, setThoughtExpanded] = useState(true);
 
   // Refresh greeting periodically when random mode is enabled
   useEffect(() => {
@@ -254,6 +275,27 @@ export default function GlassChatPiP() {
   }, [voiceModeEnabled, speechService.isConnected, speechService.isListening, speechService.startListening, speechService.stopListening]);
   // Copy functionality state
   // Local state no longer needed here
+
+  // Derive orb state from agentic activity (Change 6)
+  const orbState = useMemo((): 'idle' | 'listening' | 'thinking' | 'speaking' | 'processing' | 'ggwave' => {
+    if (isTyping && agenticMode && agentSteps.some((s) => s.type === 'tool_call' && s.status === 'running'))
+      return 'processing';
+    if (isTyping && streamingThoughtText.length > 0) return 'thinking';
+    if (isTyping) return 'thinking';
+    if (voiceModeEnabled && speechService.isListening) return 'listening';
+    if (droidModeEnabled && speechService.isSpeaking) return 'speaking';
+    return 'idle';
+  }, [isTyping, agenticMode, agentSteps, streamingThoughtText, voiceModeEnabled, droidModeEnabled, speechService.isListening, speechService.isSpeaking]);
+
+  // Derive AIBackdrop state
+  const backdropState = useMemo((): AIBackdropProps['state'] => {
+    if (isTyping && agenticMode && agentSteps.some((s) => s.type === 'tool_call' && s.status === 'running'))
+      return 'tool_executing';
+    if (isTyping && streamingThoughtText.length > 0) return 'thinking';
+    if (isTyping) return 'streaming';
+    if (droidModeEnabled && speechService.isSpeaking) return 'speaking';
+    return 'idle';
+  }, [isTyping, agenticMode, agentSteps, streamingThoughtText, droidModeEnabled, speechService.isSpeaking]);
 
   // Refs
   const inputRef = useRef<HTMLInputElement>(null);
@@ -525,6 +567,8 @@ export default function GlassChatPiP() {
 
     setIsTyping(true);
     setCurrentResponse('');
+    setAgentSteps([]); // Reset agent steps for each new conversation turn
+    setStreamingThoughtText(''); // Reset live thinking text
 
     try {
       // Web mode: route through Supabase → desktop poller → Ollama → Supabase
@@ -554,6 +598,7 @@ export default function GlassChatPiP() {
       setActiveToolExecutions([]); // Clear tool executions when done
       setStreamingThinking(null); // Clear streaming thinking when done
       setStreamingSegments([]); // Clear streaming segments when done
+      setStreamingThoughtText(''); // Clear live thinking text when done
     }
   };
 
@@ -670,9 +715,12 @@ export default function GlassChatPiP() {
     let accumulatedResponse = '';
     let capturedThinking = ''; // capture thinking for saving in message
 
-    // Get the basic system prompt
-    const basicSystemPrompt = localStorage.getItem('ally-prompt-basic') || 
-      `You are Ally, a helpful AI assistant running on the user's computer. You have access to their system through tools when enabled. Be concise, friendly, and helpful. If the user asks about files, time, or system info and you don't have tool access, let them know they can enable tools for that.`;
+    // Get the basic system prompt — use robot prompt when robot mode is active
+    // Append live HowYouSeeMe state when available
+    const basePrompt = robotMode ? getPrompt('robot') : getPrompt('basic');
+    const basicSystemPrompt = robotMode
+      ? basePrompt + howYouSeeMe.liveContext
+      : basePrompt;
 
     const response = await ollamaIntegration.sendMessageToOllama(
       historySnapshot ?? cleanMessagesForLLM(activeChat?.messages || []),
@@ -682,11 +730,13 @@ export default function GlassChatPiP() {
 
         if (update.type === 'thinking') {
           capturedThinking = update.thinking || '';
-          responseContent = `💭 **Thinking...**\n\n${update.thinking}${update.thinking.endsWith('.') || update.thinking.endsWith('!') || update.thinking.endsWith('?') ? '' : '▋'}`;
+          setStreamingThoughtText(capturedThinking);
+          responseContent = ''; // don't show thinking in legacy response area; LiveThinkingPanel handles it
         } else if (update.type === 'response') {
           if (update.thinking) {
             capturedThinking = update.thinking;
-            responseContent = `💭 **Thought Process:**\n\n${update.thinking}\n\n---\n\n**Answer:**\n\n${update.response}${update.response.endsWith('.') || update.response.endsWith('!') || update.response.endsWith('?') ? '' : '▋'}`;
+            setStreamingThoughtText(capturedThinking);
+            responseContent = `${update.response}${update.response.endsWith('.') || update.response.endsWith('!') || update.response.endsWith('?') ? '' : '▋'}`;
           } else {
             responseContent = `${update.response}${update.response.endsWith('.') || update.response.endsWith('!') || update.response.endsWith('?') ? '' : '▋'}`;
           }
@@ -711,7 +761,8 @@ export default function GlassChatPiP() {
         } else if (update.type === 'done') {
           if (update.thinking) {
             capturedThinking = update.thinking;
-            responseContent = `💭 **Thought Process:**\n\n${update.thinking}\n\n---\n\n**Answer:**\n\n${update.response}`;
+            setStreamingThoughtText(capturedThinking);
+            responseContent = update.response;
           } else {
             responseContent = update.response;
           }
@@ -763,74 +814,9 @@ export default function GlassChatPiP() {
     }
     
     // Get saved tool prompt or use default - different prompts for agentic vs single-tool mode
-    const savedToolPrompt = localStorage.getItem('ally-prompt-tools') || 
-      (agenticMode 
-        ? `You are an AI assistant with access to powerful tools. You MUST use tools to get real information.
-
-⚠️ CRITICAL RULES:
-1. YOU DO NOT KNOW THE CURRENT TIME OR DATE! You must ALWAYS call get_current_time to get it.
-2. NEVER fabricate, simulate, or make up tool output. If you need to run a command, you MUST call execute_command. Do NOT write fake terminal output.
-3. NEVER pretend a tool succeeded without actually calling it. If a tool fails, say it failed.
-4. NEVER guess file contents, directory listings, or command output — use the appropriate tool.
-5. Output EXACTLY ONE JSON tool call per response — no explanations before it, no extra text.
-6. You will be called MULTIPLE times in a loop. Each time you output a tool call, it will be executed and the result given back to you. Then you can call another tool or give your final answer.
-7. Only give your final answer (plain text, NO JSON) when you have completed ALL steps the user asked for.
-8. Do NOT repeat raw tool results in your final answer — summarize naturally.
-9. ⚠️ NEVER use curl or wget — they don't work on this system. Use fetch_url tool for ALL HTTP requests.
-10. To open a URL in the browser, use browser_navigate (preferred) or execute_command with {"command": "start <url>"}.
-11. To interact with web pages (click buttons, type text, read content, send messages), use browser_* tools.
-12. For complex multi-step browser tasks (research, booking, shopping, sending messages on WhatsApp/email, form filling), use comet_run — it handles everything automatically.
-
-PERPLEXITY COMET — always use comet_run (not comet_ask directly):
-- {"name": "comet_run", "parameters": {"prompt": "your full task here"}}
-  → Fires the task, polls every 20s automatically, waits until COMPLETED, returns the result.
-  → You just call it once and get the answer. No manual polling needed.
-- Only use comet_poll manually if comet_run itself times out (rare, >3 min tasks).
-- comet_stop to cancel a running task if needed.
-
-EXAMPLE — "send a WhatsApp message to Srijan saying hi":
-Response 1: {"name": "comet_run", "parameters": {"prompt": "Open WhatsApp Web and send a message to Srijan saying hi"}}
-→ Returns when done (30-120s). Report the result.
-
-GENERIC BROWSER TOOL EXAMPLES (for quick/simple interactions):
-- Navigate: {"name": "browser_navigate", "parameters": {"url": "https://example.com"}}
-- Click by text: {"name": "browser_click", "parameters": {"text": "Sign In"}}
-- Type + submit: {"name": "browser_type", "parameters": {"selector": "input[name='q']", "text": "hello", "pressEnter": true}}
-- Read page: {"name": "browser_read_page", "parameters": {"includeLinks": true}}
-- Run JS: {"name": "browser_eval", "parameters": {"code": "document.title"}}
-
-IMPORTANT — ONE TOOL PER RESPONSE:
-- Output exactly ONE tool call JSON, then STOP. Do not output multiple tool calls or any text after the JSON.
-- You will get the result back and can then call the next tool.
-- This is a Windows system. Use Windows paths (C:\\Users\\...) not Unix paths (~/...).
-
-TOOL FORMAT:
-{"name": "tool_name", "parameters": {"key": "value"}}
-
-EXAMPLE — User asks "write hello.c on my desktop and compile it":
-Response 1: {"name": "write_file", "parameters": {"path": "C:\\Users\\buzza\\Desktop\\hello.c", "content": "#include <stdio.h>\\nint main() { printf(\\"Hello\\\\n\\"); return 0; }"}}
-(you get result, then...)
-Response 2: {"name": "execute_command", "parameters": {"command": "gcc C:\\Users\\buzza\\Desktop\\hello.c -o C:\\Users\\buzza\\Desktop\\hello.exe"}}
-(you get result, then...)
-Response 3: {"name": "execute_command", "parameters": {"command": "C:\\Users\\buzza\\Desktop\\hello.exe"}}
-(you get result, then...)
-Response 4: Done! I wrote hello.c, compiled it, and ran it. Output was: Hello
-
-EXAMPLE — User asks "what's the weather?":
-Response 1: {"name": "fetch_url", "parameters": {"url": "https://wttr.in/?format=3"}}
-(you get result, then...)
-Response 2: The weather is [result from fetch_url]`
-        : `You are an AI assistant with tool access. When you need information you don't have, use a tool.
-
-TO USE A TOOL, output ONLY this JSON (nothing else before or after):
-{"name": "tool_name", "parameters": {}}
-
-RULES:
-- For questions about time, files, calculations - USE A TOOL, don't explain
-- Output the JSON tool call IMMEDIATELY, no explanation needed
-- NEVER fabricate or simulate tool output — always call the tool
-- NEVER use curl or wget — use fetch_url tool for HTTP requests instead
-- After getting results, give a natural response incorporating the data`);
+    const savedToolPrompt = robotMode
+      ? getPrompt('robot') + howYouSeeMe.liveContext
+      : agenticMode ? getPrompt('agentic') : getPrompt('tool');
 
     // Build the full system prompt with available tools
     const toolsSystemPrompt = `${savedToolPrompt}
@@ -846,8 +832,8 @@ Remember: Output ONLY the JSON tool call when you need to use a tool. No explana
     if (agenticMode && ptcMode) {
       // PTC mode: LLM writes a JS script, execute it, summarize stdout — 2 LLM calls total
       await runPTCLoop(contextualContent, mcpTools, historySnapshot);
-    } else if (agenticMode) {
-      // Use agentic loop for multi-tool execution
+    } else if (agenticMode || robotMode) {
+      // Use agentic loop for multi-tool execution (robot mode always uses agentic for perception queries)
       await handleAgenticChat(contextualContent, toolsSystemPrompt, mcpTools, historySnapshot);
     } else {
       // Use single-tool mode (original behavior)
@@ -894,7 +880,7 @@ Remember: Output ONLY the JSON tool call when you need to use a tool. No explana
         // Fallback: no valid script — run agentic loop instead
         console.warn('[PTC] No valid script extracted, falling back to agentic loop');
         setCurrentResponse('');
-        const savedToolPrompt = localStorage.getItem('ally-prompt-tools') || '';
+        const savedToolPrompt = getPrompt('agentic');
         const toolsSystemPrompt = `${savedToolPrompt}\n\nAVAILABLE TOOLS:\n${mcpTools.map((t) => `• ${t.name} → ${t.description}`).join('\n')}`;
         await handleAgenticChat(userQuery, toolsSystemPrompt, mcpTools, historySnapshot);
         return;
@@ -1214,7 +1200,10 @@ Remember: Output ONLY the JSON tool call when you need to use a tool. No explana
       {
         onStreamUpdate: (text) => setCurrentResponse(text),
         onToolExecutionsUpdate: (execs) => setActiveToolExecutions(execs),
-        onThinkingUpdate: (thinking) => setStreamingThinking(thinking),
+        onThinkingUpdate: (thinking) => {
+          setStreamingThinking(thinking);
+          setStreamingThoughtText(thinking);
+        },
         onSegmentUpdate: (segs) => {
           lastSegments = segs;
           setStreamingSegments(segs);
@@ -1513,6 +1502,22 @@ Remember: Output ONLY the JSON tool call when you need to use a tool. No explana
         { name: 'wait', description: 'Sleep for N seconds. Use this after comet_ask (timeout:5000) to give Comet time to complete its task before calling comet_poll. Use 30-60s for most tasks.', parameters: { seconds: 'number (1-60)' } },
       );
       
+      // Add HowYouSeeMe perception tools when robot mode is active
+      if (robotMode) {
+        const hysm = [
+          { name: 'query_world', description: 'Get all visible objects, people, robot position, and recent events from the robot\'s perception system', parameters: { filter: 'string (optional label filter)' } },
+          { name: 'where_is', description: 'Find the 3D position of a specific object or person by label', parameters: { label: 'string' } },
+          { name: 'get_robot_status', description: 'Get a natural language summary of what the robot currently sees and where it is', parameters: {} },
+          { name: 'get_recent_events', description: 'Get the last N perception events with timestamps', parameters: { limit: 'number (optional, default 10)', event_type: 'string (optional)' } },
+          { name: 'remember_object', description: 'Pin an object for persistent tracking by name', parameters: { name: 'string', label: 'string' } },
+          { name: 'recall_memory', description: 'Get the current location of a previously pinned object', parameters: { name: 'string' } },
+          { name: 'get_robot_context', description: 'Get the full system context block describing robot capabilities', parameters: {} },
+        ];
+        for (const t of hysm) {
+          if (!tools.find(existing => existing.name === t.name)) tools.push(t);
+        }
+      }
+
       // Add MCP tools from the integration hook (persisted in store)
       const mcpTools = mcpIntegration.mcpTools;
       console.log('📡 MCP tools for LLM:', mcpTools);
@@ -1599,6 +1604,21 @@ Remember: Output ONLY the JSON tool call when you need to use a tool. No explana
       return { error: 'read_file requires a path parameter' };
     }
     
+    // Route HowYouSeeMe perception tools when robot mode is active
+    const howYouSeeMeTools = [
+      'query_world', 'where_is', 'remember_object', 'recall_memory',
+      'forget_memory', 'get_recent_events', 'get_checkpoint',
+      'get_robot_status', 'get_robot_context', 'get_camera_frame',
+    ];
+    if (robotMode && howYouSeeMeTools.includes(actualToolName)) {
+      try {
+        const result = await howYouSeeMe.executeTool(actualToolName, normalizedParams);
+        return { result };
+      } catch (e: any) {
+        return { error: `HowYouSeeMe tool error: ${e.message}` };
+      }
+    }
+
     // Handle built-in tools first
     if (actualToolName === 'get_current_time' || toolName === 'current_time' || toolName === 'get_time' || toolName === 'time') {
       const now = new Date();
@@ -2190,8 +2210,7 @@ Remember: Output ONLY the JSON tool call when you need to use a tool. No explana
         
         if (mcpTools.length === 0) {
           // No tools — just do a regular Ollama chat with system prompt
-          const basicSystemPrompt = localStorage.getItem('ally-prompt-basic') || 
-            `You are Ally, a helpful AI assistant running on the user's computer. You have access to their system through tools when enabled. Be concise, friendly, and helpful.`;
+          const basicSystemPrompt = getPrompt('basic');
           let fullResponse = '';
           await ollamaIntegration.sendMessageToOllama(
             sessionHistory, request.content,
@@ -2211,22 +2230,7 @@ Remember: Output ONLY the JSON tool call when you need to use a tool. No explana
         }
 
         // Build tool system prompt (same as handleSendWithTools)
-        const savedToolPrompt = localStorage.getItem('ally-prompt-tools') || 
-          `You are an AI assistant with access to powerful tools. You MUST use tools to get real information.
-
-⚠️ CRITICAL RULES:
-1. YOU DO NOT KNOW THE CURRENT TIME OR DATE! You must ALWAYS call get_current_time to get it.
-2. NEVER fabricate, simulate, or make up tool output. If you need to run a command, you MUST call execute_command.
-3. NEVER pretend a tool succeeded without actually calling it.
-4. NEVER guess file contents, directory listings, or command output — use the appropriate tool.
-5. Output EXACTLY ONE JSON tool call per response — no explanations before it, no extra text.
-6. You will be called MULTIPLE times in a loop. Each time you output a tool call, it will be executed and the result given back to you.
-7. Only give your final answer (plain text, NO JSON) when you have completed ALL steps.
-8. This is a Windows system. Use Windows paths (C:\\Users\\...) not Unix paths.
-9. ⚠️ NEVER use curl or wget — use fetch_url tool for ALL HTTP requests instead.
-
-TOOL FORMAT:
-{"name": "tool_name", "parameters": {"key": "value"}}`;
+        const savedToolPrompt = getPrompt('agentic');
 
         const toolsSystemPrompt = `${savedToolPrompt}\n\nAVAILABLE TOOLS:\n${mcpTools.map(t => {
           const params = t.parameters ? ` | params: ${JSON.stringify(t.parameters)}` : ' | no params needed';
@@ -2431,6 +2435,14 @@ TOOL FORMAT:
       const cleanup = window.pip.onToggleSpeech(handleToggleSpeech);
       return cleanup;
     }
+  }, []);
+
+  // Listen for terminal panel toggle event
+  useEffect(() => {
+    const pip = (window as any).pip;
+    if (!pip?.onToggleTerminal) return;
+    const cleanup = pip.onToggleTerminal(() => setShowTerminal((prev: boolean) => !prev));
+    return cleanup;
   }, []);
 
   // Handle stop typing
@@ -3023,6 +3035,9 @@ TOOL FORMAT:
           margin: `${padding}px`
         } as React.CSSProperties}
       >
+        {/* AI Backdrop — Gemini-style animated glow (Behind everything else) */}
+        <AIBackdrop state={backdropState} />
+
         {/* Chat Sidebar */}
         {!state.collapsed && (
           <div className={cn("chat-sidebar", sidebarCollapsed && "collapsed")}>
@@ -3128,9 +3143,10 @@ TOOL FORMAT:
                 speechServiceConnected={speechService.isConnected}
                 isContextExpanded={isContextExpanded}
                 onContextExpandedChange={setIsContextExpanded}
-                isSpeaking={false} // TODO: Track TTS state
+                isSpeaking={speechService.isSpeaking}
                 isListening={speechService.isListening}
                 placeholder={currentGreeting}
+                orbState={orbState}
               />
             ) : (
               <ExpandedHeader
@@ -3238,7 +3254,29 @@ TOOL FORMAT:
                       showDetails={true}
                     />
                   )}
-                  
+
+                  {/* Agent Activity Stream — Cursor-style live step feed */}
+                  {(agentSteps.length > 0 || (isTyping && agenticMode)) && (
+                    <AgentActivityStream
+                      steps={agentSteps}
+                      isActive={isTyping && agenticMode}
+                      stepCount={agentSteps.length}
+                      maxSteps={8}
+                      theme={theme}
+                    />
+                  )}
+
+                  {/* Live Thinking Panel — real-time thought tokens */}
+                  {(streamingThoughtText || (isTyping && streamingThinking)) && (
+                    <LiveThinkingPanel
+                      text={streamingThoughtText}
+                      isStreaming={isTyping}
+                      isExpanded={thoughtExpanded}
+                      onToggle={() => setThoughtExpanded((v) => !v)}
+                      theme={theme}
+                    />
+                  )}
+
                   {/* Show streaming response in expanded mode */}
                   {isTyping && (currentResponse || streamingSegments.length > 0) && (
                     <motion.div
@@ -3389,7 +3427,7 @@ TOOL FORMAT:
                     contextMonitoring.clearNewContextFlag();
                   }}
                   onRunCommand={() => setInput('/run ')}
-                  placeholder={currentGreeting}
+                  placeholder={speechService.interimTranscript ? `🎤 ${speechService.interimTranscript}` : currentGreeting}
                   messages={messages}
                   currentModel={ollamaIntegration.currentModel}
                   toolsEnabled={isWeb ? true : toolsEnabled}
@@ -3409,6 +3447,15 @@ TOOL FORMAT:
                     setPtcMode(next);
                     localStorage.setItem('ally-ptc-mode', String(next));
                   }}
+                  robotMode={isWeb ? false : robotMode}
+                  onRobotModeToggle={isWeb ? undefined : () => {
+                    const next = !robotMode;
+                    setRobotMode(next);
+                    localStorage.setItem('ally-robot-mode', String(next));
+                  }}
+                  howYouSeeMeAvailable={!isWeb && howYouSeeMe.available}
+                  showTerminal={showTerminal}
+                  onTerminalToggle={isWeb ? undefined : () => setShowTerminal(!showTerminal)}
                 />
 
                 {/* Tool Approval Dialog */}
@@ -3547,6 +3594,13 @@ TOOL FORMAT:
           console.log('Provider config updated:', config);
           // The config is already saved in the component, just log for now
         }}
+      />
+
+      {/* Terminal Panel — Cursor-style glass terminal (Ctrl+Shift+`) */}
+      <TerminalPanel
+        visible={showTerminal}
+        onClose={() => setShowTerminal(false)}
+        className="absolute bottom-0 left-0 right-0 z-50"
       />
 
     </motion.div>
