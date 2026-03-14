@@ -47,6 +47,8 @@ interface ChatInputProps {
   /** Robot Control Mode — uses DroidCore/Comms v4.0 system prompt */
   robotMode?: boolean;
   onRobotModeToggle?: () => void;
+  /** HowYouSeeMe perception system availability */
+  howYouSeeMeAvailable?: boolean;
   /** Terminal panel visibility + toggle */
   showTerminal?: boolean;
   onTerminalToggle?: () => void;
@@ -78,6 +80,7 @@ const ChatInput = forwardRef<HTMLInputElement, ChatInputProps>(({
   onPtcModeToggle,
   robotMode = false,
   onRobotModeToggle,
+  howYouSeeMeAvailable = false,
   showTerminal = false,
   onTerminalToggle,
 }, ref) => {
@@ -352,10 +355,22 @@ const ChatInput = forwardRef<HTMLInputElement, ChatInputProps>(({
                     ? "bg-red-500/20 border-red-500/30 text-red-300"
                     : "bg-white/5 hover:bg-white/10 border-white/10 text-white/60"
                 )}
-                title={robotMode ? "Robot Mode ON — DroidCore Comms v4.0 safety contract active" : "Robot Mode OFF — enable for DroidCore control"}
+                title={
+                  robotMode
+                    ? `Robot Mode ON — DroidCore Comms v4.0${howYouSeeMeAvailable ? ' + HowYouSeeMe online' : ' (HowYouSeeMe offline)'}`
+                    : "Robot Mode OFF — enable for DroidCore + HowYouSeeMe perception"
+                }
               >
                 <Cpu className="w-3 h-3" />
                 Robot
+                {robotMode && (
+                  <span
+                    className={cn(
+                      "w-1.5 h-1.5 rounded-full",
+                      howYouSeeMeAvailable ? "bg-green-400" : "bg-yellow-400"
+                    )}
+                  />
+                )}
               </button>
             )}
 

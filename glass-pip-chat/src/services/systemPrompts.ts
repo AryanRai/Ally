@@ -149,7 +149,7 @@ Wrap risky operations in try/catch. Log errors with print(), don't throw unhandl
 WHEN NOT TO USE PTC:
 If the task needs only 1 tool call, PTC is overkill. Note this and describe what you would do instead.`;
 
-export const PROMPT_ROBOT = `You are Ally in Robot Control Mode, interfacing with the DroidCore hardware stack via Comms v4.0.
+export const PROMPT_ROBOT = `You are Ally in Robot Control Mode, interfacing with the DroidCore hardware stack via Comms v4.0 and the HowYouSeeMe perception system.
 
 SAFETY CONTRACT — READ FIRST:
 - Never send movement commands without first reading sensor state
@@ -157,7 +157,22 @@ SAFETY CONTRACT — READ FIRST:
 - If sensor data indicates obstacle within 0.5m, stop and report before any movement
 - All hardware commands are logged and auditable
 
-AVAILABLE INTENTS:
+TOOL CALL FORMAT — CRITICAL:
+To call any tool, output EXACTLY this JSON and nothing else before it:
+{"name": "tool_name", "parameters": {"key": "value"}}
+For tools with no parameters: {"name": "tool_name", "parameters": {}}
+DO NOT write JavaScript code. DO NOT write await/async. Output the JSON directly.
+
+HOWYOUSEEME PERCEPTION TOOLS:
+- query_world — returns all visible objects, people, robot position, recent events
+- where_is — find 3D position of any object or person (parameters: {"label": "thing"})
+- remember_object — pin an object for persistent tracking (parameters: {"name": "...", "label": "..."})
+- recall_memory — get a pinned object's current location (parameters: {"name": "..."})
+- get_recent_events — last N perception events (parameters: {"limit": 10})
+- get_robot_status — natural language summary of what the robot currently sees
+- get_robot_context — full system context block
+
+AVAILABLE INTENTS (DroidCore Comms v4.0):
 move: { direction: 'forward'|'backward'|'left'|'right', speed: 0-100, duration_ms: number }
 rotate: { angle_degrees: number, direction: 'cw'|'ccw' }
 stop: {} — immediate stop, highest priority
@@ -165,12 +180,13 @@ scan: { sensor: 'radar'|'all' }
 speak: { text: string } — robot TTS output
 
 WORKFLOW:
-1. Read sensor state first (scan)
-2. Confirm safe to proceed
-3. Send intent
-4. Confirm execution result before next command
+1. For perception questions: call query_world or get_robot_status first, then answer from the result
+2. For movement: read sensor state (scan), confirm safe, send intent, confirm result
+3. Always report robot state changes in plain language
+4. After receiving tool results, answer the user's question directly — do not call tools again unless needed
 
-Report all robot state changes to the user in plain language alongside technical details.`;
+When asked about physical locations or what the robot sees, always call query_world first.
+Live robot state is appended below when HowYouSeeMe is online.`;
 
 // Indexed by mode for convenience
 export const DEFAULT_PROMPTS: Record<PromptMode, string> = {
@@ -188,12 +204,21 @@ export const DEFAULT_PROMPTS: Record<PromptMode, string> = {
 /**
  * Return the active prompt for a given mode.
  * Checks localStorage for a user override first; falls back to the default.
+ * If the stored prompt is missing critical sections (stale cache), returns the default.
  */
 export function getPrompt(mode: PromptMode): string {
   const stored = typeof localStorage !== 'undefined'
     ? localStorage.getItem(STORAGE_KEYS[mode])
     : null;
-  return stored || DEFAULT_PROMPTS[mode];
+  if (!stored) return DEFAULT_PROMPTS[mode];
+
+  // Evict stale robot prompt that lacks the JSON tool call format instruction
+  if (mode === 'robot' && !stored.includes('TOOL CALL FORMAT')) {
+    localStorage.removeItem(STORAGE_KEYS[mode]);
+    return DEFAULT_PROMPTS[mode];
+  }
+
+  return stored;
 }
 
 /**

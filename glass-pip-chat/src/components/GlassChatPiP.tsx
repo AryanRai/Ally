@@ -61,6 +61,7 @@ import { SettingsManager } from '../utils/settingsManager';
 import { Chat, Message } from '../types/chat';
 import { AppSettings } from '../types/settings';
 import { getPrompt } from '../services/systemPrompts';
+import { useHowYouSeeMe } from '../hooks/useHowYouSeeMe';
 
 export default function GlassChatPiP() {
   // Window and UI management
@@ -97,6 +98,10 @@ export default function GlassChatPiP() {
   const [ptcMode, setPtcMode] = useState(() => localStorage.getItem('ally-ptc-mode') === 'true');
   // Robot Control Mode — use DroidCore/Comms v4.0 system prompt, overrides basic prompt
   const [robotMode, setRobotMode] = useState(() => localStorage.getItem('ally-robot-mode') === 'true');
+
+  // HowYouSeeMe perception integration — polls robot state when robot mode is active
+  const howYouSeeMe = useHowYouSeeMe(robotMode);
+
   // Autopilot mode - auto-approve all tool executions without confirmation
   const [autopilotMode, setAutopilotMode] = useState(() => {
     const saved = localStorage.getItem('ally-autopilot-mode');
@@ -711,7 +716,11 @@ export default function GlassChatPiP() {
     let capturedThinking = ''; // capture thinking for saving in message
 
     // Get the basic system prompt — use robot prompt when robot mode is active
-    const basicSystemPrompt = robotMode ? getPrompt('robot') : getPrompt('basic');
+    // Append live HowYouSeeMe state when available
+    const basePrompt = robotMode ? getPrompt('robot') : getPrompt('basic');
+    const basicSystemPrompt = robotMode
+      ? basePrompt + howYouSeeMe.liveContext
+      : basePrompt;
 
     const response = await ollamaIntegration.sendMessageToOllama(
       historySnapshot ?? cleanMessagesForLLM(activeChat?.messages || []),
@@ -805,7 +814,9 @@ export default function GlassChatPiP() {
     }
     
     // Get saved tool prompt or use default - different prompts for agentic vs single-tool mode
-    const savedToolPrompt = agenticMode ? getPrompt('agentic') : getPrompt('tool');
+    const savedToolPrompt = robotMode
+      ? getPrompt('robot') + howYouSeeMe.liveContext
+      : agenticMode ? getPrompt('agentic') : getPrompt('tool');
 
     // Build the full system prompt with available tools
     const toolsSystemPrompt = `${savedToolPrompt}
@@ -821,8 +832,8 @@ Remember: Output ONLY the JSON tool call when you need to use a tool. No explana
     if (agenticMode && ptcMode) {
       // PTC mode: LLM writes a JS script, execute it, summarize stdout — 2 LLM calls total
       await runPTCLoop(contextualContent, mcpTools, historySnapshot);
-    } else if (agenticMode) {
-      // Use agentic loop for multi-tool execution
+    } else if (agenticMode || robotMode) {
+      // Use agentic loop for multi-tool execution (robot mode always uses agentic for perception queries)
       await handleAgenticChat(contextualContent, toolsSystemPrompt, mcpTools, historySnapshot);
     } else {
       // Use single-tool mode (original behavior)
@@ -1491,6 +1502,22 @@ Remember: Output ONLY the JSON tool call when you need to use a tool. No explana
         { name: 'wait', description: 'Sleep for N seconds. Use this after comet_ask (timeout:5000) to give Comet time to complete its task before calling comet_poll. Use 30-60s for most tasks.', parameters: { seconds: 'number (1-60)' } },
       );
       
+      // Add HowYouSeeMe perception tools when robot mode is active
+      if (robotMode) {
+        const hysm = [
+          { name: 'query_world', description: 'Get all visible objects, people, robot position, and recent events from the robot\'s perception system', parameters: { filter: 'string (optional label filter)' } },
+          { name: 'where_is', description: 'Find the 3D position of a specific object or person by label', parameters: { label: 'string' } },
+          { name: 'get_robot_status', description: 'Get a natural language summary of what the robot currently sees and where it is', parameters: {} },
+          { name: 'get_recent_events', description: 'Get the last N perception events with timestamps', parameters: { limit: 'number (optional, default 10)', event_type: 'string (optional)' } },
+          { name: 'remember_object', description: 'Pin an object for persistent tracking by name', parameters: { name: 'string', label: 'string' } },
+          { name: 'recall_memory', description: 'Get the current location of a previously pinned object', parameters: { name: 'string' } },
+          { name: 'get_robot_context', description: 'Get the full system context block describing robot capabilities', parameters: {} },
+        ];
+        for (const t of hysm) {
+          if (!tools.find(existing => existing.name === t.name)) tools.push(t);
+        }
+      }
+
       // Add MCP tools from the integration hook (persisted in store)
       const mcpTools = mcpIntegration.mcpTools;
       console.log('📡 MCP tools for LLM:', mcpTools);
@@ -1577,6 +1604,21 @@ Remember: Output ONLY the JSON tool call when you need to use a tool. No explana
       return { error: 'read_file requires a path parameter' };
     }
     
+    // Route HowYouSeeMe perception tools when robot mode is active
+    const howYouSeeMeTools = [
+      'query_world', 'where_is', 'remember_object', 'recall_memory',
+      'forget_memory', 'get_recent_events', 'get_checkpoint',
+      'get_robot_status', 'get_robot_context', 'get_camera_frame',
+    ];
+    if (robotMode && howYouSeeMeTools.includes(actualToolName)) {
+      try {
+        const result = await howYouSeeMe.executeTool(actualToolName, normalizedParams);
+        return { result };
+      } catch (e: any) {
+        return { error: `HowYouSeeMe tool error: ${e.message}` };
+      }
+    }
+
     // Handle built-in tools first
     if (actualToolName === 'get_current_time' || toolName === 'current_time' || toolName === 'get_time' || toolName === 'time') {
       const now = new Date();
@@ -3411,6 +3453,7 @@ Remember: Output ONLY the JSON tool call when you need to use a tool. No explana
                     setRobotMode(next);
                     localStorage.setItem('ally-robot-mode', String(next));
                   }}
+                  howYouSeeMeAvailable={!isWeb && howYouSeeMe.available}
                   showTerminal={showTerminal}
                   onTerminalToggle={isWeb ? undefined : () => setShowTerminal(!showTerminal)}
                 />
