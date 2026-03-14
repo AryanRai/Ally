@@ -35,6 +35,8 @@ It is ideal for:
 - **Persistent layout:** remembers window position, size, and theme between sessions via Electron `userData`.
 - **System tray:** minimize to tray with right-click menu for quick access.
 - **Dark/light theme:** persisted theme preference.
+- **Robot Mode:** one-click toggle (`Cpu` icon in the toolbar) that switches the system prompt to the DroidCore Comms v4.0 personality, displayed as `Robot · {model} · DroidCore` in the mode bar. State is persisted to `localStorage`.
+- **Terminal Panel:** cursor-style glassmorphic terminal with named session tabs, toggled via the toolbar `Terminal` icon or `` Ctrl+Shift+` ``.
 
 <img width="397" height="622" alt="image" src="https://github.com/user-attachments/assets/701ac206-1e5d-4148-a32b-4ba484079020" />
 
@@ -58,11 +60,15 @@ It is ideal for:
 - **Secure:** Supabase RLS policies, HTTPS enforced.
 
 ### Speech Integration
-- **Speech-to-Text:** OpenAI Whisper with Voice Activity Detection (VAD) for accurate, real-time voice recognition.
-- **Text-to-Speech:** Coqui TTS (`tts_models/en/jenny/jenny`) for natural speech synthesis.
-- **ggwave Communication:** audio-based data transmission protocol for robot communication.
+- **Streaming STT (cloud):** [Deepgram Nova-2](https://deepgram.com/) — word-by-word transcription via WebSocket with <300 ms latency. Interim partial transcripts shown as a `🎤` placeholder in the input field in real time.
+- **Streaming TTS (cloud):** [ElevenLabs Flash v2.5](https://elevenlabs.io/) — ~75 ms time-to-first-audio-chunk, streaming MP3 playback while the LLM is still generating.
+- **Offline STT fallback:** OpenAI Whisper with Voice Activity Detection (VAD) — selected when `STT_MODE=whisper` (the default).
+- **Offline TTS fallback:** Coqui TTS (`tts_models/en/jenny/jenny`) — selected when `TTS_MODE=coqui` (the default).
+- **Barge-in / Voice Interruption:** `InterruptManager` detects user speech during AI playback (via Deepgram `SpeechStarted` VAD events), immediately stops TTS, and emits `speech_interrupted` to clear the partial response in the UI.
+- **ggwave Communication:** audio-based data transmission protocol for robot communication (max 140 bytes, uses speakers + microphone).
 - **WebSocket Service:** separate Python service (`ws://localhost:8765`) for GPU-accelerated speech processing.
 - **Voice Commands:** hands-free interaction — press `Ctrl+Shift+V` to toggle.
+- **Backend selection:** set `STT_MODE=deepgram` / `TTS_MODE=elevenlabs` in `speech-service/.env` to switch from offline models to streaming cloud APIs.
 
 ### Tool Calling Framework
 - **TypeScript Framework** (`tool-calling-framework/`): standalone package (`@droidcore/tool-calling-framework`) for registering, validating, and orchestrating tools.
@@ -124,12 +130,17 @@ It is ideal for:
 |  | Glassmorphic     |  | AI Providers  |  | Tool Calling     |  |
 |  | PiP Overlay UI   |  | - Ollama      |  | - Agentic Loop   |  |
 |  | (React/Framer)   |  | - OpenRouter  |  | - PTC Executor   |  |
-|  +--------+---------+  | - Gemini      |  | - MCP Client     |  |
-|           |            +---------------+  | - ACP Agents     |  |
-|           |                              | - FS Tools        |  |
+|  | - Robot Mode     |  | - Gemini      |  | - MCP Client     |  |
+|  | - Terminal Panel +--+---------------+  | - ACP Agents     |  |
+|  +--------+---------+                     | - FS Tools        |  |
 |           |            +---------------+  +------------------+  |
 |           |            | Speech Svc    |                         |
 |           |            | (WebSocket)   |                         |
+|           |            | STT: Deepgram |                         |
+|           |            |  or Whisper   |                         |
+|           |            | TTS: Eleven   |                         |
+|           |            |  Labs or Coqui|                         |
+|           |            | Barge-in VAD  |                         |
 |           |            +---------------+                         |
 +-----------|------------------------------------------------------+
             | Electron IPC (preload bridge)
@@ -160,6 +171,27 @@ It is ideal for:
                     +--------------v--------------+
                     |  Web / Discord Users        |
                     +-----------------------------+
+```
+
+### Streaming Voice Pipeline
+
+```
+Microphone (16kHz raw PCM)
+    │
+    ▼
+Deepgram Nova-2 WebSocket ──► interim transcript ──► 🎤 placeholder in input
+    │
+    ▼ (final transcript, ~300 ms after speech ends)
+LLM streaming (Ollama / OpenRouter / Gemini)
+    │ (tokens arrive)
+    ├──► AgentActivityStream (tool/thinking display)
+    └──► ElevenLabs Flash v2.5 WebSocket ──► MP3 audio chunks ──► PyAudio playback
+                                                │
+                                                ▼ (~75 ms after first token)
+                                           User hears response
+
+InterruptManager: if Deepgram fires SpeechStarted while TTS is playing
+    → stop ElevenLabs stream → clear TTS queue → emit speech_interrupted to UI
 ```
 
 ---
@@ -223,8 +255,11 @@ Ally/
 |           +-- link/route.ts        # Link local system
 |
 +-- speech-service/               # Python WebSocket STT/TTS service
-|   +-- speech_service.py         # Main service (Whisper + Coqui TTS + ggwave)
+|   +-- speech_service.py         # Main service (DeepgramSTTService, ElevenLabsTTSService,
+|   |                             #   TTSRouter, InterruptManager, Whisper + Coqui fallbacks)
+|   +-- start_service.py          # Startup script with dependency & env checks
 |   +-- requirements.txt          # Python dependencies
+|   +-- .env.example              # Speech service environment variables
 |   +-- start.bat / start.sh / start.ps1
 |
 +-- tool-calling-framework/       # Standalone TypeScript tool framework
@@ -263,8 +298,8 @@ Ally/
 | **Local LLM** | Ollama (`llama3.2` default) | Fully offline inference |
 | **Cloud LLM** | OpenRouter (`claude-3.5-sonnet` default) | 100+ cloud models |
 | **Cloud LLM** | Google Gemini (`gemini-2.0-flash` default) | Gemini model family |
-| **Speech STT** | OpenAI Whisper | Offline speech-to-text |
-| **Speech TTS** | Coqui TTS (jenny) | Neural text-to-speech |
+| **Speech STT** | Deepgram Nova-2 (streaming) / OpenAI Whisper (offline) | Real-time word-by-word transcription or batch offline STT |
+| **Speech TTS** | ElevenLabs Flash v2.5 (streaming) / Coqui TTS (offline) | ~75 ms first-chunk streaming or offline neural TTS |
 | **Audio protocol** | ggwave | Audio-based data transmission |
 | **Agent protocol** | MCP (Model Context Protocol) | Tool discovery from external servers |
 | **Agent protocol** | ACP (Agent Coordination Protocol) | Multi-agent query routing |
@@ -287,8 +322,10 @@ Ally/
 - [X] **M6 – Remote Service & Chat API**: Next.js web app with Supabase storage, real-time sync, and Discord bot.
 - [X] **M7 – Multi-provider AI**: Ollama + OpenRouter + Gemini with runtime switching and persistent config.
 - [X] **M8 – PTC Executor**: Programmatic Tool Calling — N tools in 2 LLM calls via sandboxed JS execution.
-- [ ] **M9 – Browser Automation**: full browser control via Browser Bridge extension integration.
-- [ ] **M10 – Packaging**: cross-platform builds, code signing, autoupdate via electron-builder.
+- [X] **M9 – Real-Time Streaming Voice**: Deepgram Nova-2 streaming STT (<300 ms) + ElevenLabs Flash v2.5 streaming TTS (~75 ms first chunk) with barge-in interruption support; Whisper + Coqui retained as offline fallbacks.
+- [X] **M10 – Robot Mode & Terminal Panel**: one-click DroidCore system prompt toggle; cursor-style glass terminal with named sessions.
+- [ ] **M11 – Browser Automation**: full browser control via Browser Bridge extension integration.
+- [ ] **M12 – Packaging**: cross-platform builds, code signing, autoupdate via electron-builder.
 
 ---
 
@@ -322,12 +359,25 @@ This starts both the Vite dev server and the Electron shell. The overlay will ap
 
 ```bash
 cd speech-service
+cp .env.example .env     # Set STT_MODE, TTS_MODE, and API keys
 # Windows
 start.bat
 # macOS/Linux
 ./start.sh
 # PowerShell (cross-platform)
 pwsh start.ps1
+```
+
+The service defaults to **offline mode** (`STT_MODE=whisper`, `TTS_MODE=coqui`).  
+To enable the low-latency cloud backends, edit `.env`:
+
+```bash
+STT_MODE=deepgram
+DEEPGRAM_API_KEY=your_key
+
+TTS_MODE=elevenlabs
+ELEVENLABS_API_KEY=your_key
+ELEVENLABS_VOICE_ID=21m00Tcm4TlvDq8ikWAM   # Rachel (default)
 ```
 
 Then in the overlay, press `Ctrl+Shift+V` and click **Connect** to link with the speech service at `ws://localhost:8765`.
@@ -357,6 +407,25 @@ See [docs/REMOTE_INTEGRATION_GUIDE.md](docs/REMOTE_INTEGRATION_GUIDE.md) for ful
 ---
 
 ## Environment Variables
+
+### `speech-service/.env`
+```bash
+# STT backend: 'deepgram' (streaming, cloud) or 'whisper' (offline default)
+STT_MODE=whisper
+DEEPGRAM_API_KEY=            # Required when STT_MODE=deepgram
+
+# TTS backend: 'elevenlabs' (streaming, cloud) or 'coqui' (offline default)
+TTS_MODE=coqui
+ELEVENLABS_API_KEY=          # Required when TTS_MODE=elevenlabs
+ELEVENLABS_VOICE_ID=21m00Tcm4TlvDq8ikWAM  # ElevenLabs voice (default: Rachel)
+
+# Offline model selection
+WHISPER_MODEL=base            # tiny | base | small | medium | large
+TTS_MODEL=tts_models/en/jenny/jenny
+
+# Server
+WEBSOCKET_PORT=8765
+```
 
 ### `glass-pip-chat/.env`
 ```bash
