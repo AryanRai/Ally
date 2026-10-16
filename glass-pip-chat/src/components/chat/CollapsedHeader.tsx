@@ -1,5 +1,3 @@
-import { useState, useRef, useEffect } from 'react';
-import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   Grip, 
@@ -20,6 +18,7 @@ import { Message } from '../../types/chat';
 import AnimatedOrb from '../AnimatedOrb';
 import CollapsedChatPreview from './CollapsedChatPreview';
 import CollapsedResponsePreview from './CollapsedResponsePreview';
+import { UnifiedModelSelector } from '../UnifiedModelSelector';
 
 interface CollapsedHeaderProps {
   platform: string;
@@ -43,8 +42,6 @@ interface CollapsedHeaderProps {
   onRecompute?: (messageId: string) => void;
   isResizing: boolean;
   size: string;
-  ollamaAvailable: boolean;
-  serverStatus: any;
   hasNewContext: boolean;
   contextData: any;
   contextToggleEnabled: boolean;
@@ -53,7 +50,6 @@ interface CollapsedHeaderProps {
   onContextToggleChange?: (enabled: boolean) => void;
   uiSettings?: any;
   currentResponse?: string;
-  availableModels: any[];
   currentModel: string;
   showModelSelector: boolean;
   onModelSelectorToggle: () => void;
@@ -92,8 +88,6 @@ export default function CollapsedHeader({
   onRecompute,
   isResizing,
   size,
-  ollamaAvailable,
-  serverStatus,
   hasNewContext,
   contextData,
   contextToggleEnabled,
@@ -102,7 +96,6 @@ export default function CollapsedHeader({
   onContextToggleChange,
   uiSettings,
   currentResponse,
-  availableModels,
   currentModel,
   showModelSelector,
   onModelSelectorToggle,
@@ -118,28 +111,7 @@ export default function CollapsedHeader({
   placeholder = 'Balalalala',
   orbState
 }: CollapsedHeaderProps) {
-  const modelButtonRef = useRef<HTMLButtonElement>(null);
   const contextExpanded = isContextExpanded ?? false;
-  const [dropdownPosition, setDropdownPosition] = useState({ top: 0, right: 0, maxHeight: 256 });
-
-  // Update dropdown position and calculate available height when it opens
-  useEffect(() => {
-    if (showModelSelector && modelButtonRef.current) {
-      const rect = modelButtonRef.current.getBoundingClientRect();
-      const viewportHeight = window.innerHeight;
-      const spaceBelow = viewportHeight - rect.bottom - 8; // 8px margin
-      const spaceAbove = rect.top - 8; // 8px margin
-      
-      // Calculate optimal height - prefer showing below, but use above if more space
-      const maxHeight = Math.max(120, Math.min(256, Math.max(spaceBelow, spaceAbove) - 20)); // Min 120px, max 256px, with 20px buffer
-      
-      setDropdownPosition({
-        top: rect.bottom + 4,
-        right: window.innerWidth - rect.right,
-        maxHeight
-      });
-    }
-  }, [showModelSelector]);
 
   return (
     <div className="flex flex-col">
@@ -168,27 +140,6 @@ export default function CollapsedHeader({
               )
             }
           />
-
-          {/* Status indicators */}
-          <div className="flex items-center gap-1 flex-shrink-0">
-            <div
-              className={cn(
-                "w-2 h-2 rounded-full",
-                ollamaAvailable ? "bg-green-400" : "bg-red-400"
-              )}
-              title={ollamaAvailable ? "Ollama connected" : "Ollama offline"}
-            />
-            {serverStatus && (
-              <div
-                className={cn(
-                  "w-2 h-2 rounded-full",
-                  serverStatus.status === 'online' ? "bg-green-400" :
-                    serverStatus.status === 'offline' ? "bg-red-400" : "bg-yellow-400"
-                )}
-                title={`Server ${serverStatus.status}: ${serverStatus.domain || serverStatus.ip}`}
-              />
-            )}
-          </div>
 
           {/* Optimized context indicator - removed separate indicator, will be combined with eye icon */}
         </div>
@@ -237,94 +188,17 @@ export default function CollapsedHeader({
             </div>
           )}
 
-          {/* Model Selector */}
-          {ollamaAvailable && availableModels.length > 0 && (
-            <>
-              <button
-                ref={modelButtonRef}
-                onClick={onModelSelectorToggle}
-                className={cn(
-                  "p-1.5 rounded-lg hover:bg-white/10 transition-colors text-xs",
-                  showModelSelector && "bg-blue-500/20"
-                )}
-                title={`Model: ${currentModel}`}
-              >
-                <span className="text-xs font-mono">{currentModel.split(':')[0]}</span>
-                <ChevronDown className={cn(
-                  "w-2.5 h-2.5 ml-1 inline transition-transform",
-                  showModelSelector && "rotate-180"
-                )} />
-              </button>
-
-              {/* Model dropdown - Rendered via Portal */}
-              {showModelSelector && createPortal(
-                <>
-                  {/* Backdrop to close dropdown */}
-                  <div
-                    className="fixed inset-0 z-[999998]"
-                    onClick={onModelSelectorToggle}
-                    style={{ pointerEvents: 'auto' }}
-                  />
-                  <AnimatePresence>
-                    <motion.div
-                      initial={{ opacity: 0, scale: 0.9, y: -10 }}
-                      animate={{ opacity: 1, scale: 1, y: 0 }}
-                      exit={{ opacity: 0, scale: 0.9, y: -10 }}
-                      className={cn(
-                        "fixed min-w-[160px] rounded-lg border shadow-xl",
-                        "bg-black/95 border-white/20 backdrop-blur-xl"
-                      )}
-                      style={{ 
-                        top: dropdownPosition.top,
-                        right: dropdownPosition.right,
-                        zIndex: 999999,
-                        pointerEvents: 'auto'
-                      } as React.CSSProperties}
-                    >
-                    <div className="p-1">
-                      <div className="text-xs font-medium opacity-60 px-2 py-1">
-                        Select Model
-                      </div>
-                      <div className={cn(
-                        "overflow-y-auto scrollbar-youtube",
-                        "scroll-smooth"
-                      )}
-                      style={{
-                        maxHeight: `${dropdownPosition.maxHeight}px`,
-                        scrollbarWidth: 'thin',
-                        scrollbarColor: 'rgba(255, 255, 255, 0.4) rgba(255, 255, 255, 0.1)'
-                      }}
-                      >
-                        {availableModels.map((model) => (
-                          <button
-                            key={model.name}
-                            onClick={() => {
-                              console.log('Model selected:', model.name);
-                              onModelSelect(model.name);
-                            }}
-                            className={cn(
-                              "w-full text-left px-2 py-1.5 text-xs rounded transition-colors",
-                              "cursor-pointer select-none",
-                              currentModel === model.name
-                                ? "bg-blue-500/20 text-blue-300"
-                                : "hover:bg-white/10 text-white/90"
-                            )}
-                          >
-                            <div className="font-medium">{model.name}</div>
-                            <div className="text-xs opacity-60">
-                              {(model.size / (1024 * 1024 * 1024)).toFixed(1)}GB
-                            </div>
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                    </motion.div>
-                  </AnimatePresence>
-                </>,
-                document.body
-              )}
-            </>
-          )}
+          {/* Model selector (same picker as the expanded header) */}
+          <UnifiedModelSelector
+            platform={platform}
+            theme={theme}
+            currentModel={currentModel}
+            onModelSelect={onModelSelect}
+            showSelector={showModelSelector}
+            onToggleSelector={onModelSelectorToggle}
+            compact={true}
+            windowSize="S"
+          />
 
           {/* Combined Context Control - Eye + Clipboard with smart indicators */}
           {onContextToggle && (

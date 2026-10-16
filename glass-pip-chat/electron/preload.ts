@@ -50,79 +50,6 @@ const pipAPI = {
     return () => ipcRenderer.removeListener('theme:changed', handler);
   },
 
-  // Ollama API
-  ollama: {
-    isAvailable: () => ipcRenderer.invoke('ollama:isAvailable'),
-    getModels: () => ipcRenderer.invoke('ollama:getModels'),
-    chat: (messages: any[], model?: string) => ipcRenderer.invoke('ollama:chat', messages, model),
-    streamChatWithThinking: async (messages: any[], model: string, onProgress: (chunk: any) => void) => {
-      // Set up listener for progress updates
-      const progressHandler = (_: any, chunk: any) => onProgress(chunk);
-      ipcRenderer.on('ollama:streamProgress', progressHandler);
-      
-      try {
-        // Start the streaming request
-        const result = await ipcRenderer.invoke('ollama:streamChatWithThinking', messages, model);
-        return result;
-      } finally {
-        // Clean up the listener
-        ipcRenderer.removeListener('ollama:streamProgress', progressHandler);
-      }
-    },
-    stop: () => ipcRenderer.invoke('ollama:stop'),
-    getConfig: () => ipcRenderer.invoke('ollama:getConfig'),
-    updateConfig: (config: any) => ipcRenderer.send('ollama:updateConfig', config),
-    
-    // Provider management
-    getProviders: () => ipcRenderer.invoke('ollama:getProviders'),
-    setProvider: (provider: 'ollama' | 'openrouter' | 'gemini') => ipcRenderer.send('ollama:setProvider', provider),
-    
-    // OpenRouter specific methods
-    getOpenRouterModels: () => ipcRenderer.invoke('ollama:getOpenRouterModels'),
-    isOpenRouterAvailable: () => ipcRenderer.invoke('ollama:isOpenRouterAvailable'),
-    testOpenRouterConnection: () => ipcRenderer.invoke('ollama:testOpenRouterConnection'),
-    openRouterStreamChat: async (messages: any[], model: string, onProgress: (chunk: string) => void) => {
-      // Set up listener for progress updates
-      const progressHandler = (_: any, chunk: string) => onProgress(chunk);
-      ipcRenderer.on('ollama:openRouterProgress', progressHandler);
-      
-      try {
-        // Start the streaming request
-        const result = await ipcRenderer.invoke('ollama:openRouterStreamChat', messages, model);
-        return result;
-      } finally {
-        // Clean up the listener
-        ipcRenderer.removeListener('ollama:openRouterProgress', progressHandler);
-      }
-    },
-    
-    // Gemini specific methods
-    getGeminiModels: () => ipcRenderer.invoke('ollama:getGeminiModels'),
-    isGeminiAvailable: () => ipcRenderer.invoke('ollama:isGeminiAvailable'),
-    testGeminiConnection: () => ipcRenderer.invoke('ollama:testGeminiConnection')
-  },
-
-  // Server status
-  server: {
-    getStatus: () => ipcRenderer.invoke('server:getStatus'),
-    checkStatus: () => ipcRenderer.invoke('server:checkStatus'),
-    updateConfig: (config: any) => ipcRenderer.send('server:updateConfig', config)
-  },
-
-  // System commands
-  system: {
-    executeCommand: (command: string) => ipcRenderer.invoke('system:executeCommand', command),
-    fetchUrl: (url: string, options?: { method?: string; headers?: Record<string, string>; body?: string }) =>
-      ipcRenderer.invoke('system:fetchUrl', url, options),
-  },
-
-  // Browser bridge — talks to Ally Chrome extension
-  browser: {
-    callTool: (tool: string, params: Record<string, unknown>) =>
-      ipcRenderer.invoke('browser:callTool', tool, params),
-    isConnected: () => ipcRenderer.invoke('browser:isConnected'),
-  },
-
   // Speech service
   speech: {
     connect: () => ipcRenderer.invoke('speech:connect'),
@@ -224,87 +151,56 @@ const pipAPI = {
     return () => ipcRenderer.removeListener('toggle-speech', callback);
   },
 
-  // Listen for terminal panel toggle event
-  onToggleTerminal: (callback: () => void) => {
-    ipcRenderer.on('toggle-terminal', callback);
-    return () => ipcRenderer.removeListener('toggle-terminal', callback);
+  // Global hotkey events from the main process (see SHORTCUTS in main.ts)
+  onShortcut: (callback: (event: 'focus-main-input' | 'show-collapsed-and-focus-quick' | 'toggle-collapse' | 'cycle-size' | 'toggle-context') => void) => {
+    const events = ['focus-main-input', 'show-collapsed-and-focus-quick', 'toggle-collapse', 'cycle-size', 'toggle-context'] as const;
+    const handlers = events.map(name => {
+      const handler = () => callback(name);
+      ipcRenderer.on(name, handler);
+      return [name, handler] as const;
+    });
+    return () => handlers.forEach(([name, handler]) => ipcRenderer.removeListener(name, handler));
   },
 
-  // MCP/ACP Integration
-  mcp: {
-    readConfig: () => ipcRenderer.invoke('mcp:readConfig'),
-    writeConfig: (config: any) => ipcRenderer.invoke('mcp:writeConfig', config),
-    spawnServer: (config: any) => ipcRenderer.invoke('mcp:spawnServer', config),
-    sendMessage: (processId: string, message: string) => ipcRenderer.invoke('mcp:sendMessage', processId, message),
-    killServer: (processId: string) => ipcRenderer.invoke('mcp:killServer', processId),
-    getServerStatus: () => ipcRenderer.invoke('mcp:getServerStatus'),
-    restartServer: (serverName: string) => ipcRenderer.invoke('mcp:restartServer', serverName),
-    executeTool: (toolName: string, parameters: any) => ipcRenderer.invoke('mcp:executeTool', toolName, parameters),
-    
-    // Event listeners for MCP server events
-    onServerData: (callback: (data: { processId: string; data: string }) => void) => {
-      const handler = (_: any, data: { processId: string; data: string }) => callback(data);
-      ipcRenderer.on('mcp:serverData', handler);
-      return () => ipcRenderer.removeListener('mcp:serverData', handler);
+
+  // Avatar mode: transparent window + global cursor feed for the robot's eyes
+  setAvatarMode: (on: boolean) => ipcRenderer.send('window:avatar-mode', on),
+  watchCursor: (on: boolean) => ipcRenderer.send('cursor:watch', on),
+  onCursorMoved: (callback: (pos: { x: number; y: number }) => void) => {
+    const handler = (_: any, pos: { x: number; y: number }) => callback(pos);
+    ipcRenderer.on('cursor:moved', handler);
+    return () => ipcRenderer.removeListener('cursor:moved', handler);
+  },
+
+  // Circle to Ask (overlay page + the chat window that receives the result)
+  circle: {
+    start: () => ipcRenderer.invoke('circle:start'),
+    getShot: () => ipcRenderer.invoke('circle:getShot'),
+    submit: (payload: { rect?: { x: number; y: number; width: number; height: number }; prompt: string }) =>
+      ipcRenderer.invoke('circle:submit', payload),
+    cancel: () => ipcRenderer.invoke('circle:cancel'),
+    onAsk: (callback: (ask: { imagePath: string; thumbnail: string; prompt: string }) => void) => {
+      const handler = (_: any, ask: { imagePath: string; thumbnail: string; prompt: string }) => callback(ask);
+      ipcRenderer.on('circle:ask', handler);
+      return () => ipcRenderer.removeListener('circle:ask', handler);
     },
-    onServerError: (callback: (data: { processId: string; error: string }) => void) => {
-      const handler = (_: any, data: { processId: string; error: string }) => callback(data);
-      ipcRenderer.on('mcp:serverError', handler);
-      return () => ipcRenderer.removeListener('mcp:serverError', handler);
-    },
-    onServerExit: (callback: (data: { processId: string; code: number; signal: string }) => void) => {
-      const handler = (_: any, data: { processId: string; code: number; signal: string }) => callback(data);
-      ipcRenderer.on('mcp:serverExit', handler);
-      return () => ipcRenderer.removeListener('mcp:serverExit', handler);
-    }
   },
 
-  acp: {
-    readConfig: () => ipcRenderer.invoke('acp:readConfig'),
-    writeConfig: (config: any) => ipcRenderer.invoke('acp:writeConfig', config),
-    getAgentStatus: () => ipcRenderer.invoke('acp:getAgentStatus'),
-    queryAgent: (agentId: string, query: string, context?: any) => ipcRenderer.invoke('acp:queryAgent', agentId, query, context),
-    reconnectAgent: (agentId: string) => ipcRenderer.invoke('acp:reconnectAgent', agentId)
-  },
-
-  // Accessibility service
-  accessibility: {
-    connect: () => ipcRenderer.invoke('accessibility:connect'),
-    disconnect: () => ipcRenderer.invoke('accessibility:disconnect'),
-    isConnected: () => ipcRenderer.invoke('accessibility:isConnected'),
-    getSelectedText: () => ipcRenderer.invoke('accessibility:getSelectedText'),
-    getElementAtCursor: () => ipcRenderer.invoke('accessibility:getElementAtCursor'),
-    getFocusedElement: () => ipcRenderer.invoke('accessibility:getFocusedElement'),
-    getCursorPosition: () => ipcRenderer.invoke('accessibility:getCursorPosition'),
-    getActiveWindow: () => ipcRenderer.invoke('accessibility:getActiveWindow'),
-    getScreenContent: () => ipcRenderer.invoke('accessibility:getScreenContent'),
-    
-    // Listen for accessibility context updates
-    onContextUpdate: (callback: (context: any) => void) => {
-      const handler = (_: any, context: any) => callback(context);
-      ipcRenderer.on('accessibility-context-update', handler);
-      return () => ipcRenderer.removeListener('accessibility-context-update', handler);
-    }
-  },
-
-  // Terminal session manager bridge
-  terminal: {
-    createSession: (name: string) => ipcRenderer.invoke('terminal:createSession', name),
-    listSessions: () => ipcRenderer.invoke('terminal:listSessions'),
-    executeInSession: (sessionId: string, command: string) =>
-      ipcRenderer.invoke('terminal:executeInSession', sessionId, command),
-    killSession: (sessionId: string) => ipcRenderer.invoke('terminal:killSession', sessionId),
-
-    onOutput: (callback: (data: { sessionId: string; line: string }) => void) => {
-      const handler = (_: any, data: { sessionId: string; line: string }) => callback(data);
-      ipcRenderer.on('terminal:output', handler);
-      return () => ipcRenderer.removeListener('terminal:output', handler);
-    },
-
-    onSessionUpdate: (callback: (session: any) => void) => {
-      const handler = (_: any, session: any) => callback(session);
-      ipcRenderer.on('terminal:sessionUpdate', handler);
-      return () => ipcRenderer.removeListener('terminal:sessionUpdate', handler);
+  // Claude Code / Codex agent backends
+  agent: {
+    status: () => ipcRenderer.invoke('agent:status'),
+    getConfig: () => ipcRenderer.invoke('agent:getConfig'),
+    updateConfig: (patch: Record<string, unknown>) => ipcRenderer.invoke('agent:updateConfig', patch),
+    listModels: (provider: 'claude' | 'codex') => ipcRenderer.invoke('agent:listModels', provider),
+    send: (opts: Record<string, unknown>) => ipcRenderer.invoke('agent:send', opts),
+    stop: (runId: string) => ipcRenderer.invoke('agent:stop', runId),
+    listSessions: (provider: 'claude' | 'codex', limit?: number) => ipcRenderer.invoke('agent:listSessions', provider, limit),
+    loadSession: (provider: 'claude' | 'codex', id: string) => ipcRenderer.invoke('agent:loadSession', provider, id),
+    pickFolder: (current?: string) => ipcRenderer.invoke('agent:pickFolder', current),
+    onEvent: (callback: (data: { runId: string; event: any }) => void) => {
+      const handler = (_: any, data: { runId: string; event: any }) => callback(data);
+      ipcRenderer.on('agent:event', handler);
+      return () => ipcRenderer.removeListener('agent:event', handler);
     },
   }
 };

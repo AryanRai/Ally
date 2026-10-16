@@ -1,145 +1,177 @@
 /**
- * AIBackdrop — Gemini-style animated glow that sits behind the glass panel.
- *
- * Three blurred radial-gradient orbs are absolutely-positioned and animated
- * with Framer Motion variants per AI state.  No canvas, no WebGL — pure CSS
- * with Framer Motion. All opacity values are intentionally low so the glass
- * effect is never obscured.
+ * AIBackdrop — glowy floating orbs inside the glass panel, visible when the AI is active.
  */
 
 import { motion, Transition } from 'framer-motion';
 
 export interface AIBackdropProps {
   state: 'idle' | 'thinking' | 'streaming' | 'tool_executing' | 'speaking';
-  intensity?: number; // 0–1 multiplier applied on top of per-state opacity
+  intensity?: number;
 }
 
 type OrbState = AIBackdropProps['state'];
 
-interface OrbStyle {
+interface OrbDef {
   background: string;
-  opacity: number | number[];
-  scale: number | number[];
-  x?: number | number[];
-  y?: number | number[];
-  transition?: Transition & { delay?: number };
+  opacity: number[];
+  scale: number[];
+  x?: number[];
+  y?: number[];
+  transition: Transition & { delay?: number };
 }
 
-const orbVariants: Record<OrbState, OrbStyle[]> = {
+const orbVariants: Record<OrbState, OrbDef[]> = {
   idle: [
     {
-      background: 'radial-gradient(circle, rgba(139,92,246,0.4) 0%, transparent 70%)',
-      opacity: [0.03, 0.05, 0.03],
-      scale: [1, 1.04, 1],
+      background: 'radial-gradient(circle, rgba(139,92,246,0.6) 0%, transparent 70%)',
+      opacity: [0.06, 0.10, 0.06],
+      scale: [1, 1.05, 1],
       transition: { duration: 8, repeat: Infinity, ease: 'easeInOut' },
     },
     {
-      background: 'radial-gradient(circle, rgba(99,102,241,0.4) 0%, transparent 70%)',
-      opacity: [0.02, 0.04, 0.02],
-      scale: [1, 1.03, 1],
+      background: 'radial-gradient(circle, rgba(99,102,241,0.5) 0%, transparent 70%)',
+      opacity: [0.04, 0.08, 0.04],
+      scale: [1, 1.04, 1],
       transition: { duration: 10, repeat: Infinity, ease: 'easeInOut' },
     },
     {
-      background: 'radial-gradient(circle, rgba(147,51,234,0.35) 0%, transparent 70%)',
-      opacity: [0.02, 0.03, 0.02],
-      scale: [1, 1.02, 1],
+      background: 'radial-gradient(circle, rgba(147,51,234,0.5) 0%, transparent 70%)',
+      opacity: [0.03, 0.06, 0.03],
+      scale: [1, 1.03, 1],
       transition: { duration: 12, repeat: Infinity, ease: 'easeInOut' },
+    },
+    {
+      background: 'radial-gradient(circle, rgba(59,130,246,0.4) 0%, transparent 70%)',
+      opacity: [0.03, 0.05, 0.03],
+      scale: [1, 1.03, 1],
+      transition: { duration: 9, repeat: Infinity, ease: 'easeInOut' },
     },
   ],
   thinking: [
     {
-      background: 'radial-gradient(circle, rgba(139,92,246,0.8) 0%, rgba(109,40,217,0.4) 50%, transparent 70%)',
-      opacity: [0.10, 0.14, 0.10],
-      scale: [1, 1.3, 1],
-      x: [-10, 10, -10],
+      background: 'radial-gradient(circle, rgba(167,92,255,1) 0%, rgba(109,40,217,0.6) 40%, transparent 70%)',
+      opacity: [0.30, 0.50, 0.30],
+      scale: [1, 1.35, 1],
+      x: [-20, 20, -20],
       transition: { duration: 4, repeat: Infinity, ease: 'easeInOut' },
     },
     {
-      background: 'radial-gradient(circle, rgba(167,139,250,0.7) 0%, rgba(139,92,246,0.3) 50%, transparent 70%)',
-      opacity: [0.08, 0.12, 0.08],
-      scale: [1, 1.2, 1],
-      y: [-8, 8, -8],
-      transition: { duration: 4.5, repeat: Infinity, ease: 'easeInOut', delay: 0.5 },
+      background: 'radial-gradient(circle, rgba(196,181,253,0.9) 0%, rgba(139,92,246,0.5) 40%, transparent 70%)',
+      opacity: [0.22, 0.38, 0.22],
+      scale: [1, 1.25, 1],
+      y: [-15, 15, -15],
+      transition: { duration: 4.5, repeat: Infinity, ease: 'easeInOut', delay: 0.6 },
     },
     {
-      background: 'radial-gradient(circle, rgba(196,181,253,0.6) 0%, rgba(139,92,246,0.2) 50%, transparent 70%)',
-      opacity: [0.06, 0.10, 0.06],
+      background: 'radial-gradient(circle, rgba(139,92,246,0.8) 0%, rgba(99,102,241,0.4) 40%, transparent 70%)',
+      opacity: [0.18, 0.30, 0.18],
+      scale: [1, 1.2, 1],
+      x: [10, -10, 10],
+      transition: { duration: 5, repeat: Infinity, ease: 'easeInOut', delay: 1.2 },
+    },
+    {
+      background: 'radial-gradient(circle, rgba(124,58,237,0.7) 0%, transparent 70%)',
+      opacity: [0.15, 0.25, 0.15],
       scale: [1, 1.15, 1],
-      transition: { duration: 5, repeat: Infinity, ease: 'easeInOut', delay: 1 },
+      y: [10, -10, 10],
+      transition: { duration: 3.5, repeat: Infinity, ease: 'easeInOut', delay: 0.3 },
     },
   ],
   streaming: [
     {
-      background: 'radial-gradient(circle, rgba(59,130,246,0.7) 0%, rgba(6,182,212,0.4) 50%, transparent 70%)',
-      opacity: [0.07, 0.11, 0.07],
-      scale: [1, 1.15, 1],
-      x: [-15, 15, -15],
-      transition: { duration: 2, repeat: Infinity, ease: 'easeInOut' },
+      background: 'radial-gradient(circle, rgba(56,189,248,1) 0%, rgba(6,182,212,0.6) 40%, transparent 70%)',
+      opacity: [0.28, 0.45, 0.28],
+      scale: [1, 1.3, 1],
+      x: [-25, 25, -25],
+      transition: { duration: 2.5, repeat: Infinity, ease: 'easeInOut' },
     },
     {
-      background: 'radial-gradient(circle, rgba(34,211,238,0.6) 0%, rgba(59,130,246,0.3) 50%, transparent 70%)',
-      opacity: [0.06, 0.10, 0.06],
-      scale: [1, 1.12, 1],
-      y: [-12, 12, -12],
-      transition: { duration: 2.5, repeat: Infinity, ease: 'easeInOut', delay: 0.3 },
+      background: 'radial-gradient(circle, rgba(99,102,241,0.9) 0%, rgba(139,92,246,0.5) 40%, transparent 70%)',
+      opacity: [0.22, 0.38, 0.22],
+      scale: [1, 1.22, 1],
+      y: [-18, 18, -18],
+      transition: { duration: 3, repeat: Infinity, ease: 'easeInOut', delay: 0.4 },
     },
     {
-      background: 'radial-gradient(circle, rgba(96,165,250,0.55) 0%, rgba(34,211,238,0.2) 50%, transparent 70%)',
-      opacity: [0.05, 0.09, 0.05],
-      scale: [1, 1.1, 1],
-      transition: { duration: 3, repeat: Infinity, ease: 'easeInOut', delay: 0.6 },
+      background: 'radial-gradient(circle, rgba(34,211,238,0.8) 0%, rgba(59,130,246,0.4) 40%, transparent 70%)',
+      opacity: [0.18, 0.30, 0.18],
+      scale: [1, 1.18, 1],
+      x: [15, -15, 15],
+      transition: { duration: 3.5, repeat: Infinity, ease: 'easeInOut', delay: 0.8 },
+    },
+    {
+      background: 'radial-gradient(circle, rgba(168,85,247,0.7) 0%, transparent 70%)',
+      opacity: [0.14, 0.24, 0.14],
+      scale: [1, 1.2, 1],
+      y: [12, -12, 12],
+      transition: { duration: 2.8, repeat: Infinity, ease: 'easeInOut', delay: 1.0 },
     },
   ],
   tool_executing: [
     {
-      background: 'radial-gradient(circle, rgba(245,158,11,0.8) 0%, rgba(217,119,6,0.4) 50%, transparent 70%)',
-      opacity: [0.12, 0.17, 0.12],
-      scale: [1, 1.4, 1],
-      x: [-8, 8, -8],
+      background: 'radial-gradient(circle, rgba(251,191,36,1) 0%, rgba(217,119,6,0.6) 40%, transparent 70%)',
+      opacity: [0.32, 0.52, 0.32],
+      scale: [1, 1.45, 1],
+      x: [-12, 12, -12],
       transition: { duration: 1.5, repeat: Infinity, ease: 'easeInOut' },
     },
     {
-      background: 'radial-gradient(circle, rgba(251,191,36,0.7) 0%, rgba(245,158,11,0.35) 50%, transparent 70%)',
-      opacity: [0.10, 0.15, 0.10],
-      scale: [1, 1.3, 1],
-      y: [-10, 10, -10],
+      background: 'radial-gradient(circle, rgba(249,115,22,0.9) 0%, rgba(245,158,11,0.5) 40%, transparent 70%)',
+      opacity: [0.25, 0.42, 0.25],
+      scale: [1, 1.35, 1],
+      y: [-14, 14, -14],
       transition: { duration: 1.8, repeat: Infinity, ease: 'easeInOut', delay: 0.2 },
     },
     {
-      background: 'radial-gradient(circle, rgba(252,211,77,0.65) 0%, rgba(245,158,11,0.25) 50%, transparent 70%)',
-      opacity: [0.08, 0.13, 0.08],
-      scale: [1, 1.2, 1],
+      background: 'radial-gradient(circle, rgba(253,224,71,0.8) 0%, rgba(251,191,36,0.4) 40%, transparent 70%)',
+      opacity: [0.20, 0.35, 0.20],
+      scale: [1, 1.25, 1],
       transition: { duration: 2.2, repeat: Infinity, ease: 'easeInOut', delay: 0.4 },
+    },
+    {
+      background: 'radial-gradient(circle, rgba(245,158,11,0.7) 0%, transparent 70%)',
+      opacity: [0.16, 0.28, 0.16],
+      scale: [1, 1.2, 1],
+      x: [8, -8, 8],
+      transition: { duration: 1.6, repeat: Infinity, ease: 'easeInOut', delay: 0.6 },
     },
   ],
   speaking: [
     {
-      background: 'radial-gradient(circle, rgba(16,185,129,0.7) 0%, rgba(5,150,105,0.35) 50%, transparent 70%)',
-      opacity: [0.06, 0.10, 0.06],
-      scale: [1, 1.2, 1],
-      y: [-6, 6, -6],
+      background: 'radial-gradient(circle, rgba(52,211,153,0.9) 0%, rgba(5,150,105,0.5) 40%, transparent 70%)',
+      opacity: [0.24, 0.40, 0.24],
+      scale: [1, 1.28, 1],
+      y: [-10, 10, -10],
       transition: { duration: 1.2, repeat: Infinity, ease: 'easeInOut' },
     },
     {
-      background: 'radial-gradient(circle, rgba(52,211,153,0.6) 0%, rgba(16,185,129,0.3) 50%, transparent 70%)',
-      opacity: [0.05, 0.08, 0.05],
-      scale: [1, 1.15, 1],
-      x: [-4, 4, -4],
+      background: 'radial-gradient(circle, rgba(20,184,166,0.8) 0%, rgba(16,185,129,0.4) 40%, transparent 70%)',
+      opacity: [0.18, 0.32, 0.18],
+      scale: [1, 1.22, 1],
+      x: [-8, 8, -8],
       transition: { duration: 1.5, repeat: Infinity, ease: 'easeInOut', delay: 0.2 },
     },
     {
-      background: 'radial-gradient(circle, rgba(110,231,183,0.55) 0%, rgba(16,185,129,0.2) 50%, transparent 70%)',
-      opacity: [0.04, 0.07, 0.04],
-      scale: [1, 1.1, 1],
+      background: 'radial-gradient(circle, rgba(110,231,183,0.7) 0%, rgba(52,211,153,0.35) 40%, transparent 70%)',
+      opacity: [0.14, 0.24, 0.14],
+      scale: [1, 1.15, 1],
       transition: { duration: 1.8, repeat: Infinity, ease: 'easeInOut', delay: 0.4 },
+    },
+    {
+      background: 'radial-gradient(circle, rgba(16,185,129,0.6) 0%, transparent 70%)',
+      opacity: [0.10, 0.18, 0.10],
+      scale: [1, 1.12, 1],
+      y: [8, -8, 8],
+      transition: { duration: 1.3, repeat: Infinity, ease: 'easeInOut', delay: 0.6 },
     },
   ],
 };
 
 const ORB_POSITIONS = [
-  { left: '-10%', top: '55%' },
-  { right: '-5%', top: '25%' },
-  { left: '35%', top: '-8%' },
+  { left: '-5%',  top: '50%'  },
+  { right: '-5%', top: '20%'  },
+  { left: '30%',  top: '-5%'  },
+  { right: '15%', bottom: '-5%' },
 ];
 
 export default function AIBackdrop({ state, intensity = 1 }: AIBackdropProps) {
@@ -159,17 +191,17 @@ export default function AIBackdrop({ state, intensity = 1 }: AIBackdropProps) {
     >
       {ORB_POSITIONS.map((pos, i) => {
         const v = variants[i];
-        const opacityArr = Array.isArray(v.opacity) ? v.opacity.map((o) => o * intensity) : v.opacity * intensity;
+        const opacityArr = v.opacity.map((o) => o * intensity);
         return (
           <motion.div
             key={i}
             style={{
               position: 'absolute',
-              width: '24rem', // w-96
-              height: '24rem', // h-96
+              width: '28rem',
+              height: '28rem',
               borderRadius: '9999px',
               background: v.background,
-              filter: 'blur(64px)', // blur-3xl
+              filter: 'blur(72px)',
               mixBlendMode: 'screen',
               ...pos,
             }}

@@ -43,7 +43,13 @@ export class ChatManager {
         {
           id: '1',
           role: 'assistant',
-          content: "Hello! I'm your glass PiP chat assistant. How can I help you today!\n\n💡 **Available commands:**\n• `/run <command>` - Execute local commands\n• `/run@target <command>` - Execute remote commands\n• `/cmd <command>` - Alternative command syntax\n• `/exec <command>` - Another command syntax\n\n🎯 **Local examples:**\n• `/run git status` - Check git status\n• `/run npm install` - Install npm packages\n• `/run code .` - Open current directory in VS Code\n\n🌐 **Remote examples:**\n• `/run@docker ps` - Run in Docker container\n• `/run@myserver uptime` - Run on custom server\n• `/run@ssh-host ls -la` - Run on SSH server",
+          content: [
+            "Hi, I'm Ally. Pick **Claude Code** or **Codex** in the model menu, choose a working folder, and talk to it here.",
+            '',
+            '• **Agent sessions** (bottom of the sidebar) continue chats you started in Claude Code or Codex',
+            '• **Ctrl+Shift+C** shows or hides me from anywhere',
+            '• Copy something, then hit **Explain** to ask about it',
+          ].join('\n'),
           timestamp: now
         }
       ],
@@ -189,7 +195,9 @@ export class ChatManager {
       title: `${chat.title} (edited)`,
       messages: forkedMessages,
       createdAt: now,
-      updatedAt: now
+      updatedAt: now,
+      // Same agent and folder, but a fresh session: the history has diverged
+      agent: chat.agent && { provider: chat.agent.provider, cwd: chat.agent.cwd },
     };
 
     // Add the forked chat and switch to it
@@ -230,11 +238,33 @@ export class ChatManager {
     return { ...this.state };
   }
 
-  /** Import a chat from Supabase if it doesn't already exist locally */
-  importChat(chat: Chat): boolean {
-    if (this.state.chats.some(c => c.id === chat.id)) return false;
-    this.state.chats.push(chat);
+  /** Link (or re-link) a chat to a Claude Code / Codex session */
+  setChatAgent(chatId: string, agent: Chat['agent']): boolean {
+    const chat = this.state.chats.find(c => c.id === chatId);
+    if (!chat) return false;
+    chat.agent = agent;
     this.saveState();
     return true;
   }
+
+  /**
+   * Open an existing agent session as a chat. Reuses the chat already linked to
+   * that session (refreshing its messages) instead of creating a duplicate.
+   */
+  openAgentSession(agent: NonNullable<Chat['agent']>, title: string, messages: Message[]): Chat {
+    let chat = this.state.chats.find(c => c.agent?.provider === agent.provider && c.agent?.sessionId === agent.sessionId);
+    const now = Date.now();
+    if (chat) {
+      chat.messages = messages;
+      chat.agent = agent;
+      chat.updatedAt = now;
+    } else {
+      chat = { id: `chat_${now}_${Math.random().toString(36).substr(2, 9)}`, title, messages, createdAt: now, updatedAt: now, agent };
+      this.state.chats.push(chat);
+    }
+    this.state.activeChat = chat.id;
+    this.saveState();
+    return chat;
+  }
+
 }

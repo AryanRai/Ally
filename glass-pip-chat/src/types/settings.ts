@@ -4,12 +4,8 @@ export interface UISettings {
   messagePadding: 'tight' | 'normal' | 'spacious';
   windowPadding: number; // 0-32px padding around the chat container
   borderRadius: 'none' | 'sm' | 'md' | 'lg' | 'xl' | '2xl' | '3xl';
-}
-
-export interface ToolSettings {
-  enabled: boolean;
-  autoConnect: boolean;
-  streamHandlerUrl: string;
+  /** What collapsing turns into: the floating robot or the compact quick-input pill */
+  collapseStyle?: 'avatar' | 'pill';
 }
 
 export interface GreetingSettings {
@@ -18,18 +14,11 @@ export interface GreetingSettings {
   randomGreetings: string[];
 }
 
-export interface NetworkSettings {
-  enableSupabase: boolean;
-  enableStreamHandler: boolean;
-}
-
 export interface AppSettings {
   ui: UISettings;
   theme: 'light' | 'dark';
   contextToggleEnabled: boolean;
-  tools?: ToolSettings;
   greeting?: GreetingSettings;
-  network?: NetworkSettings;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -38,15 +27,11 @@ export const DEFAULT_SETTINGS: AppSettings = {
     messageSpacing: 'normal',
     messagePadding: 'normal',
     windowPadding: 8,
-    borderRadius: '2xl'
+    borderRadius: '2xl',
+    collapseStyle: 'avatar'
   },
   theme: 'dark',
   contextToggleEnabled: true,
-  tools: {
-    enabled: false,
-    autoConnect: true,
-    streamHandlerUrl: 'ws://localhost:3000'
-  },
   greeting: {
     customGreeting: 'Balalalala',
     useRandomGreeting: false,
@@ -59,9 +44,5 @@ export const DEFAULT_SETTINGS: AppSettings = {
       'Let\'s talk!',
       'How can I help?'
     ]
-  },
-  network: {
-    enableSupabase: false,
-    enableStreamHandler: false
   }
 };

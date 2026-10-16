@@ -1,30 +1,4 @@
-export interface OllamaModel {
-  name: string;
-  modified_at: string;
-  size: number;
-  digest: string;
-}
-
-export interface ChatMessage {
-  role: 'user' | 'assistant' | 'system';
-  content: string;
-}
-
-export interface ServerStatus {
-  ip: string;
-  domain: string;
-  status: 'online' | 'offline' | 'unknown';
-  lastCheck: number;
-  uptime?: number;
-  load?: number;
-}
-
-export interface CommandResult {
-  success: boolean;
-  stdout?: string;
-  stderr?: string;
-  error?: string;
-}
+import type { AgentProvider, AgentPermission, AgentConfig, AgentModel, AgentSessionSummary, AgentHistoryMessage, AgentEvent } from './agent';
 
 export interface PipAPI {
   show: () => void;
@@ -58,44 +32,6 @@ export interface PipAPI {
   setTheme: (theme: 'light' | 'dark') => void;
   onThemeChanged: (callback: (theme: 'light' | 'dark') => void) => () => void;
 
-  // Ollama API
-  ollama: {
-    isAvailable: () => Promise<boolean>;
-    getModels: () => Promise<OllamaModel[]>;
-    chat: (messages: ChatMessage[], model?: string) => Promise<string>;
-    getConfig: () => Promise<any>;
-    updateConfig: (config: any) => void;
-    streamChatWithThinking: (messages: ChatMessage[], model: string, onProgress: (chunk: any) => void) => Promise<string>;
-    stop: () => Promise<boolean>;
-    
-    // Provider management
-    getProviders: () => Promise<Array<{ name: string; available: boolean; configured: boolean }>>;
-    setProvider: (provider: 'ollama' | 'openrouter' | 'gemini') => void;
-    
-    // OpenRouter specific
-    getOpenRouterModels: () => Promise<any[]>;
-    isOpenRouterAvailable: () => Promise<boolean>;
-    testOpenRouterConnection: () => Promise<{ success: boolean; error?: string }>;
-    openRouterStreamChat: (messages: ChatMessage[], model: string, onProgress: (chunk: string) => void) => Promise<string>;
-    
-    // Gemini specific
-    getGeminiModels: () => Promise<any[]>;
-    isGeminiAvailable: () => Promise<boolean>;
-    testGeminiConnection: () => Promise<{ success: boolean; error?: string }>;
-  };
-
-  // Server status
-  server: {
-    getStatus: () => Promise<ServerStatus>;
-    checkStatus: () => Promise<ServerStatus>;
-    updateConfig: (config: Partial<ServerStatus>) => void;
-  };
-
-  // System commands
-  system: {
-    executeCommand: (command: string) => Promise<CommandResult>;
-  };
-
   // Speech service
   speech: {
     connect: () => Promise<{ success: boolean; error?: string }>;
@@ -104,6 +40,10 @@ export interface PipAPI {
     startListening: () => Promise<{ success: boolean; error?: string }>;
     stopListening: () => Promise<{ success: boolean; error?: string }>;
     synthesize: (text: string) => Promise<{ success: boolean; error?: string }>;
+    synthesizeStreaming: (text: string) => Promise<{ success: boolean; error?: string }>;
+    clearTTSQueue: () => Promise<{ success: boolean; error?: string }>;
+    getTTSQueueStatus: () => Promise<any>;
+    skipCurrentTTS: () => Promise<{ success: boolean; error?: string }>;
     sendGGWave: (text: string) => Promise<{ success: boolean; error?: string }>;
     getStatus: () => Promise<{ success: boolean; error?: string }>;
     
@@ -119,56 +59,59 @@ export interface PipAPI {
     onStatusUpdate: (callback: (status: any) => void) => () => void;
     onListeningStarted: (callback: () => void) => () => void;
     onListeningStopped: (callback: () => void) => () => void;
+    onTTSStreamStart: (callback: (data: any) => void) => () => void;
+    onTTSStreamChunk: (callback: (data: any) => void) => () => void;
+    onTTSStreamComplete: (callback: (data: any) => void) => () => void;
+    onTTSStreamError: (callback: (error: string) => void) => () => void;
   };
 
   // Speech toggle event
   onToggleSpeech: (callback: () => void) => () => void;
 
-  // MCP Integration
-  mcp: {
-    readConfig: () => Promise<any>;
-    writeConfig: (config: any) => Promise<void>;
-    spawnServer: (config: any) => Promise<{ processId: string }>;
-    sendMessage: (processId: string, message: string) => Promise<void>;
-    killServer: (processId: string) => Promise<void>;
-    getServerStatus: () => Promise<Array<{ name: string; connected: boolean; toolCount: number }>>;
-    restartServer: (serverName: string) => Promise<void>;
-    executeTool: (toolName: string, parameters: any) => Promise<any>;
-    
-    onServerData: (callback: (data: { processId: string; data: string }) => void) => () => void;
-    onServerError: (callback: (data: { processId: string; error: string }) => void) => () => void;
-    onServerExit: (callback: (data: { processId: string; code: number; signal: string }) => void) => () => void;
+  // Global hotkey events from the main process
+  onShortcut: (callback: (event: 'focus-main-input' | 'show-collapsed-and-focus-quick' | 'toggle-collapse' | 'cycle-size' | 'toggle-context') => void) => () => void;
+
+  // Avatar mode
+  setAvatarMode: (on: boolean) => void;
+  /** Start/stop the global cursor feed (window-relative coordinates) */
+  watchCursor: (on: boolean) => void;
+  onCursorMoved: (callback: (pos: { x: number; y: number }) => void) => () => void;
+
+  // Circle to Ask
+  circle: {
+    start: () => Promise<void>;
+    /** Frozen screenshot for the overlay page (PNG data URL) */
+    getShot: () => Promise<string | null>;
+    /** `rect` in overlay CSS pixels; omit to send the whole screen */
+    submit: (payload: { rect?: { x: number; y: number; width: number; height: number }; prompt: string }) => Promise<void>;
+    cancel: () => Promise<void>;
+    onAsk: (callback: (ask: { imagePath: string; thumbnail: string; prompt: string }) => void) => () => void;
   };
 
-  // ACP Integration
-  acp: {
-    readConfig: () => Promise<any>;
-    writeConfig: (config: any) => Promise<void>;
-    getAgentStatus: () => Promise<any>;
-    queryAgent: (agentId: string, query: string, context?: any) => Promise<any>;
-    reconnectAgent: (agentId: string) => Promise<void>;
+  // Claude Code / Codex agent backends
+  agent: {
+    status: () => Promise<Record<AgentProvider, { available: boolean; path: string | null }>>;
+    getConfig: () => Promise<AgentConfig>;
+    updateConfig: (patch: Partial<AgentConfig>) => Promise<AgentConfig>;
+    listModels: (provider: AgentProvider) => Promise<AgentModel[]>;
+    send: (opts: {
+      provider: AgentProvider;
+      prompt: string;
+      cwd?: string;
+      sessionId?: string;
+      model?: string;
+      permission?: AgentPermission;
+      /** Robot mode: persona instructions; the HowYouSeeMe MCP URL comes from agent config */
+      robot?: { instructions: string };
+      /** Image files shown to the agent (e.g. a circled screen region) */
+      images?: string[];
+    }) => Promise<string>;
+    stop: (runId: string) => Promise<boolean>;
+    listSessions: (provider: AgentProvider, limit?: number) => Promise<AgentSessionSummary[]>;
+    loadSession: (provider: AgentProvider, id: string) => Promise<{ cwd?: string; messages: AgentHistoryMessage[] }>;
+    pickFolder: (current?: string) => Promise<string | null>;
+    onEvent: (callback: (data: { runId: string; event: AgentEvent }) => void) => () => void;
   };
-
-  // Accessibility service
-  accessibility?: {
-    connect: () => Promise<{ success: boolean; error?: string }>;
-    disconnect: () => Promise<{ success: boolean }>;
-    isConnected: () => Promise<boolean>;
-    getSelectedText: () => Promise<string>;
-    getElementAtCursor: () => Promise<any>;
-    getFocusedElement: () => Promise<any>;
-    getCursorPosition: () => Promise<{ x: number; y: number }>;
-    getActiveWindow: () => Promise<any>;
-    getScreenContent: () => Promise<any>;
-    onContextUpdate: (callback: (context: AccessibilityContext) => void) => () => void;
-  };
-}
-
-export interface AccessibilityContext {
-  selectedText?: string;
-  focusedElement?: any;
-  cursorPosition?: { x: number; y: number };
-  activeWindow?: any;
 }
 
 declare global {

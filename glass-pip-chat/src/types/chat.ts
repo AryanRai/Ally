@@ -4,8 +4,10 @@ export interface Message {
   content: string;
   timestamp: number;
   metadata?: {
-    source?: 'speech' | 'text' | 'remote';
+    source?: 'speech' | 'text' | 'remote' | 'circle';
     context?: string;
+    /** Small JPEG data URL of a circled screen region attached to this message */
+    image?: string;
     toolCalls?: ToolCall[];
     toolResults?: ToolResult[];
     /** Persisted streaming segments (interleaved text + tool pills) for agentic messages.
@@ -33,6 +35,14 @@ export interface Chat {
   messages: Message[];
   createdAt: number;
   updatedAt: number;
+  /** Set when this chat is backed by a Claude Code / Codex session */
+  agent?: {
+    provider: 'claude' | 'codex';
+    /** Agent session id; unset until the first turn returns one */
+    sessionId?: string;
+    /** Working folder the agent runs in */
+    cwd?: string;
+  };
 }
 
 export interface ChatState {

@@ -1,5 +1,4 @@
 import { motion } from 'framer-motion';
-import { isWeb } from '../../utils/platform';
 import {
   Grip,
   Maximize2,
@@ -11,9 +10,7 @@ import {
   Clipboard,
   Check,
   Mic,
-  MicOff,
-  LogOut,
-  Globe
+  MicOff
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { ThemeUtils } from '../../utils/themeUtils';
@@ -28,8 +25,6 @@ interface ExpandedHeaderProps {
   onSidebarToggle: () => void;
   activeChat: any;
   headerTitleEdit: any;
-  ollamaAvailable: boolean;
-  serverStatus: any;
   hasNewContext: boolean;
   contextData: any;
   showContext: boolean;
@@ -58,8 +53,6 @@ export default function ExpandedHeader({
   onSidebarToggle,
   activeChat,
   headerTitleEdit,
-  ollamaAvailable,
-  serverStatus,
   hasNewContext,
   contextData,
   showContext,
@@ -73,7 +66,6 @@ export default function ExpandedHeader({
   onSizeChange,
   onSettings,
   onCollapseToggle,
-  onProviderSettings,
   onHide,
   size,
   showSpeechControls,
@@ -83,9 +75,7 @@ export default function ExpandedHeader({
   return (
     <>
       <div className="flex items-center gap-1 flex-1 min-w-0">
-        <Grip className={cn("w-3 h-3 opacity-50 flex-shrink-0", isWeb && "hidden")} />
-        {isWeb && <Globe className="w-3 h-3 text-blue-400 flex-shrink-0" />}
-        <button
+        <Grip className="w-3 h-3 opacity-50 flex-shrink-0" />        <button
           onClick={onSidebarToggle}
           className={cn(
             "flex items-center justify-center p-1 rounded transition-colors relative flex-shrink-0",
@@ -94,15 +84,10 @@ export default function ExpandedHeader({
           title={sidebarCollapsed ? "Show chats" : "Hide chats"}
         >
           <img
-            src={platform === 'web' ? '/app/allay.png' : '/allay.png'}
+            src="/allay.png"
             alt="Ally"
             className="w-4 h-4 flex-shrink-0"
-          />
-          {/* Web mode badge */}
-          {isWeb && (
-            <span className="absolute -bottom-1 -right-1 text-[7px] bg-blue-500/80 text-white px-1 rounded-full leading-tight">WEB</span>
-          )}
-          {/* Indicator for auto-collapsed sidebar at large sizes */}
+          />          {/* Indicator for auto-collapsed sidebar at large sizes */}
           {sidebarCollapsed && size === 'L' && (
             <div className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-orange-400 rounded-full"
               title="Sidebar auto-collapsed to prevent overflow" />
@@ -156,32 +141,7 @@ export default function ExpandedHeader({
           >
             {activeChat?.title || 'Untitled'}
           </div>
-        )}
-
-        {/* Status indicators - always visible */}
-        <div className="flex items-center gap-0.5 flex-shrink-0">
-          {/* Ollama status */}
-          <div
-            className={cn(
-              "w-1.5 h-1.5 rounded-full",
-              ollamaAvailable ? "bg-green-400" : "bg-red-400"
-            )}
-            title={ollamaAvailable ? "Ollama connected" : "Ollama offline"}
-          />
-
-          {/* Server status */}
-          {serverStatus && (
-            <div
-              className={cn(
-                "w-1.5 h-1.5 rounded-full",
-                serverStatus.status === 'online' ? "bg-green-400" :
-                  serverStatus.status === 'offline' ? "bg-red-400" : "bg-yellow-400"
-              )}
-              title={`Server ${serverStatus.status}: ${serverStatus.domain || serverStatus.ip}`}
-            />
-          )}
-        </div>
-      </div>
+        )}      </div>
 
       {isResizing && (
         <motion.div
@@ -209,14 +169,12 @@ export default function ExpandedHeader({
           onModelSelect={onModelSelect}
           showSelector={showModelSelector}
           onToggleSelector={onModelSelectorToggle}
-          showProviderSettings={onProviderSettings}
           compact={true}
           windowSize={size as 'S' | 'M' | 'L'}
         />
 
-        {/* Combined Context Control - Eye + Clipboard with smart indicators (desktop only) */}
-        {!isWeb && (
-        <button
+        {/* Context control: eye toggles the chip, right-click toggles clipboard monitoring */}
+                <button
           onClick={onContextToggle}
           onContextMenu={(e) => {
             e.preventDefault();
@@ -240,33 +198,13 @@ export default function ExpandedHeader({
             <div className="absolute -top-0.5 -left-0.5 w-2 h-2 bg-blue-400 rounded-full animate-pulse" />
           )}
         </button>
-        )}
-
-        {/* Simple Tool Toggle - moved to footer ChatInput */}
-
-        {/* Web: sign out */}
-        {isWeb && (
-          <button
-            onClick={async () => {
-              const { getSupabaseClient } = await import('../../utils/supabase');
-              const client = getSupabaseClient();
-              if (client) await client.auth.signOut();
-            }}
-            className="p-1 rounded-lg hover:bg-white/10 transition-colors"
-            title="Sign out"
-          >
-            <LogOut className="w-3 h-3 text-gray-400" />
-          </button>
-        )}
-
         <button
           onClick={onSpeechToggle}
           className={cn(
             "p-1 rounded-lg transition-colors relative",
             showSpeechControls
               ? "bg-blue-500/20 hover:bg-blue-500/30 text-blue-300"
-              : "hover:bg-white/10",
-            isWeb && "hidden"
+              : "hover:bg-white/10"
           )}
           title={`Speech: ${showSpeechControls ? 'ON' : 'OFF'}`}
         >
@@ -288,8 +226,7 @@ export default function ExpandedHeader({
           onClick={onSizeChange}
           className={cn(
             "p-1 rounded-lg hover:bg-white/10 transition-all duration-200",
-            isResizing && "bg-blue-500/20 scale-110",
-            isWeb && "hidden"
+            isResizing && "bg-blue-500/20 scale-110"
           )}
           title={`Size: ${size}`}
           disabled={isResizing}
@@ -301,8 +238,7 @@ export default function ExpandedHeader({
           onClick={onCollapseToggle}
           className={cn(
             "p-1 rounded-lg hover:bg-white/10 transition-all duration-200",
-            isResizing && "opacity-50",
-            isWeb && "hidden"
+            isResizing && "opacity-50"
           )}
           title="Collapse"
           disabled={isResizing}
@@ -313,8 +249,7 @@ export default function ExpandedHeader({
         <button
           onClick={onHide}
           className={cn(
-            "p-1 rounded-lg hover:bg-white/10 transition-colors",
-            isWeb && "hidden"
+            "p-1 rounded-lg hover:bg-white/10 transition-colors"
           )}
           title="Close"
         >

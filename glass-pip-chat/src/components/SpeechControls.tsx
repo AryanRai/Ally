@@ -3,8 +3,8 @@
  * Provides UI controls for speech recognition, synthesis, and ggwave
  */
 
-import React, { useState, useEffect, useRef } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { useState, useEffect, useRef } from 'react';
+import { motion } from 'framer-motion';
 import { 
   Mic, 
   MicOff, 
@@ -48,8 +48,6 @@ export function SpeechControls({
     disconnect,
     startListening,
     stopListening,
-    synthesizeSpeech,
-    sendGGWave,
     lastRecognizedText,
     speechError
   } = useSpeechService();

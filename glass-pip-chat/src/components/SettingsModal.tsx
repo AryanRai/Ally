@@ -1,17 +1,11 @@
 import { useEffect, useState, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Sun, Moon, Server, Wifi, WifiOff, RefreshCw, Keyboard, Volume2, Wrench, Activity, Globe, Monitor } from 'lucide-react';
+import { X, Sun, Moon, Keyboard, Volume2 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { useSpeechService } from '../hooks/useSpeechService';
-import { GreetingUtils } from '../utils/greetingUtils';
-import { recheckSupabaseEnabled } from '../utils/supabase';
-import { isWeb } from '../utils/platform';
-import { SupabaseChatSync } from '../services/supabaseChatSync';
-
-
 import { AppSettings } from '../types/settings';
-import { MCPACPDashboard } from './chat/MCPACPDashboard';
-import { SystemPromptsEditor } from './SystemPromptsEditor';
+import ShortcutsPanel from './settings/ShortcutsPanel';
+import AgentSettingsSection from './settings/AgentSettingsSection';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -22,45 +16,25 @@ interface SettingsModalProps {
   onContextToggleChange?: (enabled: boolean) => void;
   appSettings: AppSettings;
   onSettingsChange: (settings: Partial<AppSettings>) => void;
-  ollamaIntegration?: any;
-  ollamaService?: any;
-  onOpenProviderSettings?: () => void;
-  onMcpToolCountChange?: (count: number) => void;
 }
 
-export default function SettingsModal({ 
-  isOpen, 
-  onClose, 
-  platform, 
-  theme: initialTheme, 
+export default function SettingsModal({
+  isOpen,
+  onClose,
+  platform,
+  theme: initialTheme,
   contextToggleEnabled = true,
   onContextToggleChange,
   appSettings,
   onSettingsChange,
-  ollamaIntegration,
-  ollamaService,
-  onOpenProviderSettings,
-  onMcpToolCountChange
 }: SettingsModalProps) {
   const [theme, setTheme] = useState<'light' | 'dark'>(initialTheme);
-  const [serverStatus, setServerStatus] = useState<any>(null);
-  const [ollamaStatus, setOllamaStatus] = useState<{ available: boolean; models: any[] }>({ available: false, models: [] });
-  const [isRefreshing, setIsRefreshing] = useState(false);
-  const [ollamaTimeout, setOllamaTimeout] = useState(60); // Default 60 seconds
   const [blurAmount, setBlurAmount] = useState(20); // Default blur amount
   const [blurType, setBlurType] = useState<'acrylic' | 'mica' | 'standard'>('acrylic'); // Blur type
   const [showShortcuts, setShowShortcuts] = useState(false);
-  const [remoteSystemInfo, setRemoteSystemInfo] = useState<{
-    name: string;
-    status: string;
-    currentModel: string;
-    models: string[];
-    tools: string[];
-    features: string[];
-  } | null>(null);
 
   const modalRef = useRef<HTMLDivElement>(null);
-  
+
   // Speech service integration
   const speechService = useSpeechService();
   const [speechSettings, setSpeechSettings] = useState({
@@ -77,87 +51,15 @@ export default function SettingsModal({
     setTheme(initialTheme);
   }, [initialTheme]);
 
-  // Web mode: fetch connected desktop system info
-  useEffect(() => {
-    if (!isWeb || !isOpen) return;
-    const sync = SupabaseChatSync.getInstance();
-    const load = async () => {
-      await sync.init();
-      const systems = await sync.fetchActiveSystems();
-      const selected = systems.find(s => s.id === sync.selectedSystemId) || systems[0];
-      if (selected) {
-        setRemoteSystemInfo({
-          name: selected.name,
-          status: selected.status,
-          currentModel: selected.capabilities?.currentModel || 'unknown',
-          models: selected.capabilities?.models || [],
-          tools: selected.capabilities?.tools || [],
-          features: selected.capabilities?.features || [],
-        });
-      }
-    };
-    load();
-  }, [isOpen]);
-
   useEffect(() => {
     if (!window.pip || !isOpen) return;
-
-    // Listen for theme changes
-    const cleanup = window.pip.onThemeChanged((newTheme) => {
-      setTheme(newTheme);
-    });
-
-    // Load server status and Ollama info when modal opens
-    const loadStatus = async () => {
-      try {
-        const [server, ollamaAvailable, models] = await Promise.all([
-          window.pip.server?.getStatus(),
-          window.pip.ollama?.isAvailable(),
-          window.pip.ollama?.getModels().catch(() => [])
-        ]);
-        
-        setServerStatus(server);
-        setOllamaStatus({
-          available: ollamaAvailable || false,
-          models: models || []
-        });
-      } catch (error) {
-        console.error('Failed to load status information:', error);
-      }
-    };
-
-    loadStatus();
-
-    return cleanup;
+    return window.pip.onThemeChanged((newTheme) => setTheme(newTheme));
   }, [isOpen]);
 
   const handleThemeChange = (newTheme: 'light' | 'dark') => {
     if (!window.pip) return;
     window.pip.setTheme(newTheme);
     setTheme(newTheme);
-  };
-
-  const handleRefreshStatus = async () => {
-    if (!window.pip || isRefreshing) return;
-    
-    setIsRefreshing(true);
-    try {
-      const [server, ollamaAvailable, models] = await Promise.all([
-        window.pip.server?.checkStatus(),
-        window.pip.ollama?.isAvailable(),
-        window.pip.ollama?.getModels().catch(() => [])
-      ]);
-      
-      setServerStatus(server);
-      setOllamaStatus({
-        available: ollamaAvailable || false,
-        models: models || []
-      });
-    } catch (error) {
-      console.error('Failed to refresh status:', error);
-    } finally {
-      setIsRefreshing(false);
-    }
   };
 
   return (
@@ -237,285 +139,10 @@ export default function SettingsModal({
               </div>
             </div>
 
-            {/* Shortcuts Display */}
             <AnimatePresence>
-              {showShortcuts && (
-                <motion.div
-                  initial={{ opacity: 0, height: 0 }}
-                  animate={{ opacity: 1, height: 'auto' }}
-                  exit={{ opacity: 0, height: 0 }}
-                  className="overflow-hidden"
-                >
-                  <div className={cn(
-                    "p-4 border-b",
-                    platform === 'win32'
-                      ? "border-white/10 bg-white/5"
-                      : theme === 'dark' ? "border-white/10 bg-white/5" : "border-black/10 bg-black/5"
-                  )}>
-                    <h3 className={cn(
-                      "text-sm font-medium mb-3",
-                      platform === 'win32'
-                        ? "text-white/80"
-                        : theme === 'dark' ? "text-white/80" : "text-black/80"
-                    )}>Keyboard Shortcuts</h3>
-                    
-                    <div className="space-y-4">
-                      {/* Global Shortcuts */}
-                      <div className="space-y-2">
-                        <h4 className={cn(
-                          "text-xs font-medium",
-                          platform === 'win32'
-                            ? "text-white/70"
-                            : theme === 'dark' ? "text-white/70" : "text-black/70"
-                        )}>🌐 Global Shortcuts (anywhere)</h4>
-                        <div className="grid grid-cols-1 gap-1 text-xs">
-                          <div className="flex justify-between items-center">
-                            <span className={cn(
-                              platform === 'win32'
-                                ? "text-white/60"
-                                : theme === 'dark' ? "text-white/60" : "text-black/60"
-                            )}>Toggle collapse/expand</span>
-                            <kbd className={cn(
-                              "px-2 py-0.5 rounded text-xs font-mono",
-                              platform === 'win32'
-                                ? "bg-white/10 border border-white/20"
-                                : theme === 'dark' ? "bg-white/10 border border-white/20" : "bg-black/10 border border-black/20"
-                            )}>Ctrl+Shift+C</kbd>
-                          </div>
-                          <div className="flex justify-between items-center">
-                            <span className={cn(
-                              platform === 'win32'
-                                ? "text-white/60"
-                                : theme === 'dark' ? "text-white/60" : "text-black/60"
-                            )}>Open settings</span>
-                            <kbd className={cn(
-                              "px-2 py-0.5 rounded text-xs font-mono",
-                              platform === 'win32'
-                                ? "bg-white/10 border border-white/20"
-                                : theme === 'dark' ? "bg-white/10 border border-white/20" : "bg-black/10 border border-black/20"
-                            )}>Ctrl+Shift+S</kbd>
-                          </div>
-                          <div className="flex justify-between items-center">
-                            <span className={cn(
-                              platform === 'win32'
-                                ? "text-white/60"
-                                : theme === 'dark' ? "text-white/60" : "text-black/60"
-                            )}>New chat</span>
-                            <kbd className={cn(
-                              "px-2 py-0.5 rounded text-xs font-mono",
-                              platform === 'win32'
-                                ? "bg-white/10 border border-white/20"
-                                : theme === 'dark' ? "bg-white/10 border border-white/20" : "bg-black/10 border border-black/20"
-                            )}>Ctrl+Shift+N</kbd>
-                          </div>
-                          <div className="flex justify-between items-center">
-                            <span className={cn(
-                              platform === 'win32'
-                                ? "text-white/60"
-                                : theme === 'dark' ? "text-white/60" : "text-black/60"
-                            )}>Hide window</span>
-                            <kbd className={cn(
-                              "px-2 py-0.5 rounded text-xs font-mono",
-                              platform === 'win32'
-                                ? "bg-white/10 border border-white/20"
-                                : theme === 'dark' ? "bg-white/10 border border-white/20" : "bg-black/10 border border-black/20"
-                            )}>Ctrl+Shift+H</kbd>
-                          </div>
-                          <div className="flex justify-between items-center">
-                            <span className={cn(
-                              platform === 'win32'
-                                ? "text-white/60"
-                                : theme === 'dark' ? "text-white/60" : "text-black/60"
-                            )}>Resize window</span>
-                            <kbd className={cn(
-                              "px-2 py-0.5 rounded text-xs font-mono",
-                              platform === 'win32'
-                                ? "bg-white/10 border border-white/20"
-                                : theme === 'dark' ? "bg-white/10 border border-white/20" : "bg-black/10 border border-black/20"
-                            )}>Ctrl+Shift+R</kbd>
-                          </div>
-                          <div className="flex justify-between items-center">
-                            <span className={cn(
-                              platform === 'win32'
-                                ? "text-white/60"
-                                : theme === 'dark' ? "text-white/60" : "text-black/60"
-                            )}>Focus input</span>
-                            <kbd className={cn(
-                              "px-2 py-0.5 rounded text-xs font-mono",
-                              platform === 'win32'
-                                ? "bg-white/10 border border-white/20"
-                                : theme === 'dark' ? "bg-white/10 border border-white/20" : "bg-black/10 border border-black/20"
-                            )}>/</kbd>
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Input Shortcuts */}
-                      <div className="space-y-2">
-                        <h4 className={cn(
-                          "text-xs font-medium",
-                          platform === 'win32'
-                            ? "text-white/70"
-                            : theme === 'dark' ? "text-white/70" : "text-black/70"
-                        )}>⌨️ Input Shortcuts (when typing)</h4>
-                        <div className="grid grid-cols-1 gap-1 text-xs">
-                          <div className="flex justify-between items-center">
-                            <span className={cn(
-                              platform === 'win32'
-                                ? "text-white/60"
-                                : theme === 'dark' ? "text-white/60" : "text-black/60"
-                            )}>Previous message</span>
-                            <kbd className={cn(
-                              "px-2 py-0.5 rounded text-xs font-mono",
-                              platform === 'win32'
-                                ? "bg-white/10 border border-white/20"
-                                : theme === 'dark' ? "bg-white/10 border border-white/20" : "bg-black/10 border border-black/20"
-                            )}>↑</kbd>
-                          </div>
-                          <div className="flex justify-between items-center">
-                            <span className={cn(
-                              platform === 'win32'
-                                ? "text-white/60"
-                                : theme === 'dark' ? "text-white/60" : "text-black/60"
-                            )}>Next message</span>
-                            <kbd className={cn(
-                              "px-2 py-0.5 rounded text-xs font-mono",
-                              platform === 'win32'
-                                ? "bg-white/10 border border-white/20"
-                                : theme === 'dark' ? "bg-white/10 border border-white/20" : "bg-black/10 border border-black/20"
-                            )}>↓</kbd>
-                          </div>
-                          <div className="flex justify-between items-center">
-                            <span className={cn(
-                              platform === 'win32'
-                                ? "text-white/60"
-                                : theme === 'dark' ? "text-white/60" : "text-black/60"
-                            )}>Send message</span>
-                            <kbd className={cn(
-                              "px-2 py-0.5 rounded text-xs font-mono",
-                              platform === 'win32'
-                                ? "bg-white/10 border border-white/20"
-                                : theme === 'dark' ? "bg-white/10 border border-white/20" : "bg-black/10 border border-black/20"
-                            )}>Ctrl+Enter</kbd>
-                          </div>
-                          <div className="flex justify-between items-center">
-                            <span className={cn(
-                              platform === 'win32'
-                                ? "text-white/60"
-                                : theme === 'dark' ? "text-white/60" : "text-black/60"
-                            )}>Stop typing</span>
-                            <kbd className={cn(
-                              "px-2 py-0.5 rounded text-xs font-mono",
-                              platform === 'win32'
-                                ? "bg-white/10 border border-white/20"
-                                : theme === 'dark' ? "bg-white/10 border border-white/20" : "bg-black/10 border border-black/20"
-                            )}>Ctrl+.</kbd>
-                          </div>
-                          <div className="flex justify-between items-center">
-                            <span className={cn(
-                              platform === 'win32'
-                                ? "text-white/60"
-                                : theme === 'dark' ? "text-white/60" : "text-black/60"
-                            )}>Clear input</span>
-                            <kbd className={cn(
-                              "px-2 py-0.5 rounded text-xs font-mono",
-                              platform === 'win32'
-                                ? "bg-white/10 border border-white/20"
-                                : theme === 'dark' ? "bg-white/10 border border-white/20" : "bg-black/10 border border-black/20"
-                            )}>Ctrl+K</kbd>
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Function Keys */}
-                      <div className="space-y-2">
-                        <h4 className={cn(
-                          "text-xs font-medium",
-                          platform === 'win32'
-                            ? "text-white/70"
-                            : theme === 'dark' ? "text-white/70" : "text-black/70"
-                        )}>📱 Function Keys</h4>
-                        <div className="grid grid-cols-1 gap-1 text-xs">
-                          <div className="flex justify-between items-center">
-                            <span className={cn(
-                              platform === 'win32'
-                                ? "text-white/60"
-                                : theme === 'dark' ? "text-white/60" : "text-black/60"
-                            )}>Settings</span>
-                            <kbd className={cn(
-                              "px-2 py-0.5 rounded text-xs font-mono",
-                              platform === 'win32'
-                                ? "bg-white/10 border border-white/20"
-                                : theme === 'dark' ? "bg-white/10 border border-white/20" : "bg-black/10 border border-black/20"
-                            )}>F1</kbd>
-                          </div>
-                          <div className="flex justify-between items-center">
-                            <span className={cn(
-                              platform === 'win32'
-                                ? "text-white/60"
-                                : theme === 'dark' ? "text-white/60" : "text-black/60"
-                            )}>New chat</span>
-                            <kbd className={cn(
-                              "px-2 py-0.5 rounded text-xs font-mono",
-                              platform === 'win32'
-                                ? "bg-white/10 border border-white/20"
-                                : theme === 'dark' ? "bg-white/10 border border-white/20" : "bg-black/10 border border-black/20"
-                            )}>F2</kbd>
-                          </div>
-                          <div className="flex justify-between items-center">
-                            <span className={cn(
-                              platform === 'win32'
-                                ? "text-white/60"
-                                : theme === 'dark' ? "text-white/60" : "text-black/60"
-                            )}>Toggle collapse</span>
-                            <kbd className={cn(
-                              "px-2 py-0.5 rounded text-xs font-mono",
-                              platform === 'win32'
-                                ? "bg-white/10 border border-white/20"
-                                : theme === 'dark' ? "bg-white/10 border border-white/20" : "bg-black/10 border border-black/20"
-                            )}>F3</kbd>
-                          </div>
-                          <div className="flex justify-between items-center">
-                            <span className={cn(
-                              platform === 'win32'
-                                ? "text-white/60"
-                                : theme === 'dark' ? "text-white/60" : "text-black/60"
-                            )}>Resize window</span>
-                            <kbd className={cn(
-                              "px-2 py-0.5 rounded text-xs font-mono",
-                              platform === 'win32'
-                                ? "bg-white/10 border border-white/20"
-                                : theme === 'dark' ? "bg-white/10 border border-white/20" : "bg-black/10 border border-black/20"
-                            )}>F4</kbd>
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Tips */}
-                      <div className="space-y-2">
-                        <h4 className={cn(
-                          "text-xs font-medium",
-                          platform === 'win32'
-                            ? "text-white/70"
-                            : theme === 'dark' ? "text-white/70" : "text-black/70"
-                        )}>💡 Tips</h4>
-                        <div className={cn(
-                          "text-xs space-y-1",
-                          platform === 'win32'
-                            ? "text-white/50"
-                            : theme === 'dark' ? "text-white/50" : "text-black/50"
-                        )}>
-                          <p>• Use Ctrl+Shift+? to see shortcuts anywhere</p>
-                          <p>• Arrow keys work in any input field</p>
-                          <p>• Escape safely hides the window</p>
-                          <p>• Most shortcuts work globally</p>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </motion.div>
-              )}
+              {showShortcuts && <ShortcutsPanel platform={platform} theme={theme} />}
             </AnimatePresence>
+
 
             {/* Content */}
             <div className="p-4 space-y-6">
@@ -680,7 +307,7 @@ export default function SettingsModal({
                   </div>
 
                   {/* Window Padding — desktop only */}
-                  {!isWeb && (<>
+                  <>
                   <div className="space-y-2">
                     <label className={cn(
                       "text-xs font-medium",
@@ -717,6 +344,27 @@ export default function SettingsModal({
                     )}>
                       Spacing around chat container (0px = full window)
                     </p>
+                  </div>
+
+                  {/* Collapse style */}
+                  <div className="space-y-2">
+                    <label className="text-xs font-medium">Collapse into</label>
+                    <div className="grid grid-cols-2 gap-1">
+                      {([['avatar', '🤖 Robot'], ['pill', '💊 Quick pill']] as const).map(([style, label]) => (
+                        <button
+                          key={style}
+                          onClick={() => onSettingsChange({ ui: { ...appSettings.ui, collapseStyle: style } })}
+                          className={cn(
+                            'px-2 py-1 text-xs rounded border transition-colors',
+                            (appSettings.ui.collapseStyle ?? 'avatar') === style
+                              ? 'bg-purple-500/25 border-purple-500/50 text-purple-200'
+                              : 'bg-white/5 border-white/10 hover:bg-white/10'
+                          )}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
                   </div>
 
                   {/* Border Radius */}
@@ -758,12 +406,11 @@ export default function SettingsModal({
                       Rounded corners of chat container
                     </p>
                   </div>
-                  </>)}
+                  </>
                 </div>
               </div>
 
                 {/* Windows Acrylic Settings — desktop only */}
-                {!isWeb && (
                 <div className="space-y-3">
                   <h3 className={cn(
                     "text-sm font-medium",
@@ -830,10 +477,8 @@ export default function SettingsModal({
                     </div>
                   )}
                 </div>
-                )}
 
               {/* Context Section — desktop only */}
-              {!isWeb && (
               <div className="space-y-3">
                 <h3 className={cn(
                   "text-sm font-medium",
@@ -882,403 +527,11 @@ export default function SettingsModal({
                   </div>
                 </div>
               </div>
-              )}
 
-              {/* Ollama Section — desktop only */}
-              {!isWeb && (
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <h3 className={cn(
-                    "text-sm font-medium",
-                    platform === 'win32'
-                      ? "text-white/80"
-                      : theme === 'dark' ? "text-white/80" : "text-black/80"
-                  )}>Ollama AI</h3>
-                  <button
-                    onClick={handleRefreshStatus}
-                    disabled={isRefreshing}
-                    className={cn(
-                      "p-1 rounded transition-colors",
-                      platform === 'win32' 
-                        ? "hover:bg-white/10"
-                        : theme === 'dark' ? "hover:bg-white/10" : "hover:bg-black/10"
-                    )}
-                    title="Refresh status"
-                  >
-                    <RefreshCw className={cn("w-3 h-3", isRefreshing && "animate-spin")} />
-                  </button>
-                </div>
-                
-                <div className={cn(
-                  "p-3 rounded-lg border",
-                  ollamaStatus.available 
-                    ? "bg-green-500/10 border-green-500/20" 
-                    : "bg-red-500/10 border-red-500/20"
-                )}>
-                  <div className="flex items-center gap-2 mb-2">
-                    <div className={cn(
-                      "w-2 h-2 rounded-full",
-                      ollamaStatus.available ? "bg-green-400" : "bg-red-400"
-                    )} />
-                    <span className="text-xs font-medium">
-                      {ollamaStatus.available ? "Connected" : "Offline"}
-                    </span>
-                  </div>
-                  <p className={cn(
-                    "text-xs mb-2",
-                    platform === 'win32'
-                      ? "text-white/60"
-                      : theme === 'dark' ? "text-white/60" : "text-black/60"
-                  )}>
-                    {ollamaStatus.available 
-                      ? `Connected to Ollama. ${ollamaStatus.models.length} model(s) available.`
-                      : "Ollama is not running. Please start Ollama to enable AI responses."
-                    }
-                  </p>
-                  
-                  {ollamaStatus.available && ollamaStatus.models.length > 0 && (
-                    <div className="space-y-1">
-                      <span className={cn(
-                        "text-xs font-medium",
-                        platform === 'win32'
-                          ? "text-white/80"
-                          : theme === 'dark' ? "text-white/80" : "text-black/80"
-                      )}>Available Models:</span>
-                      <div className="flex flex-wrap gap-1">
-                        {ollamaStatus.models.slice(0, 3).map((model) => (
-                          <span
-                            key={model.name}
-                            className={cn(
-                              "px-2 py-0.5 text-xs rounded border",
-                              platform === 'win32'
-                                ? "bg-white/5 border-white/10"
-                                : theme === 'dark' 
-                                  ? "bg-white/5 border-white/10"
-                                  : "bg-black/5 border-black/10"
-                            )}
-                          >
-                            {model.name}
-                          </span>
-                        ))}
-                        {ollamaStatus.models.length > 3 && (
-                          <span className={cn(
-                            "px-2 py-0.5 text-xs rounded border",
-                            platform === 'win32'
-                              ? "bg-white/5 border-white/10"
-                              : theme === 'dark' 
-                                ? "bg-white/5 border-white/10"
-                                : "bg-black/5 border-black/10"
-                          )}>
-                            +{ollamaStatus.models.length - 3} more
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  )}
-                  
-                  {/* Timeout Configuration */}
-                  {ollamaStatus.available && (
-                    <div className="mt-3 pt-3 border-t border-white/10">
-                      <div className="space-y-2">
-                        <label className={cn(
-                          "text-xs font-medium",
-                          platform === 'win32'
-                            ? "text-white/80"
-                            : theme === 'dark' ? "text-white/80" : "text-black/80"
-                        )}>Response Timeout</label>
-                        <div className="flex items-center gap-2">
-                          <input
-                            type="range"
-                            min="30"
-                            max="300"
-                            step="10"
-                            value={ollamaTimeout}
-                            onChange={(e) => {
-                              const newTimeout = parseInt(e.target.value);
-                              setOllamaTimeout(newTimeout);
-                              // Update Ollama config
-                              if (window.pip?.ollama) {
-                                window.pip.ollama.updateConfig({ 
-                                  timeout: newTimeout * 1000,
-                                  streamTimeout: newTimeout * 2000 
-                                });
-                              }
-                            }}
-                            className="flex-1 h-2 bg-white/10 rounded-lg appearance-none slider"
-                          />
-                          <span className={cn(
-                            "text-xs font-mono min-w-[3rem] text-right",
-                            platform === 'win32'
-                              ? "text-white/60"
-                              : theme === 'dark' ? "text-white/60" : "text-black/60"
-                          )}>
-                            {ollamaTimeout}s
-                          </span>
-                        </div>
-                        <p className={cn(
-                          "text-xs",
-                          platform === 'win32'
-                            ? "text-white/50"
-                            : theme === 'dark' ? "text-white/50" : "text-black/50"
-                        )}>
-                          Longer timeouts help with larger models but may slow responses.
-                        </p>
-                      </div>
-                    </div>
-                  )}
-                </div>
-                
-                {/* Provider Settings Button */}
-                {onOpenProviderSettings && (
-                  <button
-                    onClick={onOpenProviderSettings}
-                    className={cn(
-                      "w-full p-3 rounded-lg border transition-all duration-200 flex items-center justify-between group",
-                      platform === 'win32'
-                        ? "border-white/20 hover:border-blue-500/50 hover:bg-blue-500/10"
-                        : theme === 'dark' 
-                          ? "border-white/20 hover:border-blue-500/50 hover:bg-blue-500/10"
-                          : "border-black/20 hover:border-blue-500/50 hover:bg-blue-500/10"
-                    )}
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className={cn(
-                        "p-2 rounded-lg",
-                        platform === 'win32'
-                          ? "bg-blue-500/20"
-                          : theme === 'dark' ? "bg-blue-500/20" : "bg-blue-500/20"
-                      )}>
-                        <Server className="w-4 h-4 text-blue-400" />
-                      </div>
-                      <div className="text-left">
-                        <div className={cn(
-                          "text-sm font-medium",
-                          platform === 'win32'
-                            ? "text-white/90"
-                            : theme === 'dark' ? "text-white/90" : "text-black/90"
-                        )}>
-                          AI Provider Settings
-                        </div>
-                        <div className={cn(
-                          "text-xs",
-                          platform === 'win32'
-                            ? "text-white/60"
-                            : theme === 'dark' ? "text-white/60" : "text-black/60"
-                        )}>
-                          Configure Ollama and OpenRouter
-                        </div>
-                      </div>
-                    </div>
-                    <div className={cn(
-                      "text-xs px-2 py-1 rounded transition-colors",
-                      platform === 'win32'
-                        ? "text-white/50 group-hover:text-blue-400"
-                        : theme === 'dark' 
-                          ? "text-white/50 group-hover:text-blue-400"
-                          : "text-black/50 group-hover:text-blue-400"
-                    )}>
-                      Configure →
-                    </div>
-                  </button>
-                )}
-              </div>
-              )}
+              <AgentSettingsSection platform={platform} theme={theme} />
 
-              {/* Server Status Section — desktop only */}
-              {!isWeb && (
-              <div className="space-y-3">
-                <h3 className={cn(
-                  "text-sm font-medium",
-                  platform === 'win32'
-                    ? "text-white/80"
-                    : theme === 'dark' ? "text-white/80" : "text-black/80"
-                )}>Server Status</h3>
-                
-                {serverStatus ? (
-                  <div className={cn(
-                    "p-3 rounded-lg border",
-                    serverStatus.status === 'online' 
-                      ? "bg-green-500/10 border-green-500/20"
-                      : serverStatus.status === 'offline'
-                        ? "bg-red-500/10 border-red-500/20"
-                        : "bg-yellow-500/10 border-yellow-500/20"
-                  )}>
-                    <div className="flex items-center gap-2 mb-2">
-                      <div className={cn(
-                        "w-2 h-2 rounded-full",
-                        serverStatus.status === 'online' ? "bg-green-400" : 
-                        serverStatus.status === 'offline' ? "bg-red-400" : "bg-yellow-400"
-                      )} />
-                      <span className="text-xs font-medium capitalize">
-                        {serverStatus.status}
-                      </span>
-                      {serverStatus.status === 'online' && <Wifi className="w-3 h-3" />}
-                      {serverStatus.status === 'offline' && <WifiOff className="w-3 h-3" />}
-                    </div>
-                    
-                    <div className={cn(
-                      "space-y-1 text-xs",
-                      platform === 'win32'
-                        ? "text-white/60"
-                        : theme === 'dark' ? "text-white/60" : "text-black/60"
-                    )}>
-                      <div className="flex items-center gap-2">
-                        <Server className="w-3 h-3" />
-                        <span>{serverStatus.domain || serverStatus.ip}</span>
-                      </div>
-                      {serverStatus.uptime !== undefined && (
-                        <p>Uptime: {Math.floor(serverStatus.uptime / 3600)}h {Math.floor((serverStatus.uptime % 3600) / 60)}m</p>
-                      )}
-                      {serverStatus.load !== undefined && (
-                        <p>Load: {serverStatus.load.toFixed(1)}%</p>
-                      )}
-                      <p>Last checked: {new Date(serverStatus.lastCheck).toLocaleTimeString()}</p>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="p-3 rounded-lg bg-gray-500/10 border border-gray-500/20">
-                    <p className={cn(
-                      "text-xs",
-                      platform === 'win32'
-                        ? "text-white/60"
-                        : theme === 'dark' ? "text-white/60" : "text-black/60"
-                    )}>
-                      Loading server status...
-                    </p>
-                  </div>
-                )}
-              </div>
-              )}
-
-              {/* Network Services Section — desktop only */}
-              {!isWeb && (
-              <div className="space-y-3">
-                <h3 className={cn(
-                  "text-sm font-medium",
-                  platform === 'win32'
-                    ? "text-white/80"
-                    : theme === 'dark' ? "text-white/80" : "text-black/80"
-                )}>Network Services</h3>
-                
-                <div className="space-y-2">
-                  {/* Supabase Toggle */}
-                  <div className={cn(
-                    "p-3 rounded-lg border",
-                    platform === 'win32'
-                      ? "bg-white/5 border-white/10"
-                      : theme === 'dark' 
-                        ? "bg-white/5 border-white/10"
-                        : "bg-black/5 border-black/10"
-                  )}>
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <Activity className="w-4 h-4 text-purple-400" />
-                        <div>
-                          <span className="text-xs font-medium">Supabase (Remote)</span>
-                          <p className={cn(
-                            "text-[10px]",
-                            platform === 'win32'
-                              ? "text-white/50"
-                              : theme === 'dark' ? "text-white/50" : "text-black/50"
-                          )}>
-                            Cloud sync & remote access
-                          </p>
-                        </div>
-                      </div>
-                      <button
-                        onClick={() => {
-                          const newValue = !appSettings.network?.enableSupabase;
-                          onSettingsChange({
-                            network: { 
-                              enableSupabase: newValue,
-                              enableStreamHandler: appSettings.network?.enableStreamHandler ?? false
-                            }
-                          });
-                          // Re-check Supabase enabled state after settings change
-                          setTimeout(() => recheckSupabaseEnabled(), 100);
-                        }}
-                        className={cn(
-                          "relative w-10 h-5 rounded-full transition-colors",
-                          appSettings.network?.enableSupabase
-                            ? "bg-purple-500"
-                            : platform === 'win32'
-                              ? "bg-white/20"
-                              : theme === 'dark' ? "bg-white/20" : "bg-black/20"
-                        )}
-                      >
-                        <div className={cn(
-                          "absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform",
-                          appSettings.network?.enableSupabase ? "translate-x-5" : "translate-x-0.5"
-                        )} />
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Stream Handler Toggle */}
-                  <div className={cn(
-                    "p-3 rounded-lg border",
-                    platform === 'win32'
-                      ? "bg-white/5 border-white/10"
-                      : theme === 'dark' 
-                        ? "bg-white/5 border-white/10"
-                        : "bg-black/5 border-black/10"
-                  )}>
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <Wifi className="w-4 h-4 text-blue-400" />
-                        <div>
-                          <span className="text-xs font-medium">Stream Handler</span>
-                          <p className={cn(
-                            "text-[10px]",
-                            platform === 'win32'
-                              ? "text-white/50"
-                              : theme === 'dark' ? "text-white/50" : "text-black/50"
-                          )}>
-                            WebSocket tool integration (ws://localhost:3000)
-                          </p>
-                        </div>
-                      </div>
-                      <button
-                        onClick={() => {
-                          const newValue = !appSettings.network?.enableStreamHandler;
-                          onSettingsChange({
-                            network: { 
-                              enableSupabase: appSettings.network?.enableSupabase ?? false,
-                              enableStreamHandler: newValue
-                            }
-                          });
-                        }}
-                        className={cn(
-                          "relative w-10 h-5 rounded-full transition-colors",
-                          appSettings.network?.enableStreamHandler
-                            ? "bg-blue-500"
-                            : platform === 'win32'
-                              ? "bg-white/20"
-                              : theme === 'dark' ? "bg-white/20" : "bg-black/20"
-                        )}
-                      >
-                        <div className={cn(
-                          "absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform",
-                          appSettings.network?.enableStreamHandler ? "translate-x-5" : "translate-x-0.5"
-                        )} />
-                      </button>
-                    </div>
-                  </div>
-
-                  <p className={cn(
-                    "text-[10px] px-1",
-                    platform === 'win32'
-                      ? "text-white/40"
-                      : theme === 'dark' ? "text-white/40" : "text-black/40"
-                  )}>
-                    Disable these to run in local-only mode without network errors
-                  </p>
-                </div>
-              </div>
-              )}
 
               {/* Speech Settings Section — desktop only */}
-              {!isWeb && (
               <div className="space-y-3">
                 <h3 className={cn(
                   "text-sm font-medium",
@@ -1501,10 +754,8 @@ export default function SettingsModal({
                   </div>
                 </div>
               </div>
-              )}
 
                 {/* Greeting Settings — desktop only */}
-                {!isWeb && (
                 <div className={cn(
                   "p-3 rounded-lg border",
                   platform === 'win32'
@@ -1516,38 +767,6 @@ export default function SettingsModal({
                   <div className="space-y-3">
                     <div className="flex items-center justify-between">
                       <span className="text-xs font-medium">Chat Greeting</span>
-                      <button
-                        onClick={async () => {
-                          if (ollamaIntegration.ollamaAvailable) {
-                            try {
-                              const newGreeting = await GreetingUtils.generateRandomGreeting(ollamaService);
-                              const updatedSettings = {
-                                ...appSettings,
-                                greeting: {
-                                  customGreeting: newGreeting,
-                                  useRandomGreeting: appSettings.greeting?.useRandomGreeting ?? false,
-                                  randomGreetings: appSettings.greeting?.randomGreetings ?? []
-                                }
-                              };
-                              onSettingsChange(updatedSettings);
-                            } catch (error) {
-                              console.error('Failed to generate greeting:', error);
-                            }
-                          }
-                        }}
-                        disabled={!ollamaIntegration.ollamaAvailable}
-                        className={cn(
-                          "px-2 py-1 text-xs rounded border transition-colors disabled:opacity-50",
-                          platform === 'win32'
-                            ? "bg-blue-500/20 border-blue-500/30 text-blue-400 hover:bg-blue-500/30"
-                            : theme === 'dark' 
-                              ? "bg-blue-500/20 border-blue-500/30 text-blue-400 hover:bg-blue-500/30"
-                              : "bg-blue-500/20 border-blue-500/30 text-blue-400 hover:bg-blue-500/30"
-                        )}
-                        title={!ollamaIntegration.ollamaAvailable ? "Ollama required for AI-generated greetings" : "Generate random greeting with AI"}
-                      >
-                        🎲 Generate
-                      </button>
                     </div>
                     
                     <div>
@@ -1645,242 +864,7 @@ export default function SettingsModal({
                     )}
                   </div>
                 </div>
-              )}
 
-              {/* Web: Connected Desktop Info */}
-              {isWeb && remoteSystemInfo && (
-              <div className="space-y-3">
-                <h3 className={cn(
-                  "text-sm font-medium flex items-center gap-2",
-                  theme === 'dark' ? "text-white/80" : "text-black/80"
-                )}>
-                  <Monitor className="w-4 h-4" />
-                  Connected Desktop
-                </h3>
-                <div className={cn(
-                  "p-3 rounded-lg border",
-                  remoteSystemInfo.status === 'online'
-                    ? "bg-green-500/10 border-green-500/20"
-                    : "bg-yellow-500/10 border-yellow-500/20"
-                )}>
-                  <div className="flex items-center gap-2 mb-2">
-                    <div className={cn(
-                      "w-2 h-2 rounded-full",
-                      remoteSystemInfo.status === 'online' ? "bg-green-400 animate-pulse" : "bg-yellow-400"
-                    )} />
-                    <span className="text-xs font-medium">{remoteSystemInfo.name}</span>
-                    <span className={cn(
-                      "text-[10px] px-1.5 py-0.5 rounded",
-                      remoteSystemInfo.status === 'online' ? "bg-green-500/20 text-green-400" : "bg-yellow-500/20 text-yellow-400"
-                    )}>{remoteSystemInfo.status}</span>
-                  </div>
-                  <div className={cn("text-xs space-y-1", theme === 'dark' ? "text-white/60" : "text-black/60")}>
-                    <p>Model: {remoteSystemInfo.currentModel}</p>
-                    <p>Features: {remoteSystemInfo.features.join(', ') || 'none'}</p>
-                  </div>
-                </div>
-              </div>
-              )}
-
-              {/* Web: Desktop Tools (read-only) */}
-              {isWeb && remoteSystemInfo && (
-              <div className="space-y-3">
-                <h3 className={cn(
-                  "text-sm font-medium flex items-center gap-2",
-                  theme === 'dark' ? "text-white/80" : "text-black/80"
-                )}>
-                  <Wrench className="w-4 h-4" />
-                  Desktop Tools
-                  <span className={cn(
-                    "text-[10px] px-1.5 py-0.5 rounded",
-                    theme === 'dark' ? "bg-blue-500/20 text-blue-400" : "bg-blue-500/20 text-blue-600"
-                  )}>synced from desktop</span>
-                </h3>
-                <div className={cn(
-                  "p-3 rounded-lg border",
-                  theme === 'dark' ? "border-white/10 bg-white/5" : "border-black/10 bg-black/5"
-                )}>
-                  <div className="flex flex-wrap gap-1">
-                    {remoteSystemInfo.tools.map((tool) => (
-                      <span key={tool} className={cn(
-                        "px-2 py-0.5 text-xs rounded border",
-                        theme === 'dark' ? "bg-white/5 border-white/10" : "bg-black/5 border-black/10"
-                      )}>
-                        {tool}
-                      </span>
-                    ))}
-                  </div>
-                  <p className={cn(
-                    "text-[10px] mt-2",
-                    theme === 'dark' ? "text-white/40" : "text-black/40"
-                  )}>
-                    Tools are executed on your desktop Ally. Configure them in the desktop app.
-                  </p>
-                </div>
-              </div>
-              )}
-
-              {/* Web: Desktop Models (read-only) */}
-              {isWeb && remoteSystemInfo && (
-              <div className="space-y-3">
-                <h3 className={cn(
-                  "text-sm font-medium flex items-center gap-2",
-                  theme === 'dark' ? "text-white/80" : "text-black/80"
-                )}>
-                  <Globe className="w-4 h-4" />
-                  Available Models
-                  <span className={cn(
-                    "text-[10px] px-1.5 py-0.5 rounded",
-                    theme === 'dark' ? "bg-blue-500/20 text-blue-400" : "bg-blue-500/20 text-blue-600"
-                  )}>synced from desktop</span>
-                </h3>
-                <div className={cn(
-                  "p-3 rounded-lg border",
-                  theme === 'dark' ? "border-white/10 bg-white/5" : "border-black/10 bg-black/5"
-                )}>
-                  <div className="flex flex-wrap gap-1">
-                    {remoteSystemInfo.models.map((model) => (
-                      <span key={model} className={cn(
-                        "px-2 py-0.5 text-xs rounded border",
-                        model === remoteSystemInfo.currentModel
-                          ? "bg-blue-500/20 border-blue-500/40 text-blue-300"
-                          : theme === 'dark' ? "bg-white/5 border-white/10" : "bg-black/5 border-black/10"
-                      )}>
-                        {model} {model === remoteSystemInfo.currentModel && '(active)'}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              </div>
-              )}
-
-              {/* Tool Integration Section — desktop only */}
-              {!isWeb && (
-              <div className="space-y-3">
-                <h3 className={cn(
-                  "text-sm font-medium flex items-center gap-2",
-                  platform === 'win32'
-                    ? "text-white/80"
-                    : theme === 'dark' ? "text-white/80" : "text-black/80"
-                )}>
-                  <Wrench className="w-4 h-4" />
-                  Tool Integration
-                </h3>
-                
-                <div className={cn(
-                  "p-4 rounded-lg border",
-                  platform === 'win32'
-                    ? "border-white/10 bg-white/5"
-                    : theme === 'dark' ? "border-white/10 bg-white/5" : "border-black/10 bg-black/5"
-                )}>
-                  <div className="flex items-center justify-between">
-                    <div className="flex-1">
-                      <p className={cn(
-                        "text-sm font-medium mb-1",
-                        platform === 'win32'
-                          ? "text-white/80"
-                          : theme === 'dark' ? "text-white/80" : "text-black/80"
-                      )}>
-                        Enable Tool Calling
-                      </p>
-                      <p className={cn(
-                        "text-xs leading-relaxed",
-                        platform === 'win32'
-                          ? "text-white/60"
-                          : theme === 'dark' ? "text-white/60" : "text-black/60"
-                      )}>
-                        Allow AI to use tools like calculator, weather, etc.
-                      </p>
-                    </div>
-                    <label className="relative inline-flex items-center cursor-pointer ml-4">
-                      <input
-                        type="checkbox"
-                        checked={appSettings.tools?.enabled || false}
-                        onChange={(e) => onSettingsChange({ 
-                          tools: { 
-                            enabled: e.target.checked,
-                            autoConnect: appSettings.tools?.autoConnect ?? true,
-                            streamHandlerUrl: appSettings.tools?.streamHandlerUrl ?? 'ws://localhost:3000'
-                          } 
-                        })}
-                        className="sr-only peer"
-                      />
-                      <div className={cn(
-                        "relative w-11 h-6 rounded-full peer transition-all duration-200",
-                        "peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-offset-2",
-                        appSettings.tools?.enabled 
-                          ? "bg-blue-600 peer-focus:ring-blue-300" 
-                          : platform === 'win32'
-                            ? "bg-white/20 peer-focus:ring-blue-300"
-                            : theme === 'dark' 
-                              ? "bg-gray-600 peer-focus:ring-blue-300"
-                              : "bg-gray-300 peer-focus:ring-blue-300"
-                      )}>
-                        <div className={cn(
-                          "absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow-lg transform transition-transform duration-200 ease-in-out",
-                          appSettings.tools?.enabled ? "translate-x-5" : "translate-x-0"
-                        )}></div>
-                      </div>
-                    </label>
-                  </div>
-                  
-                  {appSettings.tools?.enabled && (
-                    <div className={cn(
-                      "text-xs p-3 mt-3 rounded border",
-                      platform === 'win32'
-                        ? "border-blue-500/20 bg-blue-500/10 text-blue-300"
-                        : theme === 'dark' 
-                          ? "border-blue-500/20 bg-blue-500/10 text-blue-300"
-                          : "border-blue-500/20 bg-blue-500/10 text-blue-700"
-                    )}>
-                      ℹ️ Tools enabled: calculator, weather, time, and more
-                    </div>
-                  )}
-                </div>
-              </div>
-              )}
-
-              {/* MCP/ACP Integration Section — desktop only */}
-              {!isWeb && (
-              <div className="space-y-3">
-                <h3 className={cn(
-                  "text-sm font-medium flex items-center gap-2",
-                  platform === 'win32'
-                    ? "text-white/80"
-                    : theme === 'dark' ? "text-white/80" : "text-black/80"
-                )}>
-                  <Activity className="w-4 h-4" />
-                  MCP/ACP Integration
-                </h3>
-                
-                <div className={cn(
-                  "rounded-lg border overflow-hidden",
-                  platform === 'win32'
-                    ? "border-white/10 bg-white/5"
-                    : theme === 'dark' ? "border-white/10 bg-white/5" : "border-black/10 bg-black/5"
-                )}>
-                  <MCPACPDashboard 
-                    className="bg-transparent border-0 p-4" 
-                    theme={theme}
-                    platform={platform}
-                    onToolCountChange={onMcpToolCountChange}
-                  />
-                </div>
-              </div>
-              )}
-
-              {/* System Prompts Section — desktop only */}
-              {!isWeb && (
-              <div className="space-y-3">
-                <SystemPromptsEditor
-                  theme={theme}
-                  platform={platform}
-                  onPromptUpdate={(promptId, newPrompt) => {
-                    console.log(`Updated prompt ${promptId}:`, newPrompt);
-                  }}
-                />
-              </div>
-              )}
 
               {/* Info Section */}
               <div className="space-y-2">
@@ -1896,10 +880,9 @@ export default function SettingsModal({
                     ? "text-white/60"
                     : theme === 'dark' ? "text-white/60" : "text-black/60"
                 )}>
-                  <p>Ally {isWeb ? 'Web' : 'Desktop'} v1.0.0</p>
-                  <p>Platform: {isWeb ? 'Web (Remote)' : platform}</p>
-                  {!isWeb && <p>Press Ctrl+Shift+C to toggle visibility</p>}
-                  {isWeb && <p>Connected to desktop Ally for remote access</p>}
+                  <p>Ally v2.0.0 · Claude Code + Codex frontend</p>
+                  <p>Platform: {platform}</p>
+                  <p>Press Ctrl+Shift+C to toggle visibility</p>
                 </div>
               </div>
             </div>

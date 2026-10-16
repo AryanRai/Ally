@@ -229,7 +229,6 @@ function CollapsibleBlock({ section, theme, platform }: CollapsibleBlockProps) {
 
 export default function EditableMessage({
   message,
-  isLast,
   onEdit,
   onFork,
   onDelete,
@@ -445,7 +444,7 @@ export default function EditableMessage({
       const cleanUser = contextMatch ? content.replace(contextMatch[0], '').trim() : content;
       return (
         <div className="space-y-1">
-          <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>, code: CodeBlock }}>
+          <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ p: ({ children }) => <div className="mb-2 last:mb-0">{children}</div>, code: CodeBlock }}>
             {cleanUser}
           </ReactMarkdown>
           {contextMatch && (
@@ -494,7 +493,7 @@ export default function EditableMessage({
                 <ReactMarkdown
                   key={i}
                   remarkPlugins={[remarkGfm]}
-                  components={{ p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>, code: CodeBlock }}
+                  components={{ p: ({ children }) => <div className="mb-2 last:mb-0">{children}</div>, code: CodeBlock }}
                 >
                   {seg.content}
                 </ReactMarkdown>
@@ -531,7 +530,7 @@ export default function EditableMessage({
         {cleanText && (
           <ReactMarkdown
             remarkPlugins={[remarkGfm]}
-            components={{ p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>, code: CodeBlock }}
+            components={{ p: ({ children }) => <div className="mb-2 last:mb-0">{children}</div>, code: CodeBlock }}
           >
             {cleanText}
           </ReactMarkdown>
@@ -663,8 +662,16 @@ export default function EditableMessage({
                 uiSettings.fontSize === 'lg' ? 'prose-lg' : 'prose-xl'
               )}
             >
+              {/* Circled screen region sent with this message */}
+              {message.metadata?.image && (
+                <img
+                  src={message.metadata.image}
+                  alt="Circled region"
+                  className="not-prose mb-2 max-h-40 rounded-lg border border-white/20 shadow-[0_0_16px_rgba(155,114,203,0.35)]"
+                />
+              )}
               {renderMessageContent(message.content)}
-              
+
               {/* Message Metadata (Tool Calls and Context) */}
               <MessageMetadata
                 platform={platform}

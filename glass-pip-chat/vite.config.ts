@@ -15,6 +15,7 @@ export default defineConfig({
     rollupOptions: {
       input: {
         main: path.resolve(__dirname, 'index.html'),
+        circle: path.resolve(__dirname, 'circle.html'),
       },
     },
   },
@@ -30,8 +31,5 @@ export default defineConfig({
   assetsInclude: ['**/*.json'],
   define: {
     global: 'globalThis',
-  },
-  optimizeDeps: {
-    include: ['uuid']
   }
 });

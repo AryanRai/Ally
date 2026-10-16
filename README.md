@@ -1,487 +1,72 @@
-# Ally – Unified Robot Cognitive Overlay
+# Ally
 
-**Ally** is a **glassmorphic, picture-in-picture desktop overlay** that provides advanced access to local and remote LLMs, a comprehensive tool calling framework, MCP/ACP agent coordination, and seamless integration with the **Comms v4.0 Unified Robot Cognitive Overlay Platform**.
+**Ally** is a glassmorphic, always-on-top desktop overlay that fronts **Claude Code** and **Codex**. The agents do the work (files, shell, MCP tools, their own sessions); Ally gives them a floating glass window you can summon from anywhere, plus voice and robot integration they don't have on their own.
 
-<img width="481" height="214" alt="image" src="https://github.com/user-attachments/assets/f2e88fcf-58c6-447f-b384-19a7c1efbbb1" />
+<img width="481" height="214" alt="Ally overlay" src="https://github.com/user-attachments/assets/f2e88fcf-58c6-447f-b384-19a7c1efbbb1" />
 
-It runs as a floating, always-on-top Electron app with Apple-style glass UI, animated interactions, and support for **three AI providers**: local Ollama models, cloud models via OpenRouter, and Google Gemini. All chats are logged to **Supabase** (PostgreSQL), enabling persistent conversation history, analytics, and direct robot control through the unified tool calling framework. A companion **Next.js web service** (`ally-remote-service`) provides remote access from any browser or Discord.
+## What Ally adds on top of the agents
 
-<img width="867" height="704" alt="image" src="https://github.com/user-attachments/assets/1479ae38-7df5-4682-a35f-0e46c729a64d" />
+| Feature | Why it's here |
+|---|---|
+| **Glass PiP overlay**: always on top, `Ctrl+Shift+C` from anywhere, collapses to a pill, tray icon | Claude's Quick Entry is macOS-only; Codex has no overlay |
+| **One window for both agents**: pick Claude Code or Codex (and a model) per chat | The two apps are otherwise separate |
+| **Agent sessions browser**: continue any Claude Code / Codex session in Ally | Ally chats *are* real agent sessions, resumed by id |
+| **Voice loop**: speech in, spoken replies out, barge-in | Claude Code only dictates; it never speaks replies |
+| **Circle to Ask**: `Ctrl+Shift+Space` (or shake the cursor) freezes the screen; circle anything, then Ask / Search web / Explain / Fix / Copy text / Translate | Pixel-style Circle to Search, but the circled pixels go straight to Claude Code or Codex as an image |
+| **Robot avatar**: collapsing turns Ally into a little robot ([agent-robot-avatar](https://github.com/CX-ArtLab/agent-robot-avatar)) whose eyes follow your cursor anywhere and whose face shows what the agent is doing | Ambient status without a window in the way |
+| **Clipboard context**: copy something, hit *Explain* | Quick capture without switching windows |
+| **Robot mode**: DroidCore persona + the HowYouSeeMe MCP server handed to the agent | Lets either agent see through the robot |
 
----
+Retired in v2 (the agents now cover them): Ally's own Ollama/OpenRouter/Gemini chat, its homemade MCP/ACP/PTC tool loop, Supabase sync + web build + `ally-remote-service`/Discord (use Claude Code Remote Control/Channels or Codex Remote), the terminal panel, and the browser extension.
 
-## About
-
-Ally is designed as both a **personal AI assistant** and a **robot control console**:
-- **As a desktop overlay:** quick access to AI chat, search, and task automation without switching windows.
-- **As part of DroidCore:** acts as the human-facing "head" of the robot, providing vision, language, and speech interfaces.
-
-<img width="480" height="450" alt="image" src="https://github.com/user-attachments/assets/85a65d19-8c13-430a-9b9e-6b38c196af9b" />
-
-It is ideal for:
-- Rapid natural-language queries and responses via local or cloud LLMs.
-- On-the-fly tool execution (filesystem operations, browser control, system commands).
-- Sending structured tool calls and robot intents to the DroidCore control stack.
-- Remote AI access from a web browser or Discord bot.
-
----
-
-## Core Features
-
-### Glass PiP Overlay
-- **Apple-style glassmorphism:** frosted blur, subtle gradients, rounded corners, hairline borders.
-- **Motion-rich interactions:** drag, snap to corners, elastic resize, collapse into a pill, animated open/close.
-- **Keyboard accessible:** focus ring, `Esc` to close, `Ctrl+Shift+C` / `Cmd+Shift+C` to toggle.
-- **Persistent layout:** remembers window position, size, and theme between sessions via Electron `userData`.
-- **System tray:** minimize to tray with right-click menu for quick access.
-- **Dark/light theme:** persisted theme preference.
-- **Robot Mode:** one-click toggle (`Cpu` icon in the toolbar) that switches the system prompt to the DroidCore Comms v4.0 personality, displayed as `Robot · {model} · DroidCore` in the mode bar. State is persisted to `localStorage`.
-- **Terminal Panel:** cursor-style glassmorphic terminal with named session tabs, toggled via the toolbar `Terminal` icon or `` Ctrl+Shift+` ``.
-
-<img width="397" height="622" alt="image" src="https://github.com/user-attachments/assets/701ac206-1e5d-4148-a32b-4ba484079020" />
-
-### AI Integration — Triple Provider Support
-- **Ollama (local):** Connects to `http://localhost:11434` for fully offline, low-latency inference. Default model: `llama3.2`.
-- **OpenRouter (cloud):** Access to 100+ models including Claude, GPT-4, Gemini, Mistral, and more. Default: `anthropic/claude-3.5-sonnet`.
-- **Google Gemini:** Native integration via `@google/genai`. Default: `gemini-2.0-flash`.
-- **Seamless switching:** Change provider and model at runtime from the settings panel.
-- **Streaming output:** tokens rendered in real-time with smooth animations.
-- **Thinking process display:** real-time thinking/reasoning visualization during inference.
-- **Custom system prompts:** switchable personas via the System Prompts Editor.
-- **Provider config persistence:** provider settings are saved across restarts.
-
-<img width="401" height="625" alt="image" src="https://github.com/user-attachments/assets/3f9eb11b-9d17-4eff-a549-76e4f5cc45db" />
-
-### Chat Logging & Remote Sync
-- **Supabase backend:** all messages are stored in Supabase (PostgreSQL) for persistence, retrieval, and analytics.
-- **Real-time subscriptions:** Supabase Realtime for live message delivery between desktop and web.
-- **Remote message polling:** desktop Ally polls Supabase for messages sent from the remote web service.
-- **Session management:** full chat session CRUD with history retrieval.
-- **Secure:** Supabase RLS policies, HTTPS enforced.
-
-### Speech Integration
-- **Streaming STT (cloud):** [Deepgram Nova-2](https://deepgram.com/) — word-by-word transcription via WebSocket with <300 ms latency. Interim partial transcripts shown as a `🎤` placeholder in the input field in real time.
-- **Streaming TTS (cloud):** [ElevenLabs Flash v2.5](https://elevenlabs.io/) — ~75 ms time-to-first-audio-chunk, streaming MP3 playback while the LLM is still generating.
-- **Offline STT fallback:** OpenAI Whisper with Voice Activity Detection (VAD) — selected when `STT_MODE=whisper` (the default).
-- **Offline TTS fallback:** Coqui TTS (`tts_models/en/jenny/jenny`) — selected when `TTS_MODE=coqui` (the default).
-- **Barge-in / Voice Interruption:** `InterruptManager` detects user speech during AI playback (via Deepgram `SpeechStarted` VAD events), immediately stops TTS, and emits `speech_interrupted` to clear the partial response in the UI.
-- **ggwave Communication:** audio-based data transmission protocol for robot communication (max 140 bytes, uses speakers + microphone).
-- **WebSocket Service:** separate Python service (`ws://localhost:8765`) for GPU-accelerated speech processing.
-- **Voice Commands:** hands-free interaction — press `Ctrl+Shift+V` to toggle.
-- **Backend selection:** set `STT_MODE=deepgram` / `TTS_MODE=elevenlabs` in `speech-service/.env` to switch from offline models to streaming cloud APIs.
-
-### Tool Calling Framework
-- **TypeScript Framework** (`tool-calling-framework/`): standalone package (`@droidcore/tool-calling-framework`) for registering, validating, and orchestrating tools.
-- **Tool Registry:** dynamic registration with metadata, security levels, and capability discovery.
-- **Tool Executor:** async execution with configurable timeouts, retry policies (linear/exponential/fixed backoff), and error recovery.
-- **Tool Manager:** multi-tool workflow orchestration with dependency resolution, context passing, and audit logging.
-- **Schema Validation:** JSON schema validation for all tool definitions and execution requests.
-- **Agentic Loop:** `agenticToolService` enables the AI to call multiple tools sequentially until the task is complete, with inline status pills in the UI.
-- **PTC Executor:** Programmatic Tool Calling — the LLM writes a JS script that calls all needed tools in a sandboxed `AsyncFunction`, reducing multi-tool tasks to just 2 LLM calls instead of N+1.
-
-<img width="394" height="633" alt="image" src="https://github.com/user-attachments/assets/e5cd9523-410e-4890-ba52-8c7c68870871" />
-
-### MCP & ACP Agent Integration
-- **MCP Client:** Model Context Protocol client (`mcpClient.ts`) that discovers and calls tools from any MCP-compatible server process (spawned via stdio).
-- **MCP Integration Service:** manages MCP server lifecycle, tool discovery, and routing of tool calls to the correct server.
-- **ACP Integration:** Agent Coordination Protocol (`acpIntegrationService.ts`) enables multi-agent coordination — register external agents with endpoints, query them with context, and aggregate results.
-- **Unified Tool Integration:** `unifiedToolIntegrationService.ts` combines local tools, MCP tools, and ACP agents into a single interface for the chat UI.
-- **MCP/ACP Dashboard:** built-in `MCPACPDashboard` component for live status, tool discovery, and manual test calls.
-
-### Browser Bridge & Filesystem Tools
-- **Browser Bridge Server:** WebSocket server (`browserBridgeServer.ts`) that allows the Electron main process to send tool calls to a browser extension for web automation.
-- **Filesystem Tools:** MCP-compatible tools for `list_directory`, `read_file`, `write_file`, `create_directory`, `delete_file`, and more — all routed safely through Electron IPC.
-- **Clipboard Monitoring:** Electron main process monitors clipboard changes and surfaces context to the AI.
-
-### Remote Web Service (`ally-remote-service`)
-- **Next.js 14 web app:** hosted on Vercel, provides a browser-based chat interface to your local Ally system.
-- **Supabase Auth:** email/password authentication with server-side SSR.
-- **Message routing:** web messages are stored in Supabase; the local Ally system polls and processes them, then stores the response.
-- **Discord bot integration:** `/api/discord` endpoint for slash commands; Discord users can chat with Ally directly.
-- **Device pairing:** `/pair` pages for linking new local systems to a Vercel deployment.
-- **System monitoring:** `/api/systems` for heartbeat-based online/offline status of connected local systems.
-
-### Accessibility & Context Monitoring
-- **Accessibility Service:** exposes screen reader and UI automation hooks.
-- **Context Monitor:** `AccessibilityContextMonitor` component tracks active application context and surfaces it to the AI.
-- **Grammarly conflict fix:** automatic detection and suppression of browser extension attribute conflicts.
-- **Error Recovery:** `unified-error-recovery.ts` auto-detects and recovers from auth issues, extension conflicts, network errors, and stream failures.
-
-### Shared Services
-- **`shared-config.js`:** unified configuration object compatible with both Next.js (`process.env`) and Vite (`import.meta.env`).
-- **`shared-types.ts`:** cross-service TypeScript interfaces — `UnifiedMessage`, `UnifiedChatSession`, `UnifiedAuthState`, `UnifiedLocalSystem`, and legacy-format converters.
-- **`unified-auth-service.ts`:** singleton Supabase auth service with local system registration, heartbeat, and observable auth state.
-- **`unified-message-service.ts`:** message send/receive, real-time Supabase subscriptions, session management, and legacy format conversion.
-- **`unified-error-recovery.ts`:** automatic error detection (auth, network, stream, extension conflicts) with recovery strategies.
-
----
-
-## Architecture Overview
+## Layout
 
 ```
-+------------------------------------------------------------------+
-|                   Desktop User (Local)                           |
-+------------------------------------------------------------------+
-                              |
-                              v
-+------------------------------------------------------------------+
-|               glass-pip-chat  (Electron + React)                 |
-|  +------------------+  +---------------+  +------------------+  |
-|  | Glassmorphic     |  | AI Providers  |  | Tool Calling     |  |
-|  | PiP Overlay UI   |  | - Ollama      |  | - Agentic Loop   |  |
-|  | (React/Framer)   |  | - OpenRouter  |  | - PTC Executor   |  |
-|  | - Robot Mode     |  | - Gemini      |  | - MCP Client     |  |
-|  | - Terminal Panel +--+---------------+  | - ACP Agents     |  |
-|  +--------+---------+                     | - FS Tools        |  |
-|           |            +---------------+  +------------------+  |
-|           |            | Speech Svc    |                         |
-|           |            | (WebSocket)   |                         |
-|           |            | STT: Deepgram |                         |
-|           |            |  or Whisper   |                         |
-|           |            | TTS: Eleven   |                         |
-|           |            |  Labs or Coqui|                         |
-|           |            | Barge-in VAD  |                         |
-|           |            +---------------+                         |
-+-----------|------------------------------------------------------+
-            | Electron IPC (preload bridge)
-            v
-+------------------------------------------------------------------+
-|                    Electron Main Process                         |
-| - Window/tray management       - Clipboard monitoring           |
-| - Provider config persistence  - Browser Bridge WebSocket       |
-| - Filesystem IPC handlers      - Global shortcuts               |
-+----------------------------------+-------------------------------+
-                                   |
-                    +--------------v--------------+
-                    |    Supabase Backend         |
-                    |  - PostgreSQL DB            |
-                    |  - Auth / RLS               |
-                    |  - Realtime subscriptions   |
-                    +--------------+--------------+
-                                   |
-                    +--------------v-----------------------------+
-                    |  ally-remote-service (Next.js / Vercel)   |
-                    |  - Web chat UI                            |
-                    |  - Supabase SSR auth                      |
-                    |  - Message routing API                    |
-                    |  - Discord bot endpoint                   |
-                    |  - System pairing & monitoring            |
-                    +-------------------------------------------+
-                                   |
-                    +--------------v--------------+
-                    |  Web / Discord Users        |
-                    +-----------------------------+
+glass-pip-chat/          Electron + React app
+  electron/
+    main.ts              app lifecycle + global hotkeys
+    window.ts            the PiP window, bounds, tray, theme
+    agent/               Claude Code / Codex backend
+      binaries.ts          find the CLIs (incl. the Codex Store app's bundled codex.exe)
+      runner.ts            spawn a turn, stream events, stop
+      parsers.ts           CLI JSONL → shared AgentEvent stream
+      sessions.ts          list/load existing sessions, models
+      ipc.ts               `pip.agent.*` IPC + agent-config.json
+    capture/             Circle to Ask overlay window + shake-to-summon detector
+    ipc/                 clipboard context, speech bridge, global cursor feed
+    speech/client.ts     WebSocket client for speech-service
+  src/
+    components/          GlassChatPiP shell, AvatarMode, headers, messages, settings
+    circle/              the Circle to Ask overlay page (circle.html)
+    hooks/               useChats, useAgentConversation, useAgentChat,
+                         useSpeechService, useContextMonitoring, useKeyboardShortcuts…
+    config/robotPersona.ts
+speech-service/          Python STT/TTS service (Deepgram/ElevenLabs, Whisper/Coqui fallback)
 ```
 
-### Streaming Voice Pipeline
-
-```
-Microphone (16kHz raw PCM)
-    │
-    ▼
-Deepgram Nova-2 WebSocket ──► interim transcript ──► 🎤 placeholder in input
-    │
-    ▼ (final transcript, ~300 ms after speech ends)
-LLM streaming (Ollama / OpenRouter / Gemini)
-    │ (tokens arrive)
-    ├──► AgentActivityStream (tool/thinking display)
-    └──► ElevenLabs Flash v2.5 WebSocket ──► MP3 audio chunks ──► PyAudio playback
-                                                │
-                                                ▼ (~75 ms after first token)
-                                           User hears response
-
-InterruptManager: if Deepgram fires SpeechStarted while TTS is playing
-    → stop ElevenLabs stream → clear TTS queue → emit speech_interrupted to UI
-```
-
----
-
-## Repository Structure
-
-```
-Ally/
-+-- glass-pip-chat/               # Electron desktop overlay
-|   +-- electron/
-|   |   +-- main.ts               # Main process (window, tray, IPC, shortcuts)
-|   |   +-- preload.ts            # Secure IPC bridge to renderer
-|   +-- src/
-|   |   +-- App.tsx               # Root React component
-|   |   +-- components/           # UI components
-|   |   |   +-- GlassChatPiP.tsx  # Main overlay component
-|   |   |   +-- UnifiedChatInterface.tsx
-|   |   |   +-- Enhanced3DOrb.tsx
-|   |   |   +-- ProviderSettings.tsx
-|   |   |   +-- SpeechControls.tsx
-|   |   |   +-- RemoteControlPanel.tsx
-|   |   |   +-- chat/             # Chat sub-components (input, headers, tool status)
-|   |   |   +-- ...               # Auth, accessibility, settings components
-|   |   +-- services/             # Business logic
-|   |   |   +-- ollamaService.ts       # Ollama + OpenRouter + Gemini client
-|   |   |   +-- agenticToolService.ts  # Agentic tool-use loop
-|   |   |   +-- ptcExecutor.ts         # Programmatic Tool Calling (2-call pattern)
-|   |   |   +-- mcpClient.ts           # MCP protocol client
-|   |   |   +-- mcpIntegrationService.ts
-|   |   |   +-- acpIntegrationService.ts  # ACP multi-agent coordination
-|   |   |   +-- filesystemTools.ts     # MCP-compatible FS operations
-|   |   |   +-- browserBridgeServer.ts # Browser automation WebSocket
-|   |   |   +-- speechService.ts       # Speech WebSocket client
-|   |   |   +-- remoteMessagePoller.ts # Supabase message polling
-|   |   |   +-- supabaseChatSync.ts    # Chat history sync
-|   |   |   +-- allyRemoteClient.ts    # Remote service connector
-|   |   |   +-- ...                    # More services
-|   |   +-- hooks/                # React custom hooks
-|   |   +-- stores/               # Zustand state management
-|   |   +-- types/                # TypeScript definitions
-|   |   +-- utils/                # Utilities (platform detection, etc.)
-|   |   +-- styles/               # Tailwind CSS / global styles
-|   +-- .env.example              # Environment variable template
-|   +-- vite.config.ts            # Vite dev config
-|   +-- electron-builder.json     # Desktop packaging config
-|   +-- package.json
-|
-+-- ally-remote-service/          # Next.js web service (deploy to Vercel)
-|   +-- src/app/
-|       +-- page.tsx              # Home page
-|       +-- chat/page.tsx         # Browser chat interface
-|       +-- pair/                 # Device pairing UI
-|       |   +-- discord/          # Discord OAuth flow
-|       +-- api/
-|           +-- messages/route.ts    # Message CRUD
-|           +-- sessions/route.ts    # Session management
-|           +-- systems/route.ts     # Connected system monitoring
-|           +-- auth/callback/       # Supabase auth redirect
-|           +-- discord/route.ts     # Discord slash commands
-|           +-- discord/deliver/     # Push message to Discord
-|           +-- link/route.ts        # Link local system
-|
-+-- speech-service/               # Python WebSocket STT/TTS service
-|   +-- speech_service.py         # Main service (DeepgramSTTService, ElevenLabsTTSService,
-|   |                             #   TTSRouter, InterruptManager, Whisper + Coqui fallbacks)
-|   +-- start_service.py          # Startup script with dependency & env checks
-|   +-- requirements.txt          # Python dependencies
-|   +-- .env.example              # Speech service environment variables
-|   +-- start.bat / start.sh / start.ps1
-|
-+-- tool-calling-framework/       # Standalone TypeScript tool framework
-|   +-- src/
-|       +-- index.ts              # Factory: createToolCallingFramework()
-|       +-- types/                # ToolDefinition, ExecutionRequest, WorkflowPlan
-|       +-- registry/             # ToolRegistry
-|       +-- executor/             # ToolExecutor (retry, timeout, validation)
-|       +-- manager/              # ToolManager (workflow orchestration)
-|       +-- schemas/              # JSON schemas
-|       +-- utils/validation.ts
-|       +-- __tests__/
-|
-+-- docs/
-|   +-- REMOTE_INTEGRATION_GUIDE.md
-|   +-- Anthropic_PTC.md
-|   +-- Open_PTC.md
-|
-+-- shared-config.js              # Cross-service config (Next.js + Vite compatible)
-+-- shared-types.ts               # Cross-service TypeScript interfaces
-+-- unified-auth-service.ts       # Singleton Supabase auth + local system heartbeat
-+-- unified-message-service.ts    # Message send/receive + Realtime subscriptions
-+-- unified-error-recovery.ts     # Auto error detection and recovery
-```
-
----
-
-## Core Technologies
-
-| Layer | Technology | Purpose |
-|-------|-----------|---------|
-| **Desktop runtime** | Electron 31 | Native app, system tray, global shortcuts |
-| **UI framework** | React 18 + TypeScript | Component model |
-| **Web framework** | Next.js 14 | Remote service + API routes |
-| **Styling** | Tailwind CSS + Framer Motion | Glassmorphic UI + animations |
-| **Local LLM** | Ollama (`llama3.2` default) | Fully offline inference |
-| **Cloud LLM** | OpenRouter (`claude-3.5-sonnet` default) | 100+ cloud models |
-| **Cloud LLM** | Google Gemini (`gemini-2.0-flash` default) | Gemini model family |
-| **Speech STT** | Deepgram Nova-2 (streaming) / OpenAI Whisper (offline) | Real-time word-by-word transcription or batch offline STT |
-| **Speech TTS** | ElevenLabs Flash v2.5 (streaming) / Coqui TTS (offline) | ~75 ms first-chunk streaming or offline neural TTS |
-| **Audio protocol** | ggwave | Audio-based data transmission |
-| **Agent protocol** | MCP (Model Context Protocol) | Tool discovery from external servers |
-| **Agent protocol** | ACP (Agent Coordination Protocol) | Multi-agent query routing |
-| **Tool execution** | PTC (Programmatic Tool Calling) | 2-call multi-tool pattern |
-| **Database** | Supabase (PostgreSQL) | Persistence + Realtime |
-| **Authentication** | Supabase Auth | Email/password, SSR |
-| **Builds** | Vite, tsc, electron-builder | Dev + production builds |
-| **Tests** | Vitest | Unit + integration tests |
-
----
-
-## Roadmap
-
-- [X] **M0 – UI Prototype**: glass PiP component with animations.
-- [X] **M1 – Electron Shell**: window vibrancy, bounds persistence, shortcut toggle, system tray.
-- [X] **M2 – Ollama Integration**: local LLM streaming with real-time thinking display.
-- [X] **M3 – Speech Integration**: STT (Whisper), TTS (Coqui), and ggwave via Python WebSocket service.
-- [X] **M4 – Tool Calling Framework**: complete TypeScript tool execution system with validation, retry, and workflow orchestration.
-- [X] **M5 – ACP/MCP Integration**: multi-agent coordination via ACP and tool discovery via MCP protocol.
-- [X] **M6 – Remote Service & Chat API**: Next.js web app with Supabase storage, real-time sync, and Discord bot.
-- [X] **M7 – Multi-provider AI**: Ollama + OpenRouter + Gemini with runtime switching and persistent config.
-- [X] **M8 – PTC Executor**: Programmatic Tool Calling — N tools in 2 LLM calls via sandboxed JS execution.
-- [X] **M9 – Real-Time Streaming Voice**: Deepgram Nova-2 streaming STT (<300 ms) + ElevenLabs Flash v2.5 streaming TTS (~75 ms first chunk) with barge-in interruption support; Whisper + Coqui retained as offline fallbacks.
-- [X] **M10 – Robot Mode & Terminal Panel**: one-click DroidCore system prompt toggle; cursor-style glass terminal with named sessions.
-- [ ] **M11 – Browser Automation**: full browser control via Browser Bridge extension integration.
-- [ ] **M12 – Packaging**: cross-platform builds, code signing, autoupdate via electron-builder.
-
----
-
-## Quick Start
-
-### Prerequisites
-- Node.js 18+
-- [Ollama](https://ollama.ai) installed and running (for local models)
-- Python 3.9+ with GPU support (optional, for speech service)
-- A [Supabase](https://supabase.com) project (optional, for remote sync)
-
-### 1. Launch the Desktop Overlay
+## Running
 
 ```bash
 cd glass-pip-chat
-cp .env.example .env        # Fill in your Supabase credentials (optional)
 npm install
 npm run dev
 ```
 
-This starts both the Vite dev server and the Electron shell. The overlay will appear as a floating window.
+Requirements: the `claude` CLI (`npm i -g @anthropic-ai/claude-code`, then run `claude` once to log in) and/or Codex (the Codex desktop app's bundled CLI is found automatically, or `npm i -g @openai/codex`). Set CLI paths, the default working folder, permissions and the robot MCP URL in **Settings → Agents**.
 
-**Keyboard shortcuts:**
-- `Ctrl+Shift+C` / `Cmd+Shift+C` — toggle overlay
-- `Esc` — hide overlay
-- `Ctrl+Shift+V` — toggle speech controls
-- `Ctrl+Shift+I` — open integration test panel *(dev)*
-- `Ctrl+Shift+P` — open provider test panel *(dev)*
+Voice: start `speech-service` (`speech-service/start.ps1`), then toggle voice mode in the overlay.
 
-### 2. (Optional) Start the Speech Service
+## How a turn works
 
-```bash
-cd speech-service
-cp .env.example .env     # Set STT_MODE, TTS_MODE, and API keys
-# Windows
-start.bat
-# macOS/Linux
-./start.sh
-# PowerShell (cross-platform)
-pwsh start.ps1
-```
+1. The chat's agent and working folder are shown under the input; the first message starts a new agent session (earlier non-agent turns are handed over as a transcript).
+2. `electron/agent/runner.ts` runs `claude -p --output-format stream-json …` or `codex exec --json …`, prompt over stdin, follow-ups via `--resume` / `exec resume`.
+3. The parser turns the JSONL stream into text / thinking / tool events, rendered live as inline tool pills.
+4. Permissions map to `--permission-mode` (Claude) and the sandbox mode (Codex): read-only, can edit, or full access.
 
-The service defaults to **offline mode** (`STT_MODE=whisper`, `TTS_MODE=coqui`).  
-To enable the low-latency cloud backends, edit `.env`:
+## Development
 
 ```bash
-STT_MODE=deepgram
-DEEPGRAM_API_KEY=your_key
-
-TTS_MODE=elevenlabs
-ELEVENLABS_API_KEY=your_key
-ELEVENLABS_VOICE_ID=21m00Tcm4TlvDq8ikWAM   # Rachel (default)
+npm run typecheck   # tsc over src + electron
+npm run test:run    # vitest (chat store, stream parsers, shake detector, orb)
+npm run build       # renderer + electron + installer
 ```
-
-Then in the overlay, press `Ctrl+Shift+V` and click **Connect** to link with the speech service at `ws://localhost:8765`.
-
-### 3. (Optional) Deploy the Remote Web Service
-
-```bash
-cd ally-remote-service
-cp .env.example .env        # Fill in Supabase + Discord credentials
-npm install
-npm run dev                 # Local dev at http://localhost:3000
-```
-
-For production, deploy to Vercel and set the environment variables in the Vercel dashboard.
-
-### 4. (Optional) Build the Tool Calling Framework
-
-```bash
-cd tool-calling-framework
-npm install
-npm run build               # Compiles TypeScript to dist/
-npm run test                # Run Vitest test suite
-```
-
-See [docs/REMOTE_INTEGRATION_GUIDE.md](docs/REMOTE_INTEGRATION_GUIDE.md) for full remote setup instructions.
-
----
-
-## Environment Variables
-
-### `speech-service/.env`
-```bash
-# STT backend: 'deepgram' (streaming, cloud) or 'whisper' (offline default)
-STT_MODE=whisper
-DEEPGRAM_API_KEY=            # Required when STT_MODE=deepgram
-
-# TTS backend: 'elevenlabs' (streaming, cloud) or 'coqui' (offline default)
-TTS_MODE=coqui
-ELEVENLABS_API_KEY=          # Required when TTS_MODE=elevenlabs
-ELEVENLABS_VOICE_ID=21m00Tcm4TlvDq8ikWAM  # ElevenLabs voice (default: Rachel)
-
-# Offline model selection
-WHISPER_MODEL=base            # tiny | base | small | medium | large
-TTS_MODEL=tts_models/en/jenny/jenny
-
-# Server
-WEBSOCKET_PORT=8765
-```
-
-### `glass-pip-chat/.env`
-```bash
-# Supabase (required for remote sync)
-VITE_SUPABASE_URL=your_supabase_url
-VITE_SUPABASE_PUBLISHABLE_KEY=your_anon_key
-VITE_SUPABASE_SECRET_KEY=your_service_key
-
-# Local system identity
-VITE_LOCAL_SYSTEM_ID=ally-desktop-system
-VITE_LOCAL_SYSTEM_NAME=Ally Desktop System
-
-# Remote service URL (your Vercel deployment)
-VITE_REMOTE_SERVICE_URL=https://your-ally-remote.vercel.app
-VITE_ENABLE_REMOTE=true
-
-# LLM endpoints
-VITE_OLLAMA_BASE_URL=http://localhost:11434
-VITE_SPEECH_SERVICE_URL=ws://localhost:8765
-VITE_STREAM_HANDLER_URL=ws://localhost:8766
-
-# Feature flags
-VITE_ENABLE_SPEECH=true
-VITE_ENABLE_TOOLS=true
-VITE_TOOL_CALLING_ENABLED=true
-VITE_UNIFIED_INTEGRATION_ENABLED=true
-
-# Tool limits
-VITE_MAX_TOOL_CALLS=5
-VITE_TOOL_CALL_TIMEOUT=30000
-```
-
-### `ally-remote-service/.env`
-```bash
-# Supabase
-NEXT_PUBLIC_SUPABASE_URL=your_supabase_url
-NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=your_anon_key
-SUPABASE_SECRET_KEY=your_service_key
-
-# Discord bot (optional)
-DISCORD_BOT_TOKEN=your_discord_bot_token
-DISCORD_APPLICATION_ID=your_app_id
-DISCORD_PUBLIC_KEY=your_public_key
-
-# Next.js
-NEXTAUTH_URL=http://localhost:3000
-NEXTAUTH_SECRET=your_secret
-NEXT_PUBLIC_DOMAIN=your-ally-domain.vercel.app
-```
-
----
-
-## License
-[Apache-2.0 License](LICENSE)
-
----
-
-## Credits
-Developed as part of the **DroidCore** robotics platform, extending Ally into a real-world AI-driven assistant.

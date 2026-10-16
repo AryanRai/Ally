@@ -36,7 +36,7 @@ export default function MarkdownRenderer({
         remarkPlugins={[remarkGfm]}
         components={{
           p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
-          code: ({ inline, className, children, ...props }) => {
+          code: ({ inline, className, children, ...props }: any) => {
             const codeText = String(children);
             const codeId = `${effectiveMessageId}-${Math.random().toString(36).slice(2, 11)}`;
             const isCopied = safeCopiedCode.has(codeId);

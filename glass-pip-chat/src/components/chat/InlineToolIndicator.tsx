@@ -461,7 +461,7 @@ const TOOL_ICONS: Record<string, string> = {
   ros2_topic: '🔗',
 };
 
-export function InlineToolPill({ execution, theme = 'dark' }: { execution: ToolExecution; theme?: 'light' | 'dark' }) {
+export function InlineToolPill({ execution }: { execution: ToolExecution; theme?: 'light' | 'dark' }) {
   const [expanded, setExpanded] = useState(false);
 
   const icon = TOOL_ICONS[execution.name] ?? '🔧';

@@ -1,0 +1,177 @@
+import { useCallback, useEffect, useRef, useState } from 'react';
+import type { Segment, ToolExecution } from '../components/chat/InlineToolIndicator';
+import type { AgentConfig, AgentEvent, AgentPermission, AgentProvider } from '../types/agent';
+
+export interface AgentTurnCallbacks {
+  onSegments: (segments: Segment[]) => void;
+  onText: (text: string) => void;
+  onThinking: (thinking: string) => void;
+  /** Fired as soon as the agent reports its session id (new sessions only) */
+  onSession?: (sessionId: string) => void;
+}
+
+export interface AgentTurnResult {
+  text: string;
+  thinking: string;
+  segments: Segment[];
+  sessionId?: string;
+  error?: string;
+  stopped?: boolean;
+}
+
+const PERMISSION_ORDER: AgentPermission[] = ['readonly', 'edit', 'full'];
+
+/**
+ * Runs Claude Code / Codex turns through the Electron agent bridge and turns
+ * their event stream into the same Segment[] shape the agentic chat UI uses.
+ */
+export function useAgentChat() {
+  const available = typeof window !== 'undefined' && !!window.pip?.agent;
+  const [config, setConfig] = useState<AgentConfig | null>(null);
+  const activeRun = useRef<{ runId: string; stop: () => void } | null>(null);
+
+  useEffect(() => {
+    if (!available) return;
+    window.pip.agent!.getConfig().then(setConfig).catch(() => {});
+  }, [available]);
+
+  const updateConfig = useCallback(async (patch: Partial<AgentConfig>) => {
+    if (!window.pip?.agent) return;
+    setConfig(await window.pip.agent.updateConfig(patch));
+  }, []);
+
+  const cyclePermission = useCallback(() => {
+    const current = config?.permission ?? 'edit';
+    const next = PERMISSION_ORDER[(PERMISSION_ORDER.indexOf(current) + 1) % PERMISSION_ORDER.length];
+    return updateConfig({ permission: next });
+  }, [config, updateConfig]);
+
+  const pickFolder = useCallback(async (current?: string) => {
+    if (!window.pip?.agent) return null;
+    return window.pip.agent.pickFolder(current);
+  }, []);
+
+  const runTurn = useCallback(async (
+    opts: {
+      provider: AgentProvider;
+      prompt: string;
+      model: string;
+      cwd?: string;
+      sessionId?: string;
+      robot?: { instructions: string };
+      images?: string[];
+    },
+    cb: AgentTurnCallbacks,
+  ): Promise<AgentTurnResult> => {
+    const agent = window.pip?.agent;
+    if (!agent) throw new Error('Claude Code / Codex need the desktop app');
+
+    const segments: Segment[] = [];
+    const tools = new Map<string, ToolExecution>();
+    let text = '';
+    let thinking = '';
+    let sessionId = opts.sessionId;
+
+    // Snapshot so React sees a new array and the persisted copy can't be mutated later
+    const emitSegments = () => cb.onSegments(segments.map(s => ({ ...s, toolExecution: s.toolExecution && { ...s.toolExecution } })));
+
+    const appendText = (chunk: string) => {
+      text += chunk;
+      const last = segments[segments.length - 1];
+      if (last?.type === 'text') last.content = (last.content ?? '') + chunk;
+      else segments.push({ type: 'text', content: chunk.replace(/^\s+/, '') });
+      cb.onText(text);
+      emitSegments();
+    };
+
+    return new Promise<AgentTurnResult>((resolve, reject) => {
+      let runId: string | null = null;
+      let settled = false;
+      const pending: Array<{ runId: string; event: AgentEvent }> = [];
+
+      const finish = (result: Partial<AgentTurnResult>) => {
+        if (settled) return;
+        settled = true;
+        unsubscribe();
+        activeRun.current = null;
+        // Anything still running when the turn ends was interrupted
+        for (const t of tools.values()) {
+          if (t.status === 'executing') { t.status = 'error'; t.error = 'Interrupted'; t.endTime = Date.now(); }
+        }
+        resolve({ text: text.trim(), thinking, segments: segments.map(s => ({ ...s })), sessionId, ...result });
+      };
+
+      const handle = ({ event: ev }: { runId: string; event: AgentEvent }) => {
+        switch (ev.kind) {
+          case 'session':
+            if (ev.sessionId !== sessionId) {
+              sessionId = ev.sessionId;
+              cb.onSession?.(ev.sessionId);
+            }
+            break;
+          case 'text':
+            appendText(ev.text);
+            break;
+          case 'thinking':
+            thinking += ev.text;
+            cb.onThinking(thinking);
+            break;
+          case 'tool_start': {
+            const exec: ToolExecution = {
+              id: ev.id, name: ev.name, parameters: ev.input, status: 'executing', startTime: Date.now(),
+            };
+            tools.set(ev.id, exec);
+            segments.push({ type: 'tool', toolExecution: exec });
+            emitSegments();
+            break;
+          }
+          case 'tool_end': {
+            const exec = tools.get(ev.id);
+            if (!exec) break;
+            exec.status = ev.isError ? 'error' : 'success';
+            exec.endTime = Date.now();
+            if (ev.isError) exec.error = (ev.output || 'Tool failed').slice(0, 2000);
+            else exec.result = (ev.output ?? '').slice(0, 4000);
+            emitSegments();
+            break;
+          }
+          case 'done':
+            if (ev.sessionId) sessionId = ev.sessionId;
+            finish(ev.isError ? { error: ev.error || 'Agent failed' } : {});
+            break;
+          case 'stderr':
+            break;
+        }
+      };
+
+      // Events can arrive before `send` resolves with the run id; buffer them
+      const unsubscribe = agent.onEvent(data => {
+        if (runId === null) pending.push(data);
+        else if (data.runId === runId) handle(data);
+      });
+
+      agent.send(opts)
+        .then(id => {
+          runId = id;
+          activeRun.current = {
+            runId: id,
+            stop: () => { agent.stop(id); finish({ stopped: true }); },
+          };
+          for (const data of pending.splice(0)) if (data.runId === id) handle(data);
+        })
+        .catch(err => {
+          settled = true;
+          unsubscribe();
+          reject(err);
+        });
+    });
+  }, []);
+
+  const stop = useCallback(() => {
+    if (!activeRun.current) return false;
+    activeRun.current.stop();
+    return true;
+  }, []);
+
+  return { available, config, updateConfig, cyclePermission, pickFolder, runTurn, stop };
+}

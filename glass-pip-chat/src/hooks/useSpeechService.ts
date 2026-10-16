@@ -141,7 +141,7 @@ export function useSpeechService(): UseSpeechServiceReturn {
           currentStreamIdRef.current = null;
           isPlayingRef.current = false;
           if (currentAudioSourceRef.current) {
-            try { currentAudioSourceRef.current.stop(); } catch (_) {}
+            try { currentAudioSourceRef.current.stop(); } catch { /* already stopped */ }
             currentAudioSourceRef.current = null;
           }
         })
@@ -419,14 +419,10 @@ export function useSpeechService(): UseSpeechServiceReturn {
       // Store reference for interruption
       currentAudioSourceRef.current = source;
       
-      return new Promise<void>((resolve, reject) => {
+      return new Promise<void>((resolve) => {
         source.onended = () => {
           currentAudioSourceRef.current = null;
           resolve();
-        };
-        source.onerror = (error) => {
-          currentAudioSourceRef.current = null;
-          reject(error);
         };
         source.start();
       });

@@ -9,10 +9,13 @@ import {
   Check, 
   X,
   ChevronLeft,
-  ChevronRight
+  ChevronRight,
+  Bot
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { Chat } from '../types/chat';
+import type { AgentSessionSummary } from '../types/agent';
+import AgentSessionsPanel from './chat/AgentSessionsPanel';
 
 interface ChatSidebarProps {
   chats: Chat[];
@@ -25,6 +28,8 @@ interface ChatSidebarProps {
   onToggleCollapse: () => void;
   theme: 'light' | 'dark';
   platform: string;
+  /** Continue an existing Claude Code / Codex session as a chat */
+  onOpenAgentSession?: (session: AgentSessionSummary) => void;
 }
 
 export default function ChatSidebar({
@@ -37,7 +42,8 @@ export default function ChatSidebar({
   isCollapsed,
   onToggleCollapse,
   theme,
-  platform
+  platform,
+  onOpenAgentSession
 }: ChatSidebarProps) {
   const [editingChat, setEditingChat] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState('');
@@ -195,14 +201,14 @@ export default function ChatSidebar({
                   )}
                 >
                   <div className="flex items-center gap-3">
-                    <MessageSquare className={cn(
+                    {(() => { const ChatIcon = chat.agent ? Bot : MessageSquare; return <ChatIcon className={cn(
                       "w-4 h-4 flex-shrink-0",
                       activeChat === chat.id
                         ? "text-blue-400"
                         : platform === 'win32'
                           ? "text-white/60"
                           : theme === 'dark' ? "text-white/60" : "text-black/60"
-                    )} />
+                    )} />; })()}
                     
                     <AnimatePresence mode="wait">
                       {!isCollapsed && (
@@ -375,6 +381,8 @@ export default function ChatSidebar({
           </div>
         )}
       </div>
+
+      {!isCollapsed && onOpenAgentSession && <AgentSessionsPanel onOpen={onOpenAgentSession} />}
 
       {/* Click outside to close menu */}
       {showMenu && (
