@@ -1,43 +1,34 @@
 import { execSync } from 'child_process';
-import { copyFileSync, mkdirSync, existsSync, renameSync, cpSync } from 'fs';
+import { mkdirSync, existsSync, cpSync, rmSync } from 'fs';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const rootDir = join(__dirname, '..');
+const outDir = join(rootDir, 'dist');
 
 console.log('Building Electron files...');
 
-// Ensure dist directory exists
-mkdirSync(join(rootDir, 'dist', 'electron'), { recursive: true });
+// Start clean so files from removed modules don't linger
+rmSync(join(outDir, 'electron'), { recursive: true, force: true });
 
-// Compile main process (ESNext modules)
-execSync('npx tsc electron/main.ts --outDir dist --module esnext --target es2022 --moduleResolution node --esModuleInterop true', {
-  cwd: rootDir,
-  stdio: 'inherit'
-});
+// `--rootDir .` pins the layout: electron/main.ts -> dist/electron/main.js
+const tsc = (entry, module) =>
+  execSync(`npx tsc ${entry} --rootDir . --outDir dist --module ${module} --target es2022 --moduleResolution node --esModuleInterop true --skipLibCheck`, {
+    cwd: rootDir,
+    stdio: 'inherit',
+  });
 
-// Compile preload script (CommonJS for Electron compatibility)  
-execSync('npx tsc electron/preload.ts --outDir dist --module commonjs --target es2022 --moduleResolution node --esModuleInterop true', {
-  cwd: rootDir,
-  stdio: 'inherit'
-});
+// Main process (ES modules)
+tsc('electron/main.ts', 'esnext');
+// Preload (CommonJS for Electron's preload loader)
+tsc('electron/preload.ts', 'commonjs');
 
-// Move preload.js to the correct location (in the same directory as main.js)
-const preloadSource = join(rootDir, 'dist', 'preload.js');
-const preloadDest = join(rootDir, 'dist', 'electron', 'preload.js');
-
-if (existsSync(preloadSource)) {
-  renameSync(preloadSource, preloadDest);
-}
-
-// Copy assets folder to dist
+// Copy assets next to the build
 const assetsSource = join(rootDir, 'assets');
-const assetsDest = join(rootDir, 'dist', 'assets');
-
 if (existsSync(assetsSource)) {
-  mkdirSync(assetsDest, { recursive: true });
-  cpSync(assetsSource, assetsDest, { recursive: true });
+  mkdirSync(join(outDir, 'assets'), { recursive: true });
+  cpSync(assetsSource, join(outDir, 'assets'), { recursive: true });
 }
 
 console.log('Electron build completed!');

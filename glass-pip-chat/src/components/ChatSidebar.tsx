@@ -1,18 +1,16 @@
-import { useState, useRef, useEffect } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import { 
-  Plus, 
-  MessageSquare, 
-  MoreHorizontal, 
-  Edit3, 
-  Trash2, 
-  Check, 
-  X,
-  ChevronLeft,
-  ChevronRight
-} from 'lucide-react';
-import { cn } from '../lib/utils';
-import { Chat } from '../types/chat';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { motion } from 'framer-motion';
+import { ChevronRight, Folder, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Pencil, SquarePen, Trash2 } from 'lucide-react';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { cn } from '@/lib/utils';
+import type { Chat } from '@/types/chat';
+import type { AgentSessionSummary } from '@/types/agent';
 
 interface ChatSidebarProps {
   chats: Chat[];
@@ -25,8 +23,183 @@ interface ChatSidebarProps {
   onToggleCollapse: () => void;
   theme: 'light' | 'dark';
   platform: string;
+  /** Sessions from the Claude Code / Codex apps, listed alongside Ally's chats */
+  externalSessions?: AgentSessionSummary[];
+  /** Continue an existing Claude Code / Codex session as a chat */
+  onOpenAgentSession?: (session: AgentSessionSummary) => void;
 }
 
+type Entry =
+  | { kind: 'chat'; chat: Chat; updatedAt: number }
+  | { kind: 'session'; session: AgentSessionSummary; updatedAt: number };
+
+interface ProjectGroup {
+  key: string;
+  name: string;
+  path?: string;
+  entries: Entry[];
+  updatedAt: number;
+}
+
+const NO_FOLDER = '__none__';
+const COLLAPSED_GROUPS_KEY = 'ally-sidebar-collapsed-projects';
+const ROWS_BEFORE_MORE = 6;
+const PROVIDER_TAG: Record<AgentSessionSummary['provider'], string> = { claude: 'cc', codex: 'cx' };
+
+/** Same folder regardless of slash direction, case (Windows) or trailing slash */
+const folderKey = (p: string) => p.replace(/[\\/]+/g, '/').replace(/\/$/, '').toLowerCase();
+
+function folderName(p: string): string {
+  const parts = p.split(/[\\/]/).filter(Boolean);
+  return parts[parts.length - 1] || p;
+}
+
+function relativeTime(ts: number): string {
+  const mins = Math.floor((Date.now() - ts) / 60000);
+  if (mins < 1) return 'now';
+  if (mins < 60) return `${mins}m`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h`;
+  const days = Math.floor(hours / 24);
+  return days < 7 ? `${days}d` : `${Math.floor(days / 7)}w`;
+}
+
+/**
+ * Ally chats and Claude Code / Codex sessions grouped by project folder, newest
+ * first (like Codex's Projects). A session already continued in Ally shows once, as its chat.
+ */
+function groupByProject(chats: Chat[], sessions: AgentSessionSummary[]): ProjectGroup[] {
+  const groups = new Map<string, ProjectGroup>();
+  const add = (cwd: string | undefined, entry: Entry) => {
+    const key = cwd ? folderKey(cwd) : NO_FOLDER;
+    const group = groups.get(key) ?? { key, name: cwd ? folderName(cwd) : 'Chats', path: cwd, entries: [], updatedAt: 0 };
+    group.entries.push(entry);
+    group.updatedAt = Math.max(group.updatedAt, entry.updatedAt);
+    groups.set(key, group);
+  };
+  const linked = new Set(chats.map(c => c.agent?.sessionId).filter(Boolean));
+  for (const chat of chats) add(chat.agent?.cwd, { kind: 'chat', chat, updatedAt: chat.updatedAt });
+  for (const session of sessions) {
+    if (!linked.has(session.id)) add(session.cwd, { kind: 'session', session, updatedAt: session.updatedAt });
+  }
+  for (const g of groups.values()) g.entries.sort((a, b) => b.updatedAt - a.updatedAt);
+  return [...groups.values()].sort((a, b) => b.updatedAt - a.updatedAt);
+}
+
+/** A Claude Code / Codex session not yet opened in Ally; clicking continues it here. */
+function SessionRow({ session, onOpen }: { session: AgentSessionSummary; onOpen: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      title={`${session.title}\nFrom ${session.provider === 'claude' ? 'Claude Code' : 'Codex'} · click to continue in Ally`}
+      className="flex w-full items-center rounded-md text-left text-foreground/55 transition-colors hover:bg-white/[0.05] hover:text-foreground"
+    >
+      <span className="min-w-0 flex-1 truncate py-1.5 pl-2.5 pr-1 text-[13px] font-light">{session.title}</span>
+      <span className="shrink-0 pr-1 font-mono text-[9px] uppercase tracking-[0.1em] text-foreground/30">{PROVIDER_TAG[session.provider]}</span>
+      <span className="shrink-0 pr-2 font-mono text-[10px] text-foreground/30">{relativeTime(session.updatedAt)}</span>
+    </button>
+  );
+}
+
+function loadCollapsed(): Set<string> {
+  try {
+    return new Set(JSON.parse(localStorage.getItem(COLLAPSED_GROUPS_KEY) ?? '[]'));
+  } catch {
+    return new Set();
+  }
+}
+
+function ChatRow({
+  chat,
+  active,
+  onSelect,
+  onRename,
+  onDelete,
+  canDelete,
+}: {
+  chat: Chat;
+  active: boolean;
+  onSelect: () => void;
+  onRename: (title: string) => void;
+  onDelete: () => void;
+  canDelete: boolean;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(chat.title);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (editing) inputRef.current?.select();
+  }, [editing]);
+
+  const commit = () => {
+    if (draft.trim() && draft.trim() !== chat.title) onRename(draft.trim());
+    setEditing(false);
+  };
+
+  if (editing) {
+    return (
+      <input
+        ref={inputRef}
+        value={draft}
+        onChange={e => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={e => {
+          if (e.key === 'Enter') commit();
+          if (e.key === 'Escape') { setDraft(chat.title); setEditing(false); }
+        }}
+        className="mx-1 w-[calc(100%-0.5rem)] rounded-md border border-ring bg-transparent px-2 py-1 text-[13px] font-light outline-none"
+      />
+    );
+  }
+
+  return (
+    <div
+      className={cn(
+        'group/row relative flex items-center rounded-md transition-colors',
+        active ? 'bg-white/[0.09] text-foreground' : 'text-foreground/70 hover:bg-white/[0.05] hover:text-foreground'
+      )}
+    >
+      <button
+        type="button"
+        onClick={onSelect}
+        onDoubleClick={() => setEditing(true)}
+        className="min-w-0 flex-1 truncate py-1.5 pl-2.5 pr-1 text-left text-[13px] font-light"
+        title={chat.title}
+      >
+        {chat.title || 'Untitled'}
+      </button>
+      <span className="shrink-0 pr-2 font-mono text-[10px] text-foreground/30 group-hover/row:hidden">{relativeTime(chat.updatedAt)}</span>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button
+            type="button"
+            className="mr-1 hidden size-5 shrink-0 place-items-center rounded text-foreground/50 hover:bg-white/10 hover:text-foreground group-hover/row:grid data-[state=open]:grid"
+            title="More"
+          >
+            <MoreHorizontal className="size-3.5" />
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="min-w-36">
+          <DropdownMenuItem onSelect={() => setEditing(true)}>
+            <Pencil className="size-3.5" /> Rename
+          </DropdownMenuItem>
+          {canDelete && (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem variant="destructive" onSelect={onDelete}>
+                <Trash2 className="size-3.5" /> Delete
+              </DropdownMenuItem>
+            </>
+          )}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </div>
+  );
+}
+
+/** Chat list in the style of the Codex / Claude Code apps: New chat, then chats under their project folders. */
 export default function ChatSidebar({
   chats,
   activeChat,
@@ -36,353 +209,116 @@ export default function ChatSidebar({
   onChatRename,
   isCollapsed,
   onToggleCollapse,
-  theme,
-  platform
+  externalSessions = [],
+  onOpenAgentSession,
 }: ChatSidebarProps) {
-  const [editingChat, setEditingChat] = useState<string | null>(null);
-  const [editTitle, setEditTitle] = useState('');
-  const [showMenu, setShowMenu] = useState<string | null>(null);
-  const editInputRef = useRef<HTMLInputElement>(null);
+  const groups = useMemo(() => groupByProject(chats, externalSessions), [chats, externalSessions]);
+  const [collapsedGroups, setCollapsedGroups] = useState(loadCollapsed);
+  const [showAll, setShowAll] = useState<Set<string>>(new Set());
 
-  useEffect(() => {
-    if (editingChat && editInputRef.current) {
-      editInputRef.current.focus();
-      editInputRef.current.select();
-    }
-  }, [editingChat]);
-
-  const handleStartEdit = (chat: Chat) => {
-    setEditingChat(chat.id);
-    setEditTitle(chat.title);
-    setShowMenu(null);
+  const toggleGroup = (key: string) => {
+    setCollapsedGroups(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      localStorage.setItem(COLLAPSED_GROUPS_KEY, JSON.stringify([...next]));
+      return next;
+    });
   };
 
-  const handleSaveEdit = () => {
-    if (editingChat && editTitle.trim()) {
-      onChatRename(editingChat, editTitle.trim());
-    }
-    setEditingChat(null);
-    setEditTitle('');
-  };
-
-  const handleCancelEdit = () => {
-    setEditingChat(null);
-    setEditTitle('');
-  };
-
-  const handleDeleteChat = (chatId: string) => {
-    onChatDelete(chatId);
-    setShowMenu(null);
-  };
-
-  const formatTime = (timestamp: number) => {
-    const now = Date.now();
-    const diff = now - timestamp;
-    const minutes = Math.floor(diff / 60000);
-    const hours = Math.floor(diff / 3600000);
-    const days = Math.floor(diff / 86400000);
-
-    if (minutes < 1) return 'now';
-    if (minutes < 60) return `${minutes}m`;
-    if (hours < 24) return `${hours}h`;
-    if (days < 7) return `${days}d`;
-    return new Date(timestamp).toLocaleDateString();
-  };
-
-  const getLastMessage = (chat: Chat) => {
-    const lastMessage = chat.messages[chat.messages.length - 1];
-    if (!lastMessage) return 'No messages';
-    
-    let content = lastMessage.content;
-    // Remove markdown and clean up
-    content = content.replace(/[#*`]/g, '').replace(/\n/g, ' ');
-    return content.length > 40 ? content.substring(0, 37) + '...' : content;
-  };
+  const railButton = 'grid size-8 place-items-center rounded-md text-foreground/60 transition-colors hover:bg-white/[0.07] hover:text-foreground';
 
   return (
-    <motion.div
+    <motion.nav
       initial={false}
       animate={{ width: isCollapsed ? 48 : 280 }}
       transition={{ duration: 0.2, ease: 'easeInOut' }}
-      className={cn(
-        "flex flex-col border-r h-full",
-        platform === 'win32'
-          ? "border-white/10 bg-black/20"
-          : theme === 'dark' 
-            ? "border-white/10 bg-black/20"
-            : "border-black/10 bg-white/20"
-      )}
+      className="flex h-full flex-col overflow-hidden border-r border-border bg-black/30"
+      aria-label="Chats"
     >
-      {/* Header */}
-      <div className="flex items-center justify-between p-3 border-b border-inherit">
-        <AnimatePresence mode="wait">
-          {!isCollapsed && (
-            <motion.h2
-              initial={{ opacity: 0, x: -10 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: -10 }}
-              className={cn(
-                "text-sm font-medium",
-                platform === 'win32'
-                  ? "text-white/80"
-                  : theme === 'dark' ? "text-white/80" : "text-black/80"
-              )}
-            >
-              Chats
-            </motion.h2>
+      {/* Top: sidebar toggle + New chat */}
+      <div className={cn('flex shrink-0 flex-col gap-0.5 p-2', isCollapsed && 'items-center')}>
+        <button type="button" onClick={onToggleCollapse} className={railButton} title={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}>
+          {isCollapsed ? <PanelLeftOpen className="size-4" /> : <PanelLeftClose className="size-4" />}
+        </button>
+        <button
+          type="button"
+          onClick={onChatCreate}
+          title="New chat"
+          className={cn(
+            isCollapsed ? railButton : 'flex items-center gap-2 rounded-md px-2.5 py-1.5 text-[13px] text-foreground/85 transition-colors hover:bg-white/[0.07] hover:text-foreground'
           )}
-        </AnimatePresence>
-        
-        <div className="flex items-center gap-1">
-          {!isCollapsed && (
-            <button
-              onClick={onChatCreate}
-              className={cn(
-                "p-1.5 rounded-lg transition-colors flex items-center justify-center min-w-[28px] min-h-[28px]",
-                platform === 'win32' 
-                  ? "hover:bg-white/10"
-                  : theme === 'dark' ? "hover:bg-white/10" : "hover:bg-black/10"
-              )}
-              title="New chat"
-            >
-              <Plus className="w-4 h-4 flex-shrink-0" />
-            </button>
-          )}
-          
-          <button
-            onClick={onToggleCollapse}
-            className={cn(
-              "p-1.5 rounded-lg transition-colors",
-              platform === 'win32' 
-                ? "hover:bg-white/10"
-                : theme === 'dark' ? "hover:bg-white/10" : "hover:bg-black/10"
-            )}
-            title={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-          >
-            {isCollapsed ? <ChevronRight className="w-4 h-4" /> : <ChevronLeft className="w-4 h-4" />}
-          </button>
-        </div>
+        >
+          <SquarePen className="size-4 shrink-0" />
+          {!isCollapsed && 'New chat'}
+        </button>
       </div>
 
-      {/* Chat List */}
-      <div className="flex-1 overflow-y-auto">
-        <AnimatePresence>
-          {chats.map((chat) => (
-            <motion.div
-              key={chat.id}
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -10 }}
-              className="relative"
-            >
-              <div className="relative group">
-                <button
-                  onClick={() => onChatSelect(chat.id)}
-                  className={cn(
-                    "w-full text-left transition-colors relative",
-                    isCollapsed ? "p-3" : "p-3",
-                    activeChat === chat.id
-                      ? platform === 'win32'
-                        ? "bg-blue-500/20 border-r-2 border-blue-400"
-                        : theme === 'dark'
-                          ? "bg-blue-500/20 border-r-2 border-blue-400"
-                          : "bg-blue-500/20 border-r-2 border-blue-600"
-                      : platform === 'win32'
-                        ? "hover:bg-white/5"
-                        : theme === 'dark'
-                          ? "hover:bg-white/5"
-                          : "hover:bg-black/5"
-                  )}
-                >
-                  <div className="flex items-center gap-3">
-                    <MessageSquare className={cn(
-                      "w-4 h-4 flex-shrink-0",
-                      activeChat === chat.id
-                        ? "text-blue-400"
-                        : platform === 'win32'
-                          ? "text-white/60"
-                          : theme === 'dark' ? "text-white/60" : "text-black/60"
-                    )} />
-                    
-                    <AnimatePresence mode="wait">
-                      {!isCollapsed && (
-                        <motion.div
-                          initial={{ opacity: 0, width: 0 }}
-                          animate={{ opacity: 1, width: 'auto' }}
-                          exit={{ opacity: 0, width: 0 }}
-                          className="flex-1 min-w-0"
-                        >
-                          {editingChat === chat.id ? (
-                            <div className="flex items-center gap-2">
-                              <input
-                                ref={editInputRef}
-                                value={editTitle}
-                                onChange={(e) => setEditTitle(e.target.value)}
-                                onKeyDown={(e) => {
-                                  if (e.key === 'Enter') handleSaveEdit();
-                                  if (e.key === 'Escape') handleCancelEdit();
-                                }}
-                                className={cn(
-                                  "flex-1 bg-transparent border rounded px-2 py-1 text-xs",
-                                  platform === 'win32'
-                                    ? "border-white/20 text-white"
-                                    : theme === 'dark' 
-                                      ? "border-white/20 text-white"
-                                      : "border-black/20 text-black"
-                                )}
-                              />
-                              <button
-                                onClick={handleSaveEdit}
-                                className="p-1 hover:bg-green-500/20 rounded"
-                              >
-                                <Check className="w-3 h-3 text-green-400" />
-                              </button>
-                              <button
-                                onClick={handleCancelEdit}
-                                className="p-1 hover:bg-red-500/20 rounded"
-                              >
-                                <X className="w-3 h-3 text-red-400" />
-                              </button>
-                            </div>
-                          ) : (
-                            <div className="space-y-1">
-                              <div className="flex items-center justify-between">
-                                <h3 className={cn(
-                                  "text-sm font-medium truncate",
-                                  activeChat === chat.id
-                                    ? "text-blue-400"
-                                    : platform === 'win32'
-                                      ? "text-white/90"
-                                      : theme === 'dark' ? "text-white/90" : "text-black/90"
-                                )}>
-                                  {chat.title}
-                                </h3>
-                                <span className={cn(
-                                  "text-xs flex-shrink-0 ml-2",
-                                  platform === 'win32'
-                                    ? "text-white/50"
-                                    : theme === 'dark' ? "text-white/50" : "text-black/50"
-                                )}>
-                                  {formatTime(chat.updatedAt)}
-                                </span>
-                              </div>
-                              <p className={cn(
-                                "text-xs truncate",
-                                platform === 'win32'
-                                  ? "text-white/60"
-                                  : theme === 'dark' ? "text-white/60" : "text-black/60"
-                              )}>
-                                {getLastMessage(chat)}
-                              </p>
-                            </div>
-                          )}
-                        </motion.div>
-                      )}
-                    </AnimatePresence>
-                  </div>
-                </button>
-
-                {/* Menu button - now outside the main button */}
-                {!isCollapsed && editingChat !== chat.id && (
+      {!isCollapsed && (
+        <>
+          <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2 scrollbar-thin">
+            <p className="px-2.5 pb-1 pt-2 text-[11px] text-foreground/40">Projects</p>
+            {groups.map(group => {
+              const closed = collapsedGroups.has(group.key);
+              const expandedAll = showAll.has(group.key);
+              const shown = expandedAll ? group.entries : group.entries.slice(0, ROWS_BEFORE_MORE);
+              const hiddenCount = group.entries.length - shown.length;
+              return (
+                <div key={group.key} className="mb-1">
                   <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setShowMenu(showMenu === chat.id ? null : chat.id);
-                    }}
-                    className={cn(
-                      "absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded opacity-0 group-hover:opacity-100 transition-opacity z-10",
-                      platform === 'win32' 
-                        ? "hover:bg-white/10"
-                        : theme === 'dark' ? "hover:bg-white/10" : "hover:bg-black/10"
-                    )}
+                    type="button"
+                    onClick={() => toggleGroup(group.key)}
+                    title={group.path ?? 'Chats without a working folder'}
+                    className="group/proj flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-[13px] text-foreground/80 transition-colors hover:bg-white/[0.05]"
                   >
-                    <MoreHorizontal className="w-3 h-3" />
+                    <Folder className="size-4 shrink-0 text-foreground/50 group-hover/proj:hidden" />
+                    <ChevronRight className={cn('hidden size-4 shrink-0 text-foreground/50 transition-transform group-hover/proj:block', !closed && 'rotate-90')} />
+                    <span className="truncate">{group.name}</span>
                   </button>
-                )}
-              </div>
-
-              {/* Context Menu */}
-              <AnimatePresence>
-                {showMenu === chat.id && !isCollapsed && (
-                  <motion.div
-                    initial={{ opacity: 0, scale: 0.95, y: -10 }}
-                    animate={{ opacity: 1, scale: 1, y: 0 }}
-                    exit={{ opacity: 0, scale: 0.95, y: -10 }}
-                    className={cn(
-                      "absolute right-2 top-12 z-50 min-w-[120px] rounded-lg border shadow-lg",
-                      platform === 'win32'
-                        ? "bg-black/90 border-white/20"
-                        : theme === 'dark' 
-                          ? "bg-gray-900/95 border-white/20"
-                          : "bg-white/95 border-black/20"
-                    )}
-                    style={{
-                      backdropFilter: 'blur(12px)',
-                      WebkitBackdropFilter: 'blur(12px)'
-                    }}
-                  >
-                    <button
-                      onClick={() => handleStartEdit(chat)}
-                      className={cn(
-                        "w-full flex items-center gap-2 px-3 py-2 text-sm rounded-t-lg transition-colors",
-                        platform === 'win32' 
-                          ? "hover:bg-white/10 text-white/90"
-                          : theme === 'dark' 
-                            ? "hover:bg-white/10 text-white/90"
-                            : "hover:bg-black/10 text-black/90"
+                  {!closed && (
+                    <div className="ml-[18px] border-l border-border pl-1.5">
+                      {shown.map(entry =>
+                        entry.kind === 'chat' ? (
+                          <ChatRow
+                            key={entry.chat.id}
+                            chat={entry.chat}
+                            active={entry.chat.id === activeChat}
+                            onSelect={() => onChatSelect(entry.chat.id)}
+                            onRename={title => onChatRename(entry.chat.id, title)}
+                            onDelete={() => onChatDelete(entry.chat.id)}
+                            canDelete={chats.length > 1}
+                          />
+                        ) : (
+                          <SessionRow
+                            key={entry.session.provider + entry.session.id}
+                            session={entry.session}
+                            onOpen={() => onOpenAgentSession?.(entry.session)}
+                          />
+                        )
                       )}
-                    >
-                      <Edit3 className="w-3 h-3" />
-                      Rename
-                    </button>
-                    
-                    {chats.length > 1 && (
-                      <button
-                        onClick={() => handleDeleteChat(chat.id)}
-                        className={cn(
-                          "w-full flex items-center gap-2 px-3 py-2 text-sm rounded-b-lg transition-colors",
-                          "hover:bg-red-500/20 text-red-400"
-                        )}
-                      >
-                        <Trash2 className="w-3 h-3" />
-                        Delete
-                      </button>
-                    )}
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </motion.div>
-          ))}
-        </AnimatePresence>
-
-        {/* New chat button when collapsed */}
-        {isCollapsed && (
-          <div className="p-3">
-            <button
-              onClick={onChatCreate}
-              className={cn(
-                "w-full h-12 flex items-center justify-center rounded-lg border-2 border-dashed transition-colors",
-                platform === 'win32'
-                  ? "border-white/20 hover:border-white/40 hover:bg-white/5"
-                  : theme === 'dark' 
-                    ? "border-white/20 hover:border-white/40 hover:bg-white/5"
-                    : "border-black/20 hover:border-black/40 hover:bg-black/5"
-              )}
-              title="New chat"
-            >
-              <Plus className="w-4 h-4 flex-shrink-0 opacity-70" />
-            </button>
+                      {(hiddenCount > 0 || expandedAll) && group.entries.length > ROWS_BEFORE_MORE && (
+                        <button
+                          type="button"
+                          onClick={() => setShowAll(prev => {
+                            const next = new Set(prev);
+                            if (next.has(group.key)) next.delete(group.key);
+                            else next.add(group.key);
+                            return next;
+                          })}
+                          className="w-full rounded-md py-1 pl-2.5 text-left text-[11px] text-foreground/40 transition-colors hover:text-foreground/70"
+                        >
+                          {expandedAll ? 'Show less' : `Show ${hiddenCount} more`}
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
-        )}
-      </div>
 
-      {/* Click outside to close menu */}
-      {showMenu && (
-        <div
-          className="fixed inset-0 z-40"
-          onClick={() => setShowMenu(null)}
-        />
+        </>
       )}
-    </motion.div>
+    </motion.nav>
   );
 }

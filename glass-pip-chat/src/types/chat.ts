@@ -4,8 +4,14 @@ export interface Message {
   content: string;
   timestamp: number;
   metadata?: {
-    source?: 'speech' | 'text' | 'remote';
+    source?: 'speech' | 'text' | 'remote' | 'circle';
     context?: string;
+    /** Small JPEG data URL of a circled screen region attached to this message */
+    image?: string;
+    /** Images attached in a Claude Code / Codex session (data URLs) */
+    images?: string[];
+    /** Tokens / cost / time the agent reported for this reply */
+    usage?: import('./agent').AgentUsage;
     toolCalls?: ToolCall[];
     toolResults?: ToolResult[];
     /** Persisted streaming segments (interleaved text + tool pills) for agentic messages.
@@ -33,9 +39,38 @@ export interface Chat {
   messages: Message[];
   createdAt: number;
   updatedAt: number;
+  /** Set when this chat is backed by a Claude Code / Codex session */
+  agent?: {
+    provider: 'claude' | 'codex';
+    /** Agent session id; unset until the first turn returns one */
+    sessionId?: string;
+    /** Working folder the agent runs in */
+    cwd?: string;
+  };
 }
 
 export interface ChatState {
   chats: Chat[];
   activeChat: string | null;
+}
+/** A tool call made by the agent during a turn (rendered as a tool card). */
+export interface ToolExecution {
+  id: string;
+  name: string;
+  parameters?: Record<string, unknown>;
+  status: 'pending' | 'executing' | 'success' | 'error';
+  result?: any;
+  error?: string;
+  /** Images the tool returned (data URLs) */
+  images?: string[];
+  startTime: number;
+  endTime?: number;
+  isParallel?: boolean;
+}
+
+/** Assistant reply content in order: text and reasoning interleaved with tool calls. */
+export interface Segment {
+  type: 'text' | 'tool' | 'thinking';
+  content?: string;
+  toolExecution?: ToolExecution;
 }

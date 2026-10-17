@@ -49,9 +49,9 @@ export default function AnimatedOrb({
     },
     listening: {
       colors: {
-        glow: 'from-blue-400/20 via-cyan-400/30 to-blue-500/20',
-        core: 'from-blue-100 via-blue-200 to-blue-400',
-        inner: 'from-blue-300/60 via-blue-400/40 to-blue-500/80'
+        glow: 'from-white/10 via-white/10 to-white/10',
+        core: 'from-white/10 via-white/10 to-white/10',
+        inner: 'from-white/10 via-white/10 to-white/10'
       },
       animation: {
         duration: 2,
@@ -62,9 +62,9 @@ export default function AnimatedOrb({
     },
     thinking: {
       colors: {
-        glow: 'from-purple-400/20 via-violet-400/30 to-purple-500/20',
-        core: 'from-purple-100 via-purple-200 to-purple-400',
-        inner: 'from-purple-300/60 via-purple-400/40 to-purple-500/80'
+        glow: 'from-white/10 via-white/10 to-white/10',
+        core: 'from-white/10 via-white/10 to-white/10',
+        inner: 'from-white/10 via-white/10 to-white/10'
       },
       animation: {
         duration: 3,
@@ -101,7 +101,7 @@ export default function AnimatedOrb({
     },
     ggwave: {
       colors: {
-        glow: 'from-red-400/20 via-pink-400/30 to-red-500/20',
+        glow: 'from-red-400/20 via-white/10 to-red-500/20',
         core: 'from-red-100 via-red-200 to-red-400',
         inner: 'from-red-300/60 via-red-400/40 to-red-500/80'
       },
@@ -118,12 +118,12 @@ export default function AnimatedOrb({
   const shouldAnimate = isActive || state !== 'idle';
 
   return (
-    <div className={cn("relative flex-shrink-0", className)}>
+    <div className={cn("relative shrink-0", className)}>
       {/* Ambient glow */}
       <motion.div
         className={cn(
           "absolute inset-0 rounded-full blur-md",
-          `bg-gradient-to-r ${currentConfig.colors.glow}`
+          `bg-linear-to-r ${currentConfig.colors.glow}`
         )}
         style={{
           width: glowSizeClasses[size],
@@ -145,7 +145,7 @@ export default function AnimatedOrb({
       <motion.div
         className={cn(
           "relative rounded-full",
-          `bg-gradient-to-br ${currentConfig.colors.core}`,
+          `bg-linear-to-br ${currentConfig.colors.core}`,
           "shadow-[inset_0_1px_2px_rgba(255,255,255,0.8),inset_0_-1px_2px_rgba(0,0,0,0.1),0_0_8px_rgba(59,130,246,0.3)]",
           sizeClasses[size]
         )}
@@ -186,7 +186,7 @@ export default function AnimatedOrb({
         <motion.div
           className={cn(
             "absolute inset-0.5 rounded-full",
-            `bg-gradient-to-br ${currentConfig.colors.inner}`
+            `bg-linear-to-br ${currentConfig.colors.inner}`
           )}
           animate={{
             opacity: shouldAnimate ? [0.4, 0.7, 0.4] : 0.3,
@@ -236,7 +236,7 @@ export default function AnimatedOrb({
         {/* Subtle energy field */}
         {shouldAnimate && (
           <motion.div
-            className="absolute inset-0 rounded-full border border-blue-300/30"
+            className="absolute inset-0 rounded-full border border-white/25"
             animate={{
               scale: [1, 1.2, 1],
               opacity: [0.3, 0, 0.3],
@@ -253,7 +253,7 @@ export default function AnimatedOrb({
       {/* Subtle floating energy */}
       {shouldAnimate && (
         <motion.div
-          className="absolute -top-0.5 -right-0.5 w-0.5 h-0.5 bg-blue-300/70 rounded-full"
+          className="absolute -top-0.5 -right-0.5 w-0.5 h-0.5 bg-white/15 rounded-full"
           style={{
             filter: 'blur(0.5px)',
           }}

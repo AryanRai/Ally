@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ChevronDown, ChevronRight, Wrench, Clipboard, CheckCircle, XCircle } from 'lucide-react';
 import { cn } from '../../lib/utils';
@@ -39,17 +39,17 @@ export default function MessageMetadata({
         <div className={cn(
           'border rounded-lg overflow-hidden',
           ThemeUtils.getBorderClass(platform, theme),
-          'bg-blue-50/50 dark:bg-blue-900/20'
+          'bg-white/15 dark:bg-white/10'
         )}>
           <button
             onClick={() => setShowContext(!showContext)}
             className={cn(
               'w-full flex items-center gap-2 px-3 py-2 text-sm font-medium transition-colors',
-              'hover:bg-blue-100/50 dark:hover:bg-blue-800/30',
+              'hover:bg-white/15 dark:hover:bg-white/15',
               ThemeUtils.getTextClass(platform, theme, 'primary')
             )}
           >
-            <Clipboard className="w-4 h-4 text-blue-500" />
+            <Clipboard className="w-4 h-4 text-white" />
             <span>Context Attached</span>
             <div className="flex-1" />
             {showContext ? (
@@ -71,10 +71,10 @@ export default function MessageMetadata({
                 <div className={cn(
                   'px-3 py-2 border-t text-sm',
                   ThemeUtils.getBorderClass(platform, theme),
-                  'bg-blue-25 dark:bg-blue-950/30',
+                  'bg-white/10 dark:bg-white/15',
                   ThemeUtils.getTextClass(platform, theme, 'secondary')
                 )}>
-                  <div className="font-mono text-xs whitespace-pre-wrap break-words">
+                  <div className="font-mono text-xs whitespace-pre-wrap wrap-break-word">
                     {context}
                   </div>
                 </div>
@@ -89,17 +89,17 @@ export default function MessageMetadata({
         <div className={cn(
           'border rounded-lg overflow-hidden',
           ThemeUtils.getBorderClass(platform, theme),
-          'bg-purple-50/50 dark:bg-purple-900/20'
+          'bg-white/15 dark:bg-white/10'
         )}>
           <button
             onClick={() => setShowTools(!showTools)}
             className={cn(
               'w-full flex items-center gap-2 px-3 py-2 text-sm font-medium transition-colors',
-              'hover:bg-purple-100/50 dark:hover:bg-purple-800/30',
+              'hover:bg-white/15 dark:hover:bg-white/15',
               ThemeUtils.getTextClass(platform, theme, 'primary')
             )}
           >
-            <Wrench className="w-4 h-4 text-purple-500" />
+            <Wrench className="w-4 h-4 text-white" />
             <span>
               {toolCalls.length} Tool{toolCalls.length !== 1 ? 's' : ''} Used
             </span>
@@ -123,7 +123,7 @@ export default function MessageMetadata({
                 <div className={cn(
                   'border-t',
                   ThemeUtils.getBorderClass(platform, theme),
-                  'bg-purple-25 dark:bg-purple-950/30'
+                  'bg-white/10 dark:bg-white/15'
                 )}>
                   {toolCalls.map((toolCall, index) => {
                     const result = toolResults?.find(r => r.name === toolCall.name);
@@ -139,8 +139,8 @@ export default function MessageMetadata({
                       >
                         <div className="flex items-center gap-2 mb-2">
                           <div className={cn(
-                            'flex items-center gap-1 px-2 py-1 rounded text-xs font-medium',
-                            'bg-purple-100 dark:bg-purple-800/50 text-purple-700 dark:text-purple-300'
+                            'flex items-center gap-1 px-2 py-1 rounded-sm text-xs font-medium',
+                            'bg-white/10 dark:bg-white/15 text-white dark:text-white'
                           )}>
                             <Wrench className="w-3 h-3" />
                             {toolCall.name}
@@ -148,7 +148,7 @@ export default function MessageMetadata({
                           
                           {result && (
                             <div className={cn(
-                              'flex items-center gap-1 px-2 py-1 rounded text-xs font-medium',
+                              'flex items-center gap-1 px-2 py-1 rounded-sm text-xs font-medium',
                               result.success
                                 ? 'bg-green-100 dark:bg-green-800/50 text-green-700 dark:text-green-300'
                                 : 'bg-red-100 dark:bg-red-800/50 text-red-700 dark:text-red-300'
@@ -173,7 +173,7 @@ export default function MessageMetadata({
                               Parameters:
                             </div>
                             <div className={cn(
-                              'font-mono text-xs p-2 rounded',
+                              'font-mono text-xs p-2 rounded-sm',
                               'bg-gray-100 dark:bg-gray-800',
                               ThemeUtils.getTextClass(platform, theme, 'secondary')
                             )}>
@@ -192,7 +192,7 @@ export default function MessageMetadata({
                               {result.success ? 'Result:' : 'Error:'}
                             </div>
                             <div className={cn(
-                              'font-mono text-xs p-2 rounded',
+                              'font-mono text-xs p-2 rounded-sm',
                               result.success
                                 ? 'bg-green-50 dark:bg-green-900/20'
                                 : 'bg-red-50 dark:bg-red-900/20',

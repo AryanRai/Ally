@@ -68,7 +68,7 @@ export function InlineToolIndicator({ tool, theme }: InlineToolIndicatorProps) {
       case 'pending':
         return 'border-gray-400/30 bg-gray-500/10 hover:bg-gray-500/20';
       case 'executing':
-        return 'border-blue-400/40 bg-blue-500/15 hover:bg-blue-500/25';
+        return 'border-white/25 bg-white/8 hover:bg-white/13';
       case 'success':
         return 'border-green-400/40 bg-green-500/15 hover:bg-green-500/25';
       case 'error':
@@ -229,7 +229,7 @@ export function InlineToolIndicator({ tool, theme }: InlineToolIndicatorProps) {
             <button
               onClick={handleCopy}
               className={cn(
-                "absolute top-1 right-1 p-1 rounded transition-colors",
+                "absolute top-1 right-1 p-1 rounded-sm transition-colors",
                 copied ? 'text-green-400' : 'text-white/40 hover:text-white/70'
               )}
               title="Copy"
@@ -239,7 +239,7 @@ export function InlineToolIndicator({ tool, theme }: InlineToolIndicatorProps) {
             {tool.error ? (
               <span className="text-red-400">{tool.error}</span>
             ) : (
-              <pre className="whitespace-pre-wrap break-words pr-6">{resultContent}</pre>
+              <pre className="whitespace-pre-wrap wrap-break-word pr-6">{resultContent}</pre>
             )}
           </motion.div>
         )}
@@ -279,11 +279,11 @@ export function ThinkingPill({ thinking, theme }: ThinkingPillProps) {
         onClick={() => setExpanded(!expanded)}
         className={cn(
           "inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-xs border transition-all cursor-pointer",
-          "border-purple-400/40 bg-purple-500/15 hover:bg-purple-500/25",
+          "border-white/25 bg-white/8 hover:bg-white/13",
           theme === 'dark' ? 'text-white/80' : 'text-black/80'
         )}
       >
-        <Brain className="w-3 h-3 text-purple-400" />
+        <Brain className="w-3 h-3 text-white" />
         <span className="font-medium">Thinking</span>
         {!expanded && thinking.length > 0 && (
           <span className="text-[10px] opacity-50">· {thinking.length.toLocaleString()} chars</span>
@@ -299,20 +299,20 @@ export function ThinkingPill({ thinking, theme }: ThinkingPillProps) {
             exit={{ opacity: 0, height: 0 }}
             className={cn(
               "mt-1 p-2 rounded-lg text-xs overflow-x-auto relative max-h-48 overflow-y-auto",
-              theme === 'dark' ? 'bg-purple-900/20 text-white/70 border border-purple-500/20' : 'bg-purple-50 text-gray-700 border border-purple-200'
+              theme === 'dark' ? 'bg-white/10 text-white/70 border border-white/25' : 'bg-white/10 text-gray-700 border border-white/25'
             )}
           >
             <button
               onClick={handleCopy}
               className={cn(
-                "absolute top-1 right-1 p-1 rounded transition-colors",
+                "absolute top-1 right-1 p-1 rounded-sm transition-colors",
                 copied ? 'text-green-400' : 'text-white/40 hover:text-white/70'
               )}
               title="Copy"
             >
               {copied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
             </button>
-            <pre className="whitespace-pre-wrap break-words pr-6">{thinking}</pre>
+            <pre className="whitespace-pre-wrap wrap-break-word pr-6">{thinking}</pre>
           </motion.div>
         )}
       </AnimatePresence>
@@ -461,7 +461,7 @@ const TOOL_ICONS: Record<string, string> = {
   ros2_topic: '🔗',
 };
 
-export function InlineToolPill({ execution, theme = 'dark' }: { execution: ToolExecution; theme?: 'light' | 'dark' }) {
+export function InlineToolPill({ execution }: { execution: ToolExecution; theme?: 'light' | 'dark' }) {
   const [expanded, setExpanded] = useState(false);
 
   const icon = TOOL_ICONS[execution.name] ?? '🔧';
@@ -498,7 +498,7 @@ export function InlineToolPill({ execution, theme = 'dark' }: { execution: ToolE
   const isSuccess = execution.status === 'success';
 
   const pillClass = isRunning
-    ? 'bg-blue-500/10 border-blue-400/30 text-blue-300'
+    ? 'bg-white/6 border-white/25 text-white'
     : isError
     ? 'bg-red-500/10 border-red-400/30 text-red-300'
     : 'bg-green-500/10 border-green-400/30 text-green-300';
@@ -544,7 +544,7 @@ export function InlineToolPill({ execution, theme = 'dark' }: { execution: ToolE
         <span>{icon}</span>
         <span className="text-white/70">{label}</span>
         {isRunning && (
-          <Loader2 className="w-3 h-3 animate-spin text-blue-400" />
+          <Loader2 className="w-3 h-3 animate-spin text-white" />
         )}
         {isSuccess && <Check className="w-3 h-3 text-green-400" />}
         {isError && <X className="w-3 h-3 text-red-400" />}
@@ -563,7 +563,7 @@ export function InlineToolPill({ execution, theme = 'dark' }: { execution: ToolE
             initial={{ opacity: 0, height: 0 }}
             animate={{ opacity: 1, height: 'auto' }}
             exit={{ opacity: 0, height: 0 }}
-            className="mt-1 rounded-md border border-white/10 bg-black/30 backdrop-blur-sm text-xs font-mono overflow-hidden"
+            className="mt-1 rounded-md border border-white/10 bg-black/30 backdrop-blur-xs text-xs font-mono overflow-hidden"
           >
             {/* Input section */}
             {execution.parameters && Object.keys(execution.parameters).length > 0 && (
@@ -585,7 +585,7 @@ export function InlineToolPill({ execution, theme = 'dark' }: { execution: ToolE
                 )}
               </div>
               {isRunning ? (
-                <span className="text-blue-300/60 italic">running…</span>
+                <span className="text-white italic">running…</span>
               ) : isError ? (
                 <pre className="text-red-400/80 whitespace-pre-wrap break-all max-h-32 overflow-y-auto">
                   {execution.error || 'Unknown error'}

@@ -28,7 +28,7 @@ export class ThemeUtils {
 
   static getInputClass(platform: string, theme: 'light' | 'dark') {
     return cn(
-      "border rounded transition-all focus:outline-none focus:ring-2",
+      "border rounded-sm transition-all focus:outline-hidden focus:ring-2",
       platform === 'win32' || platform === 'linux'
         ? "bg-white/10 border-white/10 placeholder:text-white/40 focus:ring-white/20"
         : theme === 'dark'
@@ -42,7 +42,7 @@ export class ThemeUtils {
     
     switch (variant) {
       case 'primary':
-        return cn(baseClass, "bg-blue-500/20 hover:bg-blue-500/30 text-blue-300");
+        return cn(baseClass, "bg-white/10 hover:bg-white/15 text-white");
       case 'danger':
         return cn(baseClass, "bg-red-500/20 hover:bg-red-500/30 text-red-400");
       default:
@@ -82,7 +82,7 @@ export class ThemeUtils {
   static getBorderRadiusClass(radius: 'none' | 'sm' | 'md' | 'lg' | 'xl' | '2xl' | '3xl', platform?: string) {
     const radiusClasses = {
       none: 'rounded-none',
-      sm: 'rounded-sm',
+      sm: 'rounded-xs',
       md: 'rounded-md', 
       lg: 'rounded-lg',
       xl: 'rounded-xl',

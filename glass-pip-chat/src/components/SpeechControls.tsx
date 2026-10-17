@@ -3,8 +3,8 @@
  * Provides UI controls for speech recognition, synthesis, and ggwave
  */
 
-import React, { useState, useEffect, useRef } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { useState, useEffect, useRef } from 'react';
+import { motion } from 'framer-motion';
 import { 
   Mic, 
   MicOff, 
@@ -48,8 +48,6 @@ export function SpeechControls({
     disconnect,
     startListening,
     stopListening,
-    synthesizeSpeech,
-    sendGGWave,
     lastRecognizedText,
     speechError
   } = useSpeechService();
@@ -146,7 +144,7 @@ export function SpeechControls({
           disabled={!isConnected}
           className={`p-2 rounded-lg transition-colors ${
             voiceModeEnabled
-              ? 'bg-purple-500/20 text-purple-400 hover:bg-purple-500/30'
+              ? 'bg-white/10 text-white hover:bg-white/15'
               : 'bg-gray-500/20 text-gray-400 hover:bg-gray-500/30'
           } ${!isConnected ? 'opacity-50 cursor-not-allowed' : ''}`}
           whileHover={isConnected ? { scale: 1.05 } : {}}
@@ -163,7 +161,7 @@ export function SpeechControls({
           className={`p-2 rounded-lg transition-colors ${
             isListening
               ? 'bg-red-500/20 text-red-400 hover:bg-red-500/30'
-              : 'bg-blue-500/20 text-blue-400 hover:bg-blue-500/30'
+              : 'bg-white/10 text-white hover:bg-white/15'
           } ${(!isConnected || !voiceModeEnabled) ? 'opacity-50 cursor-not-allowed' : ''}`}
           whileHover={(isConnected && voiceModeEnabled) ? { scale: 1.05 } : {}}
           whileTap={(isConnected && voiceModeEnabled) ? { scale: 0.95 } : {}}
@@ -211,7 +209,7 @@ export function SpeechControls({
   return (
     <div className={`space-y-4 ${className}`}>
       {/* Status Bar */}
-      <div className="flex items-center justify-between p-3 bg-black/20 rounded-lg backdrop-blur-sm">
+      <div className="flex items-center justify-between p-3 bg-black/20 rounded-lg backdrop-blur-xs">
         <div className="flex items-center gap-3">
           <div className={`w-3 h-3 rounded-full ${
             isConnected ? 'bg-green-400' : 'bg-red-400'
@@ -220,7 +218,7 @@ export function SpeechControls({
             {isConnected ? 'Connected' : 'Disconnected'}
           </span>
           {status.device && (
-            <span className="text-xs text-white/60 bg-white/10 px-2 py-1 rounded">
+            <span className="text-xs text-white/60 bg-white/10 px-2 py-1 rounded-sm">
               {status.device.toUpperCase()}
             </span>
           )}
@@ -271,7 +269,7 @@ export function SpeechControls({
           disabled={!isConnected}
           className={`p-4 rounded-lg transition-colors flex flex-col items-center gap-2 ${
             voiceModeEnabled
-              ? 'bg-purple-500/20 text-purple-400 hover:bg-purple-500/30'
+              ? 'bg-white/10 text-white hover:bg-white/15'
               : 'bg-gray-500/20 text-gray-400 hover:bg-gray-500/30'
           } ${!isConnected ? 'opacity-50 cursor-not-allowed' : ''}`}
           whileHover={isConnected ? { scale: 1.02 } : {}}
@@ -290,7 +288,7 @@ export function SpeechControls({
           className={`p-4 rounded-lg transition-colors flex flex-col items-center gap-2 ${
             isListening
               ? 'bg-red-500/20 text-red-400 hover:bg-red-500/30'
-              : 'bg-blue-500/20 text-blue-400 hover:bg-blue-500/30'
+              : 'bg-white/10 text-white hover:bg-white/15'
           } ${(!isConnected || !voiceModeEnabled) ? 'opacity-50 cursor-not-allowed' : ''}`}
           whileHover={(isConnected && voiceModeEnabled) ? { scale: 1.02 } : {}}
           whileTap={(isConnected && voiceModeEnabled) ? { scale: 0.98 } : {}}
@@ -339,13 +337,13 @@ export function SpeechControls({
         <motion.div
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
-          className="p-2 bg-green-500/20 rounded-lg backdrop-blur-sm border border-green-500/30 max-h-20 overflow-hidden"
+          className="p-2 bg-green-500/20 rounded-lg backdrop-blur-xs border border-green-500/30 max-h-20 overflow-hidden"
         >
           <div className="flex items-start gap-2">
-            <CheckCircle className="w-3 h-3 text-green-400 mt-0.5 flex-shrink-0" />
+            <CheckCircle className="w-3 h-3 text-green-400 mt-0.5 shrink-0" />
             <div className="min-w-0 flex-1">
               <p className="text-xs text-green-400 font-medium">Recognized:</p>
-              <p className="text-xs text-white/80 break-words overflow-hidden" style={{ 
+              <p className="text-xs text-white/80 wrap-break-word overflow-hidden" style={{ 
                 display: '-webkit-box', 
                 WebkitLineClamp: 2, 
                 WebkitBoxOrient: 'vertical' 

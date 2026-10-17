@@ -96,23 +96,23 @@ export default function CollapsedResponsePreview({
                 <div className="w-1.5 h-1.5 bg-green-400 rounded-full animate-pulse" />
               )}
               {showFinalResponse && (
-                <div className="w-1.5 h-1.5 bg-blue-400 rounded-full animate-pulse" />
+                <div className="w-1.5 h-1.5 bg-white/10 rounded-full animate-pulse" />
               )}
             </div>
             <div className="flex items-center gap-1">
               {onExpand && (
                 <button
                   onClick={onExpand}
-                  className="p-1 rounded hover:bg-blue-500/20 transition-colors"
+                  className="p-1 rounded-sm hover:bg-white/10 transition-colors"
                   title="Expand to full chat"
                 >
-                  <Maximize2 className="w-3 h-3 text-blue-400" />
+                  <Maximize2 className="w-3 h-3 text-white" />
                 </button>
               )}
               {isTyping && onStop && (
                 <button
                   onClick={onStop}
-                  className="p-1 rounded hover:bg-red-500/20 transition-colors"
+                  className="p-1 rounded-sm hover:bg-red-500/20 transition-colors"
                   title="Stop generation"
                 >
                   <Square className="w-3 h-3 text-red-400" />

@@ -1,54 +1,65 @@
-// Simple test file to verify ChatManager functionality
-// Run this in browser console to test
-
+import { beforeEach, describe, expect, it } from 'vitest';
 import { ChatManager } from './chatManager';
 
-export function testChatManager() {
-  console.log('Testing ChatManager...');
-  
-  // Clear any existing data
-  localStorage.removeItem('glass_pip_chats');
-  
-  // Create new instance
-  const chatManager = ChatManager.getInstance();
-  
-  // Test 1: Initial state
-  console.log('Test 1: Initial state');
-  const initialChats = chatManager.getAllChats();
-  console.log('Initial chats count:', initialChats.length);
-  console.log('Active chat:', chatManager.getActiveChat()?.title);
-  
-  // Test 2: Create new chat
-  console.log('\nTest 2: Create new chat');
-  const newChat = chatManager.createNewChat('Test Chat');
-  console.log('New chat created:', newChat.title);
-  console.log('Total chats:', chatManager.getAllChats().length);
-  
-  // Test 3: Add message
-  console.log('\nTest 3: Add message');
-  const success = chatManager.addMessage(newChat.id, {
-    id: 'msg1',
-    role: 'user',
-    content: 'Hello world!',
-    timestamp: Date.now()
-  });
-  console.log('Message added:', success);
-  console.log('Chat messages:', chatManager.getChatById(newChat.id)?.messages.length);
-  
-  // Test 4: Rename chat
-  console.log('\nTest 4: Rename chat');
-  chatManager.updateChatTitle(newChat.id, 'Renamed Chat');
-  console.log('Chat renamed to:', chatManager.getChatById(newChat.id)?.title);
-  
-  // Test 5: Switch chat
-  console.log('\nTest 5: Switch chat');
-  const firstChat = chatManager.getAllChats()[0];
-  chatManager.switchToChat(firstChat.id);
-  console.log('Switched to:', chatManager.getActiveChat()?.title);
-  
-  console.log('\nAll tests completed!');
-  return chatManager;
+// ChatManager is a singleton that loads once; reset its private instance per test
+function freshManager(): ChatManager {
+  localStorage.clear();
+  (ChatManager as unknown as { instance?: ChatManager }).instance = undefined;
+  return ChatManager.getInstance();
 }
 
-// Export for browser testing
-(window as any).testChatManager = testChatManager;
+const message = (id: string, role: 'user' | 'assistant' = 'user') => ({ id, role, content: `msg ${id}`, timestamp: Date.now() });
+
+describe('ChatManager', () => {
+  let manager: ChatManager;
+  beforeEach(() => {
+    manager = freshManager();
+  });
+
+  it('starts with a welcome chat', () => {
+    expect(manager.getAllChats()).toHaveLength(1);
+    expect(manager.getActiveChat()?.messages[0].role).toBe('assistant');
+  });
+
+  it('creates, switches to and persists chats', () => {
+    const chat = manager.createNewChat('Test');
+    manager.addMessage(chat.id, message('a'));
+    expect(manager.getActiveChat()?.id).toBe(chat.id);
+
+    const reloaded = freshManagerKeepingStorage();
+    expect(reloaded.getChatById(chat.id)?.messages).toHaveLength(1);
+  });
+
+  it('links a chat to an agent session', () => {
+    const chat = manager.createNewChat();
+    manager.setChatAgent(chat.id, { provider: 'claude', sessionId: 's1', cwd: 'C:\\proj' });
+    expect(manager.getChatById(chat.id)?.agent).toEqual({ provider: 'claude', sessionId: 's1', cwd: 'C:\\proj' });
+  });
+
+  it('reuses the chat already linked to an imported session', () => {
+    const agent = { provider: 'codex' as const, sessionId: 'thread-1', cwd: 'C:\\proj' };
+    const first = manager.openAgentSession(agent, 'Imported', [message('a')]);
+    const again = manager.openAgentSession(agent, 'Imported', [message('a'), message('b', 'assistant')]);
+    expect(again.id).toBe(first.id);
+    expect(manager.getChatById(first.id)?.messages).toHaveLength(2);
+    expect(manager.getActiveChat()?.id).toBe(first.id);
+  });
+
+  it('forks into a new chat that keeps the agent but not the session', () => {
+    const chat = manager.createNewChat();
+    manager.addMessage(chat.id, message('a'));
+    manager.addMessage(chat.id, message('b', 'assistant'));
+    manager.setChatAgent(chat.id, { provider: 'claude', sessionId: 's1', cwd: 'C:\\proj' });
+
+    manager.editMessage(chat.id, 'a', 'edited');
+    const fork = manager.getActiveChat()!;
+    expect(fork.id).not.toBe(chat.id);
+    expect(fork.messages.map(m => m.content)).toEqual(['edited']);
+    expect(fork.agent).toEqual({ provider: 'claude', cwd: 'C:\\proj' });
+  });
+});
+
+function freshManagerKeepingStorage(): ChatManager {
+  (ChatManager as unknown as { instance?: ChatManager }).instance = undefined;
+  return ChatManager.getInstance();
+}
