@@ -34,6 +34,14 @@ export interface PipAPI {
 
   // Speech service
   speech: {
+    settings: () => Promise<import('../../electron/speech/settings').SpeechSettings>;
+    saveSettings: (patch: Partial<import('../../electron/speech/settings').SpeechSettings>) => Promise<import('../../electron/speech/settings').SpeechSettings>;
+    liveStart: (id: string) => void;
+    liveAudio: (id: string, bytes: Uint8Array) => void;
+    liveEnd: (id: string, cancel?: boolean) => void;
+    streamVoice: (id: string, text: string, name?: string) => Promise<{ success: boolean; error?: string }>;
+    streamCancel: () => void;
+    onLiveEvent: (callback: (event: import('../../electron/speech/streaming').SpeechEvent) => void) => () => void;
     connect: () => Promise<{ success: boolean; error?: string }>;
     getStatus: () => Promise<{ ready: boolean; state: string; backend?: string; model?: string; error?: string }>;
     voices: () => Promise<{ success: boolean; voices?: string[]; error?: string }>;
@@ -44,6 +52,8 @@ export interface PipAPI {
   };
 
   // Speech toggle event
+  notifyReply: (notice: import('../../electron/notifications').ReplyNotice) => void;
+  onReplyOpen: (callback: (notice: { chatId?: string; session?: AgentSessionSummary }) => void) => () => void;
   onToggleSpeech: (callback: () => void) => () => void;
 
   // Global hotkey events from the main process
@@ -87,6 +97,12 @@ export interface PipAPI {
     stop: (runId: string) => Promise<boolean>;
     listSessions: (provider: AgentProvider, limit?: number) => Promise<AgentSessionSummary[]>;
     loadSession: (provider: AgentProvider, id: string, revision?: string) => Promise<import('../../electron/agent/types').AgentSessionSnapshot>;
+    /** Claude Code sign-in state, verified with a real request */
+    claudeAccount: () => Promise<import('../../electron/agent/claudeLogin').ClaudeAccount>;
+    claudeLogin: {
+      start: () => Promise<void>;
+      onEvent: (callback: (event: import('../../electron/agent/claudeLogin').ClaudeLoginEvent) => void) => () => void;
+    };
     onSessionsChanged: (callback: (provider: AgentProvider) => void) => () => void;
     pickFolder: (current?: string) => Promise<string | null>;
     onEvent: (callback: (data: { runId: string; event: AgentEvent }) => void) => () => void;

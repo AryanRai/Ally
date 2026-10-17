@@ -57,6 +57,33 @@ describe('ChatManager', () => {
     expect(fork.messages.map(m => m.content)).toEqual(['edited']);
     expect(fork.agent).toEqual({ provider: 'claude', cwd: 'C:\\proj' });
   });
+
+  it('keeps locally reported usage when API history omits token counts', () => {
+    const chat = manager.openAgentSession({ provider: 'codex', sessionId: 's' }, 'Chat', [{ id: 'a', role: 'assistant', content: '<think>Check</think>\n\nDone', timestamp: 1, metadata: { usage: { inputTokens: 10, outputTokens: 2 } } }]);
+    manager.syncAgentSession(chat.id, 'codex', 's', [{ id: 'remote', role: 'assistant', content: 'Done', timestamp: 2, metadata: { usage: { durationMs: 100 } } }]);
+    expect(chat.messages[0].metadata?.usage).toEqual({ inputTokens: 10, outputTokens: 2, durationMs: 100 });
+  });
+  it('retains partial stopped output across history sync without resurrecting reverted turns', () => {
+    const prompt = message('prompt');
+    const partial = { ...message('reply', 'assistant'), content: '1 2 3\n\n⏹️ Stopped' };
+    const chat = manager.openAgentSession({ provider: 'codex', sessionId: 's' }, 'Chat', [prompt, partial]);
+    manager.syncAgentSession(chat.id, 'codex', 's', [prompt, { ...partial, id: 'remote', content: '⏹️ Stopped' }]);
+    expect(chat.messages[1].content).toBe(partial.content);
+    manager.syncAgentSession(chat.id, 'codex', 's', []);
+    expect(chat.messages).toEqual([]);
+  });
+  it('preserves a rejected send and its draft across native history sync, reopen and restart', () => {
+    const agent = { provider: 'codex' as const, sessionId: 'owned' };
+    const chat = manager.openAgentSession(agent, 'Owned chat', [message('saved')]);
+    const failure = { message: 'Codex desktop still owns this chat', text: 'My unsent follow-up' };
+    manager.setSendFailure(chat.id, failure);
+    manager.syncAgentSession(chat.id, 'codex', 'owned', [message('remote')]);
+    manager.openAgentSession(agent, 'Owned chat', [message('reopened')]);
+    manager = freshManagerKeepingStorage();
+    expect(manager.getChatById(chat.id)?.sendFailure).toEqual(failure);
+    manager.setSendFailure(chat.id);
+    expect(freshManagerKeepingStorage().getChatById(chat.id)?.sendFailure).toBeUndefined();
+  });
 });
 
 function freshManagerKeepingStorage(): ChatManager {

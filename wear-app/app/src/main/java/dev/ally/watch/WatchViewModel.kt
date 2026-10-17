@@ -9,10 +9,11 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import org.json.JSONObject
 import java.util.UUID
+import java.net.URLEncoder
 
 class WatchViewModel(application: Application) : AndroidViewModel(application) {
     private val prefs = application.getSharedPreferences("ally-watch", 0)
-    private val mutable = MutableStateFlow(WatchState(provider = prefs.getString("provider", "codex")!!, muted = prefs.getBoolean("muted", false)))
+    private val mutable = MutableStateFlow(WatchState(look = WatchLook.load(prefs), chatId = prefs.getString("chatId", null), permission = prefs.getString("permission:${prefs.getString("chatId", "")}", "readonly")!!, provider = prefs.getString("provider", "codex")!!, muted = prefs.getBoolean("muted", false)))
     val state = mutable.asStateFlow()
     var endpoint: String
         get() = prefs.getString("endpoint", "http://127.0.0.1:18765")!!
@@ -22,23 +23,42 @@ class WatchViewModel(application: Application) : AndroidViewModel(application) {
         set(value) { prefs.edit().putString("token", value.trim()).apply() }
     private val api = WatchApi({ endpoint }, { token })
     private val voice = VoiceRecorder()
+    private var liveSpeech: LiveSpeech? = null
+    private val speaker = ReplySpeaker(application, viewModelScope) { playing, error -> mutable.update { it.copy(speaking = playing, speechError = error) } }
     private var work: Job? = null
+    private var catalogWork: Job? = null
+    private var approvalWork: Job? = null
     private var lastText: String? = null
     private var lastAudio: ByteArray? = null
     private var requestId: String? = null
     var foreground = false
-    val busy get() = mutable.value.phase in setOf(Phase.RECORDING, Phase.UPLOADING, Phase.THINKING)
+    val busy get() = mutable.value.loadingHistory || mutable.value.phase in setOf(Phase.RECORDING, Phase.UPLOADING, Phase.THINKING)
 
     init {
-        runCatching { JSONObject(prefs.getString("reply", "{}")!!) }.getOrNull()?.let { saved ->
-            mutable.update { it.copy(reply = CardParser.parse(saved)) }
-        }
-        runCatching { JSONObject(prefs.getString("activity", "{}")!!) }.getOrNull()?.let { saved ->
-            mutable.update { it.copy(steps = ActivityParser.steps(saved), usage = ActivityParser.usage(saved), transcript = saved.optString("transcript")) }
+        mutable.update { it.copy(autoRead = prefs.getBoolean("autoRead", false), replyAlerts = prefs.getBoolean("replyAlerts", true)) }
+        runCatching {
+            val cached = JSONObject(prefs.getString("history", "{}")!!)
+            if (ChatParser.matchesSelection(cached, mutable.value.chatId)) applyHistory(cached)
         }
         val savedTurn = prefs.getString("turn", null)
         if (savedTurn != null) work = viewModelScope.launch { poll(savedTurn) } else refresh()
     }
+    fun appearance(look: WatchLook) {
+        look.save(prefs)
+        mutable.update { it.copy(look = look) }
+    }
+    fun autoRead(enabled: Boolean) { prefs.edit().putBoolean("autoRead", enabled).apply(); mutable.update { it.copy(autoRead = enabled) }; if (!enabled) stopSpeaking() }
+    fun replyAlerts(enabled: Boolean) { prefs.edit().putBoolean("replyAlerts", enabled).apply(); mutable.update { it.copy(replyAlerts = enabled) } }
+    fun stopSpeaking() = speaker.stop()
+    fun shouldRequestAlerts(): Boolean {
+        if (prefs.getBoolean("askedReplyAlerts", false)) return false
+        prefs.edit().putBoolean("askedReplyAlerts", true).apply(); return true
+    }
+    fun openNotification(chat: String) {
+        if (chat.isBlank() || chat == mutable.value.chatId) { refresh(); return }
+        viewModelScope.launch { work?.join(); selectChat(chat) }
+    }
+    fun readReply(text: String) { if (foreground && !mutable.value.muted && mutable.value.phase != Phase.RECORDING) speaker.speak(text, endpoint, token, mutable.value.liveSpeech) }
     fun configure(url: String, secret: String) {
         if (busy) return
         work?.cancel(); work = null
@@ -47,41 +67,144 @@ class WatchViewModel(application: Application) : AndroidViewModel(application) {
     }
     fun refresh() {
         if (busy || work?.isActive == true) return
+        if (mutable.value.phase == Phase.ERROR) return
         val pending = prefs.getString("turn", null)
         if (pending != null) { work = viewModelScope.launch { poll(pending) }; return }
-        if (mutable.value.phase == Phase.ERROR) return
+        mutable.update { it.copy(loadingHistory = true) }
         work = viewModelScope.launch {
             try {
                 val status = api.request("/v1/status")
-                mutable.update { it.copy(phase = if (it.reply.text.isBlank()) Phase.IDLE else Phase.READY,
-                    context = "Watch · ${if (it.provider == "codex") "Codex" else "Claude"}",
+                if (mutable.value.chatId == null) createChat(mutable.value.provider) else loadHistory()
+                val needsRetry = lastText != null || lastAudio != null
+                mutable.update { it.copy(phase = if (needsRetry) Phase.ERROR else if (it.messages.isEmpty()) Phase.IDLE else Phase.READY,
+                    context = it.context,
                     voiceReady = status.optBoolean("voiceAvailable"),
+                    liveSpeech = status.optBoolean("liveSpeech"),
                     voiceState = status.optString("voiceState", "offline"),
-                    detail = if (status.optBoolean("voiceAvailable")) "Hold to talk" else status.optString("voiceDetail", "Voice unavailable · text ready")) }
-            } catch (e: Exception) { fail(e, Phase.OFFLINE) }
+                    detail = if (needsRetry) ConnectionRecovery.recoveredDetail(true) else if (status.optBoolean("voiceAvailable")) "Hold to talk" else status.optString("voiceDetail", "Voice unavailable · text ready")) }
+            } catch (e: Exception) { fail(e) }
+            finally { mutable.update { it.copy(loadingHistory = false) } }
         }
     }
-    fun provider(value: String) {
+    private fun encoded(value: String) = URLEncoder.encode(value, "UTF-8")
+    private fun selected(chat: WatchChat) {
+        prefs.edit().putString("chatId", chat.id).putString("provider", chat.provider).remove("newChatRequest").apply()
+        mutable.update { it.copy(chatId = chat.id, provider = chat.provider, chatTitle = chat.title, permission = prefs.getString("permission:${chat.id}", "readonly")!!,
+            context = "${if (chat.provider == "codex") "Codex" else "Claude"} · ${chat.title}") }
+    }
+    private suspend fun createChat(provider: String) {
+        val request = prefs.getString("newChatRequest", null) ?: UUID.randomUUID().toString().also { prefs.edit().putString("newChatRequest", it).apply() }
+        val result = api.request("/v1/chats", JSONObject().put("provider", provider).put("requestId", request).toString().toByteArray())
+        selected(ChatParser.chat(result.getJSONObject("chat")))
+        clearReply()
+        mutable.update { it.copy(messages = emptyList(), historyBefore = null, phase = Phase.IDLE, detail = "Hold to talk") }
+    }
+    fun newChat(provider: String = mutable.value.provider) {
         if (busy || prefs.contains("turn")) return
-        lastText = null; lastAudio = null; requestId = null
-        prefs.edit().putString("provider", value).remove("reply").remove("activity").apply()
-        mutable.update { it.copy(provider = value, context = "Watch · ${if (value == "codex") "Codex" else "Claude"}",
-            reply = WatchReply("", emptyList()), steps = emptyList(), usage = "", transcript = "", turnId = null, phase = Phase.IDLE, detail = "Hold to talk") }
+        stopSpeaking()
+        work?.cancel()
+        mutable.update { it.copy(loadingHistory = true, chatError = "") }
+        work = viewModelScope.launch {
+            try { createChat(provider) } catch (e: Exception) { fail(e) }
+            finally { mutable.update { it.copy(loadingHistory = false) } }
+        }
+    }
+    fun provider(value: String) = newChat(value)
+    fun permission(value: String) {
+        if (busy || prefs.contains("turn") || value !in setOf("readonly", "edit", "full")) return
+        val chat = mutable.value.chatId ?: return
+        prefs.edit().putString("permission:$chat", value).apply()
+        mutable.update { it.copy(permission = value) }
+    }
+    fun answerApproval(action: String, values: Map<String, String>) {
+        if (approvalWork?.isActive == true) return
+        val request = mutable.value.approval ?: return
+        val turn = mutable.value.turnId ?: return
+        mutable.update { it.copy(answeringApproval = true, approvalError = "") }
+        approvalWork = viewModelScope.launch {
+            try {
+                api.request("/v1/turns/${encoded(turn)}/approvals/${encoded(request.id)}", JSONObject().put("action", action).put("values", JSONObject(values)).toString().toByteArray())
+                mutable.update { if (it.approval?.id == request.id) it.copy(approval = null) else it }
+            } catch (e: Exception) {
+                if (e is CancellationException) throw e
+                mutable.update { it.copy(approvalError = if (ConnectionRecovery.canReconnect(e)) "Connection lost. Your decision was not confirmed; retry when connected." else e.message ?: "Could not send decision") }
+            } finally { mutable.update { it.copy(answeringApproval = false) } }
+        }
+    }
+    fun listChats(provider: String = mutable.value.provider, more: Boolean = false) {
+        catalogWork?.cancel()
+        val offset = if (more) mutable.value.chatsOffset ?: return else 0
+        mutable.update { it.copy(chatProvider = provider, loadingChats = true, chatError = "", chats = if (more) it.chats else emptyList()) }
+        catalogWork = viewModelScope.launch {
+            try {
+                val result = api.request("/v1/chats?provider=$provider&offset=$offset")
+                mutable.update { it.copy(chats = ((if (more) it.chats else emptyList()) + ChatParser.chats(result)).distinctBy { chat -> chat.id },
+                    chatsOffset = if (result.isNull("nextOffset")) null else result.getInt("nextOffset")) }
+            } catch (e: Exception) { if (e is CancellationException) throw e; mutable.update { it.copy(chatError = e.message ?: "Could not load chats") } }
+            finally { mutable.update { it.copy(loadingChats = false) } }
+        }
+    }
+    fun selectChat(id: String) {
+        if (busy || prefs.contains("turn")) return
+        stopSpeaking()
+        work?.cancel()
+        mutable.update { it.copy(loadingHistory = true, chatError = "") }
+        work = viewModelScope.launch {
+            try {
+                val result = api.request("/v1/chats/${encoded(id)}")
+                clearReply()
+                applyHistory(result)
+                mutable.update { it.copy(phase = if (it.messages.isEmpty()) Phase.IDLE else Phase.READY, detail = "Hold to talk") }
+                val pending = result.optString("activeTurnId")
+                if (pending.isNotBlank()) { prefs.edit().putString("turn", pending).apply(); poll(pending) }
+            } catch (e: Exception) { fail(e) }
+            finally { mutable.update { it.copy(loadingHistory = false) } }
+        }
+    }
+    private fun applyHistory(result: JSONObject, older: Boolean = false, preserveOlder: Boolean = false) {
+        selected(ChatParser.chat(result.getJSONObject("chat")))
+        val messages = ChatParser.messages(result)
+        if (!older) prefs.edit().putString("history", result.toString()).apply()
+        mutable.update { it.copy(messages = if (older) (messages + it.messages).distinctBy { m -> m.id } else if (preserveOlder) it.messages.filter { old -> old.id.startsWith("history-") && old.id.substringAfter("history-").toIntOrNull()?.let { n -> n < (messages.firstOrNull()?.id?.substringAfter("history-")?.toIntOrNull() ?: 0) } == true } + messages else messages,
+            historyBefore = if (preserveOlder && it.messages.isNotEmpty()) it.historyBefore else if (result.isNull("before")) null else result.getInt("before")) }
+    }
+    private suspend fun loadHistory(older: Boolean = false) {
+        val id = mutable.value.chatId ?: return
+        val before = if (older) "?before=${mutable.value.historyBefore ?: return}" else ""
+        val result = api.request("/v1/chats/${encoded(id)}$before")
+        applyHistory(result, older, !older && mutable.value.messages.isNotEmpty())
+        if (!older && result.optString("activeTurnId").isNotBlank()) {
+            val pending = result.getString("activeTurnId")
+            prefs.edit().putString("turn", pending).apply()
+            poll(pending)
+        }
+    }
+    fun olderMessages() {
+        if (busy) return
+        mutable.update { it.copy(loadingHistory = true) }
+        work = viewModelScope.launch { try { loadHistory(true) } catch (e: Exception) { fail(e) }
+            finally { mutable.update { it.copy(loadingHistory = false) } } }
     }
     fun mute() {
         val muted = !mutable.value.muted
         prefs.edit().putBoolean("muted", muted).apply()
         mutable.update { it.copy(muted = muted) }
-        if (muted) cancelRecording()
+        if (muted) { cancelRecording(); stopSpeaking() }
     }
     fun startRecording() {
-        if (busy || mutable.value.muted || mutable.value.phase == Phase.OFFLINE) return
+        if (busy || prefs.contains("turn") || mutable.value.muted || mutable.value.phase == Phase.OFFLINE || mutable.value.chatId == null) return
         if (!mutable.value.voiceReady) { refresh(); return }
+        stopSpeaking()
         try {
+            liveSpeech?.cancel()
+            liveSpeech = if (mutable.value.liveSpeech) LiveSpeech(endpoint, token) { text ->
+                viewModelScope.launch { if (mutable.value.phase == Phase.RECORDING) mutable.update { it.copy(liveTranscript = text) } }
+            } else null
             voice.start(viewModelScope, { finishRecording() }, { error -> cancelRecording(); mutable.update { it.copy(phase = Phase.ERROR, detail = error) } },
-                { level, seconds -> mutable.update { if (it.phase == Phase.RECORDING) it.copy(microphoneLevel = level, recordingSeconds = seconds) else it } })
-            mutable.update { it.copy(phase = Phase.RECORDING, detail = "Listening · release to send", microphoneLevel = 0f, recordingSeconds = 0f) }
-        } catch (e: Exception) { voice.cancel(); fail(e) }
+                { level, seconds -> mutable.update { if (it.phase == Phase.RECORDING) it.copy(microphoneLevel = level, recordingSeconds = seconds) else it } },
+                { bytes -> liveSpeech?.write(bytes) })
+            mutable.update { it.copy(phase = Phase.RECORDING, liveTranscript = "", detail = "Listening · release to send", microphoneLevel = 0f, recordingSeconds = 0f) }
+        } catch (e: Exception) { voice.cancel(); liveSpeech?.cancel(); liveSpeech = null; fail(e) }
     }
     fun finishRecording() {
         if (mutable.value.phase != Phase.RECORDING) return
@@ -90,18 +213,23 @@ class WatchViewModel(application: Application) : AndroidViewModel(application) {
         work = viewModelScope.launch {
             try {
                 val audio = voice.stop()
-                lastText = null; lastAudio = audio; requestId = UUID.randomUUID().toString()
-                submit(null, audio)
+                val live = liveSpeech; liveSpeech = null
+                val text = live?.finish()
+                lastText = text; lastAudio = if (text == null) audio else null; requestId = UUID.randomUUID().toString()
+                mutable.update { it.copy(liveTranscript = "", detail = if (text == null) "Transcribing recording…" else "Sending…") }
+                submit(text, lastAudio)
             } catch (e: Exception) { fail(e) }
         }
     }
     fun cancelRecording() {
         if (mutable.value.phase != Phase.RECORDING) return
         voice.cancel()
+        liveSpeech?.cancel(); liveSpeech = null
         mutable.update { it.copy(phase = Phase.IDLE, microphoneLevel = 0f, recordingSeconds = 0f, detail = "Recording cancelled") }
     }
     fun send(text: String) {
-        if (busy || text.isBlank()) return
+        if (busy || text.isBlank() || prefs.contains("turn") || mutable.value.chatId == null) return
+        stopSpeaking()
         clearReply()
         lastText = text.take(4000); lastAudio = null; requestId = UUID.randomUUID().toString()
         mutable.update { it.copy(phase = Phase.UPLOADING, transcript = text, detail = "Sending…") }
@@ -117,45 +245,66 @@ class WatchViewModel(application: Application) : AndroidViewModel(application) {
     }
     private fun clearReply() {
         prefs.edit().remove("reply").remove("activity").apply()
-        mutable.update { it.copy(reply = WatchReply("", emptyList()), steps = emptyList(), usage = "", turnId = null) }
+        mutable.update { it.copy(reply = WatchReply("", emptyList()), steps = emptyList(), usage = "", turnId = null, approval = null, approvalError = "") }
     }
     private suspend fun submit(text: String?, audio: ByteArray?) {
+        if (mutable.value.chatId == null) createChat(mutable.value.provider)
+        val chatId = mutable.value.chatId!!
         val provider = mutable.value.provider
-        val result = if (audio != null) api.request("/v1/audio?provider=$provider&requestId=$requestId", audio, "audio/wav")
-        else api.request("/v1/messages", JSONObject().put("provider", provider).put("requestId", requestId).put("text", text).toString().toByteArray())
+        val result = if (audio != null) api.request("/v1/audio?provider=$provider&requestId=$requestId&chatId=${encoded(chatId)}&permission=${mutable.value.permission}", audio, "audio/wav")
+        else api.request("/v1/messages", JSONObject().put("provider", provider).put("chatId", chatId).put("requestId", requestId).put("permission", mutable.value.permission).put("text", text).toString().toByteArray())
         val id = result.getString("id")
         prefs.edit().putString("turn", id).apply()
         lastAudio = null
         poll(id)
     }
     private suspend fun poll(id: String) {
+        if (foreground && !ReplyMonitor.start(getApplication(), id, mutable.value.chatId ?: "")) mutable.update { it.copy(speechError = "Keep Ally open for reply alerts on this watch.") }
         mutable.update { it.copy(phase = Phase.THINKING, turnId = id, detail = "Thinking…") }
         try {
-            repeat(240) {
+            var polls = 0
+            while (polls < 240) {
                 val result = api.request("/v1/turns/$id")
+                val approval = ApprovalParser.parse(result)
+                if (approval == null) polls++
+                mutable.update { it.copy(approval = approval, approvalError = if (it.approval?.id == approval?.id) it.approvalError else "") }
                 result.optString("transcript").takeIf { it.isNotBlank() }?.let { lastText = it }
                 mutable.update { it.copy(transcript = result.optString("transcript", it.transcript), detail = result.optString("activity", "Thinking…"), steps = ActivityParser.steps(result), usage = ActivityParser.usage(result)) }
                 when (result.optString("status")) {
                     "done" -> {
+                        lastText = null; lastAudio = null; requestId = null
                         val json = result.getJSONObject("reply")
                         prefs.edit().remove("turn").putString("reply", json.toString()).putString("activity", JSONObject().put("steps", result.optJSONArray("steps")).put("usage", result.optJSONObject("usage")).put("transcript", result.optString("transcript")).toString()).apply()
-                        mutable.update { it.copy(phase = Phase.READY, reply = CardParser.parse(json), detail = "Response ready", readySequence = it.readySequence + 1) }
-                        if (!foreground && !mutable.value.muted) WatchNotifications.show(getApplication(), "Ally has your answer", json.optString("text"))
+                        mutable.update { it.copy(phase = Phase.READY, approval = null, reply = CardParser.parse(json), detail = "Response ready", readySequence = it.readySequence + 1) }
+                        val reply = CardParser.parse(json)
+                        mutable.update { it.copy(messages = it.messages + listOf(
+                            ChatMessage("$id-user", "user", WatchReply(result.optString("transcript"), emptyList()), emptyList(), ""),
+                            ChatMessage("$id-assistant", "assistant", reply, ActivityParser.steps(result), ActivityParser.usage(result)))) }
+                        mutable.update { it.copy(loadingHistory = true) }
+                        try { loadHistory() } catch (e: Exception) { if (e is CancellationException) throw e }
+                        finally { mutable.update { it.copy(loadingHistory = false) } }
+                        WatchNotifications.show(getApplication(), "Ally has your answer", json.optString("text"), id, mutable.value.chatId ?: "")
+                        if (foreground && mutable.value.autoRead) readReply(reply.text)
                         return
                     }
-                    "error" -> { prefs.edit().remove("turn").apply(); requestId = UUID.randomUUID().toString(); error(result.optString("error", "Agent unavailable")) }
+                    "error" -> { prefs.edit().remove("turn").apply(); mutable.update { it.copy(approval = null) }; requestId = UUID.randomUUID().toString(); error(result.optString("error", "Agent unavailable")) }
                 }
                 delay(1500)
             }
             error("Still working. Tap Retry to check again.")
         } catch (e: Exception) {
-            if (e.message?.contains("expired") == true) prefs.edit().remove("turn").apply()
+            if (e.message?.contains("expired") == true) {
+                prefs.edit().remove("turn").apply()
+                mutable.update { it.copy(turnId = null, approval = null, approvalError = "") }
+            }
             fail(e)
         }
     }
-    private fun fail(e: Exception, phase: Phase = Phase.ERROR) {
+    private fun fail(e: Exception) {
         if (e is CancellationException) throw e
-        mutable.update { it.copy(phase = phase, detail = e.message?.take(180) ?: "Connection interrupted. Retry when ready.") }
+        val reconnecting = ConnectionRecovery.canReconnect(e)
+        mutable.update { it.copy(phase = if (reconnecting) Phase.OFFLINE else Phase.ERROR,
+            detail = if (reconnecting) "Reconnecting to Ally… Keep Ally open on your PC" else e.message?.take(180) ?: "Connection interrupted. Retry when ready.") }
     }
-    override fun onCleared() { voice.cancel(); super.onCleared() }
+    override fun onCleared() { voice.cancel(); liveSpeech?.cancel(); speaker.close(); super.onCleared() }
 }

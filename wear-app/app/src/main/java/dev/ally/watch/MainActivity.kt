@@ -2,15 +2,16 @@ package dev.ally.watch
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.content.Intent
 import android.os.Bundle
 import android.os.VibrationEffect
 import android.os.Vibrator
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
-import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
@@ -24,8 +25,6 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.pointer.pointerInput
@@ -47,10 +46,9 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.wear.compose.material3.Button
 import androidx.wear.compose.material3.MaterialTheme
+import androidx.wear.compose.foundation.hierarchicalFocusGroup
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import kotlin.math.cos
-import kotlin.math.sin
 
 
 class MainActivity : ComponentActivity() {
@@ -61,14 +59,21 @@ class MainActivity : ComponentActivity() {
         if (BuildConfig.DEBUG) {
             val endpoint = intent.getStringExtra("endpoint")
             val token = intent.getStringExtra("token")
-            if (endpoint != null && token != null) model.configure(endpoint, token)
+            if (endpoint != null) {
+                // Save before first ViewModel access: its initializer starts connection work.
+                val edit = application.getSharedPreferences("ally-watch", 0).edit()
+                    .putString("endpoint", endpoint.trim())
+                if (token != null) edit.putString("token", token.trim())
+                edit.apply()
+            }
         }
         setContent { MaterialTheme(colorScheme = MaterialTheme.colorScheme.copy(primary = White, onPrimary = Ink)) {
             WatchApp(model, ::pulse, { checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED })
         } }
     }
-    override fun onResume() { super.onResume(); model.foreground = true; model.refresh() }
-    override fun onStop() { model.foreground = false; model.cancelRecording(); super.onStop() }
+    override fun onResume() { super.onResume(); model.foreground = true; WatchNotifications.foreground = true; model.refresh(); intent.getStringExtra("openChat")?.let { model.openNotification(it); intent.removeExtra("openChat") } }
+    override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); setIntent(intent); intent.getStringExtra("openChat")?.let { model.openNotification(it); intent.removeExtra("openChat") } }
+    override fun onStop() { model.foreground = false; WatchNotifications.foreground = false; model.cancelRecording(); model.stopSpeaking(); super.onStop() }
     private fun pulse(long: Boolean) {
         if (!model.state.value.muted) getSystemService(Vibrator::class.java)?.vibrate(
             VibrationEffect.createOneShot(if (long) 80 else 28, VibrationEffect.DEFAULT_AMPLITUDE))
@@ -81,10 +86,19 @@ private fun WatchApp(model: WatchViewModel, pulse: (Boolean) -> Unit, hasMic: ()
     val pager = rememberPagerState { 2 }
     val scope = rememberCoroutineScope()
     val lifecycle = LocalLifecycleOwner.current.lifecycle
+    var chats by rememberSaveable { mutableStateOf(false) }
+    val openChats = { model.listChats(); chats = true }
     var settings by rememberSaveable { mutableStateOf(false) }
+    var appearance by rememberSaveable { mutableStateOf(false) }
     var textInput by rememberSaveable { mutableStateOf(false) }
+    BackHandler(chats || settings || textInput || appearance) {
+        if (appearance) appearance = false
+        else { chats = false; settings = false; textInput = false }
+    }
     var micHint by remember { mutableStateOf(false) }
     val requestMic = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted -> micHint = !granted }
+    val requestAlerts = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted -> model.replyAlerts(granted) }
+    LaunchedEffect(Unit) { if (model.shouldRequestAlerts() && android.os.Build.VERSION.SDK_INT >= 33) requestAlerts.launch(Manifest.permission.POST_NOTIFICATIONS) }
     val start = {
         if (hasMic()) { micHint = false; model.startRecording() }
         else requestMic.launch(Manifest.permission.RECORD_AUDIO)
@@ -98,52 +112,62 @@ private fun WatchApp(model: WatchViewModel, pulse: (Boolean) -> Unit, hasMic: ()
     LaunchedEffect(lifecycle) { lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
         while (true) { delay(15000); model.refresh() }
     } }
-    when {
-        settings -> SettingsScreen(model, state, { settings = false })
+    val pendingApproval = state.approval
+    CompositionLocalProvider(LocalBezelHaptics provides !state.muted) { when {
+        pendingApproval != null -> ApprovalScreen(pendingApproval, state.answeringApproval, state.approvalError, model::answerApproval)
+        chats -> ChatPicker(model, state, { chats = false })
+        appearance -> AppearanceScreen(state.look, model::appearance, { appearance = false })
+        settings -> SettingsScreen(model, state, { settings = false }, { settings = false; openChats() }, { appearance = true })
         textInput -> TextEntry("Ask Ally", "What’s on your mind?", { text -> model.send(text); textInput = false }, { textInput = false })
         else -> Box(Modifier.fillMaxSize().background(Ink)) {
-            PresenceGlow(state.phase in setOf(Phase.RECORDING, Phase.UPLOADING, Phase.THINKING))
+            PresenceGlow(state.phase in setOf(Phase.RECORDING, Phase.UPLOADING, Phase.THINKING), state.look)
             HorizontalPager(pager, userScrollEnabled = state.phase != Phase.RECORDING) { page ->
+                Box(Modifier.fillMaxSize().hierarchicalFocusGroup(pager.currentPage == page && !pager.isScrollInProgress)) {
                 if (page == 0) InputScreen(state, micHint, start, model::finishRecording, model::cancelRecording,
-                    { textInput = true }, { settings = true }, { model.mute() }, model::retry)
-                else OutputScreen(state, model::send, { scope.launch { pager.animateScrollToPage(0) } }, pulse)
+                    { textInput = true }, { settings = true }, { if (state.speaking) model.stopSpeaking() else model.mute() }, model::retry, openChats,
+                    pager.currentPage == 0 && !pager.isScrollInProgress,
+                    { scope.launch { pager.animateScrollToPage(1) } })
+                else HistoryScreen(state, model::send, { scope.launch { pager.animateScrollToPage(0) } }, pulse, openChats, model::olderMessages, model::readReply, model::stopSpeaking)
+                }
             }
             if (pager.currentPage == 0) Row(Modifier.align(Alignment.BottomCenter).padding(bottom = 8.dp), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
                 repeat(2) { Box(Modifier.size(if (pager.currentPage == it) 5.dp else 4.dp).background(if (pager.currentPage == it) White else Muted.copy(alpha = .35f), CircleShape)) }
             }
         }
-    }
+    } }
 }
 
 @Composable
 private fun InputScreen(state: WatchState, micHint: Boolean, start: () -> Unit, finish: () -> Unit, cancel: () -> Unit,
-    type: () -> Unit, settings: () -> Unit, mute: () -> Unit, retry: () -> Unit) {
+    type: () -> Unit, settings: () -> Unit, mute: () -> Unit, retry: () -> Unit, chats: () -> Unit,
+    active: Boolean, replies: () -> Unit) {
     val canTalk = !state.muted && state.phase !in setOf(Phase.UPLOADING, Phase.THINKING)
-    BoxWithConstraints(Modifier.fillMaxSize()) {
+    BoxWithConstraints(Modifier.fillMaxSize().bezelReplies(active && state.phase != Phase.RECORDING, replies)) {
         val orbSize = maxHeight * .34f
         Column(Modifier.fillMaxSize().padding(horizontal = 24.dp, vertical = 16.dp), horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center) {
-            Text("ALLY", fontFamily = Tanker, fontSize = 17.sp, lineHeight = 19.sp, letterSpacing = 2.sp)
-            Text(state.context.uppercase(), fontFamily = Mono, color = Muted, fontSize = 8.sp, lineHeight = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text("ALLY", fontFamily = Tanker, fontSize = 17.sp, lineHeight = 19.sp, letterSpacing = 2.sp, modifier = Modifier.clickable(onClick = chats).semantics { contentDescription = "Choose chat" })
+            Text("${state.context.uppercase()} ▾", fontFamily = Mono, color = Muted, fontSize = 8.sp, lineHeight = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.clickable(onClick = chats))
             Spacer(Modifier.height(3.dp))
-            Orb(state.phase, state.microphoneLevel, canTalk, orbSize.value, if (state.phase in setOf(Phase.OFFLINE, Phase.ERROR)) retry else start, finish, cancel)
+            Orb(state.look, state.phase, state.microphoneLevel, canTalk, orbSize.value, if (state.phase in setOf(Phase.OFFLINE, Phase.ERROR)) retry else start, finish, cancel)
             Text(when {
                 state.muted -> "Paused"
+                state.speaking -> "Speaking…"
                 state.phase == Phase.RECORDING -> "Listening · ${state.recordingSeconds.toInt()}s"
                 state.phase == Phase.UPLOADING -> "Sending…"
                 state.phase == Phase.THINKING -> "Thinking…"
-                state.phase == Phase.OFFLINE -> "Tap to reconnect"
+                state.phase == Phase.OFFLINE -> "Reconnecting · tap to retry now"
                 state.phase == Phase.ERROR -> "Tap to retry"
                 !state.voiceReady -> if (state.voiceState in setOf("starting", "loading")) "Voice getting ready" else "Voice unavailable"
                 state.phase == Phase.READY -> "Ready when you are"
                 else -> "Hold to talk"
             }, color = Color.White, fontSize = 14.sp, lineHeight = 18.sp)
-            Text(if (micHint) "Allow microphone, then hold again" else if (state.detail == "Hold to talk") "Release to send · swipe for replies" else state.detail, color = Muted,
+            Text(if (micHint) "Allow microphone, then hold again" else if (state.phase == Phase.RECORDING && state.liveTranscript.isNotBlank()) state.liveTranscript else if (state.detail == "Hold to talk") "Swipe or turn bezel for replies" else state.detail, color = Muted,
                 fontSize = 10.sp, lineHeight = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center,
                 modifier = Modifier.heightIn(min = 20.dp).padding(horizontal = 5.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
                 MiniButton("Aa", "Type a message", type, state.phase !in setOf(Phase.RECORDING, Phase.UPLOADING, Phase.THINKING))
-                MiniButton(if (state.muted) "▶" else "Ⅱ", if (state.muted) "Resume microphone and haptics" else "Pause microphone and haptics", mute)
+                MiniButton(if (state.speaking) "■" else if (state.muted) "▶" else "Ⅱ", if (state.speaking) "Stop audio" else if (state.muted) "Resume microphone and haptics" else "Pause microphone and haptics", mute)
                 MiniButton("···", "Connection and settings", settings)
             }
         }
@@ -151,21 +175,13 @@ private fun InputScreen(state: WatchState, micHint: Boolean, start: () -> Unit, 
 }
 
 @Composable
-private fun Orb(phase: Phase, microphoneLevel: Float, enabled: Boolean, diameter: Float, start: () -> Unit, finish: () -> Unit, cancel: () -> Unit) {
-    val level by animateFloatAsState(microphoneLevel, tween(100), label = "microphone level")
-    val lifecycleState by LocalLifecycleOwner.current.lifecycle.currentStateFlow.collectAsState()
-    val active = lifecycleState.isAtLeast(Lifecycle.State.STARTED) && phase in setOf(Phase.RECORDING, Phase.THINKING, Phase.UPLOADING)
-    val rotation = if (active) {
-        val transition = rememberInfiniteTransition(label = "orb")
-        val value by transition.animateFloat(0f, 360f, infiniteRepeatable(tween(4500, easing = LinearEasing)), label = "halo")
-        value
-    } else 35f
+private fun Orb(look: WatchLook, phase: Phase, microphoneLevel: Float, enabled: Boolean, diameter: Float, start: () -> Unit, finish: () -> Unit, cancel: () -> Unit) {
     val currentPhase by rememberUpdatedState(phase)
     val currentStart by rememberUpdatedState(start)
     val currentFinish by rememberUpdatedState(finish)
     val currentCancel by rememberUpdatedState(cancel)
     val currentEnabled by rememberUpdatedState(enabled)
-    Canvas(Modifier.size(diameter.dp).semantics {
+    WatchOrb(look, phase, microphoneLevel, Modifier.size(diameter.dp).semantics {
         contentDescription = if (phase == Phase.RECORDING) "Recording. Release to send." else "Hold to talk to Ally"
         role = Role.Button
         onClick(label = "Start or stop recording") { if (currentPhase == Phase.RECORDING) currentFinish() else if (currentEnabled) currentStart(); true }
@@ -177,26 +193,7 @@ private fun Orb(phase: Phase, microphoneLevel: Float, enabled: Boolean, diameter
                 if (released) currentFinish() else currentCancel()
             }
         })
-    }) {
-        // Soft overlapping energy fields use the same sunset palette as Orbit's EnergyOrb.
-        val r = size.minDimension * (.43f + if (phase == Phase.RECORDING) level * .08f else .04f)
-        val angle = rotation * Math.PI / 180
-        val drift = Offset((cos(angle) * r * .2).toFloat(), (sin(angle) * r * .18).toFloat())
-        val offline = phase == Phase.OFFLINE || phase == Phase.ERROR
-        val warm = if (offline) Muted else Sunset
-        val pink = if (offline) Muted else Rose
-        val gold = if (offline) Muted else Amber
-        drawCircle(Brush.radialGradient(listOf(pink.copy(alpha = .6f), pink.copy(alpha = .16f), Color.Transparent), center + drift, r), r, center + drift)
-        drawCircle(Brush.radialGradient(listOf(warm.copy(alpha = .95f), warm.copy(alpha = .5f), Color.Transparent), center - drift, r * .8f), r * .8f, center - drift)
-        drawCircle(Brush.radialGradient(listOf(gold.copy(alpha = .95f), gold.copy(alpha = .3f), Color.Transparent), center + Offset(-r * .15f, -r * .2f), r * .55f), r * .55f, center + Offset(-r * .15f, -r * .2f))
-        if (phase == Phase.RECORDING) {
-            // Ally's perceptive presence: two quiet eyes appear while it listens.
-            for (x in listOf(-.17f, .17f)) drawRoundRect(Ink.copy(alpha = .8f),
-                topLeft = center + Offset(r * x - 2.dp.toPx(), -4.dp.toPx()),
-                size = androidx.compose.ui.geometry.Size(4.dp.toPx(), 8.dp.toPx()),
-                cornerRadius = androidx.compose.ui.geometry.CornerRadius(2.dp.toPx()))
-        }
-    }
+    })
 }
 
 @Composable
@@ -208,33 +205,7 @@ private fun MiniButton(label: String, description: String, action: () -> Unit, e
 }
 
 @Composable
-private fun OutputScreen(state: WatchState, send: (String) -> Unit, back: () -> Unit, pulse: (Boolean) -> Unit) {
-    val working = state.phase in setOf(Phase.THINKING, Phase.UPLOADING)
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 25.dp, vertical = 30.dp),
-        horizontalAlignment = Alignment.Start, verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Text(state.context.uppercase(), fontFamily = Mono, color = Muted, fontSize = 9.sp,
-            modifier = Modifier.align(Alignment.CenterHorizontally))
-        if (state.transcript.isNotBlank()) Text(state.transcript, color = White, fontSize = 12.sp, lineHeight = 16.sp,
-            modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(6.dp)).background(Panel).border(1.dp, Hairline, RoundedCornerShape(6.dp)).padding(10.dp))
-        state.steps.forEach { step -> key(state.turnId, step.id) { ActivityRow(step) } }
-        if (working) Text(state.detail, color = Muted, fontSize = 11.sp)
-        if (state.phase == Phase.ERROR || state.phase == Phase.OFFLINE) Text(state.detail, color = Amber, fontSize = 11.sp)
-        if (state.reply.text.isNotBlank()) {
-            Text(state.reply.text, fontSize = 13.sp, lineHeight = 18.sp)
-            state.reply.cards.forEachIndexed { index, card -> key(state.turnId, index, card) { GeneratedCard(card, send, pulse, !working && state.phase != Phase.RECORDING) } }
-            if (state.usage.isNotBlank()) Text(state.usage, fontFamily = Mono, color = Muted, fontSize = 8.sp, lineHeight = 12.sp)
-        } else if (!working && state.steps.isEmpty() && state.phase !in setOf(Phase.ERROR, Phase.OFFLINE)) {
-            Spacer(Modifier.height(12.dp))
-            Text("What’s on your mind?", fontSize = 19.sp, textAlign = TextAlign.Center)
-            Text("Answers and agent activity appear here.", color = Muted, fontSize = 12.sp, textAlign = TextAlign.Center)
-            Button(onClick = back) { Text("Talk to Ally") }
-        }
-        Text("‹ Swipe back to talk", color = Muted, fontSize = 9.sp, modifier = Modifier.align(Alignment.CenterHorizontally))
-    }
-}
-
-@Composable
-private fun ActivityRow(step: WatchStep) {
+internal fun ActivityRow(step: WatchStep) {
     var expanded by rememberSaveable { mutableStateOf(false) }
     Column(Modifier.fillMaxWidth()) {
         Row(Modifier.fillMaxWidth().heightIn(min = 40.dp).clickable { expanded = !expanded }.padding(vertical = 5.dp),
@@ -250,7 +221,7 @@ private fun ActivityRow(step: WatchStep) {
 }
 
 @Composable
-private fun GeneratedCard(card: WatchCard, send: (String) -> Unit, pulse: (Boolean) -> Unit, enabled: Boolean) {
+internal fun GeneratedCard(card: WatchCard, send: (String) -> Unit, pulse: (Boolean) -> Unit, enabled: Boolean) {
     Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(6.dp)).background(Panel).border(1.dp, Hairline, RoundedCornerShape(6.dp)).padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(card.title, color = White, fontSize = 13.sp, lineHeight = 17.sp)
         if (card.body.isNotBlank()) Text(card.body, color = Color.White, fontSize = 12.sp, lineHeight = 16.sp)
@@ -287,7 +258,8 @@ private fun GeneratedCard(card: WatchCard, send: (String) -> Unit, pulse: (Boole
 @Composable
 private fun TextEntry(title: String, hint: String, submit: (String) -> Unit, back: () -> Unit) {
     var text by rememberSaveable { mutableStateOf("") }
-    Column(Modifier.fillMaxSize().background(Ink).verticalScroll(rememberScrollState()).padding(horizontal = 27.dp, vertical = 32.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    val scroll = rememberScrollState()
+    Column(Modifier.fillMaxSize().background(Ink).bezelScroll(scroll).verticalScroll(scroll).padding(horizontal = 27.dp, vertical = 32.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text(title, color = White, fontSize = 15.sp)
         Field(text, { text = it.take(4000) }, hint)
         Button(onClick = { submit(text) }, enabled = text.isNotBlank()) { Text("Send") }
@@ -296,26 +268,46 @@ private fun TextEntry(title: String, hint: String, submit: (String) -> Unit, bac
 }
 
 @Composable
-private fun SettingsScreen(model: WatchViewModel, state: WatchState, back: () -> Unit) {
+private fun SettingsScreen(model: WatchViewModel, state: WatchState, back: () -> Unit, chats: () -> Unit, appearance: () -> Unit) {
     var endpoint by remember { mutableStateOf(model.endpoint) }
     var token by remember { mutableStateOf(model.token) }
-    val notifications = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
-    Column(Modifier.fillMaxSize().background(Ink).verticalScroll(rememberScrollState()).padding(horizontal = 27.dp, vertical = 32.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    val notifications = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted -> model.replyAlerts(granted) }
+    val scroll = rememberScrollState()
+    Column(Modifier.fillMaxSize().background(Ink).bezelScroll(scroll).verticalScroll(scroll).padding(horizontal = 27.dp, vertical = 32.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text("Your Ally", color = White, fontSize = 18.sp)
-        Text("A dedicated watch chat", color = Muted, fontSize = 11.sp)
-        Button(onClick = { model.provider(if (state.provider == "codex") "claude" else "codex") }, enabled = !model.busy) { Text(if (state.provider == "codex") "Engine · Codex" else "Engine · Claude") }
+        Text(state.chatTitle, color = Muted, fontSize = 11.sp, maxLines = 2)
+        Button(onClick = chats) { Text("Choose chat") }
+        Button(onClick = appearance) { Text("Appearance") }
+        Text("Voice & alerts", color = Muted, fontSize = 12.sp)
+        Text(if (state.liveSpeech) "Google live voice · Orbit. Audio and reply text go to Google." else "Local speech · hold to record", color = Muted, fontSize = 10.sp, textAlign = TextAlign.Center)
+        Button(onClick = { model.autoRead(!state.autoRead) }) { Text(if (state.autoRead) "Auto-read: On" else "Auto-read: Off", fontSize = 12.sp) }
+        Button(onClick = { model.readReply("Hello. Ally is ready when you are.") }, enabled = !state.muted) { Text("Test voice", fontSize = 12.sp) }
+        Text("Auto-read speaks while Ally is open. Tap Read aloud under any reply. Hold the orb to interrupt.", color = Muted, fontSize = 10.sp, textAlign = TextAlign.Center)
+        if (state.speaking) Button(onClick = model::stopSpeaking) { Text("Stop audio") }
+        if (state.speechError.isNotBlank()) Text(state.speechError, color = Amber, fontSize = 10.sp)
+        Text("Turn the touch bezel to scroll. Enable Touch bezel in the watch’s system settings if needed.", color = Muted, fontSize = 10.sp, textAlign = TextAlign.Center)
+        Text("Chat permissions", color = Muted, fontSize = 12.sp)
+        listOf("readonly" to "Read only", "edit" to "Edit files", "full" to "Full access").forEach { (value, label) ->
+            Button(onClick = { model.permission(value) }, enabled = !model.busy) { Text((if (state.permission == value) "✓ " else "") + label, fontSize = 12.sp) }
+        }
+        Text(if (state.permission == "full") {
+            if (state.provider == "codex") "Unrestricted files. Eligible requests use automatic review. Required browser confirmations still appear."
+            else "Claude bypass mode. Browser security checks still apply."
+        } else "File access is restricted. Approvals ask you. Applies to new messages in this chat.", color = Muted, fontSize = 10.sp)
+        if (state.provider == "claude") Text("Claude uses its CLI permission mode. Interactive watch approvals currently require Codex.", color = Muted, fontSize = 10.sp)
+        Button(onClick = { model.provider(if (state.provider == "codex") "claude" else "codex") }, enabled = !model.busy) { Text(if (state.provider == "codex") "New Claude chat" else "New Codex chat") }
         Text("Connection", color = Muted, fontSize = 11.sp)
         Field(endpoint, { endpoint = it }, "https://your-bridge")
         Field(token, { token = it }, "Pairing token", secret = true)
         Button(onClick = { model.configure(endpoint, token); back() }, enabled = !model.busy) { Text("Save & connect") }
-        Button(onClick = { if (android.os.Build.VERSION.SDK_INT >= 33) notifications.launch(Manifest.permission.POST_NOTIFICATIONS) }) { Text("Enable reply alerts") }
+        Button(onClick = { if (state.replyAlerts) model.replyAlerts(false) else if (android.os.Build.VERSION.SDK_INT >= 33) notifications.launch(Manifest.permission.POST_NOTIFICATIONS) else model.replyAlerts(true) }) { Text(if (state.replyAlerts) "Reply alerts: On" else "Enable reply alerts", fontSize = 12.sp) }
         Button(onClick = back) { Text("Back") }
         Text("Voice records only while held. Release sends; swiping away cancels. Maximum 60 seconds.", color = Muted, fontSize = 10.sp, textAlign = TextAlign.Center)
     }
 }
 
 @Composable
-private fun Field(value: String, change: (String) -> Unit, hint: String, secret: Boolean = false) {
+internal fun Field(value: String, change: (String) -> Unit, hint: String, secret: Boolean = false) {
     BasicTextField(value, change, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).clip(RoundedCornerShape(12.dp)).background(Panel).padding(12.dp),
         textStyle = TextStyle(color = Color.White, fontSize = 13.sp, fontFamily = Geist), cursorBrush = SolidColor(White),
         visualTransformation = if (secret) PasswordVisualTransformation() else VisualTransformation.None,

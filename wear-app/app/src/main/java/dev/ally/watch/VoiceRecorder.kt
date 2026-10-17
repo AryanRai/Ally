@@ -25,7 +25,7 @@ class VoiceRecorder {
     private var current: Capture? = null
 
     @SuppressLint("MissingPermission")
-    fun start(scope: CoroutineScope, onLimit: () -> Unit, onError: (String) -> Unit, onLevel: (Float, Float) -> Unit) {
+    fun start(scope: CoroutineScope, onLimit: () -> Unit, onError: (String) -> Unit, onLevel: (Float, Float) -> Unit, onAudio: (ByteArray) -> Unit = {}) {
         check(current == null)
         val minimum = AudioRecord.getMinBufferSize(16000, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
         check(minimum > 0) { "This microphone does not support voice capture" }
@@ -47,6 +47,7 @@ class VoiceRecorder {
                     check(n >= 0) { "Microphone stopped. Try again." }
                     if (n == 0) { delay(10); continue }
                     val level = capture.pcm.append(buffer, n)
+                    onAudio(buffer.copyOf(n))
                     withContext(Dispatchers.Main) {
                         if (current === capture && capture.recording.get()) onLevel(level, capture.pcm.seconds)
                     }

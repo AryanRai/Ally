@@ -39,11 +39,15 @@ export interface Chat {
   messages: Message[];
   createdAt: number;
   updatedAt: number;
+  /** Local send failure is separate from native history, which may omit rejected sends. */
+  sendFailure?: { message: string; text: string };
   /** Set when this chat is backed by a Claude Code / Codex session */
   agent?: {
     provider: 'claude' | 'codex';
     /** Agent session id; unset until the first turn returns one */
     sessionId?: string;
+    /** Original exec session retained when Codex history is forked for interactive use. */
+    originalSessionId?: string;
     /** Working folder the agent runs in */
     cwd?: string;
   };

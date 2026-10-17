@@ -7,6 +7,12 @@ export default function SpeechSettingsSection() {
   const [voiceError, setVoiceError] = useState('');
   const [cloudVoices, setCloudVoices] = useState<string[]>([]);
   const [cloudLoading, setCloudLoading] = useState(false);
+  const [project, setProject] = useState('');
+  const [notifications, setNotifications] = useState(true);
+  useEffect(() => { void window.pip.speech.settings().then(settings => {
+    setProject(settings.project); setNotifications(settings.notifications);
+    setOptions(previous => ({ ...previous, engine: settings.cloud ? 'google' : 'local', cloudVoice: settings.voice }));
+  }); }, []);
   const [options, setOptions] = useState<{ voice: string; rate: number; volume: number; engine: 'local' | 'google'; cloudVoice: string }>(() => {
     try { return { voice: '', rate: 0, volume: .8, engine: 'local', cloudVoice: '', ...JSON.parse(localStorage.getItem('ally-voice-options') ?? '{}') }; }
     catch { return { voice: '', rate: 0, volume: .8, engine: 'local', cloudVoice: '' }; }
@@ -41,17 +47,17 @@ export default function SpeechSettingsSection() {
           {speech.status.phase === 'connecting' ? 'Loading model…' : speech.isConnected ? 'Disconnect' : 'Connect'}
         </button>
       </div>
-      <p className="text-white/50">Local transcription · {speech.status.model || 'Whisper'} · speech detection. Microphone starts only when you enable voice.</p>
-      <p className="text-white/40">Microphone audio stays on this PC. Codex or Claude handles your request.</p>
+      <p className="text-white/50">{options.engine === 'google' ? `Live Chirp 3 transcription + streamed Chirp 3 HD replies · ${project}` : 'Local Whisper transcription + Windows speech'}. Microphone starts only when you enable voice.</p>
+      <p className="text-white/40">{options.engine === 'google' ? 'Microphone audio and reply text are sent to Google; usage is billed to this project. Local speech is the fallback.' : 'Microphone audio stays on this PC.'} Codex or Claude handles your request.</p>
       {speech.speechError && <p role="alert" className="text-red-300">{speech.speechError}</p>}
-      <label className="block space-y-1"><span className="text-white/60">Reply voice engine</span>
-        <select className="w-full bg-[#181818] border border-white/10 p-2" value={options.engine} onChange={event => setOptions({ ...options, engine: event.target.value as 'local' | 'google' })}>
+      <label className="block space-y-1"><span className="text-white/60">Speech engine · desktop and watch</span>
+        <select className="w-full bg-[#181818] border border-white/10 p-2" value={options.engine} onChange={event => { const engine = event.target.value as 'local' | 'google'; setOptions({ ...options, engine }); void window.pip.speech.saveSettings({ cloud: engine === 'google' }); void speech.disconnect(); }}>
           <option value="local">Local · Windows installed voices</option><option value="google">Google Cloud · Chirp 3 HD</option>
         </select>
       </label>
       {options.engine === 'google' && <>
         <p className="text-white/50">Reply text is sent to Google Cloud Text-to-Speech using this PC’s credentials and quota project. Cloud usage is billed there. Windows voice is used if Google is unavailable.</p>
-        <select aria-label="Google Cloud voice" className="w-full bg-[#181818] border border-white/10 p-2" disabled={cloudLoading} value={options.cloudVoice} onChange={event => setOptions({ ...options, cloudVoice: event.target.value })}>
+        <select aria-label="Google Cloud voice" className="w-full bg-[#181818] border border-white/10 p-2" disabled={cloudLoading} value={options.cloudVoice} onChange={event => { setOptions({ ...options, cloudVoice: event.target.value }); void window.pip.speech.saveSettings({ voice: event.target.value }); }}>
           {!cloudVoices.length && <option value="">{cloudLoading ? 'Loading available voices…' : 'No cloud voices available'}</option>}
           {cloudVoices.map(name => <option key={name} value={name}>{name}</option>)}
         </select>
@@ -74,6 +80,7 @@ export default function SpeechSettingsSection() {
         <button disabled={cloudLoading} className="border border-white/15 px-2 py-1 disabled:opacity-40" onClick={() => { void speech.synthesizeSpeech('Hello. Ally is ready when you are.'); }}>Test voice</button>
         <button className="border border-white/15 px-2 py-1" onClick={speech.stopCurrentSpeech}>Stop audio</button>
       </div>
+      <label className="flex items-center gap-2"><input type="checkbox" checked={notifications} onChange={event => { setNotifications(event.target.checked); void window.pip.speech.saveSettings({ notifications: event.target.checked }); }} />Reply notifications when Ally is in the background</label>
     </div>
   </section>;
 }
