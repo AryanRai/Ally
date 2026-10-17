@@ -1,14 +1,43 @@
 import { useState } from 'react';
 import { CopyIcon, GitBranchIcon, PencilIcon, RefreshCcwIcon, Trash2Icon, CheckIcon } from 'lucide-react';
-import { Message, MessageAction, MessageActions, MessageContent, MessageResponse } from '@/components/ai-elements/message';
+import { Message, MessageAction, MessageActions, MessageContent } from '@/components/ai-elements/message';
 import { Reasoning, ReasoningContent, ReasoningTrigger } from '@/components/ai-elements/reasoning';
 import { Shimmer } from '@/components/ai-elements/shimmer';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import type { Message as ChatMessageType, Segment } from '@/types/chat';
 import type { AgentUsage } from '@/types/agent';
-import ToolCall, { ImageStrip } from './ToolCall';
+import ToolCall, { describeTool, ImageStrip } from './ToolCall';
 import { needsClaudeLogin, openClaudeLogin } from '@/lib/claudeLogin';
+import { readableReply, watchUserText } from '@/lib/watchPresentation';
+import WatchReplyContent, { OriginalMessage } from './WatchReplyContent';
+import { browserActivity } from '../../../electron/agent/browserActivity';
+
+function ToolActivity({ parts }: { parts: Segment[] }) {
+  const tools = parts.flatMap(part => part.toolExecution ? [part.toolExecution] : []);
+  const failures = tools.filter(tool => tool.status === 'error').length;
+  const running = tools.some(tool => tool.status === 'executing' || tool.status === 'pending');
+  const browsers = tools.every(tool => browserActivity(tool.name, tool.parameters));
+  const context = tools.length ? describeTool(tools[tools.length - 1]).target : undefined;
+  return <details className="my-2 rounded-lg border border-border/60 px-3 py-2 text-xs text-foreground/55">
+    <summary className="cursor-pointer select-none hover:text-foreground/80">
+      {running ? 'Working' : browsers ? 'Used browser' : 'Activity'} · {tools.length} actions
+      {failures > 0 && <span className="ml-2 text-destructive">{failures} failed</span>}
+      {context && <span className="mt-1 block truncate pl-3.5 text-[11px] text-foreground/40">{context}</span>}
+    </summary>
+    <div className="mt-2 space-y-1">{tools.map(tool => <ToolCall key={tool.id} tool={tool} />)}</div>
+  </details>;
+}
+
+function groupToolRuns(parts: Segment[]): Segment[][] {
+  const groups: Segment[][] = [];
+  for (const part of parts) {
+    const previous = groups[groups.length - 1];
+    if (part.type === 'tool' && part.toolExecution && previous?.[0].type === 'tool' && previous[0].toolExecution) previous.push(part);
+    else groups.push([part]);
+  }
+  return groups;
+}
 
 const THINK_BLOCK = /<think>([\s\S]*?)<\/think>\s*/i;
 
@@ -38,25 +67,24 @@ export function AgentReply({ text, thinking, segments, streaming = false }: Agen
           <ReasoningContent>{thinking}</ReasoningContent>
         </Reasoning>
       )}
-      {parts.map((part, i) =>
+      {groupToolRuns(parts).map((group, i, groups) => {
+        const part = group[0];
+        return group.length > 1 ? <ToolActivity key={group[0].toolExecution?.id ?? i} parts={group} /> :
         part.type === 'tool' && part.toolExecution ? (
           <ToolCall key={part.toolExecution.id ?? i} tool={part.toolExecution} />
         ) : part.type === 'thinking' ? (
-          <Reasoning key={i} isStreaming={streaming && i === parts.length - 1} defaultOpen={false} className="my-0.5">
+          <Reasoning key={i} isStreaming={streaming && i === groups.length - 1} defaultOpen={false} className="my-0.5">
             <ReasoningTrigger />
             <ReasoningContent>{part.content ?? ''}</ReasoningContent>
           </Reasoning>
         ) : (
-          <MessageResponse
+          <WatchReplyContent
             key={i}
-            isAnimating={streaming && i === parts.length - 1}
-            // prxptn body copy: light, 13px, airy, slightly dimmed white
-            className="text-[13px] font-light leading-[1.75] text-foreground/85"
-          >
-            {part.content ?? ''}
-          </MessageResponse>
+            streaming={streaming && i === groups.length - 1}
+            content={part.content ?? ''}
+          />
         )
-      )}
+      })}
       {streaming && parts.length === 0 && !thinking && (
         <Shimmer className="font-mono text-xs" duration={1.2}>Working…</Shimmer>
       )}
@@ -92,10 +120,12 @@ export default function ChatMessage({ message, onEdit, onFork, onDelete, onRetry
   const [draft, setDraft] = useState(message.content);
   const [copied, setCopied] = useState(false);
   const isUser = message.role === 'user';
-  const { thinking, text } = isUser ? { thinking: '', text: message.content } : splitThinking(message.content);
+  const { thinking, text } = isUser ? { thinking: '', text: watchUserText(message.content) } : splitThinking(message.content);
 
   const copy = async () => {
-    await navigator.clipboard.writeText(text);
+    const segments = message.metadata?.segments as Segment[] | undefined;
+    const visible = isUser ? text : segments?.length ? segments.filter(part => part.type === 'text').map(part => readableReply(part.content ?? '')).join('\n\n') : readableReply(text);
+    await navigator.clipboard.writeText(visible);
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
   };
@@ -130,7 +160,9 @@ export default function ChatMessage({ message, onEdit, onFork, onDelete, onRetry
       )}
       <MessageContent>
         {isUser ? (
-          <p className="whitespace-pre-wrap break-words text-[13px] leading-relaxed">{text}</p>
+          <div><p className="whitespace-pre-wrap break-words text-[13px] leading-relaxed">{text}</p>
+            {text !== message.content && <OriginalMessage text={message.content} label="Watch instructions" />}
+          </div>
         ) : (
           <AgentReply text={text} thinking={thinking} segments={message.metadata?.segments as Segment[] | undefined} />
         )}
