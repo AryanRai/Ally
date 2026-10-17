@@ -131,7 +131,7 @@ async function startTrackedRun(
       if (ev.kind === 'done') codexRuns.delete(runId);
       if (ev.kind === 'tool_end' && ev.images) ev = { ...ev, images: thumbnails(ev.images) };
       emit(runId, ev);
-    }, interact);
+    }, interact, emitFallback => runCodexTurn(opts, emitFallback, binOverride, interact, interactionSurface));
     codexRuns.set(runId, run);
     return runId;
   }

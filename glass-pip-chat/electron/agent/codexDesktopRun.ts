@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { CodexDesktopClient, desktopTurns, assertDesktopIdle } from './codexDesktop.js';
+import { CodexDesktopClient, CodexChatUnownedError, CodexDesktopUnavailableError, desktopTurns, assertDesktopIdle } from './codexDesktop.js';
 import { CodexEventParser } from './codexEvents.js';
 import type { AgentEvent, AgentRunOptions, AgentInteractionHandler } from './types.js';
 
@@ -58,8 +58,9 @@ const approvalRoutes: Record<string, { method: string; field: 'decision' | 'resp
 };
 
 /** One user turn, through the existing owner. Never retries a submitted message. */
-export function runCodexDesktopTurn(opts: AgentRunOptions, emit: (event: AgentEvent) => void, interact?: AgentInteractionHandler): { stop: () => void } {
+export function runCodexDesktopTurn(opts: AgentRunOptions, emit: (event: AgentEvent) => void, interact?: AgentInteractionHandler, unowned?: (emit: (event: AgentEvent) => void) => { stop: () => void }): { stop: () => void } {
   const id = opts.sessionId!;
+  let fallback: { stop: () => void } | undefined;
   const messageId = randomUUID();
   const parser = new CodexEventParser(id);
   const startedAt = Date.now();
@@ -177,11 +178,18 @@ export function runCodexDesktopTurn(opts: AgentRunOptions, emit: (event: AgentEv
         refreshing = true;
         void client!.snapshot(id, owner!).catch(fail).finally(() => { refreshing = false; });
       }, 15000);
-    } catch (error) { if (stopped && !dispatched) finish({ kind: 'done' }); else fail(error); }
+    } catch (error) {
+      if (stopped && !dispatched) finish({ kind: 'done' });
+      else if ((error instanceof CodexChatUnownedError || error instanceof CodexDesktopUnavailableError) && !dispatched && !finished && unowned) {
+        client?.close(); client = undefined;
+        try { fallback = unowned(finish); } catch (failure) { fail(failure); }
+      } else fail(error);
+    }
   })();
   return { stop: () => {
     if (finished || stopped) return;
     stopped = true;
+    if (fallback) { fallback.stop(); return; }
     for (const controller of approvals.values()) controller.abort();
     if (!dispatched) finish({ kind: 'done' });
     else if (turnId) void interrupt();

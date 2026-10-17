@@ -12,6 +12,11 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
 import androidx.compose.foundation.*
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.onClick
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.*
 import androidx.compose.foundation.shape.CircleShape
@@ -53,13 +58,18 @@ class MainActivity : ComponentActivity() {
         window.statusBarColor = android.graphics.Color.rgb(12,12,13)
         window.navigationBarColor = android.graphics.Color.rgb(12,12,13)
         setContent {
+            val prefs = remember { DeviceLink.prefs(this) }
+            var look by remember { mutableStateOf(PhoneLook.load(prefs)) }
+            CompositionLocalProvider(LocalPhoneLook provides look) {
             val body = TextStyle(fontFamily=Geist,fontSize=14.sp,lineHeight=22.sp)
             MaterialTheme(colorScheme=darkColorScheme(primary=White,onPrimary=Ink,background=Ink,surface=Panel,onSurface=White,outline=Line),
                 typography=Typography(bodyLarge=body,bodyMedium=body,bodySmall=body.copy(fontSize=12.sp),labelLarge=body, labelMedium=body.copy(fontSize=12.sp))) {
-                Surface(Modifier.fillMaxSize(),color=Ink,contentColor=White) { PhoneApp(model,destination) }
+                Surface(Modifier.fillMaxSize(),color=Ink,contentColor=White) { PhoneApp(model,destination) { look=it; it.save(prefs) } }
+            }
             }
         }
     }
+    override fun onPause() { if(model.state.value.recording) model.cancelRecording(); super.onPause() }
     override fun onResume() { super.onResume(); DeviceLink.resume(this) }
     override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); setIntent(intent); acceptDestination(intent) }
     private fun acceptDestination(intent: Intent) {
@@ -70,7 +80,7 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-private fun PhoneApp(model: PhoneModel,destination: Pair<String,Int>?) {
+private fun PhoneApp(model: PhoneModel,destination: Pair<String,Int>?, changeLook: (PhoneLook)->Unit) {
     val state by model.state.collectAsStateWithLifecycle()
     val link by DeviceLink.status.collectAsStateWithLifecycle()
     val inbox by DeviceLink.inbox.collectAsStateWithLifecycle()
@@ -79,7 +89,8 @@ private fun PhoneApp(model: PhoneModel,destination: Pair<String,Int>?) {
     val drawer = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
     val keyboard = LocalSoftwareKeyboardController.current
-    fun navigate(target: String) { keyboard?.hide(); page=target; scope.launch { drawer.close() }; if(target=="Chats") model.catalog() }
+    fun navigate(target: String) { model.cancelRecording(); keyboard?.hide(); page=target; scope.launch { drawer.close() }; if(target=="Chats") model.catalog() }
+    LaunchedEffect(state.voiceDraft) { if(state.voiceDraft.isNotBlank()) { draft=listOf(draft,state.voiceDraft).filter { it.isNotBlank() }.joinToString(" "); model.voiceDraftRead() } }
     LaunchedEffect(destination) { destination?.let { navigate(it.first) } }
     BackHandler(drawer.isOpen || page!="Chat") { if(drawer.isOpen) scope.launch { drawer.close() } else page="Chat" }
     ModalNavigationDrawer(drawerState=drawer,gesturesEnabled=drawer.isOpen,drawerContent={
@@ -88,7 +99,7 @@ private fun PhoneApp(model: PhoneModel,destination: Pair<String,Int>?) {
                 Text("ALLY",fontFamily=Tanker,fontSize=30.sp,modifier=Modifier.weight(1f))
                 IconControl("close","Close navigation") { scope.launch { drawer.close() } }
             }
-            listOf(Triple("chat","Chat","Current conversation"),Triple("folder","Chats","Your conversations"),Triple("inbox","Inbox",if(inbox.isEmpty()) "All caught up" else "${inbox.size} waiting"),Triple("settings","Settings","Connection & preferences")).forEach { (icon,target,detail) ->
+            listOf(Triple("chat","Chat","Current conversation"),Triple("folder","Chats","Your conversations"),Triple("inbox","Inbox",if(inbox.isEmpty()) "All caught up" else "${inbox.size} waiting"),Triple("styles","Styles","Orb, colours & glow"),Triple("settings","Settings","Voice, connection & alerts")).forEach { (icon,target,detail) ->
                 Row(Modifier.padding(horizontal=12.dp,vertical=3.dp).fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(if(page==target) Panel else Color.Transparent).clickable { navigate(target) }.padding(16.dp),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(16.dp)) {
                     Glyph(icon,color=if(page==target) White else Muted)
                     Column { Text(target,fontSize=15.sp); Text(detail,color=Muted,fontSize=11.sp) }
@@ -109,7 +120,7 @@ private fun PhoneApp(model: PhoneModel,destination: Pair<String,Int>?) {
                 Spacer(Modifier.weight(1f))
                 Box(Modifier.size(5.dp).background(if(link=="Connected") Color(0xff95b6a1) else Muted,CircleShape))
                 MicroLabel(when { link=="Connected" -> "Connected"; link.contains("connecting",true) -> "Connecting"; link=="Not connected" -> "Alerts off"; else -> "Offline" },Modifier.padding(start=7.dp,end=8.dp))
-                IconControl("new","New chat",!state.busy && !state.loading) { model.newChat(); page="Chat" }
+                IconControl("new","New chat",!state.busy && !state.loading && !state.recording && !state.transcribing) { model.newChat(); page="Chat" }
             }
             HorizontalDivider(color=Line,thickness=.5.dp)
             when(page) {
@@ -126,7 +137,8 @@ private fun PhoneApp(model: PhoneModel,destination: Pair<String,Int>?) {
                 }
                 "Chats" -> ChatLibrary(state,model,Modifier.weight(1f)) { page="Chat" }
                 "Inbox" -> PhoneInbox(inbox,Modifier.weight(1f))
-                "Settings" -> PhoneSettings(link,Modifier.weight(1f))
+                "Styles" -> PhoneAppearance(Modifier.weight(1f),changeLook)
+                "Settings" -> PhoneSettings(link,Modifier.weight(1f)) { navigate("Styles") }
             }
         }
     }
@@ -189,7 +201,7 @@ private fun Composer(state: PhoneState,draft: String,onDraft: (String)->Unit,mod
             Text(" / ",color=Muted,fontSize=10.sp)
             MicroLabel(state.selected?.cwd?.let(::folderName) ?: "Personal",Modifier.weight(1f))
             Box {
-                TextButton({permissions=true},enabled=!state.busy && state.selected!=null,contentPadding=PaddingValues(horizontal=8.dp,vertical=0.dp),modifier=Modifier.height(48.dp)) {
+                TextButton({permissions=true},enabled=!state.busy && !state.recording && !state.transcribing && state.selected!=null,contentPadding=PaddingValues(horizontal=8.dp,vertical=0.dp),modifier=Modifier.height(48.dp)) {
                     Glyph("shield",Modifier.size(12.dp),if(state.permission=="full") Warm else Muted)
                     MicroLabel(when(state.permission) { "edit" -> "Can edit"; "full" -> "Full access"; else -> "Read only" },Modifier.padding(start=6.dp),if(state.permission=="full") Warm else Muted)
                 }
@@ -198,15 +210,57 @@ private fun Composer(state: PhoneState,draft: String,onDraft: (String)->Unit,mod
                 }
             }
         }
+        VoiceControl(state,model,draft.isBlank())
         Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(26.dp)).background(Panel).border(1.dp,if(draft.isNotBlank()) White.copy(alpha=.22f) else Line,RoundedCornerShape(26.dp)).padding(5.dp),verticalAlignment=Alignment.CenterVertically) {
-            PresenceOrb(Modifier.size(38.dp),state.busy)
-            BasicTextField(draft,{onDraft(it.take(4000))},modifier=Modifier.weight(1f).padding(horizontal=6.dp,vertical=9.dp).heightIn(min=24.dp,max=128.dp).semantics { contentDescription="Message Ally" },textStyle=TextStyle(color=White,fontFamily=Geist,fontSize=14.sp,lineHeight=22.sp),cursorBrush=SolidColor(White),maxLines=5,decorationBox={ inner -> if(draft.isEmpty()) Text("Hey, what’s on your mind?",color=Muted,fontSize=13.sp); inner() })
-            val enabled=state.busy || (state.selected!=null && draft.isNotBlank() && !state.loading)
+            Spacer(Modifier.width(9.dp))
+            BasicTextField(draft,{onDraft(it.take(12000))},enabled=!state.recording && !state.transcribing,modifier=Modifier.weight(1f).padding(horizontal=6.dp,vertical=9.dp).heightIn(min=24.dp,max=128.dp).semantics { contentDescription="Message Ally" },textStyle=TextStyle(color=White,fontFamily=Geist,fontSize=14.sp,lineHeight=22.sp),cursorBrush=SolidColor(White),maxLines=5,decorationBox={ inner -> if(draft.isEmpty()) Text("Hey, what’s on your mind?",color=Muted,fontSize=13.sp); inner() })
+            val enabled=state.busy || (state.selected!=null && draft.isNotBlank() && !state.loading && !state.recording && !state.transcribing)
             IconButton(onClick={if(state.busy) model.stop() else send()},enabled=enabled,modifier=Modifier.size(48.dp).semantics { contentDescription=if(state.busy) "Stop response" else "Send message" }) {
                 Box(Modifier.size(34.dp).background(if(enabled) White else Color.White.copy(alpha=.06f),CircleShape),contentAlignment=Alignment.Center) { Glyph(if(state.busy) "stop" else "send",Modifier.size(18.dp),if(enabled) Ink else Muted) }
             }
         }
         Spacer(Modifier.height(5.dp))
+    }
+}
+
+@Composable
+private fun VoiceControl(state: PhoneState,model: PhoneModel,draftEmpty: Boolean) {
+    val context=LocalContext.current
+    val review=DeviceLink.prefs(context).getBoolean("phone.voice.review",false)
+    val keyboard=LocalSoftwareKeyboardController.current
+    val permission=rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if(!granted) model.voiceError("Microphone permission is needed to talk. You can still type.")
+    }
+    val enabled=state.selected!=null && !state.busy && !state.loading && !state.transcribing && draftEmpty
+    val currentEnabled by rememberUpdatedState(enabled)
+    val recording by rememberUpdatedState(state.recording)
+    val start by rememberUpdatedState<()->Unit>({
+        keyboard?.hide()
+        if(context.checkSelfPermission(Manifest.permission.RECORD_AUDIO)==PackageManager.PERMISSION_GRANTED) model.startRecording()
+        else permission.launch(Manifest.permission.RECORD_AUDIO)
+    })
+    Column(Modifier.fillMaxWidth().padding(bottom=8.dp),horizontalAlignment=Alignment.CenterHorizontally) {
+        Box(contentAlignment=Alignment.Center) {
+        PhoneActivityGlow(state.recording || state.transcribing || state.busy,Modifier.size(width=240.dp,height=100.dp))
+        PresenceOrb(Modifier.size(100.dp).semantics {
+            contentDescription=if(state.recording) "Listening. Release to ${if(review) "review" else "send"}." else "Hold to talk to Ally"
+            role=Role.Button
+            onClick(label="Start or finish voice message") { if(recording) model.finishRecording() else if(currentEnabled) start(); true }
+        }.pointerInput(Unit) {
+            detectTapGestures(onPress={
+                if(currentEnabled) {
+                    start()
+                    try { if(tryAwaitRelease()) model.finishRecording() else model.cancelRecording() }
+                    catch(e: kotlinx.coroutines.CancellationException) { model.cancelRecording(); throw e }
+                }
+            })
+        },state.recording || state.transcribing || state.busy,state.microphoneLevel,state.recording)
+        }
+        Text(when { state.recording -> "Listening · ${state.recordingSeconds.toInt()}s · release to ${if(review) "review" else "send"}"; state.transcribing -> "Finishing your words…"; !draftEmpty -> "Send your draft to talk"; else -> "Hold to talk · up to 5 minutes" },fontSize=11.sp,color=if(state.recording) LocalPhoneLook.current.palette.colors[2] else Muted)
+        if(state.recording || state.transcribing) {
+            if(state.liveTranscript.isNotBlank()) Text(state.liveTranscript,fontSize=12.sp,color=White,maxLines=3,overflow=TextOverflow.Ellipsis,modifier=Modifier.padding(horizontal=12.dp,vertical=8.dp))
+            TextButton(model::cancelRecording) { Text("Cancel voice",color=Muted,fontSize=11.sp) }
+        }
     }
 }
 
@@ -290,11 +344,12 @@ private fun PhoneInbox(inbox: List<JSONObject>,modifier: Modifier) {
 }
 
 @Composable
-private fun PhoneSettings(link: String,modifier: Modifier) {
+private fun PhoneSettings(link: String,modifier: Modifier, appearance: ()->Unit) {
     val context=LocalContext.current
     val prefs=remember { DeviceLink.prefs(context) }
     var quiet by remember { mutableStateOf(prefs.getBoolean("deviceQuietHours",false)) }
     var muted by remember { mutableStateOf(prefs.getBoolean("muted",false)) }
+    var reviewVoice by remember { mutableStateOf(prefs.getBoolean("phone.voice.review",false)) }
     var pairing by rememberSaveable { mutableStateOf(false) }
     var endpoint by remember { mutableStateOf(prefs.getString("endpoint","https://ally.prxptn.com")!!) }
     var token by remember { mutableStateOf(prefs.getString("token","")!!) }
@@ -305,6 +360,15 @@ private fun PhoneSettings(link: String,modifier: Modifier) {
         Row(Modifier.fillMaxWidth().border(1.dp,Line,RoundedCornerShape(8.dp)).padding(18.dp),verticalAlignment=Alignment.CenterVertically) {
             PresenceOrb(Modifier.size(42.dp)); Column(Modifier.padding(start=12.dp).weight(1f)) { Text("Your desktop",fontSize=15.sp); Text(link,color=Muted,fontSize=12.sp) }
         }
+        SettingRow("styles","Styles","Orb, colours, glow & motion",appearance)
+        HorizontalDivider(color=Line)
+        MicroLabel("Voice")
+        ToggleRow("Review before sending","Put your words in the composer when you release",reviewVoice) { reviewVoice=it; prefs.edit().putBoolean("phone.voice.review",it).apply() }
+        Text("Hold the orb to talk for up to 5 minutes. Release to send, or review first. Cancel voice discards the recording. Live speech uses Google; unavailable sections use desktop transcription.",color=Muted,fontSize=12.sp,lineHeight=20.sp)
+        SettingRow("shield","Microphone & app permissions","Manage access in Android settings") {
+            context.startActivity(Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,android.net.Uri.parse("package:${context.packageName}")))
+        }
+        HorizontalDivider(color=Line)
         MicroLabel("Connection")
         SettingRow("shield","Pairing","Private connection to Ally",onClick={pairing=!pairing})
         if(pairing) Column(verticalArrangement=Arrangement.spacedBy(12.dp)) {
@@ -327,6 +391,9 @@ private fun PhoneSettings(link: String,modifier: Modifier) {
         MicroLabel("Notifications")
         ToggleRow("Quiet hours","10 pm–8 am",quiet) { quiet=it; prefs.edit().putBoolean("deviceQuietHours",it).apply() }
         ToggleRow("Mute alerts","Keep notes in your inbox",muted) { muted=it; prefs.edit().putBoolean("muted",it).apply() }
+        SettingRow("inbox","Android notification settings","Sound, vibration & notification access") {
+            context.startActivity(Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(android.provider.Settings.EXTRA_APP_PACKAGE,context.packageName))
+        }
         HorizontalDivider(color=Line)
         Text("You’re in control",fontSize=16.sp)
         Text("Choose permissions in each conversation. Device actions always need your approval. Keep connected shows an ongoing Android notification.",color=Muted,fontSize=12.sp,lineHeight=20.sp)
@@ -342,7 +409,7 @@ private fun SettingRow(icon: String,title: String,subtitle: String,onClick: ()->
 }
 
 @Composable
-private fun ToggleRow(title: String,subtitle: String,value: Boolean,change: (Boolean)->Unit) {
+internal fun ToggleRow(title: String,subtitle: String,value: Boolean,change: (Boolean)->Unit) {
     Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically) { Column(Modifier.weight(1f)) { Text(title,fontSize=14.sp); Text(subtitle,color=Muted,fontSize=11.sp) }; Switch(value,change,colors=SwitchDefaults.colors(checkedThumbColor=Ink,checkedTrackColor=White,uncheckedTrackColor=Panel,uncheckedBorderColor=Line)) }
 }
 @Composable

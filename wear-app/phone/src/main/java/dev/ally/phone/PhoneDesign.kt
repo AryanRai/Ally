@@ -14,7 +14,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.*
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.*
@@ -48,6 +47,7 @@ internal fun Glyph(name: String, modifier: Modifier = Modifier, color: Color = W
         fun line(x: Float, y: Float, x2: Float, y2: Float) = drawLine(color, Offset(x*u,y*u), Offset(x2*u,y2*u), 1.5f*u, StrokeCap.Round)
         fun path(vararg points: Pair<Float,Float>) { val p = Path(); points.forEachIndexed { i, v -> if(i==0) p.moveTo(v.first*u,v.second*u) else p.lineTo(v.first*u,v.second*u) }; drawPath(p,color,style=Stroke(1.5f*u,cap=StrokeCap.Round,join=StrokeJoin.Round)) }
         when(name) {
+            "styles" -> { drawCircle(color,8*u,Offset(12*u,12*u),style=Stroke(1.5f*u)); drawCircle(color,2*u,Offset(9*u,9*u)); drawCircle(color,2*u,Offset(16*u,11*u)); drawCircle(color,2*u,Offset(10*u,16*u)) }
             "menu" -> { line(4f,7f,20f,7f); line(4f,12f,15f,12f); line(4f,17f,20f,17f) }
             "back" -> { path(14f to 5f,7f to 12f,14f to 19f) }
             "close" -> { line(6f,6f,18f,18f); line(18f,6f,6f,18f) }
@@ -72,25 +72,26 @@ internal fun IconControl(name: String, label: String, enabled: Boolean = true, o
     IconButton(onClick, Modifier.size(48.dp).semantics { contentDescription = label }, enabled = enabled) { Glyph(name, color = if(enabled) White else Muted.copy(alpha=.4f)) }
 }
 
-/** A soft, luminous sphere in the desktop's sunset palette, not a progress spinner. */
+/** The same four styles as the watch, driven by this phone's saved appearance. */
 @Composable
-internal fun PresenceOrb(modifier: Modifier = Modifier, active: Boolean = false) {
-    val phase by rememberInfiniteTransition(label="presence").animateFloat(0f, (2*PI).toFloat(), infiniteRepeatable(tween(if(active) 4000 else 14000, easing=LinearEasing)), label="breathe")
-    Canvas(modifier) {
-        val r = size.minDimension / 2
-        drawCircle(Brush.radialGradient(listOf(Warm.copy(alpha=.16f),Color.Transparent),radius=r),r)
-        val core = r*(.60f + .035f*sin(phase))
-        drawCircle(Brush.radialGradient(listOf(Color(0xffffd9ac),Color(0xffff764b),Color(0xff993d76),Color.Transparent),center=Offset(center.x-core*.2f,center.y-core*.2f),radius=core*1.2f),core)
-        rotate(sin(phase)*25) {
-            drawCircle(Brush.radialGradient(listOf(Color(0xfffff4e0).copy(alpha=.8f),Color.Transparent),center=Offset(center.x-core*.3f,center.y-core*.35f),radius=core*.85f),core)
-            drawCircle(Brush.radialGradient(listOf(Color(0xffe152b0).copy(alpha=.7f),Color.Transparent),center=Offset(center.x+core*.4f,center.y+core*.35f),radius=core),core)
-        }
-    }
+internal fun PresenceOrb(modifier: Modifier = Modifier, active: Boolean = false, microphoneLevel: Float = 0f, listening: Boolean = false) {
+    StyledPhoneOrb(LocalPhoneLook.current, active, listening, microphoneLevel, modifier)
 }
 
+@Composable
+internal fun PhoneActivityGlow(active: Boolean, modifier: Modifier = Modifier) {
+    val look = LocalPhoneLook.current
+    if (!active || look.glow == GlowLevel.OFF) return
+    Canvas(modifier) {
+        val radius = size.maxDimension * .75f
+        val origin = Offset(size.width / 2, size.height)
+        drawCircle(Brush.radialGradient(listOf(look.palette.colors[1].copy(alpha=.16f*look.glow.strength), Color.Transparent), origin, radius), radius, origin)
+    }
+}
 /** Quiet flow strokes echo Ally's FlowField without compromising reading contrast. */
 @Composable
 internal fun FlowBackdrop(modifier: Modifier = Modifier) {
+    if (!LocalPhoneLook.current.backdrop) return
     Canvas(modifier) {
         val step=28.dp.toPx()
         for(x in 0..(size.width/step).toInt()) for(y in 0..(size.height/step).toInt()) {

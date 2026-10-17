@@ -18,6 +18,14 @@ const versions: Record<string, number> = {
 };
 const MAX_FRAME = 32 * 1024 * 1024;
 
+export class CodexDesktopUnavailableError extends Error {
+  constructor() { super('Codex desktop is not running'); }
+}
+
+export class CodexChatUnownedError extends Error {
+  constructor() { super('This chat has no loaded Codex desktop owner'); }
+}
+
 export class CodexDesktopClient {
   pending = new Map<string, { resolve: (message: any) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout>; method: string; target?: string }>();
   listeners = new Set<(message: any) => void>();
@@ -36,7 +44,11 @@ export class CodexDesktopClient {
       if (typeof response.result?.clientId !== 'string') throw new Error('Invalid desktop initialization response');
       client.clientId = response.result.clientId;
       return client;
-    } catch (error) { client.close(); throw error; }
+    } catch (error) {
+      client.close();
+      if (['ENOENT', 'ECONNREFUSED'].includes((error as NodeJS.ErrnoException).code ?? '')) throw new CodexDesktopUnavailableError();
+      throw error;
+    }
   }
 
   open() {
@@ -97,7 +109,7 @@ export class CodexDesktopClient {
 
   async owner(conversationId: string): Promise<string> {
     const response = await this.request('thread-owner-discovery', { hostId: 'local', conversationId }).catch(error => {
-      if (error instanceof Error && error.message === 'no-client-found') throw new Error('Open this exact chat in Codex desktop, then send again from Ally');
+      if (error instanceof Error && error.message === 'no-client-found') throw new CodexChatUnownedError();
       throw error;
     });
     if (!response.handledByClientId || response.result?.supportsUntrustedAppInput !== true) throw new Error('Unsupported desktop owner');

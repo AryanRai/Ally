@@ -1,6 +1,7 @@
 # Codex chat ownership (2026-10-17)
 
-Ally uses a private `codex app-server` for each turn. Codex desktop can keep a
+Ally uses the native desktop owner when available and its private `codex app-server`
+for unowned chats (see the hybrid routing update below). Codex desktop can keep a
 thread loaded after its turn finishes. Opening that thread in the desktop can
 therefore prevent Ally from resuming it, even when no model is working.
 
@@ -99,10 +100,16 @@ owner, streams state updates, forwards supported real approvals/questions, and
 interrupts only the exact turn submitted by Ally. Coordination uses no model
 runs. User messages still use the normal model quota.
 
-The desktop remains the owner and execution engine. This is shared access to
-the exact chat, not an ownership transfer. The app must be open and the chat
-loaded. There is no silent CLI fallback after submission or on a timeout. An
-uncertain outcome is reported without replaying the message.
+When a desktop owner exists, the desktop remains the execution engine for the
+exact chat. If discovery explicitly returns `no-client-found`, or the desktop
+pipe is definitively absent (`ENOENT`/`ECONNREFUSED`), Ally uses its existing
+app-server route with the same session ID. This hybrid routing fixes the watch's
+"Open this exact chat in Codex desktop" error for unloaded chats.
+
+Fallback happens only before submission. A busy or uncertain owner, discovery
+timeout, unsupported protocol, or failure after submission never causes replay.
+Stop follows the selected route. Existing writer locks and approval requirements
+still apply; no automatic fork or forced ownership transfer is introduced.
 
 Known limits:
 - New chats and history/model listing still use the standard CLI/app-server.

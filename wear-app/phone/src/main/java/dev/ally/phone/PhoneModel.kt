@@ -19,7 +19,8 @@ data class PhoneMessage(val id: String, val role: String, val text: String)
 data class PhoneState(val chats: List<PhoneChat> = emptyList(), val messages: List<PhoneMessage> = emptyList(), val selected: PhoneChat? = null,
     val running: List<PhoneChat> = emptyList(), val runningStatus: String = "Checking live status…",
     val provider: String = "codex", val permission: String = "readonly", val busy: Boolean = false, val loading: Boolean = false, val error: String = "", val activity: String = "", val approval: JSONObject? = null,
-    val more: Int? = null, val before: Int? = null)
+    val more: Int? = null, val before: Int? = null, val recording: Boolean = false, val transcribing: Boolean = false,
+    val microphoneLevel: Float = 0f, val recordingSeconds: Float = 0f, val liveTranscript: String = "", val voiceDraft: String = "")
 private class BridgeError(val status: Int, message: String) : Exception(message)
 
 class PhoneModel(app: Application) : AndroidViewModel(app) {
@@ -29,16 +30,20 @@ class PhoneModel(app: Application) : AndroidViewModel(app) {
     private var pendingText: String? = prefs.getString("phonePendingText", null)
     private var requestId: String? = prefs.getString("phoneRequestId", null)
     private var pollJob: Job? = null
+    private var voice: PhoneVoice? = null
+    private var voiceJob: Job? = null
+    private val voiceActive get() = state.value.recording || state.value.transcribing
     init { prefs.getString("phoneChat", null)?.let { id -> select(id) } }
     private fun enc(value: String) = URLEncoder.encode(value, "UTF-8")
-    suspend fun request(path: String, body: JSONObject? = null): JSONObject = withContext(Dispatchers.IO) {
+    suspend fun request(path: String, body: JSONObject? = null, audio: ByteArray? = null): JSONObject = withContext(Dispatchers.IO) {
         val url = URL(prefs.getString("endpoint", "https://ally.prxptn.com")!!.trimEnd('/') + path)
         require(url.protocol == "https") { "Use an HTTPS bridge" }
         val c = url.openConnection() as HttpURLConnection
         try {
-            c.connectTimeout = 8000; c.readTimeout = 20000; c.instanceFollowRedirects = false
+            c.connectTimeout = 8000; c.readTimeout = if (audio != null) 120000 else 20000; c.instanceFollowRedirects = false
             c.setRequestProperty("Authorization", "Bearer ${prefs.getString("token", "")}")
-            if (body != null) { c.requestMethod = "POST"; c.doOutput = true; c.setRequestProperty("Content-Type", "application/json"); c.outputStream.use { it.write(body.toString().toByteArray()) } }
+            if (audio != null) { c.requestMethod = "POST"; c.doOutput = true; c.setRequestProperty("Content-Type", "audio/wav"); c.outputStream.use { it.write(audio) } }
+            else if (body != null) { c.requestMethod = "POST"; c.doOutput = true; c.setRequestProperty("Content-Type", "application/json"); c.outputStream.use { it.write(body.toString().toByteArray()) } }
             val status = c.responseCode
             val text = (if (status in 200..299) c.inputStream else c.errorStream)?.bufferedReader()?.use { it.readText() } ?: "{}"
             val json = runCatching { JSONObject(text) }.getOrElse { throw BridgeError(status, "Desktop connection unavailable (HTTP $status). Try again shortly.") }
@@ -61,15 +66,49 @@ class PhoneModel(app: Application) : AndroidViewModel(app) {
             state.update { it.copy(running = emptyList(), runningStatus = "Live status unavailable · reconnect to desktop") }
         }
     }
+    fun voiceError(message: String) { state.update { it.copy(error = message) } }
+    fun startRecording() {
+        if (voiceActive || state.value.busy || state.value.loading || turn != null || pendingText != null) return
+        if (state.value.selected == null) { voiceError("Choose a conversation before talking."); return }
+        try {
+            voice = PhoneVoice(viewModelScope, prefs.getString("endpoint", "https://ally.prxptn.com")!!, prefs.getString("token", "")!!,
+                { audio -> request("/v1/speech/transcribe", audio = audio).optString("text") },
+                { text -> state.update { it.copy(liveTranscript = text) } })
+            state.update { it.copy(recording = true, liveTranscript = "", voiceDraft = "", error = "", recordingSeconds = 0f) }
+            voice!!.start(::finishRecording, { error -> cancelRecording(); voiceError(error) },
+                { level, seconds -> state.update { it.copy(microphoneLevel = level, recordingSeconds = seconds) } })
+        } catch (e: Exception) { cancelRecording(); voiceError(e.message ?: "Microphone unavailable") }
+    }
+    fun finishRecording() {
+        if (!state.value.recording) return
+        val capture = voice ?: return
+        state.update { it.copy(recording = false, transcribing = true, microphoneLevel = 0f) }
+        voiceJob = viewModelScope.launch {
+            try {
+                val text = capture.finish()
+                state.update { it.copy(transcribing = false, liveTranscript = "") }
+                voice = null
+                if (prefs.getBoolean("phone.voice.review",false)) state.update { it.copy(voiceDraft = text) }
+                else send(text)
+            } catch (e: CancellationException) { throw e } catch (e: Exception) {
+                state.update { it.copy(transcribing = false, voiceDraft = it.liveTranscript, error = "Voice was not sent. ${e.message ?: "Transcription failed."} Review any captured words before sending.") }
+            } finally { capture.cancel(); if (voice === capture) voice = null }
+        }
+    }
+    fun cancelRecording() {
+        voice?.cancel(); voice = null; voiceJob?.cancel(); voiceJob = null
+        state.update { it.copy(recording = false, transcribing = false, microphoneLevel = 0f, liveTranscript = "") }
+    }
+    fun voiceDraftRead() { state.update { it.copy(voiceDraft = "") } }
     fun catalog(provider: String = state.value.provider, more: Boolean = false) {
-        if (state.value.loading) return
+        if (voiceActive || state.value.loading) return
         val offset = if (more) state.value.more ?: return else 0
         task { val r = request("/v1/chats?provider=$provider&offset=$offset"); val a = r.optJSONArray("chats") ?: JSONArray()
             state.update { it.copy(provider = provider, chats = ((if (more) it.chats else emptyList()) + (0 until a.length()).map { i -> chat(a.getJSONObject(i)) }).distinctBy { c -> c.id }, more = if (r.isNull("nextOffset")) null else r.optInt("nextOffset")) }
         }
     }
     fun select(id: String) {
-        if (state.value.busy || state.value.loading || (state.value.selected != null && (turn != null || pendingText != null))) return
+        if (voiceActive || state.value.busy || state.value.loading || (state.value.selected != null && (turn != null || pendingText != null))) return
         task { history(id); if (turn != null) poll() }
     }
     private suspend fun history(id: String, older: Boolean = false) {
@@ -80,15 +119,15 @@ class PhoneModel(app: Application) : AndroidViewModel(app) {
         state.update { it.copy(selected = selected, provider = selected.provider, messages = if (older) (messages + it.messages).distinctBy { m -> m.id } else messages, before = if (r.isNull("before")) null else r.optInt("before"), permission = prefs.getString("phonePermission:${selected.id}", "readonly")!!) }
         r.optString("activeTurnId").takeIf { it.isNotBlank() && it != "null" }?.let { turn = it; prefs.edit().putString("phoneTurn", it).apply() }
     }
-    fun older() { val id = state.value.selected?.id ?: return; task { history(id, true) } }
-    fun newChat() { if (state.value.busy || state.value.loading || turn != null || pendingText != null) return; task {
+    fun older() { if(voiceActive) return; val id = state.value.selected?.id ?: return; task { history(id, true) } }
+    fun newChat() { if (voiceActive || state.value.busy || state.value.loading || turn != null || pendingText != null) return; task {
         val id = prefs.getString("phoneNewRequest", null) ?: UUID.randomUUID().toString().also { prefs.edit().putString("phoneNewRequest", it).commit() }
         val r = request("/v1/chats", JSONObject().put("provider", state.value.provider).put("requestId", id)); history(r.getJSONObject("chat").getString("id")); prefs.edit().remove("phoneNewRequest").apply()
     } }
-    fun permission(value: String) { if (state.value.busy || value !in setOf("readonly", "edit", "full")) return; prefs.edit().putString("phonePermission:${state.value.selected?.id}", value).apply(); state.update { it.copy(permission = value) } }
+    fun permission(value: String) { if (voiceActive || state.value.busy || value !in setOf("readonly", "edit", "full")) return; prefs.edit().putString("phonePermission:${state.value.selected?.id}", value).apply(); state.update { it.copy(permission = value) } }
     fun send(text: String) {
         val chat = state.value.selected ?: return
-        if (state.value.busy || state.value.loading || turn != null || text.isBlank()) return
+        if (voiceActive || state.value.busy || state.value.loading || turn != null || text.isBlank()) return
         if (pendingText != null && text != pendingText) { state.update { it.copy(error = "Retry the previous message first; its delivery is uncertain.") }; return }
         pendingText = text; requestId = requestId ?: UUID.randomUUID().toString()
         prefs.edit().putString("phonePendingText", text).putString("phoneRequestId", requestId).commit()
@@ -121,6 +160,7 @@ class PhoneModel(app: Application) : AndroidViewModel(app) {
             } finally { state.update { it.copy(busy = turn != null, approval = null) } }
         }
     }
+    override fun onCleared() { cancelRecording(); super.onCleared() }
     fun stop() { val id = turn ?: return; task { request("/v1/turns/${enc(id)}/stop", JSONObject()) } }
     fun answer(action: String, values: Map<String, String>) { val id = turn ?: return; val approval = state.value.approval ?: return
         task { request("/v1/turns/${enc(id)}/approvals/${enc(approval.getString("id"))}", JSONObject().put("action", action).put("values", JSONObject(values))) }

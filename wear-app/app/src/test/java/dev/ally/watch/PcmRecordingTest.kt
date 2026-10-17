@@ -6,6 +6,15 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class PcmRecordingTest {
+    @Test fun phoneCaptureSupportsFiveMinutesWithoutChangingWatchDefault() {
+        val capture = PcmRecording(300)
+        val chunk = ByteArray(32000)
+        repeat(301) { capture.append(chunk, chunk.size) }
+        assertTrue(capture.full)
+        assertEquals(300f, capture.seconds, 0f)
+        assertEquals(9600044, capture.wav().size)
+        assertEquals(1920000, PcmRecording.MAX_BYTES)
+    }
     @Test fun capsAtExactlySixtySecondsAndWritesConsistentWavHeader() {
         val capture = PcmRecording()
         val chunk = ByteArray(8192)
