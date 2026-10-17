@@ -58,9 +58,10 @@ object DeviceLink {
     fun resume(c: Context) { load(c); if (prefs(c).getBoolean("deviceConnected", false) && service == null) start(c) }
     fun decide(activity: Activity, item: JSONObject, approved: Boolean) {
         val id = item.optString("id")
-        if (service == null || status.value != "Connected" || item.optString("_connection") != service?.connectionId || item.optLong("expiresAt") < System.currentTimeMillis()) { status.value = "Request expired or disconnected"; return }
+        fun feedback(message: String) { android.widget.Toast.makeText(activity, message, android.widget.Toast.LENGTH_LONG).show() }
+        if (service == null || status.value != "Connected" || item.optString("_connection") != service?.connectionId || item.optLong("expiresAt") < System.currentTimeMillis()) { feedback("Request expired or disconnected"); return }
         if (!approved) { receipt(activity, id, "rejected"); dismiss(activity, id); return }
-        if (service?.send(JSONObject().put("type", "receipt").put("id", id).put("status", "approved")) != true) { status.value = "Reconnect before approving"; return }
+        if (service?.send(JSONObject().put("type", "receipt").put("id", id).put("status", "approved")) != true) { feedback("Reconnect before approving"); return }
         // Remove before execution: a second tap cannot run the command again.
         if (inbox.value.none { it.optString("id") == id }) return
         inbox.value = inbox.value.filter { it.optString("id") != id }; persist(activity)
@@ -85,7 +86,7 @@ object DeviceLink {
                 else -> throw IllegalArgumentException("Unknown action")
             }
             receipt(activity, id, if (handedOff) "handed_off" else "done")
-        } catch (_: Exception) { receipt(activity, id, "failed"); status.value = "No compatible app could complete this request" }
+        } catch (_: Exception) { receipt(activity, id, "failed"); feedback("No compatible app could complete this request") }
     }
     fun notify(c: Context, item: JSONObject) {
         if (quiet(c)) return
