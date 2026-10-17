@@ -366,7 +366,7 @@ class WatchViewModel(application: Application) : AndroidViewModel(application) {
                         // Native history can lag the final event; do not erase the answer we just received.
                         mutable.update { it.copy(messages = if (it.messages.lastOrNull()?.let { m -> m.role == "assistant" && m.reply.text == reply.text } == true) it.messages else it.messages + ChatMessage("$id-assistant", "assistant", reply, ActivityParser.steps(result), ActivityParser.usage(result))) }
                         WatchNotifications.show(getApplication(), "Ally has your answer", json.optString("text"), id, mutable.value.chatId ?: "")
-                        if (foreground && mutable.value.autoRead && !mutable.value.inputRecording && !mutable.value.inputSending) readReply(reply.text)
+                        if (foreground && mutable.value.autoRead && !mutable.value.inputRecording && !mutable.value.inputSending) readReply(reply.readAloudText())
                         return
                     }
                     "error" -> { prefs.edit().remove("turn").apply(); mutable.update { it.copy(approval = null) }; requestId = UUID.randomUUID().toString(); error(result.optString("error", "Agent unavailable")) }
