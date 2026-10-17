@@ -21,6 +21,11 @@ object DeviceLink {
     internal var service: DeviceLinkService? = null
     fun prefs(c: Context) = c.getSharedPreferences("ally-watch", Context.MODE_PRIVATE)
     fun kind(c: Context) = if (c.packageName.endsWith(".watch")) "watch" else "phone"
+    /** Phone notifications open its full Compose UI; the watch keeps its compact screen. */
+    fun inboxIntent(c: Context, page: String = "Inbox"): Intent =
+        ((if (kind(c) == "phone") c.packageManager.getLaunchIntentForPackage(c.packageName)?.putExtra("allyPage", page) else null)
+            ?: Intent(c, DeviceInboxActivity::class.java))
+            .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
     fun load(c: Context) { val a = runCatching { JSONArray(prefs(c).getString("deviceInbox", "[]")) }.getOrDefault(JSONArray()); inbox.value = (0 until a.length()).mapNotNull { a.optJSONObject(it) } }
     @Synchronized fun save(c: Context, item: JSONObject) { load(c); inbox.value = (listOf(item) + inbox.value.filter { it.optString("id") != item.optString("id") }).take(30); persist(c) }
     private fun persist(c: Context) { prefs(c).edit().putString("deviceInbox", JSONArray(inbox.value).toString()).commit() }
@@ -94,7 +99,7 @@ object DeviceLink {
         val manager = c.getSystemService(NotificationManager::class.java)
         manager.createNotificationChannel(NotificationChannel("ally-device", "Ally cards and requests", NotificationManager.IMPORTANCE_DEFAULT).apply { enableVibration(true) })
         val id = item.optString("id")
-        val open = PendingIntent.getActivity(c, id.hashCode(), Intent(c, DeviceInboxActivity::class.java).putExtra("id", id), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+        val open = PendingIntent.getActivity(c, id.hashCode(), inboxIntent(c).putExtra("id", id), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         val dismiss = PendingIntent.getBroadcast(c, id.hashCode(), Intent(c, DeviceDismissReceiver::class.java).putExtra("id", id), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         val title = if (item.optBoolean("command")) "Approve: ${item.optString("action").replace('_', ' ')}" else item.optString("title")
         manager.notify(id.hashCode(), Notification.Builder(c, "ally-device").setSmallIcon(android.R.drawable.ic_dialog_info)
@@ -121,7 +126,7 @@ class DeviceLinkService : Service() {
         if (!DeviceLink.prefs(this).getBoolean("deviceConnected", false)) { stopSelf(); return START_NOT_STICKY }
         val manager = getSystemService(NotificationManager::class.java)
         manager.createNotificationChannel(NotificationChannel("ally-link", "Ally device connection", NotificationManager.IMPORTANCE_LOW))
-        val open = PendingIntent.getActivity(this, 0, Intent(this, DeviceInboxActivity::class.java), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+        val open = PendingIntent.getActivity(this, 0, DeviceLink.inboxIntent(this, "Settings"), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         startForeground(23, Notification.Builder(this, "ally-link").setSmallIcon(android.R.drawable.ic_dialog_info).setContentTitle("Ally device connection")
             .setContentText("Cards and approval requests · tap to manage").setContentIntent(open).setOngoing(true).build())
         if (socket == null) connect()
