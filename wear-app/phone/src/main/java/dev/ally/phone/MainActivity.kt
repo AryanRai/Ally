@@ -187,7 +187,18 @@ private fun Conversation(state: PhoneState,model: PhoneModel,modifier: Modifier,
             }
             if(state.busy) item(key="activity") { Row(verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(10.dp)) { PresenceOrb(Modifier.size(26.dp),true); Text(state.activity,color=Muted,fontSize=12.sp) } }
             state.approval?.let { approval -> item(key="approval") { ChatApproval(approval,state.loading,model::answer) } }
-            if(state.error.isNotBlank()) item(key="error") { Column(Modifier.border(1.dp,Warm.copy(alpha=.3f),RoundedCornerShape(8.dp)).padding(16.dp)) { Text(state.error,color=Warm,fontSize=13.sp); TextButton(model::retry,enabled=!state.loading) { Text("Retry connection") } } }
+            if(state.inputStatus.isNotBlank()) item(key="input-status") { Column {
+                Text(state.inputStatus,color=Muted,fontSize=12.sp)
+                if(state.inputStatus.contains("unconfirmed")) Row {
+                    TextButton(model::retry,enabled=!state.loading) { Text("Retry input") }
+                    TextButton(model::dismissInput,enabled=!state.loading) { Text("Dismiss") }
+                }
+            } }
+            if(state.error.isNotBlank()) item(key="error") { Column(Modifier.border(1.dp,Warm.copy(alpha=.3f),RoundedCornerShape(8.dp)).padding(16.dp)) { Text(state.error,color=Warm,fontSize=13.sp); TextButton(model::retry,enabled=!state.loading) { Text("Retry connection") }; TextButton(model::dismissInput,enabled=!state.loading) { Text("Dismiss error") } } }
+        }
+        if(state.recording || state.transcribing) Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(124.dp).background(Ink).padding(horizontal=20.dp,vertical=8.dp)) {
+            Text(state.liveTranscript.ifBlank { if(state.transcribing) "Finishing your words…" else "Listening…" },fontSize=12.sp,color=White,maxLines=3,overflow=TextOverflow.Ellipsis,modifier=Modifier.weight(1f))
+            TextButton(model::cancelRecording,modifier=Modifier.height(48.dp)) { Text("Cancel voice",color=Muted,fontSize=11.sp) }
         }
     }
 }
@@ -214,9 +225,10 @@ private fun Composer(state: PhoneState,draft: String,onDraft: (String)->Unit,mod
         Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(26.dp)).background(Panel).border(1.dp,if(draft.isNotBlank()) White.copy(alpha=.22f) else Line,RoundedCornerShape(26.dp)).padding(5.dp),verticalAlignment=Alignment.CenterVertically) {
             Spacer(Modifier.width(9.dp))
             BasicTextField(draft,{onDraft(it.take(12000))},enabled=!state.recording && !state.transcribing,modifier=Modifier.weight(1f).padding(horizontal=6.dp,vertical=9.dp).heightIn(min=24.dp,max=128.dp).semantics { contentDescription="Message Ally" },textStyle=TextStyle(color=White,fontFamily=Geist,fontSize=14.sp,lineHeight=22.sp),cursorBrush=SolidColor(White),maxLines=5,decorationBox={ inner -> if(draft.isEmpty()) Text("Hey, what’s on your mind?",color=Muted,fontSize=13.sp); inner() })
-            val enabled=state.busy || (state.selected!=null && draft.isNotBlank() && !state.loading && !state.recording && !state.transcribing)
-            IconButton(onClick={if(state.busy) model.stop() else send()},enabled=enabled,modifier=Modifier.size(48.dp).semantics { contentDescription=if(state.busy) "Stop response" else "Send message" }) {
-                Box(Modifier.size(34.dp).background(if(enabled) White else Color.White.copy(alpha=.06f),CircleShape),contentAlignment=Alignment.Center) { Glyph(if(state.busy) "stop" else "send",Modifier.size(18.dp),if(enabled) Ink else Muted) }
+            val enabled=(state.selected!=null && draft.isNotBlank() && !state.loading && !state.recording && !state.transcribing)
+            if(state.busy) IconButton(onClick=model::stop,modifier=Modifier.size(48.dp).semantics { contentDescription="Stop response" }) { Glyph("stop",Modifier.size(18.dp),Muted) }
+            IconButton(onClick=send,enabled=enabled,modifier=Modifier.size(48.dp).semantics { contentDescription=if(state.busy) "Add input without stopping" else "Send message" }) {
+                Box(Modifier.size(34.dp).background(if(enabled) White else Color.White.copy(alpha=.06f),CircleShape),contentAlignment=Alignment.Center) { Glyph("send",Modifier.size(18.dp),if(enabled) Ink else Muted) }
             }
         }
         Spacer(Modifier.height(5.dp))
@@ -231,7 +243,7 @@ private fun VoiceControl(state: PhoneState,model: PhoneModel,draftEmpty: Boolean
     val permission=rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if(!granted) model.voiceError("Microphone permission is needed to talk. You can still type.")
     }
-    val enabled=state.selected!=null && !state.busy && !state.loading && !state.transcribing && draftEmpty
+    val enabled=state.selected!=null && !state.loading && !state.transcribing && draftEmpty
     val currentEnabled by rememberUpdatedState(enabled)
     val recording by rememberUpdatedState(state.recording)
     val start by rememberUpdatedState<()->Unit>({
@@ -256,11 +268,8 @@ private fun VoiceControl(state: PhoneState,model: PhoneModel,draftEmpty: Boolean
             })
         },state.recording || state.transcribing || state.busy,state.microphoneLevel,state.recording)
         }
-        Text(when { state.recording -> "Listening · ${state.recordingSeconds.toInt()}s · release to ${if(review) "review" else "send"}"; state.transcribing -> "Finishing your words…"; !draftEmpty -> "Send your draft to talk"; else -> "Hold to talk · up to 5 minutes" },fontSize=11.sp,color=if(state.recording) LocalPhoneLook.current.palette.colors[2] else Muted)
-        if(state.recording || state.transcribing) {
-            if(state.liveTranscript.isNotBlank()) Text(state.liveTranscript,fontSize=12.sp,color=White,maxLines=3,overflow=TextOverflow.Ellipsis,modifier=Modifier.padding(horizontal=12.dp,vertical=8.dp))
-            TextButton(model::cancelRecording) { Text("Cancel voice",color=Muted,fontSize=11.sp) }
-        }
+        Text(when { state.recording -> "Listening · ${state.recordingSeconds.toInt()}s · release to ${if(review) "review" else "send"}"; state.transcribing -> "Finishing your words…"; !draftEmpty -> "Send your draft to talk"; state.busy -> "Hold to add input · keeps working"; else -> "Hold to talk · up to 5 minutes" },fontSize=11.sp,color=if(state.recording) LocalPhoneLook.current.palette.colors[2] else Muted,maxLines=1,overflow=TextOverflow.Ellipsis,modifier=Modifier.height(24.dp))
+
     }
 }
 
@@ -349,6 +358,7 @@ private fun PhoneSettings(link: String,modifier: Modifier, appearance: ()->Unit)
     val prefs=remember { DeviceLink.prefs(context) }
     var quiet by remember { mutableStateOf(prefs.getBoolean("deviceQuietHours",false)) }
     var muted by remember { mutableStateOf(prefs.getBoolean("muted",false)) }
+    var haptics by remember { mutableStateOf(prefs.getBoolean("phone.haptics",true)) }
     var reviewVoice by remember { mutableStateOf(prefs.getBoolean("phone.voice.review",false)) }
     var pairing by rememberSaveable { mutableStateOf(false) }
     var endpoint by remember { mutableStateOf(prefs.getString("endpoint","https://ally.prxptn.com")!!) }
@@ -362,6 +372,8 @@ private fun PhoneSettings(link: String,modifier: Modifier, appearance: ()->Unit)
         }
         SettingRow("styles","Styles","Orb, colours, glow & motion",appearance)
         HorizontalDivider(color=Line)
+        ToggleRow("Touch feedback","Gentle pulses for voice, sends and decisions",haptics) { haptics=it; prefs.edit().putBoolean("phone.haptics",it).apply(); if(it) PhoneHaptics.pulse(context) }
+        TextButton({PhoneHaptics.pulse(context,true)},enabled=haptics) { Text("Test touch feedback") }
         MicroLabel("Voice")
         ToggleRow("Review before sending","Put your words in the composer when you release",reviewVoice) { reviewVoice=it; prefs.edit().putBoolean("phone.voice.review",it).apply() }
         Text("Hold the orb to talk for up to 5 minutes. Release to send, or review first. Cancel voice discards the recording. Live speech uses Google; unavailable sections use desktop transcription.",color=Muted,fontSize=12.sp,lineHeight=20.sp)

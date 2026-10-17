@@ -29,7 +29,7 @@ const PERMISSION_ORDER: AgentPermission[] = ['readonly', 'edit', 'full'];
 export function useAgentChat() {
   const available = typeof window !== 'undefined' && !!window.pip?.agent;
   const [config, setConfig] = useState<AgentConfig | null>(null);
-  const activeRun = useRef<{ stop: () => void } | null>(null);
+  const activeRun = useRef<{ stop: () => void; steer: (text: string) => Promise<'steered' | 'queued'> } | null>(null);
 
   useEffect(() => {
     if (!available) return;
@@ -107,6 +107,9 @@ export function useAgentChat() {
       const handle = ({ event: ev }: { runId: string; event: AgentEvent }) => {
         if (settled) return;
         switch (ev.kind) {
+          case 'continuation':
+            appendText('\n\n');
+            break;
           case 'session':
             if (ev.sessionId !== sessionId) {
               sessionId = ev.sessionId;
@@ -175,7 +178,15 @@ export function useAgentChat() {
           void agent.stop(runId).catch(error => finish({ error: `Could not stop: ${String(error)}` }));
         }
       };
-      activeRun.current = { stop: cancel };
+      const inputRequests = new Map<string, string>();
+      activeRun.current = { stop: cancel, steer: async text => {
+        if (!runId || settled || cancelRequested) throw new Error('This response is not accepting input yet. Your draft is kept.');
+        const requestId = inputRequests.get(text) ?? crypto.randomUUID();
+        inputRequests.set(text, requestId);
+        const mode = await agent.steer(runId, text, requestId);
+        inputRequests.delete(text);
+        return mode;
+      } };
 
       agent.send(opts)
         .then(id => {
@@ -200,5 +211,10 @@ export function useAgentChat() {
     return true;
   }, []);
 
-  return { available, config, updateConfig, cyclePermission, pickFolder, runTurn, stop };
+  const steer = useCallback(async (text: string) => {
+    if (!activeRun.current) throw new Error('This response has finished. Send your message again.');
+    return activeRun.current.steer(text);
+  }, []);
+
+  return { steer, available, config, updateConfig, cyclePermission, pickFolder, runTurn, stop };
 }

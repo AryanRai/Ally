@@ -25,7 +25,7 @@ export function codexThreadConfig(opts: AgentRunOptions, interactive = false): R
 }
 
 /** Starts asynchronously so stop remains available even during initialization/resume. */
-export function runCodexTurn(opts: AgentRunOptions, emit: (event: AgentEvent) => void, binary?: string, interact?: AgentInteractionHandler, interactionSurface: 'watch' | 'desktop' = 'watch'): { stop: () => void } {
+export function runCodexTurn(opts: AgentRunOptions, emit: (event: AgentEvent) => void, binary?: string, interact?: AgentInteractionHandler, interactionSurface: 'watch' | 'desktop' = 'watch'): { stop: () => void; steer: (text: string) => Promise<boolean> } {
   let rpc: CodexRpc | undefined;
   let sessionId: string | undefined;
   let turnId: string | undefined;
@@ -102,7 +102,14 @@ export function runCodexTurn(opts: AgentRunOptions, emit: (event: AgentEvent) =>
         ? 'Codex desktop still owns this chat, even if it is idle. Your message was not sent. Release the chat from Codex desktop before retrying. No copy was created.' : message });
     }
   })();
-  return { stop: () => {
+  return { steer: async text => {
+    if (finished || stopped) throw new Error('This response has finished. Send your input as a new message.');
+    if (!rpc || !sessionId || !turnId) return false;
+    const expected = turnId;
+    const result = await rpc.request('turn/steer', { threadId: sessionId, expectedTurnId: expected, input: [{ type: 'text', text }] });
+    if (result.turnId !== expected) throw new Error('Codex did not confirm this input. Check the chat before sending it again.');
+    return true;
+  }, stop: () => {
     if (finished || stopped) return;
     stopped = true;
     userQuestions?.close();

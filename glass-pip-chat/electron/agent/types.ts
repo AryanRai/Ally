@@ -44,6 +44,8 @@ export interface AgentSessionSnapshot {
 }
 
 export type AgentEvent =
+  | { kind: 'input'; text: string; mode: 'steered' | 'queued' }
+  | { kind: 'continuation' }
   | { kind: 'session'; sessionId: string }
   | { kind: 'text'; text: string }
   | { kind: 'thinking'; text: string }

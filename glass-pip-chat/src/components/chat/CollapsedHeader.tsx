@@ -162,8 +162,7 @@ export default function CollapsedHeader({
         <form
           onSubmit={e => {
             e.preventDefault();
-            if (isTyping) onStop();
-            else onSend(quickInput, true);
+            if (quickInput.trim()) onSend(quickInput, true);
           }}
           className="flex min-w-0 flex-1 items-center rounded-[18px] border border-white/10 bg-white/[0.06] pl-3 pr-1 transition-colors focus-within:border-white/30"
           style={noDrag}
@@ -176,16 +175,17 @@ export default function CollapsedHeader({
             placeholder={placeholder}
             className="min-w-0 flex-1 bg-transparent py-1.5 text-[13px] font-light outline-none placeholder:text-foreground/35"
           />
+          {isTyping && <button type="button" onClick={onStop} className={iconButton} title="Stop response" aria-label="Stop response"><Square className="size-3" /></button>}
           <button
             type="submit"
-            disabled={!quickInput.trim() && !isTyping}
+            disabled={!quickInput.trim()}
             className={cn(
               'grid size-6 shrink-0 place-items-center rounded-full transition-colors disabled:opacity-30',
-              isTyping ? 'bg-destructive/25 text-destructive' : 'bg-foreground text-background'
+              'bg-foreground text-background'
             )}
-            title={isTyping ? 'Stop' : 'Send'}
+            title={isTyping ? 'Add input without stopping' : 'Send'}
           >
-            {isTyping ? <Square className="size-3" /> : <ArrowUp className="size-3.5" />}
+            <ArrowUp className="size-3.5" />
           </button>
         </form>
 

@@ -9,6 +9,7 @@ import { ClaudeStreamParser, StreamParser } from './parsers.js';
 import { runCodexTurn } from './codexRun.js';
 import { runCodexDesktopTurn } from './codexDesktopRun.js';
 import { trackRunningSession, finishRunningSession } from './runningSessions.js';
+import { FollowupReceipts, type FollowupMode } from './followups.js';
 import { thumbnails } from './thumbs.js';
 import { allyChatsMcpServers } from '../chatsMcp/registry.js';
 import type { AgentEvent, AgentRobotContext, AgentRunOptions, AgentInteractionHandler } from './types.js';
@@ -19,7 +20,8 @@ interface ActiveRun {
 }
 
 const runs = new Map<string, ActiveRun>();
-const codexRuns = new Map<string, { stop: () => void }>();
+const codexRuns = new Map<string, { stop: () => void; steer?: (text: string) => Promise<boolean> }>();
+const managedRuns = new Map<string, { stop: () => void; steer: (text: string, requestId: string) => Promise<FollowupMode> }>();
 let runCounter = 0;
 
 /** MCP servers Robot mode hands the agent, by server name: perception (HowYouSeeMe) and motion (DroidCore). */
@@ -105,17 +107,83 @@ export async function startAgentRun(
   interact?: AgentInteractionHandler,
   interactionSurface: 'watch' | 'desktop' = 'watch',
 ): Promise<string> {
-  let sessionId = opts.sessionId;
-  let finished = false;
+  const publicId = `conversation-${Date.now()}-${++runCounter}`;
+  let sessionId = opts.sessionId, currentId: string | undefined;
+  let stopped = false, finished = false, ending = false;
+  const queued: string[] = [];
+  const pending = new Set<Promise<FollowupMode>>();
+  const receipts = new FollowupReceipts();
   const summary = () => sessionId && !opts.ephemeral ? { provider: opts.provider, id: sessionId, title: opts.prompt.slice(-80), cwd: opts.cwd, updatedAt: Date.now() } : undefined;
-  const runId = await startTrackedRun(opts, (id, event) => {
-    if (event.kind === 'session') sessionId = event.sessionId;
-    if (event.kind === 'done') { finished = true; finishRunningSession(id); }
-    else trackRunningSession(id, summary());
-    emit(id, event);
-  }, binOverride, interact, interactionSurface);
-  if (!finished) trackRunningSession(runId, summary());
-  return runId;
+  const complete = (event: AgentEvent) => {
+    if (finished) return;
+    finished = true;
+    managedRuns.delete(publicId);
+    finishRunningSession(publicId);
+    emit(publicId, event);
+  };
+  const launch = async (prompt: string, initial = false) => {
+    ending = false;
+    currentId = undefined;
+    const id = await startTrackedRun({ ...opts, prompt, sessionId, images: initial ? opts.images : undefined }, (_id, event) => {
+      if (finished) return;
+      if (event.kind === 'session') sessionId = event.sessionId;
+      if (event.kind === 'done') {
+        if (ending) return;
+        ending = true;
+        if (event.sessionId) sessionId = event.sessionId;
+        void (async () => {
+          await Promise.allSettled([...pending]);
+          if (!stopped && !event.isError && queued.length && sessionId) {
+            const next = queued.splice(0).join('\n\n');
+            emit(publicId, { kind: 'continuation' });
+            try {
+              const previous = currentId ? runs.get(currentId) : undefined;
+              if (previous) await new Promise<void>((resolve, reject) => {
+                const timer = setTimeout(() => { previous.child.off('close', released); reject(new Error('Previous agent process is still closing. Queued input was not sent: ' + next)); }, 5000);
+                const released = () => { clearTimeout(timer); resolve(); };
+                previous.child.once('close', released);
+              });
+              if (stopped) { complete({ kind: 'done', sessionId, isError: true, error: 'Stopped by you. Queued input was not sent: ' + next }); return; }
+              await launch(next);
+            } catch (error) { complete({ kind: 'done', sessionId, isError: true, error: String(error) }); }
+          } else {
+            complete(queued.length ? { ...event, isError: true, error: `${event.error || (stopped ? 'Stopped by you.' : 'Could not continue this session.')} Queued input was not sent: ${queued.join(' / ')}` } : event);
+          }
+        })();
+      } else {
+        trackRunningSession(publicId, summary());
+        emit(publicId, event);
+      }
+    }, binOverride, interact, interactionSurface);
+    currentId = id;
+    if (stopped) stopAgentRun(id);
+  };
+  managedRuns.set(publicId, {
+    stop: () => { stopped = true; if (currentId) stopAgentRun(currentId); },
+    steer: (text, requestId) => receipts.submit(requestId, text, async () => {
+      if (finished || stopped || ending) throw new Error('This response has finished. Send your input as a new message.');
+      const operation = (async (): Promise<FollowupMode> => {
+        const live = currentId ? codexRuns.get(currentId) : undefined;
+        if (live?.steer && await live.steer(text)) { emit(publicId, { kind: 'input', text, mode: 'steered' }); return 'steered'; }
+        // Unsupported connections continue in the same session after this response.
+        queued.push(text);
+        emit(publicId, { kind: 'input', text, mode: 'queued' });
+        return 'queued';
+      })();
+      pending.add(operation);
+      try { return await operation; } finally { pending.delete(operation); }
+    }),
+  });
+  try { await launch(opts.prompt, true); }
+  catch (error) { managedRuns.delete(publicId); finishRunningSession(publicId); throw error; }
+  if (!finished) trackRunningSession(publicId, summary());
+  return publicId;
+}
+
+export async function steerAgentRun(runId: string, text: string, requestId: string): Promise<FollowupMode> {
+  const run = managedRuns.get(runId);
+  if (!run) throw new Error('This response is no longer active. Send your input as a new message.');
+  return run.steer(text, requestId);
 }
 
 async function startTrackedRun(
@@ -231,6 +299,8 @@ async function startTrackedRun(
 }
 
 export function stopAgentRun(runId: string): boolean {
+  const managed = managedRuns.get(runId);
+  if (managed) { managed.stop(); return true; }
   finishRunningSession(runId);
   const codex = codexRuns.get(runId);
   if (codex) { codex.stop(); return true; }
@@ -249,6 +319,7 @@ export function stopAgentRun(runId: string): boolean {
 }
 
 export function stopAllAgentRuns(): void {
+  for (const run of managedRuns.values()) run.stop();
   for (const [id, run] of codexRuns) { finishRunningSession(id); run.stop(); }
   for (const id of [...runs.keys()]) stopAgentRun(id);
 }

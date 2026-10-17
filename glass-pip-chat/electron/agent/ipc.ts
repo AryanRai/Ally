@@ -3,7 +3,7 @@ import { app, BrowserWindow, dialog, ipcMain } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
 import { resolveAgentBinary } from './binaries.js';
-import { startAgentRun, stopAgentRun, stopAllAgentRuns } from './runner.js';
+import { startAgentRun, steerAgentRun, stopAgentRun, stopAllAgentRuns } from './runner.js';
 import { listRunningSessions } from './runningSessions.js';
 import { listAgentModels, listAgentSessions, loadAgentSession } from './sessions.js';
 import { watchAgentSessions } from './sessionWatch.js';
@@ -91,6 +91,8 @@ export function registerAgentIpc(getWindow: () => BrowserWindow | null, onConfig
       'desktop',
     );
   });
+
+  ipcMain.handle('agent:steer', (_, runId: string, text: string, requestId: string) => steerAgentRun(runId, text, requestId));
 
   ipcMain.handle('agent:stop', (_, runId: string) => stopAgentRun(runId));
 

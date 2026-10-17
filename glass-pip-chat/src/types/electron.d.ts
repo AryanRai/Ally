@@ -94,6 +94,7 @@ export interface PipAPI {
       /** Image files shown to the agent (e.g. a circled screen region) */
       images?: string[];
     }) => Promise<string>;
+    steer: (runId: string, text: string, requestId: string) => Promise<'steered' | 'queued'>;
     stop: (runId: string) => Promise<boolean>;
     runningSessions: () => Promise<AgentSessionSummary[]>;
     listSessions: (provider: AgentProvider, limit?: number) => Promise<AgentSessionSummary[]>;

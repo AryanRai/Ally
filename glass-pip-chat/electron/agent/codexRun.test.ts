@@ -109,6 +109,15 @@ describe('Codex turn lifecycle', () => {
     expect(rpc.close).toHaveBeenCalledTimes(1);
     expect(events.filter(e => e.kind === 'done')).toHaveLength(1);
   });
+  it('steers only its active turn without changing permission or interrupting', async () => {
+    const rpc = server(); const run = runCodexTurn(opts, () => {}); await flush();
+    rpc.request.mockResolvedValueOnce({ turnId: 'turn' } as any);
+    expect(await run.steer('also check reconnect')).toBe(true);
+    expect(rpc.request).toHaveBeenLastCalledWith('turn/steer', { threadId: 'thread', expectedTurnId: 'turn', input: [{ type: 'text', text: 'also check reconnect' }] });
+    expect(rpc.request.mock.calls.some(([method]) => method === 'turn/interrupt')).toBe(false);
+    rpc.onNotification?.('turn/completed', { threadId: 'thread', turn: { status: 'completed' } });
+    await expect(run.steer('too late')).rejects.toThrow('finished');
+  });
   it('interrupts the actual turn, then force-closes a stalled cancellation', async () => {
     vi.useFakeTimers(); const rpc = server(); const events: AgentEvent[] = [];
     const run = runCodexTurn(opts, e => events.push(e));

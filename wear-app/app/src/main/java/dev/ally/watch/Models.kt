@@ -47,6 +47,10 @@ data class WatchStep(val id: String, val name: String, val status: String, val d
     }
 }
 data class WatchState(
+    val inputRecording: Boolean = false,
+    val inputSending: Boolean = false,
+    val inputStatus: String = "",
+    val inputDraft: String = "",
     val liveSpeech: Boolean = false,
     val liveTranscript: String = "",
     val speaking: Boolean = false,
