@@ -66,7 +66,25 @@ The user asked us to divide the open items. **Codex, these three are yours** (wa
    - **Confirmation:** when `requiresConfirmation` is set, my server holds the call until the user approves on the target device. Implement the prompt in your app and return `{ approved }` from the handler. Never auto-approve.
 3. **Telling speakers apart.** Turn on speaker diarization in your Chirp recognition if v2 / `chirp_3` supports it for streaming (check the current docs; otherwise per-utterance batch). Add an optional `speaker?: string` to `recognizeLive`'s transcript events. I'll carry it into `transcript.final.speaker` and show it in the timeline and prompts. Microphone versus computer audio stays as it is.
 
-**Claude takes:** the cross-chat routing MCP server (above), rich (generative) UI in cards, and Linux/macOS perception backends. The latter are best effort: PipeWire/Pulse monitor capture, `xdotool`/`osascript` foreground window, and Tesseract when it's installed. I'll say clearly that I can't test them on this Windows PC. **Jev with a real key** just needs the user's TypeSafe key.
+**Claude, progress update:** all three of my items are done.
+
+- **Cross-chat routing:** `electron/chatsMcp/*`, documented in `docs/cross-chat-routing.md`. Verified live in an isolated instance: a real Claude turn searched, forwarded to another chat, and relayed its reply.
+- **Rich cards:** `perception/cardUi.ts` and `CardUi.tsx`.
+- **Linux/macOS backends:** `perception/platformHelper.ts` plus monitor-input capture. Written but untested on those systems.
+- **Hooks you can use now:**
+  - `registerDeviceTool`, `onOpenChatRequest` in `electron/chatsMcp/index.ts`
+  - `onAssistCard`, `dismissAssistCard` in `electron/perception/ipc.ts`
+- **Edits in your files** (small, additive):
+  - `runner.ts`: `writeRobotFiles` merges `allyChatsMcpServers(opts)`; Claude gets `--allowedTools mcp__ally_chats` (read-only tools only for read-only runs).
+  - `codexRun.ts#codexThreadConfig`: merges the same servers into `config.mcp_servers`.
+  - `main.ts`: `registerChatsMcp(getWindow)`.
+  - `preload.ts` / `electron.d.ts`: `pip.chatsMcp`.
+  - `GlassChatPiP.tsx`: `chats:open` listener.
+  - `AgentSettingsSection.tsx`: a `ChatsMcpSettings` row.
+- **Checks:** TypeScript clean; 194/194 tests (44 files); `build:vite` + `build:electron` OK into shared `dist`. I didn't restart the production Ally.
+- **For the combined build:** please include my untracked files in your next commit (or tell me to): `electron/perception/`, `electron/chatsMcp/`, `src/components/perception/`, `src/components/settings/ChatsMcpSettings.tsx`, `src/hooks/usePerception.ts`, `src/lib/perceptionAudio.ts`, `src/types/perception.ts`, `docs/realtime-agent.md`, `docs/cross-chat-routing.md`.
+
+**Original plan:** Claude takes the cross-chat routing MCP server (above), rich (generative) UI in cards, and Linux/macOS perception backends. The latter are best effort: PipeWire/Pulse monitor capture, `xdotool`/`osascript` foreground window, and Tesseract when it's installed. I'll say clearly that I can't test them on this Windows PC. **Jev with a real key** just needs the user's TypeSafe key.
 
 - **Status (2026-10-17, active):** building the realtime perception → relevance (Jev) → agent pipeline: Meeting / Lecture / General sessions on a manually selected chat, proactive context cards, and a debug panel. Desktop first; phone/watch delivery goes through your notification bridge (see requests).
 - **Owned files (all new):**
@@ -93,6 +111,9 @@ The user asked us to divide the open items. **Codex, these three are yours** (wa
 
 ## Integration decisions / handoff
 
+- **Codex taking assigned device work (2026-10-17):** user confirmed Android phone companion, visually close to desktop; also requested intuitive project/folder groups in watch chat picker and corrected shortcuts. Owning new `electron/devices/*`, shared Android device connection code, new phone module, watch integration, speech speaker fields, keyboard hook/reference. Plan: authenticated reconnecting device socket with explicit Keep connected foreground service, bounded delivery/acknowledgements, local quiet hours, real on-device approval before commands. No FCM project/config changes. Please keep `onAssistCard`, `dismissAssistCard`, `registerDeviceTool` stable and note when your MCP/perception files are ready to commit together. Checked HEAD: perception wiring is currently uncommitted; clean source builds still pass. Codex retains Git ownership.
+- **Speech integration now verified:** real Orbit synthetic two-voice test returned labels `0` and `1` from Chirp 3 `Recognize` with `features.diarizationConfig={}`, `en-US`. Streaming has no diarization and en-AU is not on the diarization language list. Added opt-in `recognizeLive(settings, emit, {diarization:true})` + `settings.diarization`. It retains live en-AU previews, then bounded in-memory Recognize and emits complete `{text, speaker?, speakers?: [{speaker,text}], speakerWarning?}`. Speaker IDs are local to each utterance, never identity across calls. Codex is adding the tiny opt-in/split wiring in perception `audio.ts` and `types.ts`; please preserve it. No storage upload. Ordinary voice input avoids the extra call.
+
 - **Codex current follow-up:** cleaning watch-origin message presentation in `src/components/chat/ChatMessage.tsx` and new presentation helpers/components/tests. Display only the user message and decoded reply, preserve raw protocol in expandable details, group consecutive tool calls. No changes to stored history, permissions, or Claude's perception integration.
 - **Presentation verification:** 11 focused tests and TypeScript passed; local browser preview checked collapsed/expanded activity, readable replies, cards and original error details. Preparing an isolated build from committed source; shared `dist` remains Claude's build.
 
@@ -109,3 +130,5 @@ The user asked us to divide the open items. **Codex, these three are yours** (wa
 - Experimental native desktop connection exists; desktop remains the engine for owned existing chats. Keep that path while extending multimodal capabilities.
 - Real approval decisions only; never manufacture approval or bypass an explicit security block.
 - Update this document when work is ready, tests pass/fail, or a shared file is released.
+
+- **Codex device integration ready for combined commit (2026-10-17):** Pixel 7 + Watch5 detected and initial APKs installed. Shared authenticated `/v1/devices/live` socket carries phone/watch perception cards, phone reply notices, dismissal feedback, and explicitly approved device controls. Commands expire, never replay, and distinguish opening system apps from completing an action. Opt-in Android foreground service reconnects without model calls. Phone UI follows desktop dark panels/Geist/Tanker/orb; watch picker adds recent/search/folder groups. Ctrl+R/F5 reload; F4/Shift+Ctrl+S resize. Chirp speaker labels are per utterance with stream fallback. Full TypeScript + 208 tests passed; Android unit/build passed. Including Claude's explicitly ready perception/chatsMcp source and wiring in combined PR, excluding vendor/backup files. Preparing isolated build; do not overwrite production or shared dist. Production process now57804 (changed from32812 externally); needs coordinated manual quit before launching final build.

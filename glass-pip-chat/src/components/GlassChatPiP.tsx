@@ -25,6 +25,10 @@ import type { RobotPulse, RobotStatus } from './glow/RobotAvatar';
 import ChatSidebar from './ChatSidebar';
 import SettingsModal from './SettingsModal';
 import ClaudeLoginDialog from './ClaudeLoginDialog';
+import PerceptionBar from './perception/PerceptionBar';
+import ContextCards from './perception/ContextCards';
+import PerceptionDebug from './perception/PerceptionDebug';
+import { usePerception } from '../hooks/usePerception';
 import { SpeechControls } from './SpeechControls';
 import CollapsedHeader from './chat/CollapsedHeader';
 import ExpandedHeader from './chat/ExpandedHeader';
@@ -52,6 +56,11 @@ export default function GlassChatPiP() {
   const speech = useSpeechService();
   const chats = useChats();
   const external = useExternalSessions();
+  // Realtime meeting / lecture sessions (perception → relevance → agent)
+  const perception = usePerception();
+  const perceptionRef = useRef(perception);
+  perceptionRef.current = perception;
+  const [perceptionDebug, setPerceptionDebug] = useState(false);
 
   const [settingsManager] = useState(() => SettingsManager.getInstance());
   const [appSettings, setAppSettings] = useState<AppSettings>(() => settingsManager.getSettings());
@@ -198,7 +207,7 @@ export default function GlassChatPiP() {
     focusInput: () => (state.collapsed ? document.getElementById('quick-input') : inputRef.current)?.focus(),
     stop: conversation.stop,
     history: inputHistory,
-    isTyping,
+    isTyping: isTyping || externalWorking,
   });
 
   useEffect(() => settingsManager.subscribe(next => {
@@ -211,8 +220,10 @@ export default function GlassChatPiP() {
   // (a new circle interrupts a reply in progress, like voice barge-in)
   const conversationRef = useRef(conversation);
   conversationRef.current = conversation;
-  useEffect(() => window.pip?.circle.onAsk(({ imagePath, thumbnail, prompt }) => {
-    const ask = () => conversationRef.current.send(prompt, 'circle', { image: { path: imagePath, thumbnail } });
+  useEffect(() => window.pip?.circle.onAsk(async ({ imagePath, thumbnail, prompt }) => {
+    const live = perceptionRef.current.status?.session?.state === 'running' ? await perceptionRef.current.api?.context(30_000).catch(() => '') : '';
+    const withContext = live ? `${prompt}\n\n[Recent audio and screen, last 30 s]\n${live}` : prompt;
+    const ask = () => conversationRef.current.send(withContext, 'circle', { image: { path: imagePath, thumbnail } });
     if (conversationRef.current.isTyping) {
       conversationRef.current.stop();
       setTimeout(ask, 300);
@@ -221,6 +232,21 @@ export default function GlassChatPiP() {
     }
   }), []);
 
+
+  // An agent asked Ally to open a chat (ally_open_chat / forward with open_in_ally).
+  // If a reply is streaming here, switch once it finishes.
+  const pendingOpen = useRef<Parameters<typeof conversation.openSession>[0] | null>(null);
+  useEffect(() => window.pip?.chatsMcp?.onOpenChat(req => {
+    const session = { provider: req.provider, id: req.sessionId, title: req.title, cwd: req.cwd, updatedAt: Date.now() };
+    if (conversationRef.current.isTyping) pendingOpen.current = session;
+    else void conversationRef.current.openSession(session);
+  }), []);
+  useEffect(() => {
+    if (conversation.isTyping || !pendingOpen.current) return;
+    const session = pendingOpen.current;
+    pendingOpen.current = null;
+    void conversation.openSession(session);
+  }, [conversation.isTyping]);
 
   // ---- Visual state ----------------------------------------------------------
 
@@ -481,6 +507,8 @@ export default function GlassChatPiP() {
                 transition={{ duration: 0.2 }}
               >
                 {/* Transcript (AI Elements): sticks to the bottom while the agent streams */}
+                <div className="relative flex min-h-0 flex-1 flex-col">
+                <ContextCards perception={perception} />
                 <Conversation className="flex-1 select-text">
                   <ConversationContent className={cn('px-3 py-3', { compact: 'gap-3', normal: 'gap-5', comfortable: 'gap-7' }[appSettings.ui.messageSpacing])}>
                     {messages.length === 0 && !activeIsWorking ? (
@@ -511,6 +539,7 @@ export default function GlassChatPiP() {
                   </ConversationContent>
                   <ConversationScrollButton />
                 </Conversation>
+                </div>
 
                 {activeChat?.sendFailure && <div role="alert" className="border-t border-border px-3 py-2 text-xs text-amber-200">
                   <p>{activeChat.sendFailure.message}</p>
@@ -519,6 +548,7 @@ export default function GlassChatPiP() {
                     <button type="button" className="underline" onClick={() => chats.setSendFailure(activeChat.id)}>Dismiss</button>
                   </div>
                 </div>}
+                <PerceptionBar perception={perception} sessions={external.sessions} onOpenDebug={() => setPerceptionDebug(true)} />
                 <ChatInput
                   ref={inputRef}
                   input={input}
@@ -573,6 +603,7 @@ export default function GlassChatPiP() {
       </motion.div>
 
       <ClaudeLoginDialog />
+      <PerceptionDebug open={perceptionDebug} onOpenChange={setPerceptionDebug} perception={perception} />
 
       <SettingsModal
         isOpen={showSettings}

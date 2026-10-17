@@ -23,6 +23,9 @@ import androidx.wear.compose.material3.Button
 @Composable
 internal fun ChatPicker(model: WatchViewModel, state: WatchState, back: () -> Unit) {
     val scroll = rememberLazyListState()
+    var query by remember { mutableStateOf("") }
+    var expanded by remember(state.chatProvider) { mutableStateOf(setOf<String>()) }
+    val folders = remember(state.chats, query) { chatFolders(state.chats, query) }
     LazyColumn(Modifier.fillMaxSize().background(Ink).bezelScroll(scroll), state = scroll, contentPadding = PaddingValues(horizontal = 25.dp, vertical = 30.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
         item { Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
@@ -38,18 +41,38 @@ internal fun ChatPicker(model: WatchViewModel, state: WatchState, back: () -> Un
             }
         } }
         if (model.busy) item { Text("Finish this turn before switching chats", color = Muted, fontSize = 10.sp) }
-        items(state.chats, key = { it.id }) { chat ->
-            Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(if (chat.id == state.chatId) White.copy(alpha = .12f) else Panel)
-                .clickable(enabled = !model.busy) { model.selectChat(chat.id); back() }.padding(10.dp)) {
-                Text((if (chat.id == state.chatId) "• " else "") + chat.title, color = White, fontSize = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                Text(chat.cwd.substringAfterLast('\\').substringAfterLast('/').ifBlank { chat.provider }, color = Muted, fontSize = 9.sp, maxLines = 1)
-            }
+        item { Text(if (state.chatProvider == "codex") "Codex chats" else "Claude chats", fontFamily = Tanker, fontSize = 20.sp) }
+        item { Field(query, { query = it }, "Find chat or folder") }
+        if (query.isBlank() && state.chats.isNotEmpty()) {
+            item { Text("RECENT", fontFamily = Mono, color = Muted, fontSize = 10.sp, modifier = Modifier.fillMaxWidth()) }
+            items(state.chats.sortedByDescending { it.updatedAt }.take(3), key = { "recent:${it.id}" }) { chat -> ChatChoice(chat, state.chatId, !model.busy) { model.selectChat(chat.id); back() } }
         }
+        item { Text("PROJECTS & FOLDERS", fontFamily = Mono, color = Muted, fontSize = 10.sp, modifier = Modifier.fillMaxWidth()) }
+        folders.forEach { folder ->
+            val open = folder.path in expanded || query.isNotBlank()
+            item(key = "folder:${folder.path}") {
+                Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(Panel).clickable { expanded = if (folder.path in expanded) expanded - folder.path else expanded + folder.path }.padding(12.dp)) {
+                    Text("${if (open) "▾" else "▸"} ${folder.title} · ${folder.chats.size}", color = White, fontSize = 13.sp, maxLines = 2)
+                    if (folder.parent.isNotBlank()) Text(folder.parent, color = Muted, fontSize = 9.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            }
+            if (open) items(folder.chats, key = { "folder-chat:${it.id}" }) { chat -> ChatChoice(chat, state.chatId, !model.busy) { model.selectChat(chat.id); back() } }
+        }
+        if (query.isNotBlank() && folders.isEmpty()) item { Text("No matching chats in the loaded list", color = Muted, fontSize = 11.sp) }
         if (state.loadingChats) item { Text("Loading chats…", color = Muted, fontSize = 11.sp) }
         if (state.chatError.isNotBlank()) item { Text(state.chatError, color = Amber, fontSize = 11.sp); Button(onClick = { model.listChats(state.chatProvider) }) { Text("Retry") } }
         if (!state.loadingChats && state.chats.isEmpty() && state.chatError.isBlank()) item { Text("No chats yet", color = Muted, fontSize = 12.sp) }
         if (state.chatsOffset != null && !state.loadingChats) item { Button(onClick = { model.listChats(state.chatProvider, true) }) { Text("More chats") } }
         item { Button(onClick = back) { Text("Back") } }
+    }
+}
+
+@Composable
+private fun ChatChoice(chat: WatchChat, selected: String?, enabled: Boolean, choose: () -> Unit) {
+    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(if (chat.id == selected) White.copy(alpha = .12f) else Panel)
+        .clickable(enabled = enabled, onClick = choose).padding(10.dp)) {
+        Text((if (chat.id == selected) "✓ " else "") + chat.title, color = White, fontSize = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        Text(chat.cwd.replace('\\', '/').substringAfterLast('/').ifBlank { "Other chats" }, color = Muted, fontSize = 9.sp, maxLines = 1)
     }
 }
 

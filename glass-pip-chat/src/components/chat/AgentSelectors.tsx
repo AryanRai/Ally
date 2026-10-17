@@ -40,14 +40,16 @@ const PERMISSIONS: { id: AgentPermission; label: string; hint: string }[] = [
 const norm = (p?: string) => p?.replace(/[\\/]+/g, '/').replace(/\/$/, '').toLowerCase();
 const folderName = (p: string) => p.split(/[\\/]/).filter(Boolean).at(-1) || p;
 
-function Trigger({ children, title, disabled, danger }: { children: ReactNode; title: string; disabled?: boolean; danger?: boolean }) {
+/** `shrink`: may truncate when the line is tight (model, folder); the others keep their full label. */
+function Trigger({ children, title, disabled, danger, shrink }: { children: ReactNode; title: string; disabled?: boolean; danger?: boolean; shrink?: boolean }) {
   return (
     <DropdownMenuTrigger asChild disabled={disabled}>
       <button
         type="button"
         title={title}
         className={cn(
-          'px-label inline-flex min-w-0 items-center gap-0.5 rounded px-1 py-0.5 transition-colors hover:bg-white/8 hover:text-foreground data-[state=open]:bg-white/10 data-[state=open]:text-foreground disabled:pointer-events-none',
+          'px-label inline-flex items-center gap-0.5 rounded px-1 py-0.5 transition-colors hover:bg-white/8 hover:text-foreground data-[state=open]:bg-white/10 data-[state=open]:text-foreground disabled:pointer-events-none',
+          shrink ? 'min-w-0' : 'shrink-0',
           danger && 'text-destructive/90'
         )}
       >
@@ -110,7 +112,7 @@ export default function AgentSelectors({
       <span className="px-label opacity-50">·</span>
 
       <DropdownMenu>
-        <Trigger title="Model" disabled={disabled}>{modelLabel}</Trigger>
+        <Trigger title="Model" disabled={disabled} shrink>{modelLabel}</Trigger>
         <DropdownMenuContent align="start" className="max-h-72 min-w-52 overflow-y-auto">
           <DropdownMenuLabel className="text-[10px] uppercase tracking-wider text-muted-foreground">{AGENT_LABEL[provider]} model</DropdownMenuLabel>
           <Row active={model === 'default'} hint="CLI default" onSelect={() => onModel(`${AGENT_MODEL_PREFIX[provider]}default`)}>Default</Row>
@@ -124,7 +126,7 @@ export default function AgentSelectors({
       <span className="px-label opacity-50">·</span>
 
       <DropdownMenu>
-        <Trigger title={folder} disabled={disabled}>{isHome ? 'Home' : folderName(folder)}</Trigger>
+        <Trigger title={folder} disabled={disabled} shrink>{isHome ? 'Home' : folderName(folder)}</Trigger>
         <DropdownMenuContent align="start" className="min-w-56 max-w-72">
           <DropdownMenuLabel className="text-[10px] uppercase tracking-wider text-muted-foreground">Working folder</DropdownMenuLabel>
           {folders.map(f => (

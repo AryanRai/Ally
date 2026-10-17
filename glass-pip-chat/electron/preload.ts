@@ -153,6 +153,48 @@ const pipAPI = {
     },
   },
 
+  // ally-chats MCP server: cross-chat find / read / forward for every agent
+  chatsMcp: {
+    status: () => ipcRenderer.invoke('chatsMcp:status'),
+    appStatus: () => ipcRenderer.invoke('chatsMcp:appStatus'),
+    addToApps: () => ipcRenderer.invoke('chatsMcp:addToApps'),
+    removeFromApps: () => ipcRenderer.invoke('chatsMcp:removeFromApps'),
+    onOpenChat: (callback: (req: { provider: 'claude' | 'codex'; sessionId: string; title: string; cwd?: string }) => void) => {
+      const handler = (_: any, req: any) => callback(req);
+      ipcRenderer.on('chats:open', handler);
+      return () => ipcRenderer.removeListener('chats:open', handler);
+    },
+  },
+
+  // Realtime perception sessions (electron/perception)
+  perception: {
+    status: () => ipcRenderer.invoke('perception:status'),
+    cards: () => ipcRenderer.invoke('perception:cards'),
+    recent: (ms: number) => ipcRenderer.invoke('perception:recent', ms),
+    context: (ms?: number) => ipcRenderer.invoke('perception:context', ms),
+    start: (opts: Record<string, unknown>) => ipcRenderer.invoke('perception:start', opts),
+    pause: () => ipcRenderer.invoke('perception:pause'),
+    resume: () => ipcRenderer.invoke('perception:resume'),
+    stop: () => ipcRenderer.invoke('perception:stop'),
+    setMode: (mode: string) => ipcRenderer.invoke('perception:setMode', mode),
+    setCapture: (patch: Record<string, boolean>) => ipcRenderer.invoke('perception:setCapture', patch),
+    setQuiet: (quiet: boolean) => ipcRenderer.invoke('perception:setQuiet', quiet),
+    fork: () => ipcRenderer.invoke('perception:fork'),
+    ask: (question: string, contextMs?: number) => ipcRenderer.invoke('perception:ask', question, contextMs),
+    stopTurn: () => ipcRenderer.invoke('perception:stopTurn'),
+    dismiss: (id: string) => ipcRenderer.invoke('perception:dismiss', id),
+    getSettings: () => ipcRenderer.invoke('perception:getSettings'),
+    updateSettings: (patch: Record<string, unknown>) => ipcRenderer.invoke('perception:updateSettings', patch),
+    audioBegin: (source: string, id: string) => ipcRenderer.send('perception:audioBegin', source, id),
+    audioChunk: (id: string, pcm: ArrayBuffer) => ipcRenderer.send('perception:audioChunk', id, pcm),
+    audioEnd: (source: string, id: string) => ipcRenderer.send('perception:audioEnd', source, id),
+    audioError: (source: string, message: string) => ipcRenderer.send('perception:audioError', source, message),
+    onEvent: (callback: (push: any) => void) => {
+      const handler = (_: any, push: any) => callback(push);
+      ipcRenderer.on('perception:event', handler);
+      return () => ipcRenderer.removeListener('perception:event', handler);
+    },
+  },
 };
 
 // Expose the API to the renderer process

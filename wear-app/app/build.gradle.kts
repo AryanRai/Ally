@@ -13,6 +13,7 @@ android {
         versionName = "0.1.0"
     }
     buildFeatures { compose = true; buildConfig = true }
+    sourceSets["main"].kotlin.srcDir("../device-common/src/main/java")
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17

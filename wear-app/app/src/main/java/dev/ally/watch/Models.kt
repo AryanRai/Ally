@@ -10,12 +10,12 @@ data class WatchCard(
 )
 data class WatchAction(val label: String, val prompt: String)
 data class WatchReply(val text: String, val cards: List<WatchCard>)
-data class WatchChat(val id: String, val provider: String, val title: String, val cwd: String)
+data class WatchChat(val id: String, val provider: String, val title: String, val cwd: String, val updatedAt: Long = 0)
 data class ChatMessage(val id: String, val role: String, val reply: WatchReply, val steps: List<WatchStep>, val usage: String)
 
 object ChatParser {
     fun matchesSelection(json: JSONObject, selectedId: String?) = selectedId != null && json.optJSONObject("chat")?.optString("id") == selectedId
-    fun chat(json: JSONObject) = WatchChat(json.getString("id"), json.getString("provider"), json.optString("title", "Chat"), json.optString("cwd"))
+    fun chat(json: JSONObject) = WatchChat(json.getString("id"), json.getString("provider"), json.optString("title", "Chat"), json.optString("cwd"), json.optLong("updatedAt"))
     fun chats(json: JSONObject): List<WatchChat> {
         val rows = json.optJSONArray("chats") ?: return emptyList()
         return (0 until rows.length()).map { chat(rows.getJSONObject(it)) }

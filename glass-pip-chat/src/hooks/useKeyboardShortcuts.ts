@@ -50,12 +50,24 @@ export function useKeyboardShortcuts(actions: ShortcutActions) {
         fn();
       };
 
-      if (mod && event.shiftKey) {
-        const map: Record<string, () => void> = { C: a.toggleCollapse, S: a.openSettings, N: a.newChat, H: a.hide, R: a.cycleSize };
-        if (map[event.key]) return run(map[event.key]);
+      // Standard reload keys must never resize the window. Avoid losing a live
+      // turn or a draft: an explicit decision is required when either exists.
+      if (!event.altKey && ((mod && event.key.toLowerCase() === 'r') || (!mod && event.key === 'F5'))) {
+        return run(() => {
+          const drafts = [...document.querySelectorAll('textarea, input[type="text"], [contenteditable="true"]')];
+          const hasDraft = drafts.some(node => node instanceof HTMLInputElement || node instanceof HTMLTextAreaElement ? !!node.value.trim() : !!node.textContent?.trim());
+          if ((!a.isTyping && !hasDraft) || window.confirm('Reload Ally? Any unsent draft or live reply in this window may be interrupted.')) window.location.reload();
+        });
       }
 
-      const fkeys: Record<string, () => void> = { F1: a.openSettings, F2: a.newChat, F3: a.toggleCollapse, F4: a.cycleSize, F5: a.toggleSidebar };
+      if (mod && event.shiftKey) {
+        // Match main-process global bindings; do not give the same chord a
+        // different meaning depending on whether this window is focused.
+        const map: Record<string, () => void> = { M: a.toggleCollapse, S: a.cycleSize, N: a.newChat, H: a.hide, T: a.toggleContext };
+        if (map[event.key.toUpperCase()]) return run(map[event.key.toUpperCase()]);
+      }
+
+      const fkeys: Record<string, () => void> = { F1: a.openSettings, F2: a.newChat, F3: a.toggleCollapse, F4: a.cycleSize, F6: a.toggleSidebar };
       if (fkeys[event.key]) return run(fkeys[event.key]);
 
       if (event.key === 'Escape') {
@@ -69,7 +81,7 @@ export function useKeyboardShortcuts(actions: ShortcutActions) {
       }
 
       if (mod && !event.shiftKey) {
-        const map: Record<string, () => void> = { n: a.newChat, s: a.openSettings, h: a.hide, w: a.hide, r: a.cycleSize, '.': a.stop };
+        const map: Record<string, () => void> = { n: a.newChat, s: a.openSettings, ',': a.openSettings, h: a.hide, w: a.hide, '.': a.stop };
         const fn = map[event.key.toLowerCase()];
         if (fn) return run(fn);
       }

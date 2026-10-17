@@ -5,3 +5,4 @@ dependencyResolutionManagement {
 }
 rootProject.name = "AllyWear"
 include(":app")
+include(":phone")
