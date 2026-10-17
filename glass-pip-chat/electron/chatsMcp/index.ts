@@ -24,7 +24,11 @@ import { forwarding, serverUrl, setEndpoint, SERVER_NAME } from './registry.js';
 export { allyChatsMcpServers, serverUrl, SERVER_NAME } from './registry.js';
 
 const execFileAsync = promisify(execFile);
-const DEFAULT_PORT = 18766;
+const DEFAULT_PORT = 18767;
+/** 18765 belongs to the watch bridge; 18766 belongs to local speech. */
+export function chatServerPort(port: unknown): number {
+  return typeof port === 'number' && Number.isInteger(port) && port >= 1024 && port <= 65515 && port !== 18765 && port !== 18766 ? port : DEFAULT_PORT;
+}
 const MAX_BODY = 1024 * 1024;
 
 interface Persisted { token: string; port: number }
@@ -145,7 +149,11 @@ function persisted(): Persisted {
   const file = path.join(app.getPath('userData'), 'ally-chats-mcp.json');
   try {
     const p = JSON.parse(fs.readFileSync(file, 'utf8')) as Persisted;
-    if (typeof p.token === 'string' && p.token.length >= 32 && Number.isInteger(p.port)) return p;
+    if (typeof p.token === 'string' && p.token.length >= 32) {
+      const port = chatServerPort(p.port);
+      if (port !== p.port) fs.writeFileSync(file, JSON.stringify({ ...p, port }, null, 2), { mode: 0o600 });
+      return { ...p, port };
+    }
   } catch { /* first run */ }
   const fresh = { token: randomBytes(24).toString('hex'), port: DEFAULT_PORT };
   fs.writeFileSync(file, JSON.stringify(fresh, null, 2), { mode: 0o600 });
@@ -205,6 +213,7 @@ async function startServer(): Promise<void> {
   });
   server.requestTimeout = 15 * 60_000; // forwarded turns may take a while
   for (let port = saved.port; port < saved.port + 20; port++) {
+    if (port === 18765 || port === 18766) continue;
     try {
       await listen(server, port);
       state = { token: saved.token, port, listening: true };
