@@ -1,7 +1,8 @@
 import type { AgentEvent, AgentUsage } from '../agent/types.js';
 import { browserActivity } from '../agent/browserActivity.js';
+import type { DeviceAttachment, DeviceMedia } from './media.js';
 
-export interface WatchActivity { id: string; name: string; status: 'running' | 'done' | 'error' | 'interrupted'; detail: string; kind?: 'browser' | 'other'; context?: string }
+export interface WatchActivity { id: string; name: string; status: 'running' | 'done' | 'error' | 'interrupted'; detail: string; kind?: 'browser' | 'other'; context?: string; attachments?: DeviceAttachment[] }
 export interface ActivityState { steps: WatchActivity[]; usage?: AgentUsage }
 
 function describe(input: Record<string, unknown>): string {
@@ -10,7 +11,7 @@ function describe(input: Record<string, unknown>): string {
   return (typeof target === 'string' ? target : JSON.stringify(input)).slice(0, 1600);
 }
 
-export function recordActivity(state: ActivityState, event: AgentEvent): void {
+export function recordActivity(state: ActivityState, event: AgentEvent, media?: DeviceMedia): void {
   if (event.kind === 'tool_start') {
     const step: WatchActivity = { id: event.id, name: event.name.slice(0, 100), status: 'running', detail: describe(event.input ?? {}), ...(browserActivity(event.name, event.input) ?? (/cua_repl/i.test(event.name) ? { kind: 'other' as const } : {})) };
     const index = state.steps.findIndex(s => s.id === event.id);
@@ -23,6 +24,7 @@ export function recordActivity(state: ActivityState, event: AgentEvent): void {
     const step = state.steps.find(s => s.id === event.id);
     if (step) {
       step.status = event.isError ? 'error' : 'done';
+      if (event.images?.length && media) step.attachments = media.dataUrls(event.images, step.kind === 'browser' ? 'Browser screenshot' : 'Tool image');
       if (event.output) step.detail = `${step.detail}\n\n${event.output.slice(0, 1600)}`.trim();
     }
   } else if (event.kind === 'done') {

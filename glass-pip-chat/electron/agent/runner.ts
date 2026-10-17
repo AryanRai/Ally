@@ -79,13 +79,13 @@ function claudeArgs(opts: AgentRunOptions, robot: { promptFile?: string; mcpFile
 }
 
 /** stdin payload: plain prompt, or a stream-json user message carrying images (Claude). */
-function stdinPayload(opts: AgentRunOptions): string {
+export function stdinPayload(opts: AgentRunOptions): string {
   if (opts.provider !== 'claude' || !opts.images?.length) return opts.prompt;
   const images = opts.images.map(file => ({
     type: 'image',
     source: {
       type: 'base64',
-      media_type: /\.jpe?g$/i.test(file) ? 'image/jpeg' : 'image/png',
+      media_type: /\.jpe?g$/i.test(file) ? 'image/jpeg' : /\.gif$/i.test(file) ? 'image/gif' : /\.webp$/i.test(file) ? 'image/webp' : 'image/png',
       data: fs.readFileSync(file).toString('base64'),
     },
   }));

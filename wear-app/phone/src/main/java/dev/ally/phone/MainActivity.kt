@@ -45,6 +45,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import dev.ally.device.AttachmentView
+import dev.ally.device.AttachmentParser
 import dev.ally.device.DeviceLink
 import kotlinx.coroutines.launch
 import org.json.JSONObject
@@ -73,6 +75,11 @@ class MainActivity : ComponentActivity() {
     override fun onResume() { super.onResume(); DeviceLink.resume(this) }
     override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); setIntent(intent); acceptDestination(intent) }
     private fun acceptDestination(intent: Intent) {
+        if (intent.action == Intent.ACTION_SEND || intent.action == Intent.ACTION_SEND_MULTIPLE) {
+            model.receiveShare(intent)
+            destination = "Chat" to ((destination?.second ?: 0) + 1)
+            intent.action = Intent.ACTION_MAIN; intent.removeExtra(Intent.EXTRA_STREAM); intent.removeExtra(Intent.EXTRA_TEXT); intent.clipData = null
+        }
         intent.getStringExtra("allyPage")?.takeIf { it=="Inbox" || it=="Settings" }?.let {
             destination=it to ((destination?.second ?: 0)+1)
         }
@@ -86,6 +93,13 @@ private fun PhoneApp(model: PhoneModel,destination: Pair<String,Int>?, changeLoo
     val inbox by DeviceLink.inbox.collectAsStateWithLifecycle()
     var page by rememberSaveable { mutableStateOf("Chat") }
     var draft by rememberSaveable(state.selected?.id) { mutableStateOf("") }
+    var submittedDraft by remember { mutableStateOf<Pair<String, String>?>(null) }
+    LaunchedEffect(state.sentSequence) {
+        if (state.sentSequence > 0) {
+            submittedDraft?.let { (original, message) -> if (draft == original && state.sentText == message) draft = "" }
+            submittedDraft = null
+        }
+    }
     val drawer = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
     val keyboard = LocalSoftwareKeyboardController.current
@@ -141,7 +155,7 @@ private fun PhoneApp(model: PhoneModel,destination: Pair<String,Int>?, changeLoo
                         Glyph("down",Modifier.padding(start=12.dp).size(16.dp),Muted)
                     }
                     Conversation(state,model,Modifier.weight(1f),onBrowse={ navigate("Chats") })
-                    Composer(state,draft,{draft=it},model) { model.send(draft); draft=""; keyboard?.hide() }
+                    Composer(state,draft,{draft=it},model) { submittedDraft = draft to listOf(state.share.text, draft).filter { it.isNotBlank() }.joinToString("\n\n"); model.send(draft); keyboard?.hide() }
                 }
                 "Chats" -> ChatLibrary(state,model,Modifier.weight(1f)) { page="Chat" }
                 "Inbox" -> PhoneInbox(inbox,Modifier.weight(1f))
@@ -195,11 +209,13 @@ private fun Conversation(state: PhoneState,model: PhoneModel,modifier: Modifier,
                             ReplyCardView(card, !state.busy && !state.loading && !state.recording && !state.transcribing, model::send)
                         } }
                     }
+                    AttachmentView(message.attachments)
                 }
             }
-            if(state.liveText.isNotBlank()) item(key="live-reply") { Column {
+            if(state.liveText.isNotBlank() || state.liveAttachments.isNotEmpty()) item(key="live-reply") { Column {
                 MicroLabel(if(state.busy) "Reply in progress" else "Latest reply",Modifier.padding(bottom=10.dp))
                 MessageBody(state.liveText)
+                AttachmentView(state.liveAttachments)
             } }
             if(state.busy || state.externalRunning) item(key="activity") { Row(verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(10.dp)) { CircularProgressIndicator(Modifier.size(18.dp),color=Muted,strokeWidth=2.dp); Text(if(state.busy) state.activity else "Thinking · working in another app…",color=Muted,fontSize=12.sp) } }
             if(state.syncStatus.isNotBlank()) item(key="sync-status") { Text(state.syncStatus,color=Muted,fontSize=12.sp) }
@@ -223,6 +239,8 @@ private fun Conversation(state: PhoneState,model: PhoneModel,modifier: Modifier,
 @Composable
 private fun Composer(state: PhoneState,draft: String,onDraft: (String)->Unit,model: PhoneModel,send: ()->Unit) {
     var permissions by remember { mutableStateOf(false) }
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { model.importUris(it) }
+    val editable = !state.loading && !state.pendingSend && !state.importingShare && !state.recording && !state.transcribing
     Column(Modifier.fillMaxWidth().background(Ink).border(BorderStroke(.5.dp,Line)).padding(horizontal=16.dp,vertical=10.dp)) {
         Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically) {
             Box(Modifier.size(4.dp).background(White)); MicroLabel(state.selected?.provider ?: state.provider,Modifier.padding(start=8.dp))
@@ -238,11 +256,23 @@ private fun Composer(state: PhoneState,draft: String,onDraft: (String)->Unit,mod
                 }
             }
         }
-        VoiceControl(state,model,draft.isBlank())
+        if (state.importingShare) Text("Copying shared content…", color=Muted, fontSize=12.sp)
+        if (state.share.text.isNotBlank() || state.share.files.isNotEmpty()) Column(Modifier.fillMaxWidth().heightIn(max=180.dp).verticalScroll(rememberScrollState()),verticalArrangement=Arrangement.spacedBy(4.dp)) {
+            Row(verticalAlignment=Alignment.CenterVertically) {
+                Text("Shared draft · review before sending",fontSize=12.sp,color=Muted,modifier=Modifier.weight(1f))
+                TextButton(model::discardShare,enabled=editable) { Text("Discard") }
+            }
+            if (state.share.text.isNotBlank()) OutlinedTextField(state.share.text,model::shareText,enabled=editable,maxLines=3,modifier=Modifier.fillMaxWidth(),label={Text("Shared text")})
+            state.share.files.forEach { file -> Row(verticalAlignment=Alignment.CenterVertically) {
+                Text(file.name,fontSize=12.sp,maxLines=1,overflow=TextOverflow.Ellipsis,modifier=Modifier.weight(1f))
+                TextButton({model.removeShared(file.key)},enabled=editable) { Text("Remove") }
+            } }
+        }
+        VoiceControl(state,model,draft.isBlank() && state.share.text.isBlank() && state.share.files.isEmpty())
         Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(26.dp)).background(Panel).border(1.dp,if(draft.isNotBlank()) White.copy(alpha=.22f) else Line,RoundedCornerShape(26.dp)).padding(5.dp),verticalAlignment=Alignment.CenterVertically) {
-            Spacer(Modifier.width(9.dp))
-            BasicTextField(draft,{onDraft(it.take(12000))},enabled=!state.recording && !state.transcribing,modifier=Modifier.weight(1f).padding(horizontal=6.dp,vertical=9.dp).heightIn(min=24.dp,max=128.dp).semantics { contentDescription="Message Ally" },textStyle=TextStyle(color=White,fontFamily=Geist,fontSize=14.sp,lineHeight=22.sp),cursorBrush=SolidColor(White),maxLines=5,decorationBox={ inner -> if(draft.isEmpty()) Text("Hey, what’s on your mind?",color=Muted,fontSize=13.sp); inner() })
-            val enabled=(state.selected!=null && draft.isNotBlank() && !state.loading && !state.recording && !state.transcribing)
+            IconButton({picker.launch(arrayOf("*/*"))},enabled=editable,modifier=Modifier.size(48.dp).semantics { contentDescription="Attach images or files" }) { Text("+",fontSize=24.sp) }
+            BasicTextField(draft,{onDraft(it.take(12000))},enabled=editable,modifier=Modifier.weight(1f).padding(horizontal=6.dp,vertical=9.dp).heightIn(min=24.dp,max=128.dp).semantics { contentDescription="Message Ally" },textStyle=TextStyle(color=White,fontFamily=Geist,fontSize=14.sp,lineHeight=22.sp),cursorBrush=SolidColor(White),maxLines=5,decorationBox={ inner -> if(draft.isEmpty()) Text("Hey, what’s on your mind?",color=Muted,fontSize=13.sp); inner() })
+            val enabled=(state.selected!=null && (draft.isNotBlank() || state.share.text.isNotBlank() || state.share.files.isNotEmpty()) && editable)
             if(state.busy) IconButton(onClick=model::stop,modifier=Modifier.size(48.dp).semantics { contentDescription="Stop response" }) { Glyph("stop",Modifier.size(18.dp),Muted) }
             IconButton(onClick=send,enabled=enabled,modifier=Modifier.size(48.dp).semantics { contentDescription=if(state.busy) "Add input without stopping" else "Send message" }) {
                 Box(Modifier.size(34.dp).background(if(enabled) White else Color.White.copy(alpha=.06f),CircleShape),contentAlignment=Alignment.Center) { Glyph("send",Modifier.size(18.dp),if(enabled) Ink else Muted) }
@@ -447,6 +477,7 @@ private fun ChatApproval(request: JSONObject, sending: Boolean, answer: (String,
     val fields = request.optJSONArray("fields"); val actions = request.optJSONArray("actions")
     Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Panel).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text(request.optString("title"), color = Warm); Text(request.optString("detail"), fontSize = 12.sp)
+        AttachmentView(AttachmentParser.list(request))
         for (i in 0 until (fields?.length() ?: 0)) { val field = fields!!.getJSONObject(i); val id = field.getString("id"); val options = field.optJSONArray("options")
             Text(field.optString("label"), fontSize = 12.sp)
             for (j in 0 until (options?.length() ?: 0)) { val option = options!!.getJSONObject(j); FilterChip(selected = values[id] == option.optString("value"), onClick = { values = values + (id to option.optString("value")) }, label = { Text(option.optString("label")) }, enabled = !sending) }

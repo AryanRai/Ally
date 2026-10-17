@@ -1,6 +1,7 @@
 package dev.ally.watch
 
 import org.json.JSONObject
+import dev.ally.device.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -14,7 +15,7 @@ import androidx.wear.compose.material3.Button
 
 data class ApprovalOption(val value: String, val label: String)
 data class ApprovalField(val id: String, val label: String, val required: Boolean, val secret: Boolean, val freeText: Boolean, val options: List<ApprovalOption>)
-data class WatchApproval(val id: String, val title: String, val detail: String, val fields: List<ApprovalField>, val actions: List<ApprovalOption>)
+data class WatchApproval(val id: String, val title: String, val detail: String, val fields: List<ApprovalField>, val actions: List<ApprovalOption>, val attachments: List<DeviceAttachment> = emptyList())
 object ApprovalParser {
     private fun options(json: JSONObject, key: String): List<ApprovalOption> {
         val rows = json.optJSONArray(key) ?: return emptyList()
@@ -27,7 +28,7 @@ object ApprovalParser {
             val f = rows.getJSONObject(it)
             ApprovalField(f.getString("id"), f.getString("label"), f.optBoolean("required"), f.optBoolean("secret"), f.optBoolean("freeText"), options(f, "options"))
         }
-        return WatchApproval(request.getString("id"), request.getString("title"), request.optString("detail"), fields, options(request, "actions"))
+        return WatchApproval(request.getString("id"), request.getString("title"), request.optString("detail"), fields, options(request, "actions"), AttachmentParser.list(request))
     }
     fun complete(request: WatchApproval, values: Map<String, String>) = request.fields.all { !it.required || !values[it.id].isNullOrBlank() }
 }
@@ -41,6 +42,7 @@ internal fun ApprovalScreen(request: WatchApproval, sending: Boolean, error: Str
         horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text(request.title, fontSize = 16.sp)
         if (request.detail.isNotBlank()) Text(request.detail, color = Muted, fontSize = 12.sp)
+        AttachmentView(request.attachments, compact = true)
         request.fields.forEach { field ->
             Text(field.label, fontSize = 12.sp)
             field.options.forEach { option ->

@@ -1,5 +1,7 @@
 package dev.ally.watch
 
+import dev.ally.device.AttachmentView
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -126,6 +128,7 @@ internal fun HistoryScreen(state: WatchState, send: (String) -> Unit, back: () -
                     message.steps.forEach { step -> key(message.id, step.id) { ActivityRow(step) } }
                     if (message.reply.text.isNotBlank()) RichReply(message.reply.text)
                     message.reply.cards.forEachIndexed { index, card -> key(message.id, index, card) { GeneratedCard(card, send, pulse, !working && !state.loadingHistory && state.phase != Phase.RECORDING) } }
+                    AttachmentView(message.attachments, compact = true)
                     val spokenText = remember(message.reply) { message.reply.readAloudText() }
                     if (spokenText.isNotBlank()) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
                         ReplyAudioControl(state.speaking, state.speaking || (!state.muted && state.phase != Phase.RECORDING && !state.inputRecording && !state.inputSending)) {
@@ -134,12 +137,14 @@ internal fun HistoryScreen(state: WatchState, send: (String) -> Unit, back: () -
                     }
                     if (message.usage.isNotBlank()) Text(message.usage, fontFamily = Mono, color = Muted, fontSize = 8.sp)
                 }
+                if (message.role == "user") AttachmentView(message.attachments, compact = true)
             }
         }
-        if (state.liveText.isNotBlank()) item(key = "live-reply") {
+        if (state.liveText.isNotBlank() || state.liveAttachments.isNotEmpty()) item(key = "live-reply") {
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(if (working) "Reply in progress" else "Partial reply", color = Muted, fontSize = 10.sp)
                 RichReply(state.liveText)
+                AttachmentView(state.liveAttachments, compact = true)
             }
         }
         if (working) item {

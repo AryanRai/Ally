@@ -1,8 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import type { AgentPermission } from '../agent/types.js';
+import type { DeviceAttachment } from './media.js';
 
 export interface ApprovalField { id: string; label: string; secret: boolean; required: boolean; options: Array<{ value: string; label: string }>; freeText: boolean }
-export interface WatchApproval { id: string; title: string; detail: string; fields: ApprovalField[]; actions: Array<{ value: string; label: string }>; expiresAt: number }
+export interface WatchApproval { id: string; title: string; detail: string; fields: ApprovalField[]; actions: Array<{ value: string; label: string }>; expiresAt: number; attachments?: DeviceAttachment[] }
 export interface ApprovalAnswer { action: string; values?: Record<string, string> }
 interface Spec { title: string; detail: string; fields: ApprovalField[]; actions: WatchApproval['actions']; answer: (answer: ApprovalAnswer) => unknown; cancel: unknown }
 const cancelAction = { value: 'cancel', label: 'Cancel' };
@@ -71,7 +72,7 @@ export class WatchApprovals {
   private answered = new Map<string, { turnId: string; answer: string }>();
   constructor(private changed: (turnId: string) => void) {}
   list(turnId: string) { return [...this.pending.values()].filter(p => p.turnId === turnId).map(p => p.request); }
-  request(turnId: string, method: string, params: any, signal: AbortSignal): Promise<unknown> {
+  request(turnId: string, method: string, params: any, signal: AbortSignal, attachments: DeviceAttachment[] = []): Promise<unknown> {
     const spec = approvalSpec(method, params);
     if (signal.aborted) return Promise.resolve(spec.cancel);
     if (JSON.stringify(spec).length > 32000) throw new Error('Approval is too large for the watch. Continue on your PC.');
@@ -80,7 +81,7 @@ export class WatchApprovals {
       const settle = (result: unknown) => { clearTimeout(timer); signal.removeEventListener('abort', cancel); this.pending.delete(id); this.changed(turnId); resolve(result); };
       const cancel = () => settle(spec.cancel);
       const timer = setTimeout(cancel, 10 * 60_000);
-      this.pending.set(id, { turnId, spec, request: { id, title: spec.title, detail: spec.detail, fields: spec.fields, actions: spec.actions, expiresAt: Date.now() + 10 * 60_000 }, settle });
+      this.pending.set(id, { turnId, spec, request: { id, title: spec.title, detail: spec.detail, fields: spec.fields, actions: spec.actions, expiresAt: Date.now() + 10 * 60_000, ...(attachments.length ? { attachments } : {}) }, settle });
       signal.addEventListener('abort', cancel, { once: true }); this.changed(turnId);
     });
   }
