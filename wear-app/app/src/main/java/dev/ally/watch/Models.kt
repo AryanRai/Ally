@@ -1,6 +1,8 @@
 package dev.ally.watch
 
 import org.json.JSONObject
+import dev.ally.device.DeviceAttachment
+import dev.ally.device.AttachmentParser
 
 enum class Phase { OFFLINE, IDLE, RECORDING, UPLOADING, THINKING, READY, ERROR }
 typealias WatchCard = dev.ally.device.ReplyCard
@@ -8,7 +10,7 @@ typealias WatchAction = dev.ally.device.ReplyAction
 typealias WatchReply = dev.ally.device.ReplyContent
 
 data class WatchChat(val id: String, val provider: String, val title: String, val cwd: String, val updatedAt: Long = 0)
-data class ChatMessage(val id: String, val role: String, val reply: WatchReply, val steps: List<WatchStep>, val usage: String)
+data class ChatMessage(val id: String, val role: String, val reply: WatchReply, val steps: List<WatchStep>, val usage: String, val attachments: List<DeviceAttachment> = emptyList())
 
 object ChatParser {
     fun matchesSelection(json: JSONObject, selectedId: String?) = selectedId != null && json.optJSONObject("chat")?.optString("id") == selectedId
@@ -21,7 +23,7 @@ object ChatParser {
         val rows = json.optJSONArray("messages") ?: return emptyList()
         return (0 until rows.length()).map { index ->
             val row = rows.getJSONObject(index)
-            ChatMessage(row.getString("id"), row.getString("role"), CardParser.parse(row), ActivityParser.steps(row), ActivityParser.usage(row))
+            ChatMessage(row.getString("id"), row.getString("role"), CardParser.parse(row), ActivityParser.steps(row), ActivityParser.usage(row), AttachmentParser.list(row))
         }
     }
 }
@@ -81,6 +83,7 @@ data class WatchState(
     val detail: String = "Connecting to Ally…",
     val transcript: String = "",
     val liveText: String = "",
+    val liveAttachments: List<DeviceAttachment> = emptyList(),
     val reply: WatchReply = WatchReply("", emptyList()),
     val steps: List<WatchStep> = emptyList(),
     val usage: String = "",

@@ -14,12 +14,14 @@ android {
     }
     buildFeatures { compose = true; buildConfig = true }
     sourceSets["main"].kotlin.srcDir("../device-common/src/main/java")
+    sourceSets["main"].res.srcDir("../device-common/src/main/res")
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
 }
 dependencies {
+    implementation("io.coil-kt:coil-compose:2.7.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("androidx.activity:activity-compose:1.10.1")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.9.1")

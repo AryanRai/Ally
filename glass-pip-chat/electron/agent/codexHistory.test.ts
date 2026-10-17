@@ -1,5 +1,8 @@
 // @vitest-environment node
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 vi.mock('./thumbs.js', () => ({ thumbnails: (images?: string[]) => images?.length ? images : undefined }));
 vi.mock('./codexMigration.js', () => ({ mappedCodexSession: (id: string) => id, codexMigrationAliases: () => ({}) }));
 import { CodexRpc } from './codexRpc';
@@ -8,6 +11,17 @@ import { readCodexActivity } from './codexActivity';
 vi.mock('./codexActivity.js', () => ({ readCodexActivity: vi.fn(async () => undefined) }));
 afterEach(() => { closeCodexHistory(); vi.restoreAllMocks(); });
 describe('API history', () => {
+  it('retains native imageView screenshots and safely ignores expired image files', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ally-native-image-'));
+    try {
+      const file = path.join(root, 'screenshot.png');
+      const bytes = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a5WQAAAAASUVORK5CYII=', 'base64');
+      fs.writeFileSync(file, bytes);
+      const messages = codexHistoryMessages([{ status: 'completed', items: [{ type: 'imageView', id: 'image', path: file }, { type: 'imageView', id: 'expired', path: path.join(root, 'missing.png') }] }], 1);
+      expect(messages[0].segments?.[0].toolExecution?.images).toEqual([`data:image/png;base64,${bytes.toString('base64')}`]);
+      expect(messages[0].segments?.[1].toolExecution?.images).toBeUndefined();
+    } finally { fs.rmSync(root, { recursive: true, force: true }); }
+  });
   it('reconciles only the matching live turn, keeps previous Stops, and revisions change on actual Stop', async () => {
     const request = vi.fn(async (method: string) => method === 'thread/read'
       ? { thread: { historyMode: 'paginated', cwd: '/work', createdAt: 1, path: '/rollout' } }

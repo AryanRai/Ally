@@ -5,8 +5,9 @@ import type { AgentHistoryMessage, AgentProvider, AgentSessionSnapshot, AgentSes
 import { parseWatchReply, type WatchReply } from './protocol.js';
 import type { ActivityState } from './activity.js';
 import { browserActivity } from '../agent/browserActivity.js';
+import type { DeviceAttachment, DeviceMedia } from './media.js';
 
-export interface WatchMessage extends WatchReply { id: string; role: 'user' | 'assistant'; timestamp: number; steps?: ActivityState['steps']; usage?: AgentUsage }
+export interface WatchMessage extends WatchReply { id: string; role: 'user' | 'assistant'; timestamp: number; steps?: ActivityState['steps']; usage?: AgentUsage; attachments?: DeviceAttachment[] }
 export interface WatchChat { id: string; provider: AgentProvider; title: string; cwd: string; sessionId?: string; updatedAt: number; messages: WatchMessage[] }
 interface Dependencies {
   list: (provider: AgentProvider, limit: number) => Promise<AgentSessionSummary[]>;
@@ -15,11 +16,14 @@ interface Dependencies {
 export const chatSummary = ({ messages: _messages, ...chat }: WatchChat) => chat;
 const userText = chatUserText;
 
-export function watchHistory(messages: AgentHistoryMessage[]): WatchMessage[] {
+export function watchHistory(messages: AgentHistoryMessage[], media?: DeviceMedia): WatchMessage[] {
   return messages.map((m, index) => ({
     id: `history-${index}`, role: m.role, timestamp: m.timestamp,
     ...(m.role === 'user' ? { text: userText(m.content), components: [] } : parseWatchReply(m.content || m.segments?.filter(s => s.type === 'text').map(s => s.content).join('\n') || '')),
     usage: m.usage,
+    ...(media ? { attachments: [...media.dataUrls(m.images, 'Attached image'),
+      ...(m.role === 'assistant' ? media.markdown(m.content) : []),
+      ...m.segments?.flatMap(s => media.dataUrls(s.toolExecution?.images, 'Tool screenshot')) ?? []].filter((asset, i, all) => all.findIndex(a => a.id === asset.id) === i).slice(0, 12) } : {}),
     steps: m.segments?.flatMap(s => s.toolExecution ? [{ id: s.toolExecution.id, name: s.toolExecution.name,
       ...(browserActivity(s.toolExecution.name, s.toolExecution.parameters) ?? (/cua_repl/i.test(s.toolExecution.name) ? { kind: 'other' as const } : {})),
       status: s.toolExecution.status === 'executing' ? 'running' as const : s.toolExecution.status === 'error' ? 'error' as const : 'done' as const,
@@ -30,7 +34,7 @@ export function watchHistory(messages: AgentHistoryMessage[]): WatchMessage[] {
 /** Stable watch identities link to native sessions; reads never acquire a writer. */
 export class WatchConversations {
   private chats: WatchChat[] = [];
-  constructor(private file: string, private deps: Dependencies, legacy: Partial<Record<AgentProvider, string>>, cwd: string) {
+  constructor(private file: string, private deps: Dependencies, legacy: Partial<Record<AgentProvider, string>>, cwd: string, private media?: DeviceMedia) {
     try { this.chats = JSON.parse(fs.readFileSync(file, 'utf8')); }
     catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw new Error('Watch chat history could not be read'); }
     for (const provider of ['codex', 'claude'] as const) {
@@ -64,7 +68,7 @@ export class WatchConversations {
     const sessionId = snapshot.sessionId ?? match[2];
     const linked = this.chats.find(c => c.provider === provider && c.sessionId === sessionId);
     if (linked) return linked;
-    const messages = watchHistory(snapshot.messages);
+    const messages = watchHistory(snapshot.messages, this.media);
     const chat: WatchChat = { id, provider, sessionId, cwd: snapshot.cwd ?? '', title: snapshot.title || messages.find(m => m.role === 'user')?.text.slice(0, 80) || `${provider} chat`, updatedAt: messages.at(-1)?.timestamp || Date.now(), messages };
     this.chats.push(chat); this.save(); return chat;
   }
@@ -74,7 +78,15 @@ export class WatchConversations {
       chat.sessionId = snapshot.sessionId ?? chat.sessionId;
       chat.cwd = snapshot.cwd ?? chat.cwd;
       chat.title = snapshot.title ?? chat.title;
-      chat.messages = watchHistory(snapshot.messages);
+      const rebuilt = watchHistory(snapshot.messages, this.media);
+      // Native history may omit uploaded file metadata; preserve it on the matching user message.
+      const remaining = chat.messages.filter(m => m.role === 'user');
+      for (const message of rebuilt) if (message.role === 'user') {
+        const index = remaining.findIndex(m => m.text === message.text);
+        const saved = index < 0 ? undefined : remaining.splice(index, 1)[0];
+        if (saved?.attachments?.length) message.attachments = [...new Map([...(message.attachments ?? []), ...saved.attachments!].map(a => [a.id, a])).values()];
+      }
+      chat.messages = rebuilt;
       this.save();
     }
     return chat.messages;
@@ -117,8 +129,8 @@ export class WatchConversations {
     return { chats: [...rows.values()].sort((a, b) => b.updatedAt - a.updatedAt) };
   }
   link(chat: WatchChat, sessionId: string) { chat.sessionId = sessionId; this.save(); }
-  record(chat: WatchChat, transcript: string, reply: WatchReply, activity: ActivityState, turnId: string) {
-    chat.messages.push({ id: `${turnId}-user`, role: 'user', text: transcript, components: [], timestamp: Date.now() }, { id: `${turnId}-assistant`, role: 'assistant', ...reply, steps: activity.steps, usage: activity.usage, timestamp: Date.now() });
+  record(chat: WatchChat, transcript: string, reply: WatchReply, activity: ActivityState, turnId: string, uploads: DeviceAttachment[] = []) {
+    chat.messages.push({ id: `${turnId}-user`, role: 'user', text: transcript, attachments: uploads, components: [], timestamp: Date.now() }, { id: `${turnId}-assistant`, role: 'assistant', ...reply, attachments: [...activity.steps.flatMap(s => s.attachments ?? []), ...this.media?.markdown(reply.text) ?? []].slice(0, 12), steps: activity.steps, usage: activity.usage, timestamp: Date.now() });
     if (chat.title === 'New watch chat') chat.title = transcript.slice(0, 80);
     chat.updatedAt = Date.now(); this.save();
   }

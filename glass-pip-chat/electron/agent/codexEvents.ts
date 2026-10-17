@@ -1,4 +1,5 @@
 import { extractImages, stringifyToolOutput } from './parsers.js';
+import { localImageDataUrl } from './imageFile.js';
 import type { AgentEvent, AgentUsage } from './types.js';
 
 /** Normalizes the documented app-server item stream, without duplicating deltas on completion. */
@@ -64,6 +65,10 @@ export class CodexEventParser {
       if (complete) {
         const content = i.result?.content ?? i.contentItems ?? i.output;
         const images = extractImages(content);
+        if (i.type === 'imageView' && typeof i.path === 'string') {
+          const image = localImageDataUrl(i.path);
+          if (image) images.push(image);
+        }
         // App-server image items carry a URL rather than an MCP image block.
         for (const c of Array.isArray(content) ? content : []) if (c.type === 'image' && c.imageUrl?.startsWith('data:')) images.push(c.imageUrl);
         if (i.type === 'imageGeneration' && i.result) images.push(`data:image/png;base64,${i.result}`);

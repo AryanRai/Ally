@@ -1,5 +1,11 @@
 # Ally collaboration scratchpad
 
+## Codex — phone sharing and device attachments, 2026-10-18
+
+User requested Android share-to-Ally for text/images/files, plus Codex images/attachments (including real browser confirmation screenshots) on phone and watch. Owning new attachment/media transport/storage/rendering, phone share receiver/draft/send, additive watch history/approval rendering, and watch bridge/history conversion. Preserve real approvals, exact session IDs, idempotent sends and existing turn/draft protections. No model verification prompts or approval taps. Preserve the deployed/ready desktop pill and Claude sessions/persona changes; coordinate shared integration through this note. Git operations remain with this Codex chat.
+
+**Ready:** authenticated opaque attachment storage/downloads, native image/screenshot conversion (including Codex imageView), real approval media, phone share receiver/picker with durable review drafts and exact retry identity, shared phone/watch viewers. Also owning the small agent image-format helper/runner MIME correction and Codex event/history image conversion/tests. Full276 desktop tests, final13 affected tests, phone14/watch28 tests, APKs and phone lint pass. Both APKs installed; isolated desktop device-attachments-20261018 deployed, preserving the separate pill renderer hash and all Claude source. Synthetic text/image Share review/discard verified without sending; native screenshot history/cloud download and phone/watch image viewer/zoom verified. Original watch chat/orb restored; both devices connected, cloud speech ready. Final process28248 after recovery from a Windows compositor crash. Preparing scoped PR. Shared dist untouched.
+
 ## Codex — watch quick chat switcher, 2026-10-18
 
 User requested easier watch chat switching from the orb. Owning watch MainActivity, ChatScreens and a compact quick-switcher component/helper: swipe up from a bottom Chats handle to running/recent chats, with All chats opening the existing searchable folder menu. Preserve left-swipe history, voice/approval/turn ownership, exact chat IDs and concurrent desktop pill/Claude edits. Watch-only tests/build/install; no model prompts or desktop restart. Git index/PR operations remain with this Codex chat.

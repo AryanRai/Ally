@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import fs from 'node:fs';
+import { localImageDataUrl } from './imageFile.js';
 import { CodexRpc } from './codexRpc.js';
 import { CodexEventParser } from './codexEvents.js';
 import { codexMigrationAliases, mappedCodexSession } from './codexMigration.js';
@@ -97,9 +97,8 @@ function userImages(content: any[]): string[] {
   for (const c of content) {
     if (c.type === 'image' && c.url?.startsWith('data:')) images.push(c.url);
     if (c.type === 'localImage' && c.path) {
-      try {
-        if (fs.statSync(c.path).size <= 20 * 1024 * 1024) images.push(`data:image/${/\.jpe?g$/i.test(c.path) ? 'jpeg' : 'png'};base64,${fs.readFileSync(c.path).toString('base64')}`);
-      } catch { /* Attachment may no longer exist. */ }
+      const image = localImageDataUrl(c.path);
+      if (image) images.push(image);
     }
   }
   return images;

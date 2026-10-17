@@ -9,9 +9,11 @@ android {
     buildFeatures { compose = true; buildConfig = true }
     sourceSets["main"].kotlin.srcDir("../device-common/src/main/java")
     sourceSets["main"].res.srcDir("../app/src/main/res")
+    sourceSets["main"].res.srcDir("../device-common/src/main/res")
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
 }
 dependencies {
+    implementation("io.coil-kt:coil-compose:2.7.0")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20250517")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.2")
