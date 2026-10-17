@@ -25,6 +25,15 @@ export interface AgentRunOptions {
   robot?: AgentRobotContext;
   /** PNG/JPEG files to show the agent (e.g. a circled screen region) */
   images?: string[];
+  /** Short auxiliary requests such as greetings must not create saved chats. */
+  ephemeral?: boolean;
+}
+
+export interface AgentSessionSnapshot {
+  cwd?: string;
+  messages: AgentHistoryMessage[];
+  revision: string;
+  unchanged?: boolean;
 }
 
 export type AgentEvent =

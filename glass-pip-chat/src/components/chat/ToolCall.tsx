@@ -38,6 +38,9 @@ export function describeTool(tool: ToolExecution): Described {
   const lower = name.toLowerCase();
   const path = str(p.file_path) ?? str(p.path) ?? str(p.notebook_path);
 
+  if ((lower === 'exec' || lower === 'functions.exec') && str(p.input)) {
+    return { done: 'Ran', running: 'Running', target: 'script', command: str(p.input) };
+  }
   if (['bash', 'shell', 'powershell', 'run_command', 'exec'].includes(lower) || str(p.command) || str(p.cmd)) {
     const command = unwrapShell(str(p.command) ?? str(p.cmd) ?? '');
     return { done: 'Ran', running: 'Running', target: command, mono: true, command };

@@ -191,10 +191,16 @@ const pipAPI = {
     getConfig: () => ipcRenderer.invoke('agent:getConfig'),
     updateConfig: (patch: Record<string, unknown>) => ipcRenderer.invoke('agent:updateConfig', patch),
     listModels: (provider: 'claude' | 'codex') => ipcRenderer.invoke('agent:listModels', provider),
+    greeting: (provider: 'claude' | 'codex', model: string) => ipcRenderer.invoke('agent:greeting', provider, model),
     send: (opts: Record<string, unknown>) => ipcRenderer.invoke('agent:send', opts),
     stop: (runId: string) => ipcRenderer.invoke('agent:stop', runId),
     listSessions: (provider: 'claude' | 'codex', limit?: number) => ipcRenderer.invoke('agent:listSessions', provider, limit),
-    loadSession: (provider: 'claude' | 'codex', id: string) => ipcRenderer.invoke('agent:loadSession', provider, id),
+    loadSession: (provider: 'claude' | 'codex', id: string, revision?: string) => ipcRenderer.invoke('agent:loadSession', provider, id, revision),
+    onSessionsChanged: (callback: (provider: 'claude' | 'codex') => void) => {
+      const handler = (_: any, provider: 'claude' | 'codex') => callback(provider);
+      ipcRenderer.on('agent:sessionsChanged', handler);
+      return () => ipcRenderer.removeListener('agent:sessionsChanged', handler);
+    },
     pickFolder: (current?: string) => ipcRenderer.invoke('agent:pickFolder', current),
     onEvent: (callback: (data: { runId: string; event: any }) => void) => {
       const handler = (_: any, data: { runId: string; event: any }) => callback(data);

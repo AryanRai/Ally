@@ -9,7 +9,7 @@ export interface StreamParser {
 export function stringifyToolOutput(content: unknown): string {
   if (typeof content === 'string') return content;
   if (Array.isArray(content)) {
-    return content.map((c: any) => (c?.type === 'text' ? c.text : c?.type ? `[${c.type}]` : '')).join('\n');
+    return content.map((c: any) => (['text', 'input_text', 'output_text'].includes(c?.type) ? c.text : c?.type ? `[${c.type}]` : '')).join('\n');
   }
   return content == null ? '' : JSON.stringify(content);
 }

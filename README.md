@@ -65,6 +65,10 @@ Appearance: open **Settings → Orb, glow & robot**. Changes apply immediately a
 
 Existing sessions appear under project folders in the sidebar (`cc` for Claude Code, `cx` for Codex). Usage and reasoning appear only when recorded by the agent; Ally does not estimate missing costs or recover hidden reasoning. Codex file-change events without patch text show the changed file list.
 
+Open linked chats follow changes from the Claude Code / Codex app automatically. File notifications refresh the transcript as it is written, with a two-second polling fallback. Codex continuation files are combined into one conversation. Ally pauses disk refresh while it is running its own turn, and switching chats discards outdated refresh results. External updates appear at the granularity the engine saves to disk; unflushed token deltas are not available to this reader.
+
+Input greetings are written by the selected engine/model in a separate unsaved request and cached for six hours. If the engine is unavailable, the input shows a neutral “Ask Codex…” or “Ask Claude Code…” hint.
+
 ## How a turn works
 
 1. The chat's agent and working folder are shown under the input; the first message starts a new agent session (earlier non-agent turns are handed over as a transcript).

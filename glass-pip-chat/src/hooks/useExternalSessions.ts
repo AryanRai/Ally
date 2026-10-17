@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import type { AgentSessionSummary } from '@/types/agent';
 
 const LIMIT_PER_AGENT = 80;
-const REFRESH_MS = 60_000;
+const REFRESH_MS = 15_000;
 
 /**
  * Sessions started in the Claude Code / Codex apps (or CLIs), read from their
@@ -24,9 +24,16 @@ export function useExternalSessions() {
   useEffect(() => {
     void refresh();
     const interval = setInterval(refresh, REFRESH_MS);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const unsubscribe = window.pip?.agent?.onSessionsChanged(() => {
+      if (timer) return;
+      timer = setTimeout(() => { timer = undefined; void refresh(); }, 1500);
+    });
     window.addEventListener('focus', refresh);
     return () => {
       clearInterval(interval);
+      clearTimeout(timer);
+      unsubscribe?.();
       window.removeEventListener('focus', refresh);
     };
   }, [refresh]);

@@ -6,17 +6,10 @@ export interface UISettings {
   borderRadius: 'none' | 'sm' | 'md' | 'lg' | 'xl' | '2xl' | '3xl';
 }
 
-export interface GreetingSettings {
-  customGreeting: string;
-  useRandomGreeting: boolean;
-  randomGreetings: string[];
-}
-
 export interface AppSettings {
   ui: UISettings;
   theme: 'light' | 'dark';
   contextToggleEnabled: boolean;
-  greeting?: GreetingSettings;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -29,17 +22,4 @@ export const DEFAULT_SETTINGS: AppSettings = {
   },
   theme: 'dark',
   contextToggleEnabled: true,
-  greeting: {
-    customGreeting: 'Balalalala',
-    useRandomGreeting: false,
-    randomGreetings: [
-      'Balalalala',
-      'Beep boop!',
-      'Ready to chat!',
-      'What\'s on your mind?',
-      'Hello there!',
-      'Let\'s talk!',
-      'How can I help?'
-    ]
-  }
 };

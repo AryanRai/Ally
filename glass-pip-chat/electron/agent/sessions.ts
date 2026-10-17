@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { extractImages, stringifyToolOutput } from './parsers.js';
 import { thumbnails } from './thumbs.js';
-import type { AgentHistoryMessage, AgentModel, AgentProvider, AgentSessionSummary, AgentToolExecution, AgentUsage } from './types.js';
+import type { AgentHistoryMessage, AgentModel, AgentProvider, AgentSessionSummary, AgentToolExecution, AgentUsage, AgentSessionSnapshot } from './types.js';
 
 // ---------------------------------------------------------------------------
 // Models
@@ -75,15 +75,19 @@ function claudeSessionFiles(): Array<{ file: string; mtime: number }> {
 function firstUserText(content: any): string {
   if (typeof content === 'string') return cleanUserText(content);
   if (Array.isArray(content)) {
-    return cleanUserText(content.filter((b: any) => b.type === 'text').map((b: any) => b.text).join('\n'));
+    return cleanUserText(content.filter((b: any) => b.type === 'text' || b.type === 'input_text').map((b: any) => b.text).join('\n'));
   }
   return '';
 }
 
+const claudeSummaryCache = new Map<string, { revision: string; summary: AgentSessionSummary | null }>();
 function listClaudeSessions(limit: number): AgentSessionSummary[] {
   const out: AgentSessionSummary[] = [];
   for (const { file, mtime } of claudeSessionFiles()) {
     if (out.length >= limit) break;
+    const revision = fileRevision([file]);
+    const cached = claudeSummaryCache.get(file);
+    if (cached?.revision === revision) { if (cached.summary) out.push(cached.summary); continue; }
     const lines = readJsonl(file);
     let title = '';
     let fallback = '';
@@ -99,20 +103,22 @@ function listClaudeSessions(limit: number): AgentSessionSummary[] {
         if (!fallback && l.type === 'user' && !l.isMeta) fallback = firstUserText(l.message?.content);
       }
     }
-    if (!hasConversation) continue;
-    out.push({
+    if (!hasConversation) { claudeSummaryCache.set(file, { revision, summary: null }); continue; }
+    const summary: AgentSessionSummary = {
       provider: 'claude',
       id: path.basename(file, '.jsonl'),
       title: (title && title !== 'Chat' ? title : fallback || title || 'Untitled').slice(0, 80),
       cwd,
       updatedAt: mtime,
-    });
+    };
+    claudeSummaryCache.set(file, { revision, summary });
+    out.push(summary);
   }
   return out;
 }
 
-function codexRolloutFiles(): Map<string, string> {
-  const map = new Map<string, string>();
+function codexRolloutFiles(): Map<string, string[]> {
+  const map = new Map<string, string[]>();
   const walk = (dir: string, depth: number) => {
     let entries: fs.Dirent[] = [];
     try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
@@ -121,13 +127,74 @@ function codexRolloutFiles(): Map<string, string> {
       if (ent.isDirectory() && depth < 4) walk(p, depth + 1);
       else if (ent.isFile() && ent.name.endsWith('.jsonl')) {
         const ids = ent.name.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi) ?? [];
-        for (const id of ids) if (!map.has(id)) map.set(id, p);
+        // Codex desktop continuations are <thread-id>_<continuation-id>.jsonl.
+        // They belong to the original thread, not a separate sidebar entry.
+        if (ids[0]) map.set(ids[0], [...(map.get(ids[0]) ?? []), p]);
       }
     }
   };
   walk(path.join(codexDir(), 'sessions'), 0);
   walk(path.join(codexDir(), 'archived_sessions'), 0);
   return map;
+}
+
+/** Merge continuation files chronologically, deduplicating repeated response items. */
+export function mergeSessionRecords(parts: any[][]): any[] {
+  // A continuation can replay the opening messages with new IDs. Remove only
+  // a shared prefix across files; repeated user messages within a file stay intact.
+  const visibleKey = (r: any): string | undefined => {
+    const p = r.payload;
+    if (r.type !== 'response_item' || p?.type !== 'message' || !['user', 'assistant'].includes(p.role)) return;
+    const text = p.role === 'user' ? firstUserText(p.content) : (p.content ?? []).map((c: any) => c.text ?? '').join('\n').trim();
+    const images = extractImages(p.content);
+    if (!text && !images.length) return;
+    return JSON.stringify([p.role, text, images]);
+  };
+  const merged: any[] = [];
+  for (const part of parts) {
+    // Desktop may save a draft in the root file, then start a continuation
+    // with the expanded prompt. Prefer that complete prompt only while the
+    // root has a single user message and no assistant activity yet.
+    const visible = merged.filter(r => visibleKey(r));
+    const opening = part.find(r => visibleKey(r));
+    if (visible.length === 1 && visible[0].payload.role === 'user' && opening?.payload.role === 'user'
+      && !merged.some(r => r.type === 'response_item' && r.payload?.role !== 'user' && r.payload?.role !== 'developer' && r.payload?.role !== 'system')) {
+      const before = firstUserText(visible[0].payload.content);
+      const after = firstUserText(opening.payload.content);
+      if (before && after.length > before.length && after.startsWith(before)
+        && JSON.stringify(extractImages(visible[0].payload.content)) === JSON.stringify(extractImages(opening.payload.content))) {
+        merged[merged.indexOf(visible[0])] = opening;
+      }
+    }
+    const prefix = merged.map(visibleKey).filter(Boolean);
+    let index = 0;
+    let replay = true;
+    for (const record of part) {
+      const key = visibleKey(record);
+      if (key && replay) {
+        if (key === prefix[index]) { index++; continue; }
+        replay = false;
+      }
+      merged.push(record);
+    }
+  }
+  const records = merged.sort((a, b) => String(a.timestamp ?? '').localeCompare(String(b.timestamp ?? '')));
+  const seen = new Set<string>();
+  return records.filter(record => {
+    const p = record.payload;
+    if (record.type !== 'response_item' || !(p?.id || p?.call_id)) return true;
+    const key = `${p.type}:${p.id || p.call_id}:${JSON.stringify(p)}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function fileRevision(files: string[]): string {
+  return files.map(file => {
+    try { const stat = fs.statSync(file); return `${file}:${stat.size}:${stat.mtimeMs}`; }
+    catch { return `${file}:missing`; }
+  }).join('|');
 }
 
 function readFirstLine(file: string): any {
@@ -151,10 +218,12 @@ function listCodexSessions(limit: number): AgentSessionSummary[] {
   }
   const files = codexRolloutFiles();
   const out: AgentSessionSummary[] = [];
-  for (const [id, info] of index) {
-    const file = files.get(id);
+  for (const [id, paths] of files) {
+    const info = index.get(id);
+    const file = paths[0];
     const meta = file ? readFirstLine(file) : null;
-    out.push({ provider: 'codex', id, title: info.title.slice(0, 80), cwd: meta?.payload?.cwd, updatedAt: info.updatedAt });
+    const updatedAt = Math.max(info?.updatedAt ?? 0, ...paths.map(p => { try { return fs.statSync(p).mtimeMs; } catch { return 0; } }));
+    out.push({ provider: 'codex', id, title: (info?.title ?? 'Codex chat').slice(0, 80), cwd: meta?.payload?.cwd, updatedAt });
   }
   return out.sort((a, b) => b.updatedAt - a.updatedAt).slice(0, limit);
 }
@@ -164,8 +233,16 @@ export function listAgentSessions(provider: AgentProvider, limit = 40): AgentSes
 }
 
 /** Rebuild a session's visible conversation (user turns + assistant text and tool pills). */
-export function loadAgentSession(provider: AgentProvider, id: string): { cwd?: string; messages: AgentHistoryMessage[] } {
-  return provider === 'claude' ? loadClaudeSession(id) : loadCodexSession(id);
+export function loadAgentSession(provider: AgentProvider, id: string, previousRevision?: string): AgentSessionSnapshot {
+  const files = provider === 'claude'
+    ? claudeSessionFiles().filter(f => path.basename(f.file, '.jsonl') === id).map(f => f.file)
+    : codexRolloutFiles().get(id) ?? [];
+  if (!files.length) throw new Error(`${provider} session ${id} not found`);
+  const revision = fileRevision(files);
+  if (revision === previousRevision) return { revision, unchanged: true, messages: [] };
+  const records = provider === 'codex' ? mergeSessionRecords(files.map(readJsonl)) : readJsonl(files[0]);
+  if (!records.length) return { revision: previousRevision ?? '', unchanged: true, messages: [] };
+  return { ...(provider === 'claude' ? rebuildClaudeHistory(records) : rebuildCodexHistory(records)), revision };
 }
 
 class HistoryBuilder {
@@ -216,7 +293,7 @@ class HistoryBuilder {
   }
 
   toolStart(id: string, name: string, input: any, ts: number) {
-    const exec: AgentToolExecution = { id, name, parameters: input, status: 'success', startTime: ts, endTime: ts };
+    const exec: AgentToolExecution = { id, name, parameters: input, status: 'executing', startTime: ts };
     this.tools.set(id, exec);
     this.assistant(ts).segments!.push({ type: 'tool', toolExecution: exec });
   }
@@ -242,12 +319,6 @@ class HistoryBuilder {
     this.tools.clear();
     this.turnStartedAt = undefined;
   }
-}
-
-function loadClaudeSession(id: string): { cwd?: string; messages: AgentHistoryMessage[] } {
-  const file = claudeSessionFiles().find(f => path.basename(f.file, '.jsonl') === id)?.file;
-  if (!file) throw new Error(`Claude Code session ${id} not found`);
-  return rebuildClaudeHistory(readJsonl(file));
 }
 
 export function rebuildClaudeHistory(records: any[]): { cwd?: string; messages: AgentHistoryMessage[] } {
@@ -284,12 +355,6 @@ export function rebuildClaudeHistory(records: any[]): { cwd?: string; messages: 
   }
   b.flush();
   return { cwd, messages: b.messages };
-}
-
-function loadCodexSession(id: string): { cwd?: string; messages: AgentHistoryMessage[] } {
-  const file = codexRolloutFiles().get(id);
-  if (!file) throw new Error(`Codex session ${id} not found`);
-  return rebuildCodexHistory(readJsonl(file));
 }
 
 export function rebuildCodexHistory(records: any[]): { cwd?: string; messages: AgentHistoryMessage[] } {

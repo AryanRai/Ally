@@ -267,4 +267,16 @@ export class ChatManager {
     return chat;
   }
 
+  /** Refresh a linked transcript without changing selection, drafts or its local title. */
+  syncAgentSession(chatId: string, provider: 'claude' | 'codex', sessionId: string, messages: Message[], cwd?: string): boolean {
+    const chat = this.getChatById(chatId);
+    if (!chat?.agent || chat.agent.provider !== provider || chat.agent.sessionId !== sessionId) return false;
+    if (JSON.stringify(chat.messages) === JSON.stringify(messages) && (!cwd || chat.agent.cwd === cwd)) return false;
+    chat.messages = messages;
+    if (cwd) chat.agent.cwd = cwd;
+    chat.updatedAt = messages.at(-1)?.timestamp ?? chat.updatedAt;
+    this.saveState();
+    return true;
+  }
+
 }

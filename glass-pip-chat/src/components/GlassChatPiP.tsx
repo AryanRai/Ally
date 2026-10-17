@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '../lib/utils';
 import { ThemeUtils } from '../utils/themeUtils';
-import { GreetingUtils } from '../utils/greetingUtils';
+import { useAgentGreeting } from '../hooks/useAgentGreeting';
 import { SettingsManager } from '../utils/settingsManager';
 import type { AppSettings } from '../types/settings';
 
@@ -51,7 +51,6 @@ export default function GlassChatPiP() {
 
   const [settingsManager] = useState(() => SettingsManager.getInstance());
   const [appSettings, setAppSettings] = useState<AppSettings>(() => settingsManager.getSettings());
-  const [greeting, setGreeting] = useState(() => GreetingUtils.getCurrentGreeting(appSettings));
   const [robotMode, setRobotMode] = useState(() => localStorage.getItem('ally-robot-mode') === 'true');
 
   const conversation = useAgentConversation({
@@ -77,6 +76,7 @@ export default function GlassChatPiP() {
   const activeChat = chats.activeChat;
   const messages = activeChat?.messages ?? [];
   const { isTyping, currentResponse, streamingSegments, thinkingText } = conversation;
+  const greeting = useAgentGreeting(conversation.provider, conversation.modelName);
 
   const headerTitleEdit = useEditState({
     initialValue: activeChat?.title || 'Chat',
@@ -175,14 +175,7 @@ export default function GlassChatPiP() {
 
   useEffect(() => settingsManager.subscribe(next => {
     setAppSettings(next);
-    setGreeting(GreetingUtils.getCurrentGreeting(next));
   }), [settingsManager]);
-
-  useEffect(() => {
-    if (!appSettings.greeting?.useRandomGreeting) return;
-    const interval = setInterval(() => setGreeting(GreetingUtils.getCurrentGreeting(appSettings)), 30000);
-    return () => clearInterval(interval);
-  }, [appSettings]);
 
   useEffect(() => window.pip?.onToggleSpeech(() => setShowSpeechControls(prev => !prev)), []);
 

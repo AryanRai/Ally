@@ -46,6 +46,7 @@ function writeRobotFiles(runId: string, opts: AgentRunOptions): { files: string[
 
 function claudeArgs(opts: AgentRunOptions, robot: { promptFile?: string; mcpFile?: string }): string[] {
   const args = ['-p', '--output-format', 'stream-json', '--verbose', '--include-partial-messages'];
+  if (opts.ephemeral) args.push('--no-session-persistence', '--tools', '');
   const mode = opts.permission === 'full' ? 'bypassPermissions' : opts.permission === 'readonly' ? 'plan' : 'acceptEdits';
   args.push('--permission-mode', mode);
   if (opts.model && opts.model !== 'default') args.push('--model', opts.model);
@@ -63,6 +64,7 @@ export function codexArgs(opts: AgentRunOptions): string[] {
   // `-i` takes several files, so it must be followed by another flag, not the `-` stdin marker
   for (const image of opts.images ?? []) args.push('-i', image);
   args.push('--json', '--skip-git-repo-check');
+  if (opts.ephemeral) args.push('--ephemeral');
   if (opts.permission === 'full') {
     args.push('--dangerously-bypass-approvals-and-sandbox');
   } else {

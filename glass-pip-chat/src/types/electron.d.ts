@@ -1,4 +1,4 @@
-import type { AgentProvider, AgentPermission, AgentConfig, AgentModel, AgentSessionSummary, AgentHistoryMessage, AgentEvent } from './agent';
+import type { AgentProvider, AgentPermission, AgentConfig, AgentModel, AgentSessionSummary, AgentEvent } from './agent';
 
 export interface PipAPI {
   show: () => void;
@@ -93,6 +93,7 @@ export interface PipAPI {
     getConfig: () => Promise<AgentConfig>;
     updateConfig: (patch: Partial<AgentConfig>) => Promise<AgentConfig>;
     listModels: (provider: AgentProvider) => Promise<AgentModel[]>;
+    greeting: (provider: AgentProvider, model: string) => Promise<string>;
     send: (opts: {
       provider: AgentProvider;
       prompt: string;
@@ -107,7 +108,8 @@ export interface PipAPI {
     }) => Promise<string>;
     stop: (runId: string) => Promise<boolean>;
     listSessions: (provider: AgentProvider, limit?: number) => Promise<AgentSessionSummary[]>;
-    loadSession: (provider: AgentProvider, id: string) => Promise<{ cwd?: string; messages: AgentHistoryMessage[] }>;
+    loadSession: (provider: AgentProvider, id: string, revision?: string) => Promise<import('../../electron/agent/types').AgentSessionSnapshot>;
+    onSessionsChanged: (callback: (provider: AgentProvider) => void) => () => void;
     pickFolder: (current?: string) => Promise<string | null>;
     onEvent: (callback: (data: { runId: string; event: AgentEvent }) => void) => () => void;
   };

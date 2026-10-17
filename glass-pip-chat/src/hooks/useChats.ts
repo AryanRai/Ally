@@ -39,6 +39,9 @@ export function useChats() {
     setAgent: (chatId: string, agent: Chat['agent']) => mutate(m => m.setChatAgent(chatId, agent)),
     openAgentSession: (agent: NonNullable<Chat['agent']>, title: string, messages: Message[]) =>
       mutate(m => m.openAgentSession(agent, title, messages)),
+    syncAgentSession: (chatId: string, provider: 'claude' | 'codex', sessionId: string, messages: Message[], cwd?: string) => {
+      if (manager.syncAgentSession(chatId, provider, sessionId, messages, cwd)) refresh();
+    },
   };
 }
 

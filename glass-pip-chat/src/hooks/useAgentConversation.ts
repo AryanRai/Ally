@@ -5,6 +5,7 @@ import type { Message } from '../types/chat';
 import { AGENT_LABEL, AGENT_MODEL_PREFIX, AgentSessionSummary, DEFAULT_AGENT_MODEL, parseAgentModel } from '../types/agent';
 import { useAgentChat } from './useAgentChat';
 import type { ChatsApi } from './useChats';
+import { sessionMessages, useSessionSync } from './useSessionSync';
 
 const MODEL_KEY = 'ally-agent-model';
 const TRANSCRIPT_HANDOFF_CHARS = 12000;
@@ -31,6 +32,7 @@ export function useAgentConversation({ chats, robotMode, onSentence }: Options) 
   const [streamingSegments, setStreamingSegments] = useState<Segment[]>([]);
   const [thinkingText, setThinkingText] = useState('');
   const spokenUpTo = useRef(0);
+  useSessionSync(chats, isTyping);
 
   const parsed = parseAgentModel(model) ?? parseAgentModel(DEFAULT_AGENT_MODEL)!;
   const cwd = chats.activeChat?.agent?.cwd || agent.config?.defaultCwd || '';
@@ -179,13 +181,7 @@ export function useAgentConversation({ chats, robotMode, onSentence }: Options) 
     chats.openAgentSession(
       { provider: session.provider, sessionId: session.id, cwd: sessionCwd ?? session.cwd },
       session.title,
-      messages.map((m, i) => ({
-        id: `${m.role}-${session.id}-${i}`,
-        role: m.role,
-        content: m.content || (m.role === 'user' ? '' : '(tool calls only)'),
-        timestamp: m.timestamp,
-        metadata: m.segments || m.images || m.usage ? { segments: m.segments, images: m.images, usage: m.usage } : undefined,
-      })),
+      sessionMessages(session.id, messages),
     );
     // Follow-ups should go to the same agent
     if (parseAgentModel(model)?.provider !== session.provider) setModel(`${AGENT_MODEL_PREFIX[session.provider]}default`);

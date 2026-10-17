@@ -1,8 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { ClaudeStreamParser, CodexStreamParser, extractImages } from './parsers';
+import { ClaudeStreamParser, CodexStreamParser, extractImages, stringifyToolOutput } from './parsers';
 import type { AgentEvent } from './types';
 
 const feed = (parser: { handle(e: unknown): AgentEvent[] }, events: unknown[]) => events.flatMap(e => parser.handle(e));
+
+it('preserves Codex desktop text blocks in tool output', () => {
+  expect(stringifyToolOutput([{ type: 'input_text', text: 'Build passed' }, { type: 'output_text', text: '34 tests passed' }, { type: 'text', text: 'Done' }])).toBe('Build passed\n34 tests passed\nDone');
+});
 
 describe('ClaudeStreamParser', () => {
   it('keeps unstreamed blocks and subsequent messages after a streamed block', () => {

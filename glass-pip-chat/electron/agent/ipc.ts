@@ -5,6 +5,8 @@ import path from 'node:path';
 import { resolveAgentBinary } from './binaries.js';
 import { startAgentRun, stopAgentRun, stopAllAgentRuns } from './runner.js';
 import { listAgentModels, listAgentSessions, loadAgentSession } from './sessions.js';
+import { watchAgentSessions } from './sessionWatch.js';
+import { generateGreeting } from './greeting.js';
 import type { AgentConfig, AgentProvider, AgentRunOptions } from './types.js';
 
 const CONFIG_FILE = () => path.join(app.getPath('userData'), 'agent-config.json');
@@ -48,6 +50,7 @@ export function registerAgentIpc(getWindow: () => BrowserWindow | null, onConfig
   });
 
   ipcMain.handle('agent:listModels', (_, provider: AgentProvider) => listAgentModels(provider));
+  ipcMain.handle('agent:greeting', (_, provider: AgentProvider, model?: string) => generateGreeting(provider, model, binPath(provider)));
 
   ipcMain.handle('agent:send', async (event, opts: Omit<AgentRunOptions, 'cwd'> & { cwd?: string; robot?: { instructions: string } }) => {
     const sender = event.sender;
@@ -71,7 +74,12 @@ export function registerAgentIpc(getWindow: () => BrowserWindow | null, onConfig
 
   ipcMain.handle('agent:listSessions', (_, provider: AgentProvider, limit?: number) => listAgentSessions(provider, limit));
 
-  ipcMain.handle('agent:loadSession', (_, provider: AgentProvider, id: string) => loadAgentSession(provider, id));
+  ipcMain.handle('agent:loadSession', (_, provider: AgentProvider, id: string, revision?: string) => loadAgentSession(provider, id, revision));
+  const stopWatching = watchAgentSessions(provider => {
+    const win = getWindow();
+    if (win && !win.isDestroyed()) win.webContents.send('agent:sessionsChanged', provider);
+  });
+  app.on('will-quit', stopWatching);
 
   ipcMain.handle('agent:pickFolder', async (_, current?: string) => {
     const win = getWindow();
