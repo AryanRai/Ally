@@ -116,7 +116,7 @@ internal fun HistoryScreen(state: WatchState, send: (String) -> Unit, back: () -
             modifier = Modifier.fillMaxWidth().clickable(onClick = chats).padding(vertical = 6.dp), textAlign = TextAlign.Center) }
         if (state.historyBefore != null) item { Button(onClick = older, enabled = !state.loadingHistory && !working) { Text("Earlier messages") } }
         if (state.loadingHistory) item { Text("Loading conversation…", color = Muted, fontSize = 11.sp) }
-        if (state.speaking) item { Button(onClick = stopAudio) { Text("Stop audio") } }
+        if (state.speaking) item { Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) { ReplyAudioControl(true, true, stopAudio) } }
         if (state.speechError.isNotBlank()) item { Text(state.speechError, color = Amber, fontSize = 10.sp) }
         items(state.messages, key = { it.id }) { message ->
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -125,8 +125,13 @@ internal fun HistoryScreen(state: WatchState, send: (String) -> Unit, back: () -
                 else {
                     message.steps.forEach { step -> key(message.id, step.id) { ActivityRow(step) } }
                     if (message.reply.text.isNotBlank()) Text(message.reply.text, fontSize = 13.sp, lineHeight = 18.sp)
-                    if (message.reply.text.isNotBlank()) Button(onClick = { if (state.speaking) stopAudio() else read(message.reply.text) }, enabled = !state.muted && state.phase != Phase.RECORDING) { Text(if (state.speaking) "Stop audio" else "Read aloud", fontSize = 11.sp) }
                     message.reply.cards.forEachIndexed { index, card -> key(message.id, index, card) { GeneratedCard(card, send, pulse, !working && !state.loadingHistory && state.phase != Phase.RECORDING) } }
+                    val spokenText = remember(message.reply) { message.reply.readAloudText() }
+                    if (spokenText.isNotBlank()) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
+                        ReplyAudioControl(state.speaking, state.speaking || (!state.muted && state.phase != Phase.RECORDING && !state.inputRecording && !state.inputSending)) {
+                            if (state.speaking) stopAudio() else read(spokenText)
+                        }
+                    }
                     if (message.usage.isNotBlank()) Text(message.usage, fontFamily = Mono, color = Muted, fontSize = 8.sp)
                 }
             }

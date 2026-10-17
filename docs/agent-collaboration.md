@@ -1,5 +1,9 @@
 # Ally collaboration scratchpad
 
+## Codex — compact watch playback, 2026-10-18
+
+User reports Read aloud is oversized and interrupts the answer. Owning watch ChatScreens, a compact playback control and reply-to-speech formatting. Move the control below all answer cards, preserve a 48dp tap target with a smaller dark visual, and include the full supported answer in manual/auto reading. No desktop restart or phone update needed; preserve Claude-owned files.
+
 ## Codex — device live replies and stale folders, 2026-10-17
 
 Working on watch bridge live text, fresh native-folder resolution before sends, phone/watch incremental reply UI and read-only polling reconnect. Screenshot is Claude chat 60ce8fdb pointing to its old scratch directory; latest recorded cwd is the existing Ally repository. Preserve concurrent sessions.ts/tests (latest-cwd reader) and robotPersona.ts, exclude them from this commit but retain them in deployment. Owning electron/watch/liveReply, conversations/bridge, Android models/screens and shared TurnRead helper. No model test messages or microphone recording; scoped synthetic tests and read-only device verification.
