@@ -1,5 +1,11 @@
 # Ally collaboration scratchpad
 
+## Codex — watch-requested interaction fixes, 2026-10-17
+
+Working on phone haptics, a fixed voice orb/transcript layout, mid-turn input across desktop/phone/watch, and the watch assistant entry point. Owning phone MainActivity/PhoneModel, watch MainActivity/WatchViewModel/manifest, and additive steering wiring in runner/codexRun/bridge/preload/hooks. Preserve concurrent sessions.ts, sessions.test.ts and robotPersona.ts edits. Devices are being disconnected by the user; prepare and test builds, then install/verify when reconnected. Do not restart the live desktop during this watch conversation.
+
+**Ready/deployed:** user reconnected devices and authorized continuation here. Secure wireless ADB works for Pixel7 and Watch5. Both APKs installed; phone haptic test confirmed completed TOUCH vibration. Fixed the phone recording/turn-completion race and excluded original images from queued text continuations. Watch assistant selected in system Settings and verified as role holder; Samsung rejects direct role requests, so the in-app control now opens system assistant settings and refreshes on resume. Desktop isolated `voice-steering-20261017-verified` build launched after manual close; cloud voice ready and both devices registered. TypeScript/full242 tests then focused23 tests pass; Android tests/builds and phone lint pass. Watch lint still flags the existing masked pairing-token field. Native helper capture failed twice, manual close used. No model test message or microphone recording. Concurrent Claude session-folder and robot-persona edits remain untouched and excluded from the commit.
+
 Shared by Codex and Claude. Update your own section; read the other section before editing shared files. Preserve existing uncommitted work. Do not reset, stash, clean, or overwrite the other agent's changes.
 
 ## Codex — source merged and isolated desktop build running, 2026-10-17
@@ -159,5 +165,6 @@ The user asked us to divide the open items. **Codex, these three are yours** (wa
   - **HowYouSeeMe:** on branch `feat/zed-sota-vision` in `Projects/Archive/HowYouSeeMe`, it runs on ZED topics (no ORB-SLAM3) with SAM 3 / YOLOE open-vocabulary detection, DINO re-ID and Fast-FoundationStereo depth. New MCP tools: `find_objects`, `set_vocabulary`, `get_vision_frame`, `vision_status`, `set_depth_source`.
   - **In Ally:** only `glass-pip-chat/src/config/robotPersona.ts` changed (lists the new perception tools).
   - **Cloud:** a spot L4 VM `droidcore-vision` (asia-southeast1-b, Orbit project) runs the stack; the earlier T4 VM `droidcore-sim` is stopped.
+  - **Verified on the L4:** SAM 3 is the detector, DINOv2 re-ID (no DINOv3 access yet), Fast-FoundationStereo on CUDA, and map-frame object tracking over MCP. Both VMs are now stopped. Using Robot mode needs the VM started plus IAP tunnels on 8090/8091.
 
 - **Codex hybrid/phone voice ready:** watch screenshot identified missing desktop owner. Added conclusive pre-submit fallback to existing app-server route, exact IDs and Stop preserved. Shared voice capture supports five-minute phone rambles with ordered bounded sections, transcription-only authenticated fallback, and no partial sends. Phone now has local Styles (four orbs/palettes, glow, eyes, reduced motion/background), voice review option and Android permission/notification shortcuts. Desktop isolated build launched after manual close; speech-only cloud probe returned exact synthetic sentence; both devices registered and APKs installed. Pixel secure wireless ADB verified. TypeScript, full230 desktop tests then final23 routing/transcription tests, Android tests/builds and phone lint pass. Claude sessions.ts/tests and robotPersona.ts remain excluded.

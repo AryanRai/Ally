@@ -58,9 +58,9 @@ const approvalRoutes: Record<string, { method: string; field: 'decision' | 'resp
 };
 
 /** One user turn, through the existing owner. Never retries a submitted message. */
-export function runCodexDesktopTurn(opts: AgentRunOptions, emit: (event: AgentEvent) => void, interact?: AgentInteractionHandler, unowned?: (emit: (event: AgentEvent) => void) => { stop: () => void }): { stop: () => void } {
+export function runCodexDesktopTurn(opts: AgentRunOptions, emit: (event: AgentEvent) => void, interact?: AgentInteractionHandler, unowned?: (emit: (event: AgentEvent) => void) => { stop: () => void; steer?: (text: string) => Promise<boolean> }): { stop: () => void; steer: (text: string) => Promise<boolean> } {
   const id = opts.sessionId!;
-  let fallback: { stop: () => void } | undefined;
+  let fallback: { stop: () => void; steer?: (text: string) => Promise<boolean> } | undefined;
   const messageId = randomUUID();
   const parser = new CodexEventParser(id);
   const startedAt = Date.now();
@@ -186,7 +186,10 @@ export function runCodexDesktopTurn(opts: AgentRunOptions, emit: (event: AgentEv
       } else fail(error);
     }
   })();
-  return { stop: () => {
+  return { steer: async text => {
+    if (finished || stopped) throw new Error('This response has finished. Send your input as a new message.');
+    return fallback?.steer ? fallback.steer(text) : false;
+  }, stop: () => {
     if (finished || stopped) return;
     stopped = true;
     if (fallback) { fallback.stop(); return; }

@@ -1,10 +1,11 @@
 import { recordActivity, settleActivity, type ActivityState } from './activity.js';
+import { FollowupReceipts } from '../agent/followups.js';
 import { app } from 'electron';
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
-import { startAgentRun, stopAgentRun } from '../agent/runner.js';
+import { startAgentRun, steerAgentRun, stopAgentRun } from '../agent/runner.js';
 import type { AgentConfig, AgentProvider, AgentPermission } from '../agent/types.js';
 import { parseWatchReply, WATCH_INSTRUCTIONS, type WatchReply } from './protocol.js';
 import { ensureSpeechRuntime, getSpeechRuntimeStatus } from '../speech/runtime.js';
@@ -47,6 +48,7 @@ export function startWatchBridge(getConfig: () => AgentConfig): (() => void) | u
     load: async (provider, id) => provider === 'codex' ? loadCodexChat(id) : loadAgentSession(provider, id),
   }, config.sessions, getConfig().defaultCwd);
   const turns = new Map<string, Turn>();
+  const followups = new Map<string, FollowupReceipts>();
   const timeouts = new Map<string, ReturnType<typeof setTimeout>>();
   // Warm the shared model without opening either microphone.
   void ensureSpeechRuntime().catch(() => { /* /v1/status exposes the actionable worker state. */ });
@@ -87,6 +89,8 @@ export function startWatchBridge(getConfig: () => AgentConfig): (() => void) | u
         if (closed || turn.status !== 'thinking') return;
         recordActivity(turn, event);
         if (event.kind === 'session') conversations.link(chat, event.sessionId);
+        if (event.kind === 'input') turn.transcript += `\n\nAdditional input:\n${event.text}`;
+        if (event.kind === 'continuation') output = '';
         if (event.kind === 'text') output = (output + event.text).slice(-64000);
         if (event.kind === 'tool_start') turn.activity = `Using ${event.name.slice(0, 70)}`;
         if (event.kind === 'done') finish(turn, event.isError ? event.error ?? 'Agent failed' : undefined, output);
@@ -132,6 +136,28 @@ export function startWatchBridge(getConfig: () => AgentConfig): (() => void) | u
       if (req.method === 'GET' && url.pathname.startsWith('/v1/turns/')) {
         const turn = turns.get(url.pathname.slice('/v1/turns/'.length));
         send(res, turn ? 200 : 404, turn ? { ...turn, approvals: approvals.list(turn.id) } : { error: 'This response expired after the desktop restarted. Check chat history before sending again.' }); return;
+      }
+      const steerRoute = req.method === 'POST' && /^\/v1\/turns\/([^/]+)\/input$/.exec(url.pathname);
+      if (steerRoute) {
+        const turn = turns.get(steerRoute[1]);
+        if (!turn) { req.resume(); send(res, 404, { error: 'Response expired. Check chat history before sending again.' }); return; }
+        const chunks: Buffer[] = []; let size = 0;
+        for await (const chunk of req) { size += chunk.length; if (size > 64000) { send(res, 413, { error: 'Input too large' }); return; } chunks.push(chunk); }
+        let body: any;
+        try { body = JSON.parse(Buffer.concat(chunks).toString()); } catch { send(res, 400, { error: 'Invalid input' }); return; }
+        if (typeof body.text !== 'string' || typeof body.requestId !== 'string') { send(res, 400, { error: 'Text and request ID are required' }); return; }
+        let receipts = followups.get(turn.id);
+        if (!receipts) { receipts = new FollowupReceipts(); followups.set(turn.id, receipts); }
+        try {
+          const mode = await receipts.submit(body.requestId, body.text, async () => {
+            if (turn.status !== 'thinking' || !turn.runId) throw new Error('This response is not accepting input. Send it as a new message.');
+            const mode = await steerAgentRun(turn.runId, body.text, body.requestId);
+            if (turn.status === 'thinking' && !approvals.list(turn.id).length) armTimeout(turn);
+            return mode;
+          });
+          send(res, 200, { accepted: true, mode });
+        } catch (error) { send(res, 409, { error: error instanceof Error ? error.message : 'Input was not confirmed. Check history before retrying.' }); }
+        return;
       }
       const approvalRoute = req.method === 'POST' && /^\/v1\/turns\/([^/]+)\/approvals\/([^/]+)$/.exec(url.pathname);
       const stopRoute = req.method === 'POST' && /^\/v1\/turns\/([^/]+)\/stop$/.exec(url.pathname);
@@ -186,7 +212,7 @@ export function startWatchBridge(getConfig: () => AgentConfig): (() => void) | u
       if (!audio && (typeof message.text !== 'string' || !message.text.trim() || message.text.length > 12000)) { send(res, 400, { error: 'Message must contain 1–12000 characters' }); return; }
       if (turns.size >= 100) {
         const oldest = [...turns.values()].find(t => t.status !== 'thinking');
-        if (oldest) turns.delete(oldest.id);
+        if (oldest) { turns.delete(oldest.id); followups.delete(oldest.id); }
       }
       const turn: Turn = { chatId: chat.id, steps: [], id: randomUUID(), requestId, provider, permission, status: 'thinking', activity: audio ? 'Transcribing…' : 'Thinking…', transcript: audio ? '' : message.text.trim(), startedAt: Date.now() };
       turns.set(turn.id, turn);

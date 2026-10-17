@@ -118,7 +118,7 @@ export default function GlassChatPiP() {
 
   const handleSend = async (messageInput?: string, fromQuickInput = false) => {
     const text = (messageInput ?? (fromQuickInput ? quickInput : input)).trim();
-    if (!text || isTyping) return;
+    if (!text) return;
     if (fromQuickInput) setQuickInput('');
     else setInput('');
     setInputHistory(prev => [...prev.filter(h => h !== text), text].slice(-50));
@@ -134,7 +134,7 @@ export default function GlassChatPiP() {
     }
   };
 
-  // Voice: recognized speech is sent straight away; new speech interrupts a reply
+  // Voice adds guidance to the active work without cancelling it.
   const lastSpeechRef = useRef<number>(0);
   useEffect(() => {
     const text = speech.lastRecognizedText;
@@ -142,8 +142,7 @@ export default function GlassChatPiP() {
     lastSpeechRef.current = speech.recognitionId;
     if (isTyping) {
       speech.stopCurrentSpeech();
-      conversation.stop();
-      setTimeout(() => conversation.send(text, 'speech'), 200);
+      conversation.send(text, 'speech');
     } else {
       conversation.send(text, 'speech');
     }
@@ -557,7 +556,7 @@ export default function GlassChatPiP() {
                   setInput={setInput}
                   onSend={() => handleSend()}
                   isTyping={isTyping || externalWorking}
-                  workingStatus={externalWorking ? externalStatus : activeIsWorking ? workingStatus : `${workingStatus} · ${runningChatTitle}`}
+                  workingStatus={conversation.inputStatus || (externalWorking ? externalStatus : activeIsWorking ? workingStatus : `${workingStatus} · ${runningChatTitle}`)}
                   stopDisabledReason={externalWorking ? `Running in the ${externalApp} app. Stop it there.` : undefined}
                   onStop={conversation.stop}
                   contextData={context.contextData}

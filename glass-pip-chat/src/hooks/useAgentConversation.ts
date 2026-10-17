@@ -30,6 +30,8 @@ export function useAgentConversation({ chats, robotMode, onSentence }: Options) 
   const [isTyping, setIsTyping] = useState(false);
   const [runningChatId, setRunningChatId] = useState<string | null>(null);
   const busy = useRef(false);
+  const runningId = useRef<string | null>(null);
+  const [inputStatus, setInputStatus] = useState('');
   const [currentResponse, setCurrentResponse] = useState('');
   const [streamingSegments, setStreamingSegments] = useState<Segment[]>([]);
   const [thinkingText, setThinkingText] = useState('');
@@ -65,6 +67,8 @@ export function useAgentConversation({ chats, robotMode, onSentence }: Options) 
     const chat = chats.getChat(chatId);
     if (!chat || busy.current) return;
     busy.current = true;
+    runningId.current = chatId;
+    setInputStatus('');
     chats.setSendFailure(chatId);
     const failedText = [...chat.messages].reverse().find(m => m.role === 'user')?.content ?? prompt;
     const { provider } = parsed;
@@ -149,6 +153,7 @@ export function useAgentConversation({ chats, robotMode, onSentence }: Options) 
       return { error: message };
     } finally {
       busy.current = false;
+      runningId.current = null;
       setIsTyping(false);
       setRunningChatId(null);
       setCurrentResponse('');
@@ -165,7 +170,22 @@ export function useAgentConversation({ chats, robotMode, onSentence }: Options) 
   ) => {
     const { context, image } = extras;
     const chat = chats.activeChat;
-    if (!chat || !text.trim() || busy.current) return;
+    if (!chat || !text.trim()) return;
+    if (busy.current) {
+      try {
+        if (chat.id !== runningId.current) throw new Error('Select the running chat to add input.');
+        if (image) throw new Error('Mid-turn input currently accepts text and voice. Send the image after this response.');
+        const prompt = context ? `Context (from my clipboard):\n${context}\n\n${text}` : text;
+        const mode = await agent.steer(prompt);
+        setInputStatus(mode === 'steered' ? 'Added to current work' : 'Queued after this response');
+        chats.addMessage(chat.id, { id: `input-${crypto.randomUUID()}`, role: 'user', content: text, timestamp: Date.now(), metadata: { source, context } });
+        return;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        chats.setSendFailure(chat.id, { message, text });
+        return { error: message };
+      }
+    }
     const history = chat.messages;
     chats.addMessage(chat.id, {
       id: `user-${Date.now()}`,
@@ -176,7 +196,7 @@ export function useAgentConversation({ chats, robotMode, onSentence }: Options) 
     });
     const prompt = context ? `Context (from my clipboard):\n${context}\n\n${text}` : text;
     return await runTurn(chat.id, prompt, history, image ? [image.path] : undefined);
-  }, [chats, isTyping, runTurn]);
+  }, [chats, isTyping, runTurn, agent]);
 
   /** Re-ask the user message before `messageId` (the assistant reply is replaced). */
   const regenerate = useCallback(async (messageId: string) => {
@@ -187,7 +207,7 @@ export function useAgentConversation({ chats, robotMode, onSentence }: Options) 
     if (index < 1 || userMessage?.role !== 'user') return;
     chats.deleteMessage(chat.id, messageId);
     await runTurn(chat.id, userMessage.content, chat.messages.slice(0, index - 1));
-  }, [chats, isTyping, runTurn]);
+  }, [chats, isTyping, runTurn, agent]);
 
   const stop = useCallback(() => agent.stop(), [agent]);
 
@@ -225,6 +245,7 @@ export function useAgentConversation({ chats, robotMode, onSentence }: Options) 
   const setPermission = useCallback((permission: AgentPermission) => agent.updateConfig({ permission }), [agent]);
 
   return {
+    inputStatus,
     model,
     setModel,
     provider: parsed.provider,

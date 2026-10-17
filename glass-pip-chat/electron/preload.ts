@@ -127,6 +127,7 @@ const pipAPI = {
     listModels: (provider: 'claude' | 'codex') => ipcRenderer.invoke('agent:listModels', provider),
     greeting: (provider: 'claude' | 'codex', model: string) => ipcRenderer.invoke('agent:greeting', provider, model),
     send: (opts: Record<string, unknown>) => ipcRenderer.invoke('agent:send', opts),
+    steer: (runId: string, text: string, requestId: string) => ipcRenderer.invoke('agent:steer', runId, text, requestId),
     stop: (runId: string) => ipcRenderer.invoke('agent:stop', runId),
     runningSessions: () => ipcRenderer.invoke('agent:runningSessions'),
     listSessions: (provider: 'claude' | 'codex', limit?: number) => ipcRenderer.invoke('agent:listSessions', provider, limit),

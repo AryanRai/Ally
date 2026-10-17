@@ -155,7 +155,7 @@ export default function ChatInput({
 
         <PromptInput
           onSubmit={() => {
-            if (!isTyping) onSend();
+            if (!stopDisabledReason) onSend();
           }}
           className={BARE_GROUP}
         >
@@ -225,6 +225,7 @@ export default function ChatInput({
                 { id: 'copy', icon: copied ? <Check /> : <ClipboardCopy />, label: copied ? 'Copied' : 'Copy chat', onClick: copyChat },
               ]}
             />
+            {isTyping && !stopDisabledReason && <button type="submit" disabled={!canSend} aria-label="Add input without stopping" title="Steer this work, or queue input when steering is unavailable" className="rounded-full border border-white/20 px-3 py-1 text-xs disabled:opacity-40">Add input</button>}
             <PromptInputSubmit
               size={isTyping ? 'sm' : 'icon-sm'}
               variant={isTyping ? 'outline' : 'default'}

@@ -17,7 +17,7 @@ class WatchApi(private val endpoint: () -> String, private val token: () -> Stri
         val connection = url.openConnection() as HttpURLConnection
         try {
             connection.connectTimeout = 5000
-            connection.readTimeout = if (path.startsWith("/v1/audio")) 120000 else 15000
+            connection.readTimeout = if (path.startsWith("/v1/audio") || path == "/v1/speech/transcribe") 120000 else 15000
             connection.instanceFollowRedirects = false
             connection.setRequestProperty("Authorization", "Bearer ${token()}")
             if (body != null) {

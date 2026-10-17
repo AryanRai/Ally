@@ -105,11 +105,11 @@ private fun WatchApp(model: WatchViewModel, pulse: (Boolean) -> Unit, hasMic: ()
         if (hasMic()) { micHint = false; model.startRecording() }
         else requestMic.launch(Manifest.permission.RECORD_AUDIO)
     }
-    LaunchedEffect(state.phase) {
-        if (state.phase == Phase.RECORDING || state.phase == Phase.UPLOADING) pulse(false)
+    LaunchedEffect(state.phase, state.inputRecording) {
+        if (state.inputRecording || state.phase == Phase.RECORDING || state.phase == Phase.UPLOADING) pulse(false)
     }
     LaunchedEffect(state.readySequence) {
-        if (state.readySequence > 0) { pulse(true); pager.animateScrollToPage(1) }
+        if (state.readySequence > 0) { pulse(true); if (!state.inputRecording && !state.inputSending) pager.animateScrollToPage(1) }
     }
     LaunchedEffect(lifecycle) { lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
         while (true) { delay(15000); model.refresh() }
@@ -120,12 +120,12 @@ private fun WatchApp(model: WatchViewModel, pulse: (Boolean) -> Unit, hasMic: ()
         chats -> ChatPicker(model, state, { chats = false })
         appearance -> AppearanceScreen(state.look, model::appearance, { appearance = false })
         settings -> SettingsScreen(model, state, { settings = false }, { settings = false; openChats() }, { appearance = true })
-        textInput -> TextEntry("Ask Ally", "What’s on your mind?", { text -> model.send(text); textInput = false }, { textInput = false })
+        textInput -> TextEntry(if(state.turnId != null) "Add input" else "Ask Ally", "What’s on your mind?", { text -> model.send(text); textInput = false }, { textInput = false })
         else -> Box(Modifier.fillMaxSize().background(Ink)) {
-            PresenceGlow(state.phase in setOf(Phase.RECORDING, Phase.UPLOADING, Phase.THINKING), state.look)
-            HorizontalPager(pager, userScrollEnabled = state.phase != Phase.RECORDING) { page ->
+            PresenceGlow(state.inputRecording || state.inputSending || state.phase in setOf(Phase.RECORDING, Phase.UPLOADING, Phase.THINKING), state.look)
+            HorizontalPager(pager, userScrollEnabled = state.phase != Phase.RECORDING && !state.inputRecording) { page ->
                 Box(Modifier.fillMaxSize().hierarchicalFocusGroup(pager.currentPage == page && !pager.isScrollInProgress)) {
-                if (page == 0) InputScreen(state, micHint, start, model::finishRecording, model::cancelRecording,
+                if (page == 0) InputScreen(if(state.inputRecording) state.copy(phase=Phase.RECORDING,detail=state.inputStatus) else if(state.inputSending) state.copy(phase=Phase.UPLOADING,detail=state.inputStatus) else if(state.inputStatus.isNotBlank()) state.copy(detail=state.inputStatus) else state, micHint, start, model::finishRecording, model::cancelRecording,
                     { textInput = true }, { settings = true }, { if (state.speaking) model.stopSpeaking() else model.mute() }, model::retry, openChats,
                     pager.currentPage == 0 && !pager.isScrollInProgress,
                     { scope.launch { pager.animateScrollToPage(1) } })
@@ -143,7 +143,7 @@ private fun WatchApp(model: WatchViewModel, pulse: (Boolean) -> Unit, hasMic: ()
 private fun InputScreen(state: WatchState, micHint: Boolean, start: () -> Unit, finish: () -> Unit, cancel: () -> Unit,
     type: () -> Unit, settings: () -> Unit, mute: () -> Unit, retry: () -> Unit, chats: () -> Unit,
     active: Boolean, replies: () -> Unit) {
-    val canTalk = !state.muted && state.phase !in setOf(Phase.UPLOADING, Phase.THINKING)
+    val canTalk = !state.muted && state.phase !in setOf(Phase.UPLOADING)
     BoxWithConstraints(Modifier.fillMaxSize().bezelReplies(active && state.phase != Phase.RECORDING, replies)) {
         val orbSize = maxHeight * .34f
         Column(Modifier.fillMaxSize().padding(horizontal = 24.dp, vertical = 16.dp), horizontalAlignment = Alignment.CenterHorizontally,
@@ -157,7 +157,7 @@ private fun InputScreen(state: WatchState, micHint: Boolean, start: () -> Unit, 
                 state.speaking -> "Speaking…"
                 state.phase == Phase.RECORDING -> "Listening · ${state.recordingSeconds.toInt()}s"
                 state.phase == Phase.UPLOADING -> "Sending…"
-                state.phase == Phase.THINKING -> "Thinking…"
+                state.phase == Phase.THINKING -> "Hold to add input"
                 state.phase == Phase.OFFLINE -> "Reconnecting · tap to retry now"
                 state.phase == Phase.ERROR -> "Tap to retry"
                 !state.voiceReady -> if (state.voiceState in setOf("starting", "loading")) "Voice getting ready" else "Voice unavailable"
@@ -168,7 +168,7 @@ private fun InputScreen(state: WatchState, micHint: Boolean, start: () -> Unit, 
                 fontSize = 10.sp, lineHeight = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center,
                 modifier = Modifier.heightIn(min = 20.dp).padding(horizontal = 5.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
-                MiniButton("Aa", "Type a message", type, state.phase !in setOf(Phase.RECORDING, Phase.UPLOADING, Phase.THINKING))
+                MiniButton("Aa", "Type a message", type, state.phase !in setOf(Phase.RECORDING, Phase.UPLOADING))
                 MiniButton(if (state.speaking) "■" else if (state.muted) "▶" else "Ⅱ", if (state.speaking) "Stop audio" else if (state.muted) "Resume microphone and haptics" else "Pause microphone and haptics", mute)
                 MiniButton("···", "Connection and settings", settings)
             }
@@ -277,6 +277,13 @@ private fun SettingsScreen(model: WatchViewModel, state: WatchState, back: () ->
     val notifications = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted -> model.replyAlerts(granted) }
     val scroll = rememberScrollState()
     Column(Modifier.fillMaxSize().background(Ink).bezelScroll(scroll).verticalScroll(scroll).padding(horizontal = 27.dp, vertical = 32.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        AssistantSetting()
+        if(state.inputDraft.isNotBlank()) {
+            Text(state.inputDraft,color=White,fontSize=11.sp)
+            Text(state.inputStatus,color=Amber,fontSize=10.sp)
+            Button(onClick=model::retryInput,enabled=!state.inputSending) { Text("Retry added input",fontSize=11.sp) }
+            Button(onClick=model::dismissInput,enabled=!state.inputSending) { Text("Dismiss draft",fontSize=11.sp) }
+        }
         Text("Your Ally", color = White, fontSize = 18.sp)
         Text(state.chatTitle, color = Muted, fontSize = 11.sp, maxLines = 2)
         Button(onClick = chats) { Text("Choose chat") }
