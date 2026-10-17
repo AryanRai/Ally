@@ -111,6 +111,9 @@ private fun WatchApp(model: WatchViewModel, pulse: (Boolean) -> Unit, hasMic: ()
     LaunchedEffect(state.readySequence) {
         if (state.readySequence > 0) { pulse(true); if (!state.inputRecording && !state.inputSending) pager.animateScrollToPage(1) }
     }
+    LaunchedEffect(state.turnId, state.liveText.isNotBlank()) {
+        if (state.phase == Phase.THINKING && state.liveText.isNotBlank() && !state.inputRecording && !state.inputSending) pager.animateScrollToPage(1)
+    }
     LaunchedEffect(lifecycle) { lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
         while (true) { delay(15000); model.refresh() }
     } }

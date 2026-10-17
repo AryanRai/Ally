@@ -99,7 +99,15 @@ internal fun HistoryScreen(state: WatchState, send: (String) -> Unit, back: () -
     LaunchedEffect(state.chatId, state.readySequence, state.messages.isEmpty()) {
         if (state.messages.isNotEmpty()) {
             withFrameNanos { }
-            scroll.scrollToItem((scroll.layoutInfo.totalItemsCount - 1).coerceAtLeast(0))
+            val headerItems = 1 + (if (state.historyBefore != null) 1 else 0) + (if (state.loadingHistory) 1 else 0) + (if (state.speaking) 1 else 0) + (if (state.speechError.isNotBlank()) 1 else 0)
+            val answer = state.messages.indexOfLast { it.role == "assistant" }.takeIf { it >= 0 } ?: state.messages.lastIndex
+            scroll.scrollToItem(headerItems + answer)
+        }
+    }
+    LaunchedEffect(state.turnId, state.liveText.isNotBlank()) {
+        if (working && state.liveText.isNotBlank()) {
+            withFrameNanos { }
+            scroll.scrollToItem((scroll.layoutInfo.totalItemsCount - 3).coerceAtLeast(0))
         }
     }
     LazyColumn(Modifier.fillMaxSize().bezelScroll(scroll), state = scroll, contentPadding = PaddingValues(horizontal = 25.dp, vertical = 30.dp),
@@ -121,6 +129,12 @@ internal fun HistoryScreen(state: WatchState, send: (String) -> Unit, back: () -
                     message.reply.cards.forEachIndexed { index, card -> key(message.id, index, card) { GeneratedCard(card, send, pulse, !working && !state.loadingHistory && state.phase != Phase.RECORDING) } }
                     if (message.usage.isNotBlank()) Text(message.usage, fontFamily = Mono, color = Muted, fontSize = 8.sp)
                 }
+            }
+        }
+        if (state.liveText.isNotBlank()) item(key = "live-reply") {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(if (working) "Reply in progress" else "Partial reply", color = Muted, fontSize = 10.sp)
+                Text(state.liveText, fontSize = 13.sp, lineHeight = 18.sp)
             }
         }
         if (working) item {

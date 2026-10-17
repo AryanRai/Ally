@@ -71,6 +71,18 @@ export class WatchConversations {
     }
     return chat.messages;
   }
+  /** Refresh the native folder immediately before submission, without acquiring a writer. */
+  async prepareRun(id: string): Promise<WatchChat> {
+    const chat = await this.get(id);
+    if (chat.sessionId) {
+      const snapshot = await this.deps.load(chat.provider, chat.sessionId);
+      if (snapshot.cwd) { chat.cwd = snapshot.cwd; this.save(); }
+    }
+    if (chat.cwd && !fs.existsSync(chat.cwd)) {
+      throw new Error(`This chat's working folder is no longer available: ${chat.cwd}. Open the original chat on your desktop and select its current project folder, then retry.`);
+    }
+    return chat;
+  }
   async list(provider: AgentProvider, offset = 0) {
     const limit = offset + 31;
     const external = await this.deps.list(provider, limit);

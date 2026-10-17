@@ -4,6 +4,10 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import dev.ally.device.DeviceLink
+import dev.ally.device.BridgeHttpError
+import dev.ally.device.reconnectingTurnRead
+import dev.ally.device.ReplyCard
+import dev.ally.device.ReplyContentParser
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.update
@@ -15,13 +19,13 @@ import java.net.URLEncoder
 import java.util.UUID
 
 data class PhoneChat(val id: String, val title: String, val provider: String, val cwd: String)
-data class PhoneMessage(val id: String, val role: String, val text: String)
+data class PhoneMessage(val id: String, val role: String, val text: String, val cards: List<ReplyCard> = emptyList())
 data class PhoneState(val chats: List<PhoneChat> = emptyList(), val messages: List<PhoneMessage> = emptyList(), val selected: PhoneChat? = null,
-    val running: List<PhoneChat> = emptyList(), val runningStatus: String = "Checking live status…",
+    val running: List<PhoneChat> = emptyList(), val runningStatus: String = "Checking live status…", val liveText: String = "",
     val provider: String = "codex", val permission: String = "readonly", val busy: Boolean = false, val loading: Boolean = false, val error: String = "", val activity: String = "", val approval: JSONObject? = null,
     val inputStatus: String = "", val more: Int? = null, val before: Int? = null, val recording: Boolean = false, val transcribing: Boolean = false,
     val microphoneLevel: Float = 0f, val recordingSeconds: Float = 0f, val liveTranscript: String = "", val voiceDraft: String = "")
-private class BridgeError(val status: Int, message: String) : Exception(message)
+private typealias BridgeError = BridgeHttpError
 
 class PhoneModel(app: Application) : AndroidViewModel(app) {
     val state = MutableStateFlow(PhoneState())
@@ -129,9 +133,9 @@ class PhoneModel(app: Application) : AndroidViewModel(app) {
     private suspend fun history(id: String, older: Boolean = false) {
         val before = if (older) "?before=${state.value.before ?: return}" else ""
         val r = request("/v1/chats/${enc(id)}$before"); val selected = chat(r.getJSONObject("chat")); val a = r.optJSONArray("messages") ?: JSONArray()
-        val messages = (0 until a.length()).map { val m = a.getJSONObject(it); PhoneMessage(m.optString("id"), m.optString("role"), m.optString("text")) }
+        val messages = (0 until a.length()).map { val m = a.getJSONObject(it); val reply = ReplyContentParser.parse(m); PhoneMessage(m.optString("id"), m.optString("role"), reply.text, reply.cards) }
         prefs.edit().putString("phoneChat", selected.id).apply()
-        state.update { it.copy(selected = selected, provider = selected.provider, messages = if (older) (messages + it.messages).distinctBy { m -> m.id } else messages, before = if (r.isNull("before")) null else r.optInt("before"), permission = prefs.getString("phonePermission:${selected.id}", "readonly")!!) }
+        state.update { it.copy(selected = selected, provider = selected.provider, liveText = if (it.selected?.id == selected.id) it.liveText else "", messages = if (older) (messages + it.messages).distinctBy { m -> m.id } else messages, before = if (r.isNull("before")) null else r.optInt("before"), permission = prefs.getString("phonePermission:${selected.id}", "readonly")!!) }
         r.optString("activeTurnId").takeIf { it.isNotBlank() && it != "null" }?.let { turn = it; prefs.edit().putString("phoneTurn", it).apply() }
     }
     fun older() { if(voiceActive) return; val id = state.value.selected?.id ?: return; task { history(id, true) } }
@@ -152,7 +156,7 @@ class PhoneModel(app: Application) : AndroidViewModel(app) {
             val r = request("/v1/messages", JSONObject().put("provider", chat.provider).put("chatId", chat.id).put("permission", state.value.permission).put("requestId", requestId).put("text", text))
             turn = r.getString("id"); prefs.edit().putString("phoneTurn", turn).remove("phonePendingText").remove("phoneRequestId").commit(); pendingText = null; requestId = null
             pulse()
-            state.update { it.copy(messages = it.messages + PhoneMessage("local-${turn}", "user", text)) }; poll()
+            state.update { it.copy(liveText = "", messages = it.messages + PhoneMessage("local-${turn}", "user", text)) }; poll()
         }
     }
     private fun addInput(text: String) {
@@ -186,18 +190,27 @@ class PhoneModel(app: Application) : AndroidViewModel(app) {
     private fun poll() {
         if (pollJob?.isActive == true) return
         val current = turn ?: return
-        state.update { it.copy(busy = true, error = "", activity = "Workingâ€¦") }
+        state.update { it.copy(busy = true, error = "", activity = "Working…") }
         pollJob = viewModelScope.launch {
             try {
                 while (isActive) {
-                    val r = request("/v1/turns/${enc(current)}")
+                    val r = reconnectingTurnRead({ state.update { it.copy(activity = "Reconnecting… Your task is still on the desktop", approval = null) } }) {
+                        request("/v1/turns/${enc(current)}")
+                    }
                     val nextApproval = r.optJSONArray("approvals")?.optJSONObject(0)
                     if (nextApproval != null && nextApproval.optString("id") != state.value.approval?.optString("id")) pulse(true)
-                    state.update { it.copy(activity = r.optString("activity", "Workingâ€¦"), approval = r.optJSONArray("approvals")?.optJSONObject(0)) }
+                    state.update { it.copy(liveText = r.optString("liveText").take(12000), activity = r.optString("activity", "Working…"), approval = nextApproval) }
                     if (r.optString("status") in setOf("done", "error")) {
                         pulse(true)
                         turn = null; prefs.edit().remove("phoneTurn").apply()
-                        state.value.selected?.let { history(it.id) }
+                        // Keep the answer visible even if the separate history read loses the network.
+                        val finalReply = r.optJSONObject("reply")?.let(ReplyContentParser::parse)
+                        val finalText = finalReply?.text
+                        state.update { it.copy(liveText = finalText ?: it.liveText) }
+                        try {
+                            state.value.selected?.let { history(it.id) }
+                        } catch (e: CancellationException) { throw e } catch (_: Exception) { /* Final text remains readable. */ }
+                        if (finalReply != null) state.update { it.copy(liveText = "", messages = if (it.messages.lastOrNull()?.let { m -> m.role == "assistant" && m.text == finalReply.text && m.cards == finalReply.cards } == true) it.messages else it.messages + PhoneMessage("$current-assistant", "assistant", finalReply.text, finalReply.cards)) }
                         state.update { it.copy(error = r.optString("error").takeIf { e -> e != "null" } ?: "") }; break
                     }
                     delay(2000)
