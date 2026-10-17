@@ -7,7 +7,7 @@ A native Kotlin / Compose for Wear OS companion with Wear Material 3 controls. T
 - Two horizontally swipeable pages: the hold-to-talk orb and a scrollable answer with structured cards.
 - Ally / prxptn typography and neutral surfaces, Orbit's sunset energy palette and inward activity glow. The orb animates only during foreground recording/processing and shows Ally's listening eyes while recording.
 - Codex-style compact, expandable tool rows update with the existing 1.5-second turn polling, followed by the answer and engine-reported usage. Up to 24 recent tool entries are retained; details are bounded for the watch. Missing tool completion events are marked interrupted, never assumed successful.
-- Hold the orb to record; release to upload. A cancelled gesture or leaving the app cancels recording. Maximum recording: 60 seconds. Audio is held in memory, sent through the bridge, and never saved by Ally.
+- Hold the orb to record; release to upload. The orb reacts to the actual microphone level and shows elapsed recording time. A cancelled gesture or leaving the app cancels recording. Maximum recording: exactly 60 seconds. Audio is held in memory, sent through the bridge, and never saved by Ally.
 - Start/stop/response haptics, pause microphone and haptics, text fallback, connection state, engine/context label, retry, and optional background reply notifications while the app process remains alive.
 - Cards, local checklists, foreground timers, progress and follow-up buttons. The renderer accepts an explicit catalog; arbitrary scripts, HTML and URLs are not executed. Actions submit a prompt only on a tap. Timers only alert while their card is open; they are not background alarms or scheduled reminders.
 - The watch uses its own persistent conversation per engine. It does not acquire a writer for a chat already open in Codex. The bridge runs agents read-only in Ally's configured working folder.
@@ -26,15 +26,15 @@ Build Ally's Electron process with `npm run build:electron` in `glass-pip-chat`.
 
 The bridge binds only to `127.0.0.1`. Requests require its bearer token. Development uses `adb reverse` over the already paired ADB connection, so no router exposure or firewall changes are required. A future standalone deployment should terminate HTTPS in front of this authenticated API; the watch permits cleartext only for localhost.
 
-Start the separate local Whisper worker in a virtual environment (the package is `openai-whisper`, not the unrelated package named `whisper`):
+Desktop and watch now share the managed faster-whisper worker on localhost:18766. Ally starts it automatically when the enabled watch bridge starts or desktop voice connects. Microphones remain off while the model loads. Run `speech-service/setup.ps1` once from the repository to install its isolated environment. The watch reports loading/offline status and keeps text available.
+
+For a manual development launch:
 
 ```powershell
-python -m venv .venv
-.\.venv\Scripts\python -m pip install -r tools/requirements.txt
-.\.venv\Scripts\python tools/transcribe.py --config "$env:APPDATA\glass-pip-chat\watch-bridge.json" --model base
+..\speech-service\.venv\Scripts\python tools/transcribe.py --config "$env:APPDATA\glass-pip-chat\watch-bridge.json" --model small
 ```
 
-The worker listens on localhost:18766, accepts bounded 16 kHz mono PCM WAV uploads, and transcribes them without using the PC microphone. The first run downloads the selected Whisper model if it is not cached. Text still works when the voice worker is offline. No cloud speech API key is needed.
+The worker accepts authenticated, bounded 16 kHz mono PCM WAV uploads and transcribes them with voice-activity filtering, without opening the PC microphone. The default `small` model runs as CPU int8; `ALLY_STT_MODEL`, `ALLY_STT_DEVICE` and `ALLY_STT_COMPUTE_TYPE` allow an explicitly configured alternative. The first run downloads the selected public model if it is not cached. Text still works when voice is offline. No cloud speech API key is needed.
 
 ## Install on a paired watch
 
@@ -44,7 +44,7 @@ The worker listens on localhost:18766, accepts bounded 16 kHz mono PCM WAV uploa
 
 This installs the debug APK, reverses port 18765 and provisions its endpoint/token using debug-only activity extras. Release builds ignore those extras; use the watch's connection settings. Secrets are not compiled into the APK or committed. Grant microphone permission on the watch when first using the orb, then hold it again. Reply alerts are optional in settings.
 
-The ADB reverse tunnel must be recreated after disconnects/reboots. Keep the PC, Ally and voice worker running. This MVP does not provide an internet relay, phone companion, process-independent background push, TTS or arbitrary desktop-chat selection.
+The ADB reverse tunnel must be recreated after disconnects/reboots. Keep the PC and Ally running. This MVP does not provide an internet relay, phone companion, process-independent background push, watch TTS or arbitrary desktop-chat selection.
 
 ## Protocol
 

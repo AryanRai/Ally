@@ -126,14 +126,15 @@ private fun InputScreen(state: WatchState, micHint: Boolean, start: () -> Unit, 
             Text("ALLY", fontFamily = Tanker, fontSize = 17.sp, lineHeight = 19.sp, letterSpacing = 2.sp)
             Text(state.context.uppercase(), fontFamily = Mono, color = Muted, fontSize = 8.sp, lineHeight = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Spacer(Modifier.height(3.dp))
-            Orb(state.phase, canTalk, orbSize.value, if (state.phase in setOf(Phase.OFFLINE, Phase.ERROR)) retry else start, finish, cancel)
+            Orb(state.phase, state.microphoneLevel, canTalk, orbSize.value, if (state.phase in setOf(Phase.OFFLINE, Phase.ERROR)) retry else start, finish, cancel)
             Text(when {
                 state.muted -> "Paused"
-                state.phase == Phase.RECORDING -> "Listening…"
+                state.phase == Phase.RECORDING -> "Listening · ${state.recordingSeconds.toInt()}s"
                 state.phase == Phase.UPLOADING -> "Sending…"
                 state.phase == Phase.THINKING -> "Thinking…"
                 state.phase == Phase.OFFLINE -> "Tap to reconnect"
                 state.phase == Phase.ERROR -> "Tap to retry"
+                !state.voiceReady -> if (state.voiceState in setOf("starting", "loading")) "Voice getting ready" else "Voice unavailable"
                 state.phase == Phase.READY -> "Ready when you are"
                 else -> "Hold to talk"
             }, color = Color.White, fontSize = 14.sp, lineHeight = 18.sp)
@@ -150,7 +151,8 @@ private fun InputScreen(state: WatchState, micHint: Boolean, start: () -> Unit, 
 }
 
 @Composable
-private fun Orb(phase: Phase, enabled: Boolean, diameter: Float, start: () -> Unit, finish: () -> Unit, cancel: () -> Unit) {
+private fun Orb(phase: Phase, microphoneLevel: Float, enabled: Boolean, diameter: Float, start: () -> Unit, finish: () -> Unit, cancel: () -> Unit) {
+    val level by animateFloatAsState(microphoneLevel, tween(100), label = "microphone level")
     val lifecycleState by LocalLifecycleOwner.current.lifecycle.currentStateFlow.collectAsState()
     val active = lifecycleState.isAtLeast(Lifecycle.State.STARTED) && phase in setOf(Phase.RECORDING, Phase.THINKING, Phase.UPLOADING)
     val rotation = if (active) {
@@ -177,7 +179,7 @@ private fun Orb(phase: Phase, enabled: Boolean, diameter: Float, start: () -> Un
         })
     }) {
         // Soft overlapping energy fields use the same sunset palette as Orbit's EnergyOrb.
-        val r = size.minDimension * .47f
+        val r = size.minDimension * (.43f + if (phase == Phase.RECORDING) level * .08f else .04f)
         val angle = rotation * Math.PI / 180
         val drift = Offset((cos(angle) * r * .2).toFloat(), (sin(angle) * r * .18).toFloat())
         val offline = phase == Phase.OFFLINE || phase == Phase.ERROR

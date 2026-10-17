@@ -1,0 +1,8 @@
+faster-whisper>=1.2.1,<2
+numpy>=1.26,<2; sys_platform == "win32"
+numpy>=1.24,<3; sys_platform != "win32"
+# Known-good Windows native runtime; 4.8.3 crashes loading models on the target PC.
+ctranslate2==4.6.0; sys_platform == "win32"
+setuptools<81; sys_platform == "win32"
+# Compatible Silero VAD runtime; newer ONNX builds fail during native import on this PC.
+onnxruntime==1.20.1; sys_platform == "win32"

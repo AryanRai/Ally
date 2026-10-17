@@ -7,10 +7,11 @@ import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { startAgentRun, stopAgentRun } from '../agent/runner.js';
 import type { AgentConfig, AgentProvider } from '../agent/types.js';
 import { parseWatchReply, WATCH_INSTRUCTIONS, type WatchReply } from './protocol.js';
+import { ensureSpeechRuntime, getSpeechRuntimeStatus } from '../speech/runtime.js';
 
 interface BridgeConfig { enabled: boolean; token: string; port: number; sessions: Partial<Record<AgentProvider, string>> }
 interface Turn extends ActivityState { id: string; requestId: string; provider: AgentProvider; status: 'thinking' | 'done' | 'error'; activity: string; transcript: string; reply?: WatchReply; error?: string; runId?: string; startedAt: number }
-const MAX_AUDIO = 2_000_044; // 60 seconds of 16 kHz mono PCM plus WAV header.
+const MAX_AUDIO = 1_920_044; // 60 seconds of 16 kHz mono PCM plus WAV header.
 
 export function authorized(header: string | undefined, token: string): boolean {
   const a = Buffer.from(header ?? '');
@@ -29,7 +30,8 @@ export function startWatchBridge(getConfig: () => AgentConfig): (() => void) | u
   save();
   const turns = new Map<string, Turn>();
   const timeouts = new Map<string, ReturnType<typeof setTimeout>>();
-  const sttUrl = 'http://127.0.0.1:18766';
+  // Warm the shared model without opening either microphone.
+  void ensureSpeechRuntime().catch(() => { /* /v1/status exposes the actionable worker state. */ });
   let closed = false;
   const finish = (turn: Turn, error?: string, raw?: string) => {
     if (turn.status !== 'thinking') return;
@@ -70,8 +72,9 @@ export function startWatchBridge(getConfig: () => AgentConfig): (() => void) | u
       if (req.headers.origin || !authorized(req.headers.authorization, config.token)) { send(res, 401, { error: 'Pair Ally from the desktop first' }); return; }
       const url = new URL(req.url ?? '/', 'http://localhost');
       if (req.method === 'GET' && url.pathname === '/v1/status') {
-        const voiceAvailable = await fetch(`${sttUrl}/health`, { signal: AbortSignal.timeout(1000) }).then(r => r.ok).catch(() => false);
-        send(res, 200, { connected: true, voiceAvailable, providers: ['codex', 'claude'], context: 'Dedicated watch chat', permission: 'readonly' }); return;
+        const voice = await getSpeechRuntimeStatus();
+        const voiceDetail = voice.ready ? 'Hold to talk' : voice.state === 'loading' || voice.state === 'starting' ? 'Voice model loading · text ready' : 'Voice unavailable · reconnect on desktop';
+        send(res, 200, { connected: true, voiceAvailable: voice.ready, voiceState: voice.state, voiceDetail, providers: ['codex', 'claude'], context: 'Dedicated watch chat', permission: 'readonly' }); return;
       }
       if (req.method === 'GET' && url.pathname.startsWith('/v1/turns/')) {
         const turn = turns.get(url.pathname.slice('/v1/turns/'.length));
@@ -93,10 +96,12 @@ export function startWatchBridge(getConfig: () => AgentConfig): (() => void) | u
       const provider = audio ? url.searchParams.get('provider') : message.provider;
       const requestId = audio ? url.searchParams.get('requestId') : message.requestId;
       if (!['codex', 'claude'].includes(provider) || typeof requestId !== 'string' || !/^[\w-]{1,80}$/.test(requestId)) { send(res, 400, { error: 'Invalid engine or request ID' }); return; }
+      const voiceReady = !audio || (await getSpeechRuntimeStatus()).ready;
       const previous = [...turns.values()].find(t => t.requestId === requestId && t.provider === provider);
       if (previous) { send(res, 202, { id: previous.id }); return; }
       if ([...turns.values()].some(t => t.provider === provider && t.status === 'thinking')) { send(res, 409, { error: 'Your watch chat is still working. Wait for its response.' }); return; }
       if (audio && (body.length < 6444 || body.toString('ascii', 0, 4) !== 'RIFF' || body.toString('ascii', 8, 12) !== 'WAVE')) { send(res, 400, { error: 'Record at least a moment of speech' }); return; }
+      if (!voiceReady) { send(res, 503, { error: 'Voice is not ready. Reconnect speech on the desktop or use text.' }); return; }
       if (!audio && (typeof message.text !== 'string' || !message.text.trim() || message.text.length > 4000)) { send(res, 400, { error: 'Message must contain 1–4000 characters' }); return; }
       if (turns.size >= 100) {
         const oldest = [...turns.values()].find(t => t.status !== 'thinking');
@@ -109,7 +114,8 @@ export function startWatchBridge(getConfig: () => AgentConfig): (() => void) | u
       if (!audio) { void run(turn); return; }
       void (async () => {
         try {
-          const response = await fetch(`${sttUrl}/transcribe`, { method: 'POST', headers: { 'Content-Type': 'audio/wav', Authorization: `Bearer ${config.token}` }, body: new Uint8Array(body), signal: AbortSignal.timeout(120000) });
+          const runtime = await ensureSpeechRuntime();
+          const response = await fetch(`${runtime.url}/transcribe`, { method: 'POST', headers: { 'Content-Type': 'audio/wav', Authorization: `Bearer ${runtime.token}` }, body: new Uint8Array(body), signal: AbortSignal.timeout(120000) });
           const data = await response.json() as { text?: string; error?: string };
           if (!response.ok || !data.text?.trim()) throw new Error(data.error ?? 'No speech heard. Try again or use text.');
           turn.transcript = data.text.trim().slice(0, 4000);

@@ -55,7 +55,9 @@ class WatchViewModel(application: Application) : AndroidViewModel(application) {
                 val status = api.request("/v1/status")
                 mutable.update { it.copy(phase = if (it.reply.text.isBlank()) Phase.IDLE else Phase.READY,
                     context = "Watch · ${if (it.provider == "codex") "Codex" else "Claude"}",
-                    detail = if (status.optBoolean("voiceAvailable")) "Hold to talk" else "Voice warming up · text ready") }
+                    voiceReady = status.optBoolean("voiceAvailable"),
+                    voiceState = status.optString("voiceState", "offline"),
+                    detail = if (status.optBoolean("voiceAvailable")) "Hold to talk" else status.optString("voiceDetail", "Voice unavailable · text ready")) }
             } catch (e: Exception) { fail(e, Phase.OFFLINE) }
         }
     }
@@ -74,15 +76,17 @@ class WatchViewModel(application: Application) : AndroidViewModel(application) {
     }
     fun startRecording() {
         if (busy || mutable.value.muted || mutable.value.phase == Phase.OFFLINE) return
+        if (!mutable.value.voiceReady) { refresh(); return }
         try {
-            voice.start(viewModelScope, { finishRecording() }, { error -> cancelRecording(); mutable.update { it.copy(phase = Phase.ERROR, detail = error) } })
-            mutable.update { it.copy(phase = Phase.RECORDING, detail = "Listening · release to send") }
+            voice.start(viewModelScope, { finishRecording() }, { error -> cancelRecording(); mutable.update { it.copy(phase = Phase.ERROR, detail = error) } },
+                { level, seconds -> mutable.update { if (it.phase == Phase.RECORDING) it.copy(microphoneLevel = level, recordingSeconds = seconds) else it } })
+            mutable.update { it.copy(phase = Phase.RECORDING, detail = "Listening · release to send", microphoneLevel = 0f, recordingSeconds = 0f) }
         } catch (e: Exception) { voice.cancel(); fail(e) }
     }
     fun finishRecording() {
         if (mutable.value.phase != Phase.RECORDING) return
         clearReply()
-        mutable.update { it.copy(phase = Phase.UPLOADING, transcript = "", detail = "Sending your voice…") }
+        mutable.update { it.copy(phase = Phase.UPLOADING, transcript = "", microphoneLevel = 0f, detail = "Sending your voice…") }
         work = viewModelScope.launch {
             try {
                 val audio = voice.stop()
@@ -94,7 +98,7 @@ class WatchViewModel(application: Application) : AndroidViewModel(application) {
     fun cancelRecording() {
         if (mutable.value.phase != Phase.RECORDING) return
         voice.cancel()
-        mutable.update { it.copy(phase = Phase.IDLE, detail = "Recording cancelled") }
+        mutable.update { it.copy(phase = Phase.IDLE, microphoneLevel = 0f, recordingSeconds = 0f, detail = "Recording cancelled") }
     }
     fun send(text: String) {
         if (busy || text.isBlank()) return

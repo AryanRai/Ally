@@ -5,55 +5,81 @@ import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
 import kotlinx.coroutines.*
-import java.io.ByteArrayOutputStream
-import java.nio.ByteBuffer
-import java.nio.ByteOrder
+import java.util.concurrent.atomic.AtomicBoolean
 
-/** 16 kHz mono PCM, capped at 60 seconds. Audio remains in RAM until upload. */
+/** Each gesture owns its recorder. Cancellation never releases a recorder still being read. */
 class VoiceRecorder {
-    private var recorder: AudioRecord? = null
-    private var job: Job? = null
-    private var bytes = ByteArrayOutputStream()
-    @Volatile private var recording = false
-    @SuppressLint("MissingPermission")
-    fun start(scope: CoroutineScope, onLimit: () -> Unit, onError: (String) -> Unit) {
-        check(recorder == null)
-        val size = maxOf(4096, AudioRecord.getMinBufferSize(16000, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT))
-        val audio = AudioRecord(MediaRecorder.AudioSource.VOICE_RECOGNITION, 16000, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, size)
-        if (audio.state != AudioRecord.STATE_INITIALIZED) { audio.release(); error("Microphone unavailable") }
-        recorder = audio
-        val capture = ByteArrayOutputStream()
-        bytes = capture
-        audio.startRecording()
-        recording = true
-        job = scope.launch(Dispatchers.IO) {
-            val buffer = ByteArray(size)
-            while (recording && isActive) {
-                val n = audio.read(buffer, 0, buffer.size)
-                if (n < 0 && recording) { withContext(Dispatchers.Main) { onError("Microphone stopped. Try again.") }; break }
-                if (n > 0) capture.write(buffer, 0, n)
-                if (capture.size() >= 16000 * 2 * 60) { withContext(Dispatchers.Main) { onLimit() }; break }
+    private class Capture(val audio: AudioRecord) {
+        val recording = AtomicBoolean(true)
+        val pcm = PcmRecording()
+        var job: Job? = null
+        private val released = AtomicBoolean(false)
+        fun release() {
+            if (released.compareAndSet(false, true)) {
+                recording.set(false)
+                runCatching { audio.stop() }
+                audio.release()
             }
         }
     }
-    suspend fun stop(): ByteArray {
-        recording = false
-        runCatching { recorder?.stop() }
-        job?.join()
-        recorder?.release(); recorder = null; job = null
-        val pcm = bytes.toByteArray(); bytes.reset()
-        require(pcm.size >= 6400) { "Hold a little longer to speak" }
-        val header = ByteBuffer.allocate(44).order(ByteOrder.LITTLE_ENDIAN)
-        header.put("RIFF".toByteArray()).putInt(pcm.size + 36).put("WAVEfmt ".toByteArray())
-        header.putInt(16).putShort(1).putShort(1).putInt(16000).putInt(32000).putShort(2).putShort(16)
-        header.put("data".toByteArray()).putInt(pcm.size)
-        return header.array() + pcm
+    private var current: Capture? = null
+
+    @SuppressLint("MissingPermission")
+    fun start(scope: CoroutineScope, onLimit: () -> Unit, onError: (String) -> Unit, onLevel: (Float, Float) -> Unit) {
+        check(current == null)
+        val minimum = AudioRecord.getMinBufferSize(16000, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
+        check(minimum > 0) { "This microphone does not support voice capture" }
+        val size = maxOf(4096, minimum)
+        val audio = AudioRecord(MediaRecorder.AudioSource.VOICE_RECOGNITION, 16000, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, size)
+        try {
+            check(audio.state == AudioRecord.STATE_INITIALIZED) { "Microphone unavailable" }
+            audio.startRecording()
+            check(audio.recordingState == AudioRecord.RECORDSTATE_RECORDING) { "Microphone could not start" }
+        } catch (error: Exception) { audio.release(); throw error }
+        val capture = Capture(audio)
+        current = capture
+        capture.job = scope.launch(Dispatchers.IO) {
+            try {
+                val buffer = ByteArray(size)
+                while (capture.recording.get() && isActive) {
+                    val n = audio.read(buffer, 0, buffer.size)
+                    if (!capture.recording.get()) break
+                    check(n >= 0) { "Microphone stopped. Try again." }
+                    if (n == 0) { delay(10); continue }
+                    val level = capture.pcm.append(buffer, n)
+                    withContext(Dispatchers.Main) {
+                        if (current === capture && capture.recording.get()) onLevel(level, capture.pcm.seconds)
+                    }
+                    if (capture.pcm.full) {
+                        withContext(Dispatchers.Main) { if (current === capture) onLimit() }
+                        break
+                    }
+                }
+            } catch (error: Exception) {
+                if (error is CancellationException) throw error
+                withContext(Dispatchers.Main) { if (current === capture && capture.recording.get()) onError(error.message ?: "Microphone unavailable") }
+            } finally {
+                capture.release()
+            }
+        }
+        // Also covers cancellation before the IO coroutine first executes.
+        capture.job?.invokeOnCompletion { capture.release() }
     }
+
+    suspend fun stop(): ByteArray {
+        val capture = current ?: error("Recording was cancelled")
+        current = null
+        capture.recording.set(false)
+        runCatching { capture.audio.stop() }
+        capture.job?.join()
+        return capture.pcm.wav()
+    }
+
     fun cancel() {
-        recording = false
-        runCatching { recorder?.stop() }
-        job?.cancel(); job = null
-        recorder?.release(); recorder = null
-        bytes = ByteArrayOutputStream()
+        val capture = current ?: return
+        current = null
+        capture.recording.set(false)
+        runCatching { capture.audio.stop() }
+        capture.job?.cancel()
     }
 }

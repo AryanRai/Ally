@@ -98,11 +98,11 @@ export default function GlassChatPiP() {
   };
 
   // Voice: recognized speech is sent straight away; new speech interrupts a reply
-  const lastSpeechRef = useRef<string | null>(null);
+  const lastSpeechRef = useRef<number>(0);
   useEffect(() => {
     const text = speech.lastRecognizedText;
-    if (!text || !speech.voiceModeEnabled || text === lastSpeechRef.current) return;
-    lastSpeechRef.current = text;
+    if (!text || !speech.voiceModeEnabled || speech.recognitionId === lastSpeechRef.current) return;
+    lastSpeechRef.current = speech.recognitionId;
     if (isTyping) {
       speech.stopCurrentSpeech();
       conversation.stop();
@@ -110,14 +110,7 @@ export default function GlassChatPiP() {
     } else {
       conversation.send(text, 'speech');
     }
-  }, [speech.lastRecognizedText, speech.voiceModeEnabled]);
-
-  // Voice mode drives the microphone
-  useEffect(() => {
-    if (!speech.isConnected) return;
-    if (speech.voiceModeEnabled && !speech.isListening) speech.startListening().catch(console.error);
-    if (!speech.voiceModeEnabled && speech.isListening) speech.stopListening().catch(console.error);
-  }, [speech.voiceModeEnabled, speech.isConnected, speech.isListening]);
+  }, [speech.recognitionId, speech.voiceModeEnabled]);
 
   const setVoiceMode = async (enabled: boolean) => {
     if (enabled && !speech.isConnected) {

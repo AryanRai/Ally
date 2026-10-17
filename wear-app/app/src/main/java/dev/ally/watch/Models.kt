@@ -32,6 +32,10 @@ data class WatchState(
     val usage: String = "",
     val turnId: String? = null,
     val muted: Boolean = false,
+    val voiceReady: Boolean = false,
+    val voiceState: String = "offline",
+    val recordingSeconds: Float = 0f,
+    val microphoneLevel: Float = 0f,
     val readySequence: Int = 0,
 )
 
