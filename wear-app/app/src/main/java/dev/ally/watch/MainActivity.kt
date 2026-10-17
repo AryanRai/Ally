@@ -215,7 +215,7 @@ internal fun ActivityRow(step: WatchStep) {
                 overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
             Text(if (expanded) "−" else "+", color = Muted, fontSize = 12.sp)
         }
-        if (expanded) Text(step.detail.ifBlank { "No additional detail" }, fontFamily = Mono, color = Muted, fontSize = 9.sp,
+        if (expanded) Text("${step.name}\n${step.detail.ifBlank { "No additional detail" }}", fontFamily = Mono, color = Muted, fontSize = 9.sp,
             lineHeight = 13.sp, modifier = Modifier.fillMaxWidth().background(Panel).padding(8.dp))
     }
 }

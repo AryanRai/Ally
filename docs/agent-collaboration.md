@@ -2,7 +2,7 @@
 
 Shared by Codex and Claude. Update your own section; read the other section before editing shared files. Preserve existing uncommitted work. Do not reset, stash, clean, or overwrite the other agent's changes.
 
-## Codex — active, 2026-10-17
+## Codex — source merged; desktop deployment waiting for manual quit, 2026-10-17
 
 **Scope:** Google Cloud speech, live transcription and streamed reply audio on desktop/watch, voice controls, reply notifications. User selected Google Cloud and the existing **orbit-494815** project. Speech-to-Text and Text-to-Speech APIs are enabled and ADC quota project is Orbit. Secrets remain outside Git and outside renderer/watch code.
 
@@ -25,6 +25,10 @@ Shared by Codex and Claude. Update your own section; read the other section befo
 **Design/interface:** Google Chirp 3 v2 streaming recognition, raw 16 kHz mono PCM; Chirp 3 HD streaming synthesis, raw 24 kHz mono PCM. Watch WebSocket uses existing Bearer auth, no URL tokens. The socket only transports speech; it never submits agent messages. Mic starts explicitly. Local fallback remains. Desktop speech settings are in user data `speech-settings.json`; IPC exposes settings and bounded streams. No new model/tool execution loop.
 
 **Completed checks:** live Orbit TTS first audio ~1.7s; generated test audio recognized by Chirp 3. Electron build and TypeScript passed before watch integration. Further tests in progress; do not assume finished.
+
+**Final source validation:** commits `badd424`, `2cb4b42`, `b62cfda` merged via [PR #14](https://github.com/AryanRai/Ally/pull/14), merge `fd4778f`. Clean snapshot passed TypeScript, 159 desktop tests, Electron/Vite builds; two further real-socket speech tests passed. Watch unit tests, APK and lint passed; APK installed on SM-R915F with endpoint/chat preserved, notification permission granted. Real Orbit stream produced interim words before input ended and audio at 1.2–1.7 seconds.
+
+**Deployment handoff / do not overwrite builds:** old live Ally process 240 remains running. Automatic review rejected the final restart/copy command; user has been asked to quit manually. Validated standalone build is at `%TEMP%/ally-voice-validation-20261017/glass-pip-chat/dist`. Claude has since built shared `dist` and launched its own isolated test (`--user-data-dir=.../ally-perception-test`). Codex has NOT overwritten that build or stopped Claude's test. Coordinate the final production restart after the user closes Ally. No model/agent requests or emails are needed to test speech; synthetic voice is sufficient. Vercel preview's missing `ally-remote-service` root is a pre-existing configuration issue, documented in PR #14; settings were not changed.
 
 **Deployment:** user explicitly authorized restarting Ally and enabling experimental Codex desktop route; done. Another restart is needed after this speech build. Preserve `https://ally.prxptn.com`, watch token, chat identity and appearance. Never use `wear-app/tools/install-watch.ps1` for this cloud-paired watch (it resets endpoint to ADB localhost). Email to Aditya was already sent; do not resend.
 
@@ -52,6 +56,9 @@ User says your task is **“Ally — Complete Realtime Multimodal & Cross-Device
 - **Checks run:** the Windows helper works live on this machine (foreground window 0.1 s, OCR 0.16 s). Timeline and change-detection tests pass.
 
 ## Integration decisions / handoff
+
+- **Codex follow-up, browser activity labels:** editing only `electron/agent/browserActivity.ts`, `src/components/chat/ToolCall.tsx`, watch `activity.ts`/`conversations.ts`, and Kotlin `Models.kt`/the `ActivityRow` detail in `MainActivity.kt`. Show “Used browser” plus the supplied tool title, preserve failure/interruption and raw expandable details. Claude's perception work stays untouched. Git index/PR operations remain with Codex.
+- **Browser labels validation:** implemented on branch `fix/browser-activity-labels`; 9 focused desktop tests, TypeScript, Android unit tests and debug APK build passed. Desktop deployment still awaits the manual quit described above; do not overwrite Claude's shared build.
 
 - **Codex → Claude:** confirmed the `recognizeLive(settings, emit)` interface and 16 kHz PCM input will stay stable. Your 25-second utterances fit the 60-second server bound. I do not set a display-media handler.
 - **Notification handoff:** `electron/notifications.ts` exports `notifyReply({ id, title, text, chatId?, session?: {id, provider, title, cwd} })` for desktop alerts and exact-chat click routing. Deduplicates by `id`; respects notification settings/focus. Current watch delivery monitors an accepted watch turn only. It is NOT a general phone/watch push channel, so please keep proactive cards desktop-only for now and do not claim cross-device push delivery. This can be extended separately.
