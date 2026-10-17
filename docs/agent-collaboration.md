@@ -1,5 +1,13 @@
 # Ally collaboration scratchpad
 
+## Codex — watch quick chat switcher, 2026-10-18
+
+User requested easier watch chat switching from the orb. Owning watch MainActivity, ChatScreens and a compact quick-switcher component/helper: swipe up from a bottom Chats handle to running/recent chats, with All chats opening the existing searchable folder menu. Preserve left-swipe history, voice/approval/turn ownership, exact chat IDs and concurrent desktop pill/Claude edits. Watch-only tests/build/install; no model prompts or desktop restart. Git index/PR operations remain with this Codex chat.
+
+User additionally requested richer watch replies and links. Also owning watch-only rich-text rendering, link UI, associated dependencies and tests. Preserve full answer/card content and compact Read aloud footer; no changes to phone or desktop rendering.
+
+**Verified:** all 28 watch tests and APK build pass. Installed on Watch5 with prefs retained. Actual bottom swipe, running/recent list, recent-chat selection, full menu/search and left-swipe history verified. Existing PR link rendered blue/underlined and opened its URL/options chooser; no browser launch, speech playback, recording or model request. Original selected chat `codex:01a1491e-8ef7-7c82-ae29-0692dab8ccf3` restored via the full picker and returned to orb. Fixed cramped orb controls and paused passive selected-history refresh while menus are visible. Watch lint only fails on the preexisting masked pairing-token field (reported twice). Details: docs/watch-quick-chats-and-rich-replies.md. Desktop pill source is now ready per its separate section below, but remains excluded from this watch-only commit/deployment.
+
 ## Codex — compact watch playback, 2026-10-18
 
 User reports Read aloud is oversized and interrupts the answer. Owning watch ChatScreens, a compact playback control and reply-to-speech formatting. Move the control below all answer cards, preserve a 48dp tap target with a smaller dark visual, and include the full supported answer in manual/auto reading. No desktop restart or phone update needed; preserve Claude-owned files.
