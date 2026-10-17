@@ -1,14 +1,17 @@
-import { forwardRef, useState } from 'react';
-import { CornerDownLeft, Square, Clipboard, Plus, X, ClipboardCopy, Cpu, FolderOpen, Lasso } from 'lucide-react';
-import { cn } from '../../lib/utils';
-import { ThemeUtils } from '../../utils/themeUtils';
-import { Message } from '../../types/chat';
-import type { AgentPermission } from '../../types/agent';
-import type { ContextData } from '../../hooks/useContextMonitoring';
+import { Ref, useState } from 'react';
+import { Clipboard, ClipboardCopy, Cpu, FolderOpen, Lasso, Check, ArrowUp, Square, Eye, ShieldCheck, ShieldAlert } from 'lucide-react';
+import { PromptInput, PromptInputFooter, PromptInputSubmit, PromptInputTextarea } from '@/components/ai-elements/prompt-input';
+import ComposerTools from './ComposerTools';
+import AuroraGlow from '@/components/glow/AuroraGlow';
+import EnergyOrb, { type OrbMood } from '@/components/glow/EnergyOrb';
+import type { GlowPalette } from '@/components/glow/palette';
+import { cn } from '@/lib/utils';
+import type { Message } from '@/types/chat';
+import type { AgentPermission } from '@/types/agent';
+import type { ContextData } from '@/hooks/useContextMonitoring';
 
 interface ChatInputProps {
-  platform: string;
-  theme: 'light' | 'dark';
+  ref?: Ref<HTMLTextAreaElement>;
   input: string;
   setInput: (value: string) => void;
   onSend: () => void;
@@ -18,11 +21,19 @@ interface ChatInputProps {
   onExplainClipboard: () => void;
   placeholder?: string;
   messages?: Message[];
-  /** Robot mode — DroidCore persona + HowYouSeeMe MCP handed to the agent */
+  /** Orb / aurora colours (shared with Orbit's Mary) */
+  palette: GlowPalette;
+  /** Voice: the orb toggles it, like Mary's live-mode orb */
+  voice: {
+    enabled: boolean;
+    listening: boolean;
+    onToggle: () => void;
+  };
+  /** Robot mode — DroidCore persona + robot MCP servers handed to the agent */
   robotMode?: boolean;
   onRobotModeToggle?: () => void;
   /** The agent behind this chat */
-  agent?: {
+  agent: {
     label: string;
     model: string;
     folder: string;
@@ -32,10 +43,10 @@ interface ChatInputProps {
   };
 }
 
-const PERMISSION_LABEL: Record<AgentPermission, { text: string; title: string; cls: string }> = {
-  readonly: { text: 'Read-only', title: 'Agent can read but not change files (click to change)', cls: 'bg-white/5 border-white/15 text-white/60' },
-  edit: { text: 'Can edit', title: 'Agent can edit files in the folder; risky commands may be blocked (click to change)', cls: 'bg-amber-500/15 border-amber-500/30 text-amber-300' },
-  full: { text: 'Full access', title: 'Agent runs anything without asking (click to change)', cls: 'bg-red-500/15 border-red-500/30 text-red-300' },
+const PERMISSION: Record<AgentPermission, { text: string; title: string }> = {
+  readonly: { text: 'read-only', title: 'Agent can read but not change files (click to change)' },
+  edit: { text: 'can edit', title: 'Agent can edit files in the folder; risky commands may be blocked (click to change)' },
+  full: { text: 'full access', title: 'Agent runs anything without asking (click to change)' },
 };
 
 function folderName(p: string): string {
@@ -60,9 +71,17 @@ function exportChat(messages: Message[], agentLabel: string): string {
   return lines.join('\n');
 }
 
-const ChatInput = forwardRef<HTMLInputElement, ChatInputProps>(({
-  platform,
-  theme,
+// Strip PromptInput's own box: the Mary-style dock below draws the frame instead
+const BARE_GROUP =
+  '[&>[data-slot=input-group]]:border-0! [&>[data-slot=input-group]]:bg-transparent! [&>[data-slot=input-group]]:ring-0! [&>[data-slot=input-group]]:shadow-none! [&>[data-slot=input-group]]:overflow-visible!';
+
+/**
+ * Composer: Orbit Mary's input dock (energy orb + pill field, aurora behind it
+ * while the agent responds) on AI Elements' PromptInput, with Ally's agent
+ * controls (circle, folder, permission, clipboard, robot) underneath.
+ */
+export default function ChatInput({
+  ref,
   input,
   setInput,
   onSend,
@@ -70,167 +89,125 @@ const ChatInput = forwardRef<HTMLInputElement, ChatInputProps>(({
   onStop,
   contextData,
   onExplainClipboard,
-  placeholder = 'Balalalala',
+  placeholder = 'Ask the agent…',
   messages = [],
+  palette,
+  voice,
   robotMode = false,
   onRobotModeToggle,
   agent,
-}, ref) => {
-  const [showToolbar, setShowToolbar] = useState(false);
+}: ChatInputProps) {
   const [copied, setCopied] = useState(false);
+  const glowing = isTyping || voice.listening;
+  const mood: OrbMood = isTyping ? 'busy' : voice.listening ? 'listening' : 'idle';
+  const canSend = !!input.trim();
 
-  const handleCopyChat = async () => {
-    try {
-      await navigator.clipboard.writeText(exportChat(messages, agent ? `${agent.label} · ${agent.model}` : 'none'));
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch (err) {
-      console.error('Failed to copy chat:', err);
-    }
+  const copyChat = async () => {
+    await navigator.clipboard.writeText(exportChat(messages, `${agent.label} · ${agent.model}`));
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
   };
 
-  const mode = robotMode
-    ? { dot: 'bg-red-400', label: 'Robot', extra: agent ? `· ${agent.label} · DroidCore` : '· DroidCore' }
-    : agent
-      ? { dot: 'bg-purple-400', label: agent.label, extra: `· ${agent.model} · ${folderName(agent.folder)}` }
-      : { dot: 'bg-gray-400', label: 'No agent', extra: '· pick Claude Code or Codex above' };
-
   return (
-    <div className={cn('border-t p-3', ThemeUtils.getBorderClass(platform, theme))}>
-      {/* Mode indicator bar */}
-      <div className="flex items-center gap-1.5 mb-2 px-0.5">
-        <span className={cn('w-1.5 h-1.5 rounded-full flex-shrink-0', mode.dot)} />
-        <span className="text-[10px] text-white/50 truncate">
-          <span className="text-white/70 font-medium">{mode.label}</span>{' '}
-          <span className="text-white/30">{mode.extra}</span>
-        </span>
-      </div>
+    <div className="relative border-t border-border">
+      <AuroraGlow active={glowing} colors={palette} />
 
-      {/* Agent folder + permission, clipboard context */}
-      <div className="flex flex-wrap gap-1 mb-2">
-        {agent && (
-          <>
-            <button
-              onClick={agent.onPickFolder}
-              className="inline-flex items-center gap-1 px-2 py-1 text-xs rounded-lg bg-purple-500/20 hover:bg-purple-500/30 border border-purple-500/30 transition-colors max-w-[180px]"
-              title={`Working folder: ${agent.folder}\nClick to change`}
-            >
-              <FolderOpen className="w-3 h-3 flex-shrink-0" />
-              <span className="truncate">{folderName(agent.folder)}</span>
-            </button>
-            <button
-              onClick={agent.onCyclePermission}
-              className={cn('px-2 py-1 text-xs rounded-lg border transition-colors hover:brightness-125', PERMISSION_LABEL[agent.permission].cls)}
-              title={PERMISSION_LABEL[agent.permission].title}
-            >
-              {PERMISSION_LABEL[agent.permission].text}
-            </button>
-          </>
-        )}
-        <button
-          onClick={() => window.pip?.circle.start()}
-          className="inline-flex items-center gap-1 px-2 py-1 text-xs rounded-lg bg-gradient-to-r from-blue-500/20 to-pink-500/20 hover:from-blue-500/30 hover:to-pink-500/30 border border-purple-400/30 transition-colors"
-          title="Circle anything on screen to ask about it (Ctrl+Shift+Space, or shake the cursor)"
-        >
-          <Lasso className="w-3 h-3" />
-          Circle
-        </button>
-        {contextData.clipboard && (
-          <button
-            onClick={onExplainClipboard}
-            className="px-2 py-1 text-xs rounded-lg bg-blue-500/20 hover:bg-blue-500/30 border border-blue-500/30 transition-colors"
-            title="Ask about clipboard content"
-          >
-            <Clipboard className="w-3 h-3 inline mr-1" />
-            Explain
-          </button>
-        )}
-      </div>
+      <div className={cn('relative z-10 flex flex-col gap-2 px-2.5 pb-2.5 pt-2 transition-colors duration-500', glowing ? 'bg-black/45' : 'bg-black/20')}>
+        {/* prxptn-style status line */}
+        <div className="flex items-center gap-2 px-1">
+          <span className={cn('size-1.5 shrink-0', robotMode ? 'bg-destructive' : 'bg-foreground', isTyping && 'animate-pulse')} />
+          <span className="px-label truncate">
+            {robotMode ? 'robot · ' : ''}{agent.label} · {agent.model} · {folderName(agent.folder)}
+            {isTyping ? ' · working' : voice.listening ? ' · listening' : ''}
+          </span>
+        </div>
 
-      {/* Expandable extra toolbar */}
-      <div className="flex items-center gap-1 mb-2">
-        <button
-          onClick={() => setShowToolbar(!showToolbar)}
-          className={cn('p-1 rounded-lg transition-colors', showToolbar ? 'bg-white/15 text-white/80' : 'hover:bg-white/10 text-white/40')}
-          title={showToolbar ? 'Hide toolbar' : 'More options'}
-        >
-          {showToolbar ? <X className="w-3 h-3" /> : <Plus className="w-3 h-3" />}
-        </button>
-
-        {showToolbar && (
-          <div className="flex flex-wrap items-center gap-1 animate-in fade-in slide-in-from-left-2 duration-150">
-            <button
-              onClick={handleCopyChat}
-              className={cn(
-                'inline-flex items-center gap-1 px-2 py-1 text-[10px] rounded-lg transition-colors',
-                copied
-                  ? 'bg-green-500/20 border border-green-500/30 text-green-300'
-                  : 'bg-white/5 hover:bg-white/10 border border-white/10 text-white/60 hover:text-white/80'
-              )}
-              title="Copy the full chat"
-            >
-              <ClipboardCopy className="w-3 h-3" />
-              {copied ? 'Copied!' : 'Copy Chat'}
-            </button>
-
-            {onRobotModeToggle && (
-              <button
-                onClick={onRobotModeToggle}
-                className={cn(
-                  'inline-flex items-center gap-1 px-2 py-1 text-[10px] rounded-lg transition-colors border',
-                  robotMode ? 'bg-red-500/20 border-red-500/30 text-red-300' : 'bg-white/5 hover:bg-white/10 border-white/10 text-white/60'
-                )}
-                title={robotMode
-                  ? 'Robot Mode ON: the agent gets the DroidCore persona and the HowYouSeeMe MCP tools'
-                  : 'Robot Mode OFF: enable for DroidCore + HowYouSeeMe perception'}
-              >
-                <Cpu className="w-3 h-3" />
-                Robot
-              </button>
-            )}
-          </div>
-        )}
-      </div>
-
-      <form
-        onSubmit={e => {
-          e.preventDefault();
-          onSend();
-        }}
-        className="flex items-center gap-2"
-      >
-        <input
-          ref={ref}
-          id="main-input"
-          type="text"
-          value={input}
-          onChange={e => setInput(e.target.value)}
-          placeholder={placeholder}
-          className={cn('flex-1 px-3 py-2 rounded-xl text-sm', platform !== 'win32' && 'backdrop-blur-md', ThemeUtils.getInputClass(platform, theme))}
-        />
-        <button
-          type="submit"
-          disabled={!input.trim() && !isTyping}
-          onClick={e => {
-            if (isTyping) {
-              e.preventDefault();
-              onStop();
-            }
+        <PromptInput
+          onSubmit={() => {
+            if (!isTyping) onSend();
           }}
-          className={cn(
-            'p-2 rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed',
-            platform !== 'win32' && 'backdrop-blur-md',
-            isTyping ? 'bg-red-500/20 hover:bg-red-500/30 text-red-300' : ThemeUtils.getBackgroundClass(platform, theme, 'hover')
-          )}
-          title={isTyping ? 'Stop' : 'Send'}
+          className={BARE_GROUP}
         >
-          {isTyping ? <Square className="w-4 h-4" /> : <CornerDownLeft className="w-4 h-4" />}
-        </button>
-      </form>
+          {/* Row 1 — Mary's dock: orb + field in a pill */}
+          <div
+            className={cn(
+              'flex min-h-9 w-full items-center rounded-[18px] border px-1 transition-colors duration-150 focus-within:border-white/30',
+              glowing ? 'border-white/20 bg-white/[0.04]' : 'border-white/10 bg-white/[0.06]'
+            )}
+          >
+            <button
+              type="button"
+              onClick={voice.onToggle}
+              className="grid size-7 shrink-0 cursor-pointer place-items-center rounded-full transition-transform hover:scale-110 active:scale-95"
+              title={voice.enabled ? 'Voice on · click to stop listening' : 'Click to talk to the agent'}
+              aria-pressed={voice.enabled}
+            >
+              <EnergyOrb size={26} colors={palette} mood={mood} />
+            </button>
+            <PromptInputTextarea
+              ref={ref}
+              id="main-input"
+              rows={1}
+              value={input}
+              onChange={e => setInput(e.target.value)}
+              placeholder={placeholder}
+              className="max-h-32 min-h-0 flex-1 resize-none border-0 bg-transparent! px-2 py-2 text-[13px] font-light shadow-none focus-visible:ring-0"
+            />
+          </div>
+
+          {/* Row 2 — Ally's agent controls + Mary-style send */}
+          <PromptInputFooter className="px-0 pb-0 pt-1.5">
+            <ComposerTools
+              tools={[
+                {
+                  id: 'circle',
+                  icon: <Lasso />,
+                  label: 'Circle to ask',
+                  detail: 'ctrl+shift+space',
+                  onClick: () => window.pip?.circle.start(),
+                },
+                { id: 'folder', icon: <FolderOpen />, label: 'Working folder', detail: folderName(agent.folder), onClick: agent.onPickFolder },
+                {
+                  id: 'permission',
+                  icon: agent.permission === 'readonly' ? <Eye /> : agent.permission === 'full' ? <ShieldAlert /> : <ShieldCheck />,
+                  label: 'Permissions',
+                  detail: PERMISSION[agent.permission].text,
+                  danger: agent.permission === 'full',
+                  onClick: agent.onCyclePermission,
+                },
+                {
+                  id: 'explain',
+                  icon: <Clipboard />,
+                  label: 'Explain clipboard',
+                  hidden: !contextData.clipboard,
+                  onClick: onExplainClipboard,
+                },
+                {
+                  id: 'robot',
+                  icon: <Cpu />,
+                  label: 'Robot mode',
+                  detail: robotMode ? 'on' : 'off',
+                  active: robotMode,
+                  hidden: !onRobotModeToggle,
+                  onClick: () => onRobotModeToggle?.(),
+                },
+                { id: 'copy', icon: copied ? <Check /> : <ClipboardCopy />, label: copied ? 'Copied' : 'Copy chat', onClick: copyChat },
+              ]}
+            />
+            <PromptInputSubmit
+              status={isTyping ? 'streaming' : 'ready'}
+              onStop={onStop}
+              disabled={!isTyping && !canSend}
+              className={cn(
+                'size-[30px] shrink-0 rounded-full transition-colors',
+                isTyping || canSend ? 'bg-foreground text-background hover:bg-foreground/85' : 'bg-white/10 text-muted-foreground'
+              )}
+            >
+              {isTyping ? <Square className="size-3" fill="currentColor" /> : <ArrowUp className="size-3.5" strokeWidth={2.5} />}
+            </PromptInputSubmit>
+          </PromptInputFooter>
+        </PromptInput>
+      </div>
     </div>
   );
-});
-
-ChatInput.displayName = 'ChatInput';
-
-export default ChatInput;
+}

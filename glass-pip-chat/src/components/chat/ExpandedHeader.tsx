@@ -1,20 +1,6 @@
-import { motion } from 'framer-motion';
-import {
-  Grip,
-  Maximize2,
-  Minus,
-  X,
-  Settings,
-  Eye,
-  EyeOff,
-  Clipboard,
-  Check,
-  Mic,
-  MicOff
-} from 'lucide-react';
-import { cn } from '../../lib/utils';
-import { ThemeUtils } from '../../utils/themeUtils';
-
+import { Maximize2, Minus, X, Settings, Clipboard, Check, Mic, MicOff, PanelLeft } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { cn } from '@/lib/utils';
 import { UnifiedModelSelector } from '../UnifiedModelSelector';
 
 interface ExpandedHeaderProps {
@@ -23,10 +9,10 @@ interface ExpandedHeaderProps {
   isResizing: boolean;
   sidebarCollapsed: boolean;
   onSidebarToggle: () => void;
-  activeChat: any;
+  activeChat: { title?: string } | null;
   headerTitleEdit: any;
   hasNewContext: boolean;
-  contextData: any;
+  contextData: { clipboard?: string; selectedText?: string };
   showContext: boolean;
   onContextToggle: () => void;
   contextToggleEnabled: boolean;
@@ -38,13 +24,16 @@ interface ExpandedHeaderProps {
   onSizeChange: () => void;
   onSettings: () => void;
   onCollapseToggle: () => void;
-  onProviderSettings?: () => void;
   onHide: () => void;
   size: string;
   showSpeechControls: boolean;
   onSpeechToggle: () => void;
 }
 
+const noDrag = { WebkitAppRegion: 'no-drag' } as React.CSSProperties;
+const iconButton = 'size-6 rounded-sm text-muted-foreground hover:text-foreground';
+
+/** Expanded window header: Tanker wordmark, chat title, agent picker, window controls. */
 export default function ExpandedHeader({
   platform,
   theme,
@@ -69,99 +58,58 @@ export default function ExpandedHeader({
   onHide,
   size,
   showSpeechControls,
-  onSpeechToggle
+  onSpeechToggle,
 }: ExpandedHeaderProps) {
+  const hasClipboard = hasNewContext && !!(contextData.clipboard || contextData.selectedText);
 
   return (
     <>
-      <div className="flex items-center gap-1 flex-1 min-w-0">
-        <Grip className="w-3 h-3 opacity-50 flex-shrink-0" />        <button
+      <div className="flex min-w-0 flex-1 items-center gap-2">
+        <Button
+          variant="ghost"
+          size="icon"
+          className={iconButton}
+          style={noDrag}
           onClick={onSidebarToggle}
-          className={cn(
-            "flex items-center justify-center p-1 rounded transition-colors relative flex-shrink-0",
-            ThemeUtils.getBackgroundClass(platform, theme, 'hover')
-          )}
-          title={sidebarCollapsed ? "Show chats" : "Hide chats"}
+          title={sidebarCollapsed ? 'Show chats' : 'Hide chats'}
         >
-          <img
-            src="/allay.png"
-            alt="Ally"
-            className="w-4 h-4 flex-shrink-0"
-          />          {/* Indicator for auto-collapsed sidebar at large sizes */}
-          {sidebarCollapsed && size === 'L' && (
-            <div className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-orange-400 rounded-full"
-              title="Sidebar auto-collapsed to prevent overflow" />
-          )}
-        </button>
+          <PanelLeft className="size-3.5" />
+        </Button>
 
-        {/* Editable chat title */}
+        <span className="select-none font-tanker text-[15px] leading-none tracking-wide text-foreground">ALLY</span>
+        <span className="h-3 w-px shrink-0 bg-border" />
+
         {headerTitleEdit.isEditing ? (
-          <div
-            className="flex items-center gap-1 flex-1 min-w-0"
-            style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
-          >
+          <div className="flex min-w-0 flex-1 items-center gap-1" style={noDrag}>
             <input
               ref={headerTitleEdit.inputRef as React.RefObject<HTMLInputElement>}
               value={headerTitleEdit.editValue}
-              onChange={(e) => headerTitleEdit.setEditValue(e.target.value)}
+              onChange={e => headerTitleEdit.setEditValue(e.target.value)}
               onKeyDown={headerTitleEdit.handleKeyDown}
               onBlur={headerTitleEdit.saveEdit}
-              className={cn(
-                "flex-1 text-sm font-medium min-w-0",
-                ThemeUtils.getInputClass(platform, theme)
-              )}
-              placeholder="Chat title..."
+              className="min-w-0 flex-1 border border-input bg-transparent px-1.5 py-0.5 text-xs font-light outline-none focus:border-ring"
+              placeholder="Chat title…"
             />
-            <button
-              onClick={headerTitleEdit.saveEdit}
-              className={cn(ThemeUtils.getButtonClass(platform, theme), "hover:bg-green-500/20")}
-              title="Save title"
-            >
-              <Check className="w-3 h-3 text-green-400" />
-            </button>
-            <button
-              onClick={headerTitleEdit.cancelEdit}
-              className={cn(ThemeUtils.getButtonClass(platform, theme), "hover:bg-red-500/20")}
-              title="Cancel editing"
-            >
-              <X className="w-3 h-3 text-red-400" />
-            </button>
+            <Button variant="ghost" size="icon" className={iconButton} onClick={headerTitleEdit.saveEdit} title="Save title">
+              <Check className="size-3" />
+            </Button>
           </div>
         ) : (
-          <div
+          <button
             className={cn(
-              "flex-1 font-medium text-left px-1 py-0.5 rounded transition-colors min-w-0 cursor-pointer truncate",
-              size === 'S' ? "text-[10px] max-w-[60px]" : "text-xs",
-              ThemeUtils.getTextClass(platform, theme),
-              ThemeUtils.getBackgroundClass(platform, theme, 'hover')
+              'min-w-0 flex-1 truncate text-left text-xs font-light text-foreground/70 transition-colors hover:text-foreground',
+              size === 'S' && 'max-w-[60px] text-[10px]'
             )}
-            style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
-            title={`Chat: ${activeChat?.title || 'Untitled'} - Click to rename`}
+            style={noDrag}
+            title={`${activeChat?.title || 'Untitled'} · click to rename`}
             onClick={() => headerTitleEdit.startEdit(activeChat?.title)}
           >
             {activeChat?.title || 'Untitled'}
-          </div>
-        )}      </div>
+          </button>
+        )}
+      </div>
 
-      {isResizing && (
-        <motion.div
-          initial={{ opacity: 0, scale: 0.8 }}
-          animate={{ opacity: 1, scale: 1 }}
-          className="px-2 py-0.5 bg-green-500/20 rounded-full text-xs flex-shrink-0"
-        >
-          Resizing to {size}
-        </motion.div>
-      )}
-
-      <div
-        className="flex items-center gap-0.5 flex-shrink-0"
-        style={{
-          WebkitAppRegion: 'no-drag',
-          WebkitUserSelect: 'none',
-          userSelect: 'none'
-        } as React.CSSProperties}
-      >
-        {/* Unified Model Selector */}
+      <div className="flex shrink-0 items-center gap-0.5" style={{ ...noDrag, userSelect: 'none' }}>
         <UnifiedModelSelector
           platform={platform}
           theme={theme}
@@ -169,92 +117,46 @@ export default function ExpandedHeader({
           onModelSelect={onModelSelect}
           showSelector={showModelSelector}
           onToggleSelector={onModelSelectorToggle}
-          compact={true}
+          compact
           windowSize={size as 'S' | 'M' | 'L'}
         />
 
-        {/* Context control: eye toggles the chip, right-click toggles clipboard monitoring */}
-                <button
+        {/* Click toggles the clipboard chip; right-click turns clipboard watching on/off */}
+        <Button
+          variant="ghost"
+          size="icon"
+          className={cn(iconButton, 'relative', !contextToggleEnabled && 'opacity-40')}
           onClick={onContextToggle}
-          onContextMenu={(e) => {
+          onContextMenu={e => {
             e.preventDefault();
             onContextToggleChange(!contextToggleEnabled);
           }}
-          className={cn(
-            "p-1 rounded-lg hover:bg-white/10 transition-colors relative",
-            showContext && hasNewContext && (contextData.clipboard || contextData.selectedText) && "bg-blue-500/20",
-            contextToggleEnabled && "ring-1 ring-green-400/30"
-          )}
-          title={`Context: ${showContext ? 'Visible' : 'Hidden'} | Monitoring: ${contextToggleEnabled ? 'ON' : 'OFF'}`}
+          title={`Clipboard context: ${showContext ? 'shown' : 'hidden'} · watching ${contextToggleEnabled ? 'on' : 'off'} (right-click)`}
         >
-          <div className="relative">
-            {showContext ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
-            <Clipboard className={cn(
-              "w-1.5 h-1.5 absolute -bottom-0.5 -right-0.5",
-              contextToggleEnabled ? "text-green-400" : "text-red-400 opacity-60"
-            )} />
-          </div>
-          {hasNewContext && (contextData.clipboard || contextData.selectedText) && (
-            <div className="absolute -top-0.5 -left-0.5 w-2 h-2 bg-blue-400 rounded-full animate-pulse" />
-          )}
-        </button>
-        <button
+          <Clipboard className="size-3.5" />
+          {hasClipboard && <span className="absolute right-1 top-1 size-1 animate-pulse bg-foreground" />}
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon"
+          className={cn(iconButton, showSpeechControls && 'bg-accent text-foreground')}
           onClick={onSpeechToggle}
-          className={cn(
-            "p-1 rounded-lg transition-colors relative",
-            showSpeechControls
-              ? "bg-blue-500/20 hover:bg-blue-500/30 text-blue-300"
-              : "hover:bg-white/10"
-          )}
-          title={`Speech: ${showSpeechControls ? 'ON' : 'OFF'}`}
+          title={`Voice controls ${showSpeechControls ? 'on' : 'off'}`}
         >
-          {showSpeechControls ? <Mic className="w-3 h-3" /> : <MicOff className="w-3 h-3" />}
-        </button>
-
-        <button
-          onClick={onSettings}
-          className={cn(
-            "p-1 rounded-lg transition-colors",
-            ThemeUtils.getBackgroundClass(platform, theme, 'hover')
-          )}
-          title="Settings"
-        >
-          <Settings className="w-3 h-3" />
-        </button>
-
-        <button
-          onClick={onSizeChange}
-          className={cn(
-            "p-1 rounded-lg hover:bg-white/10 transition-all duration-200",
-            isResizing && "bg-blue-500/20 scale-110"
-          )}
-          title={`Size: ${size}`}
-          disabled={isResizing}
-        >
-          <Maximize2 className="w-3 h-3" />
-        </button>
-
-        <button
-          onClick={onCollapseToggle}
-          className={cn(
-            "p-1 rounded-lg hover:bg-white/10 transition-all duration-200",
-            isResizing && "opacity-50"
-          )}
-          title="Collapse"
-          disabled={isResizing}
-        >
-          <Minus className="w-3 h-3" />
-        </button>
-
-        <button
-          onClick={onHide}
-          className={cn(
-            "p-1 rounded-lg hover:bg-white/10 transition-colors"
-          )}
-          title="Close"
-        >
-          <X className="w-3 h-3" />
-        </button>
+          {showSpeechControls ? <Mic className="size-3.5" /> : <MicOff className="size-3.5" />}
+        </Button>
+        <Button variant="ghost" size="icon" className={iconButton} onClick={onSettings} title="Settings">
+          <Settings className="size-3.5" />
+        </Button>
+        <Button variant="ghost" size="icon" className={iconButton} onClick={onSizeChange} disabled={isResizing} title={`Size: ${size}`}>
+          <Maximize2 className="size-3.5" />
+        </Button>
+        <Button variant="ghost" size="icon" className={iconButton} onClick={onCollapseToggle} disabled={isResizing} title="Collapse">
+          <Minus className="size-3.5" />
+        </Button>
+        <Button variant="ghost" size="icon" className={cn(iconButton, 'hover:bg-destructive/20')} onClick={onHide} title="Close">
+          <X className="size-3.5" />
+        </Button>
       </div>
     </>
   );

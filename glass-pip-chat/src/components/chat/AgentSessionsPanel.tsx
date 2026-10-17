@@ -57,7 +57,7 @@ export default function AgentSessionsPanel({ onOpen }: AgentSessionsPanelProps) 
         onClick={() => setOpen(o => !o)}
         className="w-full flex items-center justify-between px-3 py-2 text-xs font-medium text-white/70 hover:bg-white/5"
       >
-        <span className="flex items-center gap-1.5"><Bot className="w-3.5 h-3.5 text-purple-400" />Agent sessions</span>
+        <span className="flex items-center gap-1.5"><Bot className="w-3.5 h-3.5 text-white" />Agent sessions</span>
         {open ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronUp className="w-3.5 h-3.5" />}
       </button>
 
@@ -77,7 +77,7 @@ export default function AgentSessionsPanel({ onOpen }: AgentSessionsPanelProps) 
                   className={cn(
                     'flex items-center gap-1 px-2 py-0.5 text-[11px] rounded-md border transition-colors',
                     provider === p
-                      ? 'bg-purple-500/20 border-purple-500/40 text-purple-200'
+                      ? 'bg-white/10 border-white/25 text-white'
                       : 'border-white/10 text-white/50 hover:bg-white/5'
                   )}
                 >
@@ -85,7 +85,7 @@ export default function AgentSessionsPanel({ onOpen }: AgentSessionsPanelProps) 
                   {p === 'claude' ? 'Claude Code' : 'Codex'}
                 </button>
               ))}
-              <button onClick={load} className="ml-auto p-1 rounded hover:bg-white/10 text-white/50" title="Refresh">
+              <button onClick={load} className="ml-auto p-1 rounded-sm hover:bg-white/10 text-white/50" title="Refresh">
                 <RefreshCw className={cn('w-3 h-3', loading && 'animate-spin')} />
               </button>
             </div>
@@ -104,7 +104,7 @@ export default function AgentSessionsPanel({ onOpen }: AgentSessionsPanelProps) 
                 >
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-xs text-white/85 truncate">{s.title}</span>
-                    <span className="text-[10px] text-white/40 flex-shrink-0">{relativeTime(s.updatedAt)}</span>
+                    <span className="text-[10px] text-white/40 shrink-0">{relativeTime(s.updatedAt)}</span>
                   </div>
                   {s.cwd && <div className="text-[10px] text-white/40 truncate">{folderName(s.cwd)}</div>}
                 </button>

@@ -90,7 +90,7 @@ export default function CollapsedChatPreview({
         <div className="flex items-center gap-2">
           <div className={cn(
             "w-1.5 h-1.5 rounded-full",
-            isTyping ? "bg-blue-400 animate-pulse" : "bg-green-400"
+            isTyping ? "bg-white/10 animate-pulse" : "bg-green-400"
           )} />
           <span className="text-xs font-medium opacity-80">
             {`${messages.length} message${messages.length !== 1 ? 's' : ''}`}
@@ -168,13 +168,13 @@ export default function CollapsedChatPreview({
                     </div>
                     <div className="flex items-center gap-1">
                       <div className={cn(
-                        "w-1 h-1 rounded-full animate-bounce bg-blue-400"
+                        "w-1 h-1 rounded-full animate-bounce bg-white/10"
                       )} style={{ animationDelay: '0ms' }} />
                       <div className={cn(
-                        "w-1 h-1 rounded-full animate-bounce bg-blue-400"
+                        "w-1 h-1 rounded-full animate-bounce bg-white/10"
                       )} style={{ animationDelay: '150ms' }} />
                       <div className={cn(
-                        "w-1 h-1 rounded-full animate-bounce bg-blue-400"
+                        "w-1 h-1 rounded-full animate-bounce bg-white/10"
                       )} style={{ animationDelay: '300ms' }} />
                       <span className="text-xs opacity-70 ml-2">Processing...</span>
                     </div>

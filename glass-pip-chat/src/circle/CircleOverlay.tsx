@@ -8,7 +8,6 @@ interface Rect { x: number; y: number; width: number; height: number }
 
 const MIN_SELECTION_PX = 16;
 const SELECTION_PADDING = 10;
-const GRADIENT = ['#4285F4', '#9B72CB', '#D96570', '#F2A60C'];
 
 function boundingRect(points: Point[]): Rect {
   const xs = points.map(p => p.x);
@@ -61,14 +60,13 @@ export default function CircleOverlay() {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     const pts = points.current;
     if (pts.length < 2) return;
-    const gradient = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
-    GRADIENT.forEach((c, i) => gradient.addColorStop(i / (GRADIENT.length - 1), c));
+    // prxptn: a clean white stroke with a soft halo (no colour)
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
-    ctx.strokeStyle = gradient;
-    ctx.shadowColor = 'rgba(155, 114, 203, 0.9)';
-    ctx.shadowBlur = 18;
-    ctx.lineWidth = 6;
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.95)';
+    ctx.shadowColor = 'rgba(255, 255, 255, 0.7)';
+    ctx.shadowBlur = 14;
+    ctx.lineWidth = 3;
     ctx.beginPath();
     ctx.moveTo(pts[0].x, pts[0].y);
     for (const p of pts.slice(1)) ctx.lineTo(p.x, p.y);
@@ -131,13 +129,13 @@ export default function CircleOverlay() {
         }}
       />
 
-      {/* Shimmering edge glow, like the Pixel overlay */}
+      {/* Breathing white edge glow (the Pixel overlay, in prxptn monochrome) */}
       <motion.div
         className="absolute inset-0 pointer-events-none"
         initial={{ opacity: 0 }}
-        animate={{ opacity: [0.55, 0.9, 0.55] }}
+        animate={{ opacity: [0.35, 0.7, 0.35] }}
         transition={{ duration: 2.4, repeat: Infinity }}
-        style={{ boxShadow: `inset 0 0 60px 6px ${GRADIENT[1]}88, inset 0 0 18px 2px ${GRADIENT[0]}aa` }}
+        style={{ boxShadow: 'inset 0 0 70px 4px rgba(255,255,255,0.22), inset 0 0 0 1px rgba(255,255,255,0.35)' }}
       />
 
       <canvas
@@ -154,9 +152,10 @@ export default function CircleOverlay() {
             initial={{ opacity: 0, y: -10 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -10 }}
-            className="absolute top-6 left-1/2 -translate-x-1/2 px-4 py-2 rounded-full text-sm bg-black/60 backdrop-blur-xl border border-white/20 pointer-events-none"
+            className="pointer-events-none absolute left-1/2 top-6 -translate-x-1/2 border border-white/15 bg-black/70 px-4 py-2 font-mono text-[10px] uppercase tracking-[0.26em] text-white/60 backdrop-blur-xl"
           >
-            ✨ Circle anything to ask Ally · <b>Enter</b> for the whole screen · <b>Esc</b> to cancel
+            Circle anything <span className="text-white/25">·</span> <span className="text-white">enter</span> whole screen{' '}
+            <span className="text-white/25">·</span> <span className="text-white">esc</span> cancel
           </motion.div>
         )}
       </AnimatePresence>
@@ -168,10 +167,11 @@ export default function CircleOverlay() {
             initial={{ opacity: 0, y: 8, scale: 0.97 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0 }}
-            className="absolute w-[480px] p-3 rounded-2xl bg-black/70 backdrop-blur-2xl border border-white/20 shadow-[0_12px_50px_rgba(0,0,0,0.6)] cursor-default"
+            className="absolute w-[480px] cursor-default border border-white/15 bg-black/80 p-3 shadow-[0_12px_50px_rgba(0,0,0,0.6)] backdrop-blur-2xl"
             style={{ top: panelTop, left: panelLeft }}
             onPointerDown={e => e.stopPropagation()}
           >
+            <p className="mb-2 font-mono text-[9px] uppercase tracking-[0.28em] text-white/40">Ask Ally about this</p>
             <form
               className="flex items-center gap-2 mb-2"
               onSubmit={e => {
@@ -184,12 +184,12 @@ export default function CircleOverlay() {
                 value={typed}
                 onChange={e => setTyped(e.target.value)}
                 placeholder="Ask about this…"
-                className="flex-1 px-3 py-2 rounded-xl bg-white/10 border border-white/15 text-sm outline-none focus:border-purple-400/60"
+                className="flex-1 border border-white/15 bg-transparent px-3 py-2 text-[13px] font-light outline-hidden placeholder:text-white/25 focus:border-white/40"
               />
               <button
                 type="submit"
                 disabled={sending}
-                className="p-2 rounded-xl bg-gradient-to-br from-blue-500 to-purple-500 disabled:opacity-50"
+                className="bg-white p-2 text-black transition-opacity hover:opacity-85 disabled:opacity-50"
                 title="Ask (Enter)"
               >
                 <ArrowUp className="w-4 h-4" />
@@ -201,9 +201,9 @@ export default function CircleOverlay() {
                   key={action.id}
                   disabled={sending}
                   onClick={() => submit(action)}
-                  className="px-2.5 py-1 text-xs rounded-full bg-white/10 hover:bg-white/20 border border-white/15 transition-colors disabled:opacity-50"
+                  className="border border-white/15 px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.16em] text-white/60 transition-colors hover:border-white/40 hover:text-white disabled:opacity-50"
                 >
-                  {action.emoji} {action.label}
+                  {action.label}
                 </button>
               ))}
             </div>

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { Segment, ToolExecution } from '../components/chat/InlineToolIndicator';
+import type { Segment, ToolExecution } from '../types/chat';
 import type { AgentConfig, AgentEvent, AgentPermission, AgentProvider } from '../types/agent';
 
 export interface AgentTurnCallbacks {

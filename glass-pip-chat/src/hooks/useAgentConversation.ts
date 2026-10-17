@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState } from 'react';
-import type { Segment } from '../components/chat/InlineToolIndicator';
+import type { Segment } from '../types/chat';
 import { ROBOT_INSTRUCTIONS } from '../config/robotPersona';
 import type { Message } from '../types/chat';
 import { AGENT_LABEL, AGENT_MODEL_PREFIX, AgentSessionSummary, DEFAULT_AGENT_MODEL, parseAgentModel } from '../types/agent';

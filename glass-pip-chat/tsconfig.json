@@ -20,7 +20,11 @@
     "noFallthroughCasesInSwitch": true,
     "esModuleInterop": true,
     "allowSyntheticDefaultImports": true,
-    "forceConsistentCasingInFileNames": true
+    "forceConsistentCasingInFileNames": true,
+
+    /* Path alias (matches vite.config.ts) */
+    "baseUrl": ".",
+    "paths": { "@/*": ["./src/*"] }
   },
   "include": ["src", "electron"],
   "references": [{ "path": "./tsconfig.node.json" }]

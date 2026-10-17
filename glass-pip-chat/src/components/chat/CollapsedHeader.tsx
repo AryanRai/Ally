@@ -126,7 +126,7 @@ export default function CollapsedHeader({
             userSelect: 'none'
           } as React.CSSProperties}
         >
-          <Grip className="w-3 h-3 opacity-50 flex-shrink-0" />
+          <Grip className="w-3 h-3 opacity-50 shrink-0" />
           <AnimatedOrb 
             isActive={isTyping || voiceModeEnabled || isSpeaking || isListening} 
             size="sm" 
@@ -146,7 +146,7 @@ export default function CollapsedHeader({
 
         {/* Control buttons - no-drag region */}
         <div 
-          className="flex items-center gap-1 flex-shrink-0"
+          className="flex items-center gap-1 shrink-0"
           style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
         >
           {/* Voice Mode Toggle with Dropdown */}
@@ -162,7 +162,7 @@ export default function CollapsedHeader({
                 className={cn(
                   "p-1.5 rounded-lg transition-colors relative group",
                   voiceModeEnabled && speechServiceConnected
-                    ? "bg-purple-500/20 text-purple-400 hover:bg-purple-500/30"
+                    ? "bg-white/10 text-white hover:bg-white/15"
                     : "bg-gray-500/20 text-gray-400 hover:bg-gray-500/30",
                   !speechServiceConnected && "opacity-50 cursor-not-allowed"
                 )}
@@ -180,10 +180,10 @@ export default function CollapsedHeader({
                 {/* Status indicator */}
                 <div className={cn(
                   "absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full",
-                  voiceModeEnabled && speechServiceConnected ? "bg-purple-400" : "bg-gray-400"
+                  voiceModeEnabled && speechServiceConnected ? "bg-white/10" : "bg-gray-400"
                 )} />
                 {/* Settings indicator */}
-                <div className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 bg-blue-400 rounded-full opacity-0 group-hover:opacity-100 transition-opacity" />
+                <div className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 bg-white/10 rounded-full opacity-0 group-hover:opacity-100 transition-opacity" />
               </button>
             </div>
           )}
@@ -210,7 +210,7 @@ export default function CollapsedHeader({
               }}
               className={cn(
                 "p-1.5 rounded-lg hover:bg-white/10 transition-colors relative",
-                showContext && hasNewContext && (contextData.clipboard || contextData.selectedText) && "bg-blue-500/20",
+                showContext && hasNewContext && (contextData.clipboard || contextData.selectedText) && "bg-white/10",
                 contextToggleEnabled && "ring-1 ring-green-400/30"
               )}
               title={`Context: ${showContext ? 'Visible' : 'Hidden'} | Monitoring: ${contextToggleEnabled ? 'ON' : 'OFF'} | Click: toggle view, Right-click: toggle monitoring`}
@@ -227,7 +227,7 @@ export default function CollapsedHeader({
               
               {/* New context notification */}
               {hasNewContext && (contextData.clipboard || contextData.selectedText) && (
-                <div className="absolute -top-1 -left-1 w-2.5 h-2.5 bg-blue-400 rounded-full animate-pulse">
+                <div className="absolute -top-1 -left-1 w-2.5 h-2.5 bg-white/10 rounded-full animate-pulse">
                   <span className="absolute inset-0 text-[8px] font-bold text-white flex items-center justify-center">N</span>
                 </div>
               )}
@@ -238,22 +238,22 @@ export default function CollapsedHeader({
             onClick={onSizeChange}
             className={cn(
               "p-1.5 rounded-lg hover:bg-white/10 transition-all duration-200",
-              isResizing && "bg-blue-500/20 scale-110"
+              isResizing && "bg-white/10 scale-110"
             )}
             title={`Resize (${size} → ${size === 'S' ? 'M' : size === 'M' ? 'L' : 'S'})`}
             disabled={isResizing}
           >
             <div className="relative">
-              <div className="w-3.5 h-3.5 border border-current rounded-sm" />
-              <div className="absolute -top-0.5 -right-0.5 w-2 h-2 border border-current rounded-sm bg-current/20" />
+              <div className="w-3.5 h-3.5 border border-current rounded-xs" />
+              <div className="absolute -top-0.5 -right-0.5 w-2 h-2 border border-current rounded-xs bg-current/20" />
             </div>
           </button>
           <button
             onClick={onCollapseToggle}
             className={cn(
               "p-2 rounded-lg transition-all duration-200 border border-white/20",
-              "hover:bg-blue-500/20 hover:border-blue-500/40 hover:scale-105",
-              "bg-white/5 backdrop-blur-sm",
+              "hover:bg-white/10 hover:border-white/25 hover:scale-105",
+              "bg-white/5 backdrop-blur-xs",
               isResizing && "opacity-50"
             )}
             title="Expand Chat"
@@ -309,7 +309,7 @@ export default function CollapsedHeader({
               }
             }}
             className={cn(
-              "p-2 rounded-xl transition-all flex-shrink-0",
+              "p-2 rounded-xl transition-all shrink-0",
               "disabled:opacity-50 disabled:cursor-not-allowed",
               platform !== 'win32' && "backdrop-blur-md",
               isTyping
@@ -360,7 +360,7 @@ export default function CollapsedHeader({
                 {contextToggleEnabled && (
                   <span className="text-xs opacity-50">(auto-attach)</span>
                 )}
-                <div className="w-1.5 h-1.5 bg-blue-400 rounded-full animate-pulse" />
+                <div className="w-1.5 h-1.5 bg-white/10 rounded-full animate-pulse" />
               </div>
               <ChevronDown className={cn(
                 "w-3 h-3 opacity-60 transition-transform duration-200",
@@ -384,7 +384,7 @@ export default function CollapsedHeader({
                   )}>
                     <div className="text-xs opacity-70 font-medium mb-2">Context Details:</div>
                     <div className={cn(
-                      "p-2 rounded max-h-32 overflow-y-auto",
+                      "p-2 rounded-sm max-h-32 overflow-y-auto",
                       "bg-black/20 text-xs font-mono",
                       ThemeUtils.getScrollbarClass(platform, theme)
                     )}>

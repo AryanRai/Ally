@@ -2,9 +2,9 @@
 import { screen } from 'electron';
 
 const SAMPLE_MS = 16;
-const MIN_SWING_PX = 60;      // each swing must travel at least this far
-const REVERSALS_NEEDED = 5;   // direction changes within the window
-const WINDOW_MS = 900;
+const MIN_SWING_PX = 100;     // each swing must travel at least this far (normal mousing rarely does)
+const REVERSALS_NEEDED = 6;   // direction changes within the window
+const WINDOW_MS = 800;
 const COOLDOWN_MS = 2000;
 
 let timer: NodeJS.Timeout | null = null;

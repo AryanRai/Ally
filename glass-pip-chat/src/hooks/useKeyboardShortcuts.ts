@@ -33,9 +33,10 @@ export function useKeyboardShortcuts(actions: ShortcutActions) {
   }, []);
 
   useEffect(() => {
-    const setInputValue = (el: HTMLInputElement, value: string) => {
+    const setInputValue = (el: HTMLInputElement | HTMLTextAreaElement, value: string) => {
       // Go through the native setter so React's onChange sees the change
-      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(el, value);
+      const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+      Object.getOwnPropertyDescriptor(proto, 'value')?.set?.call(el, value);
       el.dispatchEvent(new Event('input', { bubbles: true }));
     };
 
@@ -73,12 +74,14 @@ export function useKeyboardShortcuts(actions: ShortcutActions) {
         if (fn) return run(fn);
       }
 
-      if (inInput && el instanceof HTMLInputElement) {
-        if (event.key === 'ArrowUp' && a.history.length > 0) {
+      if (inInput && (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement)) {
+        // In a multi-line draft the arrows move the caret, not through history
+        const singleLine = !el.value.includes('\n');
+        if (event.key === 'ArrowUp' && singleLine && a.history.length > 0) {
           historyIndex.current = Math.min(historyIndex.current + 1, a.history.length - 1);
           return run(() => setInputValue(el, a.history[a.history.length - 1 - historyIndex.current]));
         }
-        if (event.key === 'ArrowDown' && historyIndex.current >= 0) {
+        if (event.key === 'ArrowDown' && singleLine && historyIndex.current >= 0) {
           historyIndex.current -= 1;
           const value = historyIndex.current >= 0 ? a.history[a.history.length - 1 - historyIndex.current] : '';
           return run(() => setInputValue(el, value));

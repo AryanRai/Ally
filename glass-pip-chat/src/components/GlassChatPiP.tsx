@@ -14,17 +14,19 @@ import { useChats } from '../hooks/useChats';
 import { useAgentConversation } from '../hooks/useAgentConversation';
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
 
-import AIBackdrop, { AIBackdropProps } from './AIBackdrop';
+import FlowField, { FlowFieldState } from './FlowField';
+import EdgeGlow from './glow/EdgeGlow';
+import { DEFAULT_GLOW_PALETTE, GLOW_PALETTES } from './glow/palette';
 import AvatarMode, { AVATAR_WINDOW, AvatarPulse, AvatarStatus } from './AvatarMode';
 import ChatSidebar from './ChatSidebar';
-import EditableMessage from './EditableMessage';
 import SettingsModal from './SettingsModal';
 import { SpeechControls } from './SpeechControls';
 import CollapsedHeader from './chat/CollapsedHeader';
 import ExpandedHeader from './chat/ExpandedHeader';
 import ChatInput from './chat/ChatInput';
-import LiveThinkingPanel from './chat/LiveThinkingPanel';
-import StreamingMessage from './chat/StreamingMessage';
+import ChatMessage, { AgentReply } from './chat/ChatMessage';
+import { Conversation, ConversationContent, ConversationEmptyState, ConversationScrollButton } from '@/components/ai-elements/conversation';
+import { Message, MessageContent } from '@/components/ai-elements/message';
 
 const SIDEBAR_WIDTH = { expanded: 280, collapsed: 48 };
 const MAX_CONTENT = { width: 850, height: 800 }; // larger windows overflow the acrylic background
@@ -67,10 +69,8 @@ export default function GlassChatPiP() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
   const [isPreviewExpanded, setIsPreviewExpanded] = useState(false);
   const [isContextExpanded, setIsContextExpanded] = useState(false);
-  const [thoughtExpanded, setThoughtExpanded] = useState(true);
 
-  const inputRef = useRef<HTMLInputElement>(null);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
   const activeChat = chats.activeChat;
   const messages = activeChat?.messages ?? [];
   const { isTyping, currentResponse, streamingSegments, thinkingText } = conversation;
@@ -195,14 +195,11 @@ export default function GlassChatPiP() {
     }
   }), []);
 
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages.length, currentResponse, streamingSegments]);
 
   // ---- Visual state ----------------------------------------------------------
 
   const toolRunning = streamingSegments.some(s => s.type === 'tool' && s.toolExecution?.status === 'executing');
-  const backdropState = useMemo((): AIBackdropProps['state'] => {
+  const backdropState = useMemo((): FlowFieldState => {
     if (isTyping && toolRunning) return 'tool_executing';
     if (isTyping && thinkingText) return 'thinking';
     if (isTyping) return 'streaming';
@@ -327,22 +324,17 @@ export default function GlassChatPiP() {
         className={cn(
           'overflow-hidden relative flex transition-all duration-300 chat-container acrylic-container',
           ThemeUtils.getBorderRadiusClass(appSettings.ui.borderRadius, platform),
-          'border border-white/20 shadow-[0_8px_40px_rgba(0,0,0,0.4)]',
+          // prxptn: dark translucent glass, hairline border; the OS acrylic/blur still shows through
+          'border border-border bg-black/60 text-foreground shadow-[0_12px_48px_rgba(0,0,0,0.55)]',
           isResizing && 'shadow-lg scale-[1.01]',
-          platform === 'win32'
-            ? 'bg-transparent'
-            : platform === 'linux'
-              ? theme === 'dark'
-                ? 'linux-blur bg-gradient-to-b from-white/[0.06] to-white/[0.01]'
-                : 'linux-blur-light bg-gradient-to-b from-black/[0.06] to-black/[0.01]'
-              : theme === 'dark'
-                ? 'bg-gradient-to-b from-white/[0.08] to-white/[0.02] backdrop-blur-2xl backdrop-saturate-150'
-                : 'bg-gradient-to-b from-black/[0.08] to-black/[0.02] backdrop-blur-2xl backdrop-saturate-150',
-          theme === 'dark' ? 'text-white/90' : 'text-black/90'
+          platform === 'linux' && 'linux-blur',
+          platform !== 'win32' && platform !== 'linux' && 'backdrop-blur-2xl backdrop-saturate-150'
         )}
         style={{ width: contentWidth, height: contentHeight, margin: `${padding}px` }}
       >
-        <AIBackdrop state={backdropState} />
+        <FlowField state={backdropState} />
+        {/* Orbit Mary-style side glow while the agent works */}
+        <EdgeGlow active={isTyping} colors={GLOW_PALETTES[DEFAULT_GLOW_PALETTE]} />
 
         {!state.collapsed && (
           <div className={cn('chat-sidebar', sidebarCollapsed && 'collapsed')}>
@@ -366,11 +358,8 @@ export default function GlassChatPiP() {
           {/* Header */}
           <div
             className={cn(
-              'flex items-center gap-2 px-3 py-2 border-b transition-all duration-200 relative z-10 min-h-[44px] cursor-grab active:cursor-grabbing',
-              state.collapsed && 'flex-col items-stretch gap-2 pb-3 border-b-0',
-              platform === 'win32' || theme === 'dark'
-                ? 'border-white/10 hover:bg-white/5 hover:border-blue-500/30'
-                : 'border-black/10 hover:bg-black/5 hover:border-blue-500/30'
+              'relative z-10 flex min-h-[44px] cursor-grab items-center gap-2 border-b border-border bg-black/20 px-2.5 py-2 active:cursor-grabbing',
+              state.collapsed && 'flex-col items-stretch gap-2 border-b-0 pb-3'
             )}
             style={{ WebkitAppRegion: state.collapsed ? 'no-drag' : 'drag', userSelect: 'none' } as React.CSSProperties}
             title={state.collapsed ? '' : 'Drag to move window'}
@@ -461,51 +450,40 @@ export default function GlassChatPiP() {
                 exit={{ opacity: 0 }}
                 transition={{ duration: 0.2 }}
               >
-                <div
-                  className={cn(
-                    'flex-1 overflow-y-auto p-3 select-text',
-                    { compact: 'space-y-2', normal: 'space-y-3', comfortable: 'space-y-4' }[appSettings.ui.messageSpacing],
-                    platform === 'win32' || theme === 'dark' ? 'scrollbar-thin scrollbar-thumb-white/10' : 'scrollbar-thin scrollbar-thumb-black/10'
-                  )}
-                >
-                  {messages.map((message, index) => (
-                    <EditableMessage
-                      key={message.id}
-                      message={message}
-                      isLast={index === messages.length - 1}
-                      {...messageHandlers}
-                      theme={theme}
-                      platform={platform}
-                      uiSettings={appSettings.ui}
-                    />
-                  ))}
-
-                  {thinkingText && (
-                    <LiveThinkingPanel
-                      text={thinkingText}
-                      isStreaming={isTyping}
-                      isExpanded={thoughtExpanded}
-                      onToggle={() => setThoughtExpanded(v => !v)}
-                      theme={theme}
-                    />
-                  )}
-
-                  {isTyping && (
-                    <StreamingMessage
-                      text={currentResponse}
-                      segments={streamingSegments}
-                      theme={theme}
-                      platform={platform}
-                      fontSize={appSettings.ui.fontSize}
-                    />
-                  )}
-                  <div ref={messagesEndRef} />
-                </div>
+                {/* Transcript (AI Elements): sticks to the bottom while the agent streams */}
+                <Conversation className="flex-1 select-text">
+                  <ConversationContent className={cn('px-3 py-3', { compact: 'gap-3', normal: 'gap-5', comfortable: 'gap-7' }[appSettings.ui.messageSpacing])}>
+                    {messages.length === 0 && !isTyping ? (
+                      <ConversationEmptyState
+                        title={conversation.providerLabel}
+                        description="Ask anything, or circle something on screen."
+                        className="[&_h3]:font-tanker [&_h3]:text-2xl [&_h3]:tracking-wide"
+                      />
+                    ) : (
+                      messages.map(message => (
+                        <ChatMessage
+                          key={message.id}
+                          message={message}
+                          onEdit={messageHandlers.onEdit}
+                          onFork={messageHandlers.onFork}
+                          onDelete={messageHandlers.onDelete}
+                          onRetry={messageHandlers.onRecompute}
+                        />
+                      ))
+                    )}
+                    {isTyping && (
+                      <Message from="assistant">
+                        <MessageContent>
+                          <AgentReply text={currentResponse} thinking={thinkingText} segments={streamingSegments} streaming />
+                        </MessageContent>
+                      </Message>
+                    )}
+                  </ConversationContent>
+                  <ConversationScrollButton />
+                </Conversation>
 
                 <ChatInput
                   ref={inputRef}
-                  platform={platform}
-                  theme={theme}
                   input={input}
                   setInput={setInput}
                   onSend={() => handleSend()}
@@ -520,6 +498,8 @@ export default function GlassChatPiP() {
                   messages={messages}
                   robotMode={robotMode}
                   onRobotModeToggle={toggleRobotMode}
+                  palette={GLOW_PALETTES[DEFAULT_GLOW_PALETTE]}
+                  voice={{ enabled: speech.voiceModeEnabled, listening: speech.voiceModeEnabled && speech.isListening, onToggle: () => setVoiceMode(!speech.voiceModeEnabled) }}
                   agent={agentProps}
                 />
 

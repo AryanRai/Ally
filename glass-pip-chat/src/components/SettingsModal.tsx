@@ -100,8 +100,8 @@ export default function SettingsModal({
                 platform === 'win32' 
                   ? "bg-black/60" // More opaque for Windows acrylic
                   : theme === 'dark'
-                    ? "bg-gradient-to-b from-gray-900/95 to-gray-800/95"
-                    : "bg-gradient-to-b from-gray-100/95 to-gray-200/95"
+                    ? "bg-linear-to-b from-gray-900/95 to-gray-800/95"
+                    : "bg-linear-to-b from-gray-100/95 to-gray-200/95"
               )}
             >
             {/* Header */}
@@ -226,9 +226,9 @@ export default function SettingsModal({
                             ui: { ...appSettings.ui, fontSize: size } 
                           })}
                           className={cn(
-                            "px-2 py-1.5 text-xs rounded transition-all border",
+                            "px-2 py-1.5 text-xs rounded-sm transition-all border",
                             appSettings.ui.fontSize === size
-                              ? "bg-blue-500/20 border-blue-500/40 text-blue-300"
+                              ? "bg-white/10 border-white/25 text-white"
                               : platform === 'win32'
                                 ? "border-white/10 bg-white/5 hover:bg-white/10 text-white/80"
                                 : theme === 'dark' 
@@ -258,9 +258,9 @@ export default function SettingsModal({
                             ui: { ...appSettings.ui, messageSpacing: spacing } 
                           })}
                           className={cn(
-                            "px-2 py-1.5 text-xs rounded transition-all border",
+                            "px-2 py-1.5 text-xs rounded-sm transition-all border",
                             appSettings.ui.messageSpacing === spacing
-                              ? "bg-blue-500/20 border-blue-500/40 text-blue-300"
+                              ? "bg-white/10 border-white/25 text-white"
                               : platform === 'win32'
                                 ? "border-white/10 bg-white/5 hover:bg-white/10 text-white/80"
                                 : theme === 'dark' 
@@ -290,9 +290,9 @@ export default function SettingsModal({
                             ui: { ...appSettings.ui, messagePadding: padding } 
                           })}
                           className={cn(
-                            "px-2 py-1.5 text-xs rounded transition-all border",
+                            "px-2 py-1.5 text-xs rounded-sm transition-all border",
                             appSettings.ui.messagePadding === padding
-                              ? "bg-blue-500/20 border-blue-500/40 text-blue-300"
+                              ? "bg-white/10 border-white/25 text-white"
                               : platform === 'win32'
                                 ? "border-white/10 bg-white/5 hover:bg-white/10 text-white/80"
                                 : theme === 'dark' 
@@ -328,7 +328,7 @@ export default function SettingsModal({
                         className="flex-1 h-2 bg-white/10 rounded-lg appearance-none slider"
                       />
                       <span className={cn(
-                        "text-xs font-mono min-w-[3rem] text-right",
+                        "text-xs font-mono min-w-12 text-right",
                         platform === 'win32'
                           ? "text-white/60"
                           : theme === 'dark' ? "text-white/60" : "text-black/60"
@@ -355,9 +355,9 @@ export default function SettingsModal({
                           key={style}
                           onClick={() => onSettingsChange({ ui: { ...appSettings.ui, collapseStyle: style } })}
                           className={cn(
-                            'px-2 py-1 text-xs rounded border transition-colors',
+                            'px-2 py-1 text-xs rounded-sm border transition-colors',
                             (appSettings.ui.collapseStyle ?? 'avatar') === style
-                              ? 'bg-purple-500/25 border-purple-500/50 text-purple-200'
+                              ? 'bg-white/13 border-white/25 text-white'
                               : 'bg-white/5 border-white/10 hover:bg-white/10'
                           )}
                         >
@@ -383,9 +383,9 @@ export default function SettingsModal({
                             ui: { ...appSettings.ui, borderRadius: radius } 
                           })}
                           className={cn(
-                            "px-2 py-1.5 text-xs rounded transition-all border",
+                            "px-2 py-1.5 text-xs rounded-sm transition-all border",
                             appSettings.ui.borderRadius === radius
-                              ? "bg-blue-500/20 border-blue-500/40 text-blue-300"
+                              ? "bg-white/10 border-white/25 text-white"
                               : platform === 'win32'
                                 ? "border-white/10 bg-white/5 hover:bg-white/10 text-white/80"
                                 : theme === 'dark' 
@@ -438,7 +438,7 @@ export default function SettingsModal({
                         className="flex-1 h-2 bg-white/10 rounded-lg appearance-none slider"
                       />
                       <span className={cn(
-                        "text-xs font-mono min-w-[3rem] text-right",
+                        "text-xs font-mono min-w-12 text-right",
                         platform === 'win32'
                           ? "text-white/60"
                           : theme === 'dark' ? "text-white/60" : "text-black/60"
@@ -461,9 +461,9 @@ export default function SettingsModal({
                             key={type}
                             onClick={() => setBlurType(type)}
                             className={cn(
-                              "px-2 py-1.5 text-xs rounded transition-all border",
+                              "px-2 py-1.5 text-xs rounded-sm transition-all border",
                               blurType === type
-                                ? "bg-blue-500/20 border-blue-500/40 text-blue-300"
+                                ? "bg-white/10 border-white/25 text-white"
                                 : "border-white/10 bg-white/5 hover:bg-white/10 text-white/80"
                             )}
                           >
@@ -513,7 +513,7 @@ export default function SettingsModal({
                         type="checkbox"
                         checked={contextToggleEnabled}
                         onChange={(e) => onContextToggleChange?.(e.target.checked)}
-                        className="w-3 h-3 rounded border"
+                        className="w-3 h-3 rounded-sm border"
                       />
                       <span className={cn(
                         "text-xs",
@@ -561,7 +561,7 @@ export default function SettingsModal({
                       <button
                         onClick={speechService.isConnected ? speechService.disconnect : speechService.connect}
                         className={cn(
-                          "px-2 py-1 text-xs rounded border transition-colors",
+                          "px-2 py-1 text-xs rounded-sm border transition-colors",
                           speechService.isConnected
                             ? "bg-red-500/20 border-red-500/30 text-red-400 hover:bg-red-500/30"
                             : "bg-green-500/20 border-green-500/30 text-green-400 hover:bg-green-500/30"
@@ -601,12 +601,12 @@ export default function SettingsModal({
                           onClick={() => speechService.synthesizeSpeech("Hello! This is a test of the speech system.")}
                           disabled={!speechService.isConnected}
                           className={cn(
-                            "px-2 py-1 text-xs rounded border transition-colors disabled:opacity-50",
+                            "px-2 py-1 text-xs rounded-sm border transition-colors disabled:opacity-50",
                             platform === 'win32'
-                              ? "bg-purple-500/20 border-purple-500/30 text-purple-400 hover:bg-purple-500/30"
+                              ? "bg-white/10 border-white/25 text-white hover:bg-white/15"
                               : theme === 'dark' 
-                                ? "bg-purple-500/20 border-purple-500/30 text-purple-400 hover:bg-purple-500/30"
-                                : "bg-purple-500/20 border-purple-500/30 text-purple-400 hover:bg-purple-500/30"
+                                ? "bg-white/10 border-white/25 text-white hover:bg-white/15"
+                                : "bg-white/10 border-white/25 text-white hover:bg-white/15"
                           )}
                         >
                           <Volume2 className="w-3 h-3 inline mr-1" />
@@ -626,7 +626,7 @@ export default function SettingsModal({
                             value={speechSettings.voice}
                             onChange={(e) => setSpeechSettings(prev => ({ ...prev, voice: e.target.value }))}
                             className={cn(
-                              "w-full mt-1 px-2 py-1 text-xs rounded border",
+                              "w-full mt-1 px-2 py-1 text-xs rounded-sm border",
                               platform === 'win32'
                                 ? "bg-white/5 border-white/10 text-white"
                                 : theme === 'dark' 
@@ -651,7 +651,7 @@ export default function SettingsModal({
                             value={speechSettings.language}
                             onChange={(e) => setSpeechSettings(prev => ({ ...prev, language: e.target.value }))}
                             className={cn(
-                              "w-full mt-1 px-2 py-1 text-xs rounded border",
+                              "w-full mt-1 px-2 py-1 text-xs rounded-sm border",
                               platform === 'win32'
                                 ? "bg-white/5 border-white/10 text-white"
                                 : theme === 'dark' 
@@ -791,7 +791,7 @@ export default function SettingsModal({
                           onSettingsChange(updatedSettings);
                         }}
                         className={cn(
-                          "w-full px-2 py-1 text-xs rounded border",
+                          "w-full px-2 py-1 text-xs rounded-sm border",
                           platform === 'win32'
                             ? "bg-white/5 border-white/10 text-white"
                             : theme === 'dark' 
@@ -851,7 +851,7 @@ export default function SettingsModal({
                             onSettingsChange(updatedSettings);
                           }}
                           className={cn(
-                            "w-full px-2 py-1 text-xs rounded border h-20 resize-none",
+                            "w-full px-2 py-1 text-xs rounded-sm border h-20 resize-none",
                             platform === 'win32'
                               ? "bg-white/5 border-white/10 text-white"
                               : theme === 'dark' 

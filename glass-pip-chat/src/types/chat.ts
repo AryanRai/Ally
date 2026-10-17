@@ -49,3 +49,22 @@ export interface ChatState {
   chats: Chat[];
   activeChat: string | null;
 }
+/** A tool call made by the agent during a turn (rendered as a tool card). */
+export interface ToolExecution {
+  id: string;
+  name: string;
+  parameters?: Record<string, unknown>;
+  status: 'pending' | 'executing' | 'success' | 'error';
+  result?: any;
+  error?: string;
+  startTime: number;
+  endTime?: number;
+  isParallel?: boolean;
+}
+
+/** Assistant reply content in order: text chunks interleaved with tool calls. */
+export interface Segment {
+  type: 'text' | 'tool';
+  content?: string;
+  toolExecution?: ToolExecution;
+}

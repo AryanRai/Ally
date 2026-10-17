@@ -45,7 +45,7 @@ export default function ShortcutsPanel({ platform, theme }: ShortcutsPanelProps)
                     : theme === 'dark' ? "text-white/60" : "text-black/60"
                 )}>Toggle collapse/expand</span>
                 <kbd className={cn(
-                  "px-2 py-0.5 rounded text-xs font-mono",
+                  "px-2 py-0.5 rounded-sm text-xs font-mono",
                   platform === 'win32'
                     ? "bg-white/10 border border-white/20"
                     : theme === 'dark' ? "bg-white/10 border border-white/20" : "bg-black/10 border border-black/20"
@@ -58,7 +58,7 @@ export default function ShortcutsPanel({ platform, theme }: ShortcutsPanelProps)
                     : theme === 'dark' ? "text-white/60" : "text-black/60"
                 )}>Open settings</span>
                 <kbd className={cn(
-                  "px-2 py-0.5 rounded text-xs font-mono",
+                  "px-2 py-0.5 rounded-sm text-xs font-mono",
                   platform === 'win32'
                     ? "bg-white/10 border border-white/20"
                     : theme === 'dark' ? "bg-white/10 border border-white/20" : "bg-black/10 border border-black/20"
@@ -71,7 +71,7 @@ export default function ShortcutsPanel({ platform, theme }: ShortcutsPanelProps)
                     : theme === 'dark' ? "text-white/60" : "text-black/60"
                 )}>New chat</span>
                 <kbd className={cn(
-                  "px-2 py-0.5 rounded text-xs font-mono",
+                  "px-2 py-0.5 rounded-sm text-xs font-mono",
                   platform === 'win32'
                     ? "bg-white/10 border border-white/20"
                     : theme === 'dark' ? "bg-white/10 border border-white/20" : "bg-black/10 border border-black/20"
@@ -84,7 +84,7 @@ export default function ShortcutsPanel({ platform, theme }: ShortcutsPanelProps)
                     : theme === 'dark' ? "text-white/60" : "text-black/60"
                 )}>Hide window</span>
                 <kbd className={cn(
-                  "px-2 py-0.5 rounded text-xs font-mono",
+                  "px-2 py-0.5 rounded-sm text-xs font-mono",
                   platform === 'win32'
                     ? "bg-white/10 border border-white/20"
                     : theme === 'dark' ? "bg-white/10 border border-white/20" : "bg-black/10 border border-black/20"
@@ -97,7 +97,7 @@ export default function ShortcutsPanel({ platform, theme }: ShortcutsPanelProps)
                     : theme === 'dark' ? "text-white/60" : "text-black/60"
                 )}>Resize window</span>
                 <kbd className={cn(
-                  "px-2 py-0.5 rounded text-xs font-mono",
+                  "px-2 py-0.5 rounded-sm text-xs font-mono",
                   platform === 'win32'
                     ? "bg-white/10 border border-white/20"
                     : theme === 'dark' ? "bg-white/10 border border-white/20" : "bg-black/10 border border-black/20"
@@ -110,7 +110,7 @@ export default function ShortcutsPanel({ platform, theme }: ShortcutsPanelProps)
                     : theme === 'dark' ? "text-white/60" : "text-black/60"
                 )}>Focus input</span>
                 <kbd className={cn(
-                  "px-2 py-0.5 rounded text-xs font-mono",
+                  "px-2 py-0.5 rounded-sm text-xs font-mono",
                   platform === 'win32'
                     ? "bg-white/10 border border-white/20"
                     : theme === 'dark' ? "bg-white/10 border border-white/20" : "bg-black/10 border border-black/20"
@@ -135,7 +135,7 @@ export default function ShortcutsPanel({ platform, theme }: ShortcutsPanelProps)
                     : theme === 'dark' ? "text-white/60" : "text-black/60"
                 )}>Previous message</span>
                 <kbd className={cn(
-                  "px-2 py-0.5 rounded text-xs font-mono",
+                  "px-2 py-0.5 rounded-sm text-xs font-mono",
                   platform === 'win32'
                     ? "bg-white/10 border border-white/20"
                     : theme === 'dark' ? "bg-white/10 border border-white/20" : "bg-black/10 border border-black/20"
@@ -148,7 +148,7 @@ export default function ShortcutsPanel({ platform, theme }: ShortcutsPanelProps)
                     : theme === 'dark' ? "text-white/60" : "text-black/60"
                 )}>Next message</span>
                 <kbd className={cn(
-                  "px-2 py-0.5 rounded text-xs font-mono",
+                  "px-2 py-0.5 rounded-sm text-xs font-mono",
                   platform === 'win32'
                     ? "bg-white/10 border border-white/20"
                     : theme === 'dark' ? "bg-white/10 border border-white/20" : "bg-black/10 border border-black/20"
@@ -161,7 +161,7 @@ export default function ShortcutsPanel({ platform, theme }: ShortcutsPanelProps)
                     : theme === 'dark' ? "text-white/60" : "text-black/60"
                 )}>Send message</span>
                 <kbd className={cn(
-                  "px-2 py-0.5 rounded text-xs font-mono",
+                  "px-2 py-0.5 rounded-sm text-xs font-mono",
                   platform === 'win32'
                     ? "bg-white/10 border border-white/20"
                     : theme === 'dark' ? "bg-white/10 border border-white/20" : "bg-black/10 border border-black/20"
@@ -174,7 +174,7 @@ export default function ShortcutsPanel({ platform, theme }: ShortcutsPanelProps)
                     : theme === 'dark' ? "text-white/60" : "text-black/60"
                 )}>Stop typing</span>
                 <kbd className={cn(
-                  "px-2 py-0.5 rounded text-xs font-mono",
+                  "px-2 py-0.5 rounded-sm text-xs font-mono",
                   platform === 'win32'
                     ? "bg-white/10 border border-white/20"
                     : theme === 'dark' ? "bg-white/10 border border-white/20" : "bg-black/10 border border-black/20"
@@ -187,7 +187,7 @@ export default function ShortcutsPanel({ platform, theme }: ShortcutsPanelProps)
                     : theme === 'dark' ? "text-white/60" : "text-black/60"
                 )}>Clear input</span>
                 <kbd className={cn(
-                  "px-2 py-0.5 rounded text-xs font-mono",
+                  "px-2 py-0.5 rounded-sm text-xs font-mono",
                   platform === 'win32'
                     ? "bg-white/10 border border-white/20"
                     : theme === 'dark' ? "bg-white/10 border border-white/20" : "bg-black/10 border border-black/20"
@@ -212,7 +212,7 @@ export default function ShortcutsPanel({ platform, theme }: ShortcutsPanelProps)
                     : theme === 'dark' ? "text-white/60" : "text-black/60"
                 )}>Settings</span>
                 <kbd className={cn(
-                  "px-2 py-0.5 rounded text-xs font-mono",
+                  "px-2 py-0.5 rounded-sm text-xs font-mono",
                   platform === 'win32'
                     ? "bg-white/10 border border-white/20"
                     : theme === 'dark' ? "bg-white/10 border border-white/20" : "bg-black/10 border border-black/20"
@@ -225,7 +225,7 @@ export default function ShortcutsPanel({ platform, theme }: ShortcutsPanelProps)
                     : theme === 'dark' ? "text-white/60" : "text-black/60"
                 )}>New chat</span>
                 <kbd className={cn(
-                  "px-2 py-0.5 rounded text-xs font-mono",
+                  "px-2 py-0.5 rounded-sm text-xs font-mono",
                   platform === 'win32'
                     ? "bg-white/10 border border-white/20"
                     : theme === 'dark' ? "bg-white/10 border border-white/20" : "bg-black/10 border border-black/20"
@@ -238,7 +238,7 @@ export default function ShortcutsPanel({ platform, theme }: ShortcutsPanelProps)
                     : theme === 'dark' ? "text-white/60" : "text-black/60"
                 )}>Toggle collapse</span>
                 <kbd className={cn(
-                  "px-2 py-0.5 rounded text-xs font-mono",
+                  "px-2 py-0.5 rounded-sm text-xs font-mono",
                   platform === 'win32'
                     ? "bg-white/10 border border-white/20"
                     : theme === 'dark' ? "bg-white/10 border border-white/20" : "bg-black/10 border border-black/20"
@@ -251,7 +251,7 @@ export default function ShortcutsPanel({ platform, theme }: ShortcutsPanelProps)
                     : theme === 'dark' ? "text-white/60" : "text-black/60"
                 )}>Resize window</span>
                 <kbd className={cn(
-                  "px-2 py-0.5 rounded text-xs font-mono",
+                  "px-2 py-0.5 rounded-sm text-xs font-mono",
                   platform === 'win32'
                     ? "bg-white/10 border border-white/20"
                     : theme === 'dark' ? "bg-white/10 border border-white/20" : "bg-black/10 border border-black/20"

@@ -107,33 +107,33 @@ export const UnifiedModelSelector: React.FC<UnifiedModelSelectorProps> = ({
         ref={buttonRef}
         onClick={onToggleSelector}
         className={cn(
-          'flex items-center rounded-lg transition-all duration-200 flex-shrink-0',
+          'flex items-center rounded-lg transition-all duration-200 shrink-0',
           'hover:bg-white/10 border border-white/20',
-          showSelector && 'bg-blue-500/20 border-blue-500/50',
+          showSelector && 'bg-white/10 border-white/25',
           windowSize === 'S' ? 'p-1' : 'gap-1 px-1.5 py-1',
           compact && windowSize !== 'S' ? 'text-xs max-w-[120px]' : 'text-sm',
           className
         )}
         title={`Current: ${currentLabel}`}
       >
-        <Bot className="w-3 h-3 text-purple-400 flex-shrink-0" />
+        <Bot className="w-3 h-3 text-white shrink-0" />
         {windowSize !== 'S' && (
           <>
             <span className={cn('font-medium truncate', compact ? 'text-[10px]' : 'text-sm max-w-28')}>{currentLabel}</span>
-            {showSelector ? <ChevronUp className="w-3 h-3 flex-shrink-0" /> : <ChevronDown className="w-3 h-3 flex-shrink-0" />}
+            {showSelector ? <ChevronUp className="w-3 h-3 shrink-0" /> : <ChevronDown className="w-3 h-3 shrink-0" />}
           </>
         )}
       </button>
 
       {showSelector && createPortal(
         <>
-          <div className="fixed inset-0 z-[999998]" onClick={onToggleSelector} style={{ pointerEvents: 'auto' }} />
+          <div className="fixed inset-0 z-999998" onClick={onToggleSelector} style={{ pointerEvents: 'auto' }} />
           <AnimatePresence>
             <motion.div
               initial={{ opacity: 0, scale: 0.9, y: -10 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.9, y: -10 }}
-              className={cn('fixed w-80 z-[999999]', ThemeUtils.getModalClass(platform, theme))}
+              className={cn('fixed w-80 z-999999', ThemeUtils.getModalClass(platform, theme))}
               style={{ top: dropdownPosition.top, left: dropdownPosition.left, pointerEvents: 'auto' } as React.CSSProperties}
             >
               <div className="p-3">
@@ -149,7 +149,7 @@ export const UnifiedModelSelector: React.FC<UnifiedModelSelectorProps> = ({
                     value={searchQuery}
                     onChange={e => setSearchQuery(e.target.value)}
                     placeholder="Search models..."
-                    className="w-full pl-9 pr-3 py-2 bg-white/10 border border-white/20 rounded-lg text-sm focus:border-blue-500 focus:outline-none"
+                    className="w-full pl-9 pr-3 py-2 bg-white/10 border border-white/20 rounded-lg text-sm focus:border-white/25 focus:outline-hidden"
                   />
                 </div>
 
@@ -170,12 +170,12 @@ export const UnifiedModelSelector: React.FC<UnifiedModelSelectorProps> = ({
                               onClick={() => handleSelect(model.id)}
                               className={cn(
                                 'w-full text-left px-3 py-2 rounded-lg transition-all duration-200 border',
-                                currentModel === model.id ? 'bg-blue-500/20 border-blue-500/50' : 'border-transparent hover:bg-white/10 hover:border-white/20'
+                                currentModel === model.id ? 'bg-white/10 border-white/25' : 'border-transparent hover:bg-white/10 hover:border-white/20'
                               )}
                             >
                               <div className="flex items-center gap-2">
                                 <span className="font-medium text-sm truncate">{model.name}</span>
-                                {currentModel === model.id && <Check className="w-3 h-3 text-blue-400 flex-shrink-0" />}
+                                {currentModel === model.id && <Check className="w-3 h-3 text-white shrink-0" />}
                               </div>
                               {model.description && <div className="text-xs text-white/50 truncate">{model.description}</div>}
                             </button>

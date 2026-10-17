@@ -42,7 +42,7 @@ export default function MarkdownRenderer({
             const isCopied = safeCopiedCode.has(codeId);
 
             return inline ? (
-              <code className="px-1 py-0.5 bg-white/10 rounded text-xs" {...props}>
+              <code className="px-1 py-0.5 bg-white/10 rounded-sm text-xs" {...props}>
                 {children}
               </code>
             ) : (
@@ -61,7 +61,7 @@ export default function MarkdownRenderer({
                           "p-1.5 rounded-md transition-all duration-200",
                           "opacity-0 group-hover:opacity-100 focus:opacity-100",
                           safeRunningCommands.has(codeId)
-                            ? "bg-blue-500/20 text-blue-300"
+                            ? "bg-white/10 text-white"
                             : "bg-white/10 hover:bg-white/20 text-white/70 hover:text-white"
                         )}
                         title={safeRunningCommands.has(codeId) ? "Running..." : "Run in terminal"}
@@ -102,7 +102,7 @@ export default function MarkdownRenderer({
             </blockquote>
           ),
           a: ({ children, href }) => (
-            <a href={href} className="text-blue-400 hover:underline" target="_blank" rel="noopener noreferrer">
+            <a href={href} className="text-white hover:underline" target="_blank" rel="noopener noreferrer">
               {children}
             </a>
           ),

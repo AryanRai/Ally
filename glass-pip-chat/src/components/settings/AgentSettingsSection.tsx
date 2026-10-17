@@ -38,7 +38,7 @@ export default function AgentSettingsSection({ platform, theme }: AgentSettingsS
   const muted = platform === 'win32' || theme === 'dark' ? 'text-white/60' : 'text-black/60';
   const heading = platform === 'win32' || theme === 'dark' ? 'text-white/80' : 'text-black/80';
   const box = platform === 'win32' || theme === 'dark' ? 'bg-white/5 border-white/10' : 'bg-black/5 border-black/10';
-  const input = cn('w-full px-2 py-1 text-xs rounded border bg-transparent', box);
+  const input = cn('w-full px-2 py-1 text-xs rounded-sm border bg-transparent', box);
 
   return (
     <div className="space-y-3">
@@ -72,10 +72,10 @@ export default function AgentSettingsSection({ platform, theme }: AgentSettingsS
               const folder = await agent.pickFolder(config.defaultCwd);
               if (folder) update({ defaultCwd: folder });
             }}
-            className={cn('w-full flex items-center gap-1.5 px-2 py-1 text-xs rounded border text-left', box)}
+            className={cn('w-full flex items-center gap-1.5 px-2 py-1 text-xs rounded-sm border text-left', box)}
             title={config.defaultCwd}
           >
-            <FolderOpen className="w-3 h-3 flex-shrink-0" />
+            <FolderOpen className="w-3 h-3 shrink-0" />
             <span className="truncate">{config.defaultCwd}</span>
           </button>
         </div>
@@ -89,8 +89,8 @@ export default function AgentSettingsSection({ platform, theme }: AgentSettingsS
                 onClick={() => update({ permission: p.id })}
                 title={p.hint}
                 className={cn(
-                  'px-1.5 py-1 text-[11px] rounded border transition-colors',
-                  config.permission === p.id ? 'bg-purple-500/25 border-purple-500/50 text-purple-200' : box
+                  'px-1.5 py-1 text-[11px] rounded-sm border transition-colors',
+                  config.permission === p.id ? 'bg-white/13 border-white/25 text-white' : box
                 )}
               >
                 {p.label}
@@ -108,7 +108,7 @@ export default function AgentSettingsSection({ platform, theme }: AgentSettingsS
             type="checkbox"
             checked={config.shakeToCircle ?? true}
             onChange={e => update({ shakeToCircle: e.target.checked })}
-            className="accent-purple-500"
+            className="accent-white"
           />
         </label>
 
@@ -120,6 +120,17 @@ export default function AgentSettingsSection({ platform, theme }: AgentSettingsS
             placeholder="http://localhost:8090/mcp"
             onBlur={e => update({ robotMcpUrl: e.target.value || undefined })}
             title="Given to the agent while Robot mode is on"
+          />
+        </div>
+
+        <div className="space-y-1">
+          <span className={cn('text-xs block', muted)}>Robot motion MCP server (DroidCore)</span>
+          <input
+            className={input}
+            defaultValue={config.droidcoreMcpUrl ?? ''}
+            placeholder="http://localhost:8091/mcp"
+            onBlur={e => update({ droidcoreMcpUrl: e.target.value || undefined })}
+            title="Motion tools (move, rotate, stop, scan, speak) given to the agent while Robot mode is on"
           />
         </div>
       </div>

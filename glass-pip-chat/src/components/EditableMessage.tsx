@@ -158,10 +158,10 @@ function CollapsibleBlock({ section, theme, platform }: CollapsibleBlockProps) {
   const [copied, setCopied] = useState(false);
 
   const colorMap = {
-    purple: { pill: 'border-purple-400/40 bg-purple-500/10 text-purple-300', expand: 'bg-purple-900/20 border-purple-500/20' },
+    purple: { pill: 'border-white/25 bg-white/6 text-white', expand: 'bg-white/10 border-white/25' },
     amber:  { pill: 'border-amber-400/40 bg-amber-500/10 text-amber-300',   expand: 'bg-amber-900/20 border-amber-500/20' },
-    cyan:   { pill: 'border-cyan-400/40 bg-cyan-500/10 text-cyan-300',       expand: 'bg-cyan-900/20 border-cyan-500/20' },
-    blue:   { pill: 'border-blue-400/40 bg-blue-500/10 text-blue-300',       expand: 'bg-blue-900/20 border-blue-500/20' },
+    cyan:   { pill: 'border-white/25 bg-white/6 text-white',       expand: 'bg-white/10 border-white/25' },
+    blue:   { pill: 'border-white/25 bg-white/6 text-white',       expand: 'bg-white/10 border-white/25' },
     green:  { pill: 'border-green-400/40 bg-green-500/10 text-green-300',    expand: 'bg-green-900/20 border-green-500/20' },
   };
 
@@ -214,12 +214,12 @@ function CollapsibleBlock({ section, theme, platform }: CollapsibleBlockProps) {
           >
             <button
               onClick={handleCopy}
-              className={cn('absolute top-1 right-1 p-1 rounded transition-colors', copied ? 'text-green-400' : 'text-white/40 hover:text-white/70')}
+              className={cn('absolute top-1 right-1 p-1 rounded-sm transition-colors', copied ? 'text-green-400' : 'text-white/40 hover:text-white/70')}
               title="Copy"
             >
               {copied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
             </button>
-            <pre className="whitespace-pre-wrap break-words pr-6">{section.content}</pre>
+            <pre className="whitespace-pre-wrap wrap-break-word pr-6">{section.content}</pre>
           </motion.div>
         )}
       </AnimatePresence>
@@ -386,7 +386,7 @@ export default function EditableMessage({
     
     if (inline) {
       return (
-        <code className={cn("px-1 py-0.5 bg-white/10 rounded", codeSize)} {...props}>
+        <code className={cn("px-1 py-0.5 bg-white/10 rounded-sm", codeSize)} {...props}>
           {children}
         </code>
       );
@@ -411,7 +411,7 @@ export default function EditableMessage({
               "p-1.5 rounded-md transition-all duration-200",
               "opacity-0 group-hover:opacity-100 focus:opacity-100",
               isRunning
-                ? "bg-blue-500/20 text-blue-300"
+                ? "bg-white/10 text-white"
                 : "bg-white/10 hover:bg-white/20 text-white/70 hover:text-white"
             )}
             title={isRunning ? "Running..." : "Run in terminal"}
@@ -560,10 +560,10 @@ export default function EditableMessage({
         getFontSizeClass(),
         message.role === 'user'
           ? platform === 'win32'
-            ? "bg-blue-500/20 ml-auto"
+            ? "bg-white/10 ml-auto"
             : theme === 'dark'
-              ? "bg-blue-500/20 ml-auto"
-              : "bg-blue-500/20 ml-auto"
+              ? "bg-white/10 ml-auto"
+              : "bg-white/10 ml-auto"
           : platform === 'win32'
             ? "bg-white/5"
             : theme === 'dark'
@@ -592,7 +592,7 @@ export default function EditableMessage({
                 onKeyDown={handleKeyDown}
                 className={cn(
                   "w-full bg-transparent border rounded-lg resize-none min-h-[80px]",
-                  "focus:outline-none focus:ring-2",
+                  "focus:outline-hidden focus:ring-2",
                   getTextareaPaddingClass(),
                   getFontSizeClass(),
                   platform === 'win32'
@@ -622,7 +622,7 @@ export default function EditableMessage({
                     onClick={handleForkEdit}
                     className={cn(
                       "flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs transition-colors",
-                      "bg-blue-500/20 hover:bg-blue-500/30 text-blue-300"
+                      "bg-white/10 hover:bg-white/15 text-white"
                     )}
                     title="Save as new conversation branch"
                   >
@@ -696,7 +696,7 @@ export default function EditableMessage({
               <button
                 onClick={() => onCopy(message.content)}
                 className={cn(
-                  "p-1.5 rounded-lg transition-colors backdrop-blur-sm",
+                  "p-1.5 rounded-lg transition-colors backdrop-blur-xs",
                   platform === 'win32'
                     ? "bg-black/50 hover:bg-black/70"
                     : theme === 'dark'
@@ -711,7 +711,7 @@ export default function EditableMessage({
               <button
                 onClick={handleStartEdit}
                 className={cn(
-                  "p-1.5 rounded-lg transition-colors backdrop-blur-sm",
+                  "p-1.5 rounded-lg transition-colors backdrop-blur-xs",
                   platform === 'win32'
                     ? "bg-black/50 hover:bg-black/70"
                     : theme === 'dark'
@@ -728,7 +728,7 @@ export default function EditableMessage({
                 <button
                   onClick={() => onRecompute(message.id)}
                   className={cn(
-                    "p-1.5 rounded-lg transition-colors backdrop-blur-sm",
+                    "p-1.5 rounded-lg transition-colors backdrop-blur-xs",
                     platform === 'win32'
                       ? "bg-black/50 hover:bg-black/70"
                       : theme === 'dark'
@@ -745,13 +745,13 @@ export default function EditableMessage({
                 <button
                   onClick={() => setShowMenu(!showMenu)}
                   className={cn(
-                    "p-1.5 rounded-lg transition-colors backdrop-blur-sm",
+                    "p-1.5 rounded-lg transition-colors backdrop-blur-xs",
                     platform === 'win32'
                       ? "bg-black/50 hover:bg-black/70"
                       : theme === 'dark'
                         ? "bg-black/50 hover:bg-black/70"
                         : "bg-white/50 hover:bg-white/70",
-                    showMenu && "bg-blue-500/30"
+                    showMenu && "bg-white/15"
                   )}
                   title="More options"
                 >
