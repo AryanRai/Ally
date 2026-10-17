@@ -29,6 +29,8 @@ interface ChatSidebarProps {
   onStop?: () => void;
   /** Sessions from the Claude Code / Codex apps, listed alongside Ally's chats */
   externalSessions?: AgentSessionSummary[];
+  runningSessions?: AgentSessionSummary[];
+  runningError?: string;
   /** Continue an existing Claude Code / Codex session as a chat */
   onOpenAgentSession?: (session: AgentSessionSummary) => void;
 }
@@ -106,6 +108,18 @@ function SessionRow({ session, onOpen }: { session: AgentSessionSummary; onOpen:
       <span className="shrink-0 pr-2 font-mono text-[10px] text-foreground/30">{relativeTime(session.updatedAt)}</span>
     </button>
   );
+}
+
+export function runningEntries(chats: Chat[], sessions: AgentSessionSummary[], runningChatId?: string | null): Entry[] {
+  const entries = new Map<string, Entry>();
+  for (const session of sessions) {
+    const chat = chats.find(c => c.agent?.provider === session.provider && [c.agent.sessionId, c.agent.originalSessionId].filter(Boolean).some(id => id === session.id || id === session.originalSessionId));
+    const entry: Entry = chat ? { kind: 'chat', chat, updatedAt: session.updatedAt } : { kind: 'session', session, updatedAt: session.updatedAt };
+    entries.set(chat ? `chat:${chat.id}` : `${session.provider}:${session.id}`, entry);
+  }
+  const local = chats.find(c => c.id === runningChatId);
+  if (local) entries.set(`chat:${local.id}`, { kind: 'chat', chat: local, updatedAt: local.updatedAt });
+  return [...entries.values()].sort((a, b) => b.updatedAt - a.updatedAt);
 }
 
 function loadCollapsed(): Set<string> {
@@ -223,6 +237,8 @@ export default function ChatSidebar({
   isCollapsed,
   onToggleCollapse,
   externalSessions = [],
+  runningSessions = [],
+  runningError = '',
   onOpenAgentSession,
   homeCwd,
   runningChatId,
@@ -230,6 +246,17 @@ export default function ChatSidebar({
   onStop,
 }: ChatSidebarProps) {
   const groups = useMemo(() => groupByProject(chats, externalSessions, homeCwd), [chats, externalSessions, homeCwd]);
+  const running = runningEntries(chats, runningSessions, runningChatId);
+  const recent = groups.flatMap(g => g.entries).sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 3);
+  const quickRow = (entry: Entry, live: boolean) => {
+    const item = entry.kind === 'chat' ? entry.chat : entry.session;
+    const provider = entry.kind === 'chat' ? entry.chat.agent?.provider : entry.session.provider;
+    const cwd = entry.kind === 'chat' ? entry.chat.agent?.cwd : entry.session.cwd;
+    return <button key={`${entry.kind}:${provider}:${item.id}`} type="button" onClick={() => entry.kind === 'chat' ? onChatSelect(entry.chat.id) : onOpenAgentSession?.(entry.session)} className="flex w-full items-start gap-2 rounded-md px-2.5 py-2 text-left hover:bg-white/[0.05]">
+      {live && <LoaderCircle aria-hidden="true" className="mt-0.5 size-3 shrink-0 animate-spin text-amber-200/70" />}
+      <span className="min-w-0 flex-1"><span className="block truncate text-[13px] text-foreground/85">{item.title || 'Untitled'}</span><span className="block truncate text-[10px] text-foreground/40">{PROVIDER_TAG[provider ?? 'unassigned']}{cwd ? ` · ${folderName(cwd)}` : ''}</span></span>
+    </button>;
+  };
   const [collapsedGroups, setCollapsedGroups] = useState(loadCollapsed);
   const [showAll, setShowAll] = useState<Set<string>>(new Set());
 
@@ -274,6 +301,16 @@ export default function ChatSidebar({
       {!isCollapsed && (
         <>
           <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2 scrollbar-thin">
+            <section aria-label="Running chats" className="pb-3">
+              <h2 className="px-2.5 pb-1 pt-3 text-[11px] font-medium uppercase tracking-wider text-foreground/50">Running · {running.length}</h2>
+              {running.map(entry => quickRow(entry, true))}
+              {runningError && <p className="px-2.5 py-2 text-[11px] text-foreground/40">{runningError}</p>}
+              {!runningError && running.length === 0 && <p className="px-2.5 py-2 text-[11px] text-foreground/40">No active chats</p>}
+            </section>
+            <section aria-label="Recent chats" className="border-t border-border pb-2">
+              <h2 className="px-2.5 pb-1 pt-3 text-[11px] font-medium uppercase tracking-wider text-foreground/50">Most recent</h2>
+              {recent.map(entry => quickRow(entry, false))}
+            </section>
             {groups.map((group, index) => {
               const hasRunningChat = group.entries.some(entry => entry.kind === 'chat' && entry.chat.id === runningChatId);
               const closed = collapsedGroups.has(group.key) && !hasRunningChat;

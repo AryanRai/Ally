@@ -60,3 +60,17 @@ describe('watch conversations', () => {
     expect(messages[1].components).toHaveLength(1);
   });
 });
+
+it('maps running sessions to existing device identities across providers without creating chats', () => {
+  const store = new WatchConversations(path.join(root, 'chats.json'), { list: vi.fn(), load: vi.fn() }, {}, '/home');
+  const linked = store.create('codex', '/home', 'device-chat');
+  store.link(linked, 'native');
+  store.create('claude', '/home', 'unsent');
+  const sessions = [
+    { provider: 'codex' as const, id: 'native', title: 'Coding', updatedAt: 2 },
+    { provider: 'claude' as const, id: 'native', title: 'Review', updatedAt: 1 },
+  ];
+  expect(store.running(sessions, ['device-chat']).chats.map(c => c.id)).toEqual(['device-chat', 'claude:native']);
+  expect(store.running([], []).chats).toEqual([]);
+  expect(store.running([], ['unsent']).chats.map(c => c.id)).toEqual(['unsent']);
+});

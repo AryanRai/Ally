@@ -9,6 +9,11 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.*
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.repeatOnLifecycle
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.clip
@@ -22,6 +27,12 @@ import androidx.wear.compose.material3.Button
 
 @Composable
 internal fun ChatPicker(model: WatchViewModel, state: WatchState, back: () -> Unit) {
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    LaunchedEffect(lifecycle) {
+        lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            while (isActive) { model.refreshRunning(); delay(5000) }
+        }
+    }
     val scroll = rememberLazyListState()
     var query by remember { mutableStateOf("") }
     var expanded by remember(state.chatProvider) { mutableStateOf(setOf<String>()) }
@@ -43,6 +54,11 @@ internal fun ChatPicker(model: WatchViewModel, state: WatchState, back: () -> Un
         if (model.busy) item { Text("Finish this turn before switching chats", color = Muted, fontSize = 10.sp) }
         item { Text(if (state.chatProvider == "codex") "Codex chats" else "Claude chats", fontFamily = Tanker, fontSize = 20.sp) }
         item { Field(query, { query = it }, "Find chat or folder") }
+        item { Text("RUNNING · ${state.running.size}", fontFamily = Mono, color = Amber, fontSize = 10.sp, modifier = Modifier.fillMaxWidth()) }
+        items(state.running.filter { it.title.contains(query, true) || it.cwd.contains(query, true) }, key = { "running:${it.id}" }) { chat ->
+            ChatChoice(chat, state.chatId, !model.busy) { model.selectChat(chat.id); back() }
+        }
+        if (state.runningStatus.isNotBlank()) item { Text(state.runningStatus, color = Muted, fontSize = 10.sp) }
         if (query.isBlank() && state.chats.isNotEmpty()) {
             item { Text("RECENT", fontFamily = Mono, color = Muted, fontSize = 10.sp, modifier = Modifier.fillMaxWidth()) }
             items(state.chats.sortedByDescending { it.updatedAt }.take(3), key = { "recent:${it.id}" }) { chat -> ChatChoice(chat, state.chatId, !model.busy) { model.selectChat(chat.id); back() } }
@@ -72,7 +88,7 @@ private fun ChatChoice(chat: WatchChat, selected: String?, enabled: Boolean, cho
     Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(if (chat.id == selected) White.copy(alpha = .12f) else Panel)
         .clickable(enabled = enabled, onClick = choose).padding(10.dp)) {
         Text((if (chat.id == selected) "✓ " else "") + chat.title, color = White, fontSize = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
-        Text(chat.cwd.replace('\\', '/').substringAfterLast('/').ifBlank { "Other chats" }, color = Muted, fontSize = 9.sp, maxLines = 1)
+        Text("${if (chat.provider == "codex") "Codex" else "Claude"} · " + chat.cwd.replace('\\', '/').substringAfterLast('/').ifBlank { "Other chats" }, color = Muted, fontSize = 9.sp, maxLines = 1)
     }
 }
 

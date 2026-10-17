@@ -17,6 +17,7 @@ import java.util.UUID
 data class PhoneChat(val id: String, val title: String, val provider: String, val cwd: String)
 data class PhoneMessage(val id: String, val role: String, val text: String)
 data class PhoneState(val chats: List<PhoneChat> = emptyList(), val messages: List<PhoneMessage> = emptyList(), val selected: PhoneChat? = null,
+    val running: List<PhoneChat> = emptyList(), val runningStatus: String = "Checking live status…",
     val provider: String = "codex", val permission: String = "readonly", val busy: Boolean = false, val loading: Boolean = false, val error: String = "", val activity: String = "", val approval: JSONObject? = null,
     val more: Int? = null, val before: Int? = null)
 private class BridgeError(val status: Int, message: String) : Exception(message)
@@ -51,6 +52,15 @@ class PhoneModel(app: Application) : AndroidViewModel(app) {
         finally { state.update { it.copy(loading = false) } }
     }
     private fun chat(j: JSONObject) = PhoneChat(j.getString("id"), j.optString("title", "Chat"), j.optString("provider", "codex"), j.optString("cwd"))
+    suspend fun refreshRunning() {
+        try {
+            val a = request("/v1/running").optJSONArray("chats") ?: JSONArray()
+            val rows = (0 until a.length()).map { chat(a.getJSONObject(it)) }.distinctBy { it.id }
+            state.update { it.copy(running = rows, runningStatus = if (rows.isEmpty()) "No active chats" else "") }
+        } catch (e: CancellationException) { throw e } catch (e: Exception) {
+            state.update { it.copy(running = emptyList(), runningStatus = "Live status unavailable · reconnect to desktop") }
+        }
+    }
     fun catalog(provider: String = state.value.provider, more: Boolean = false) {
         if (state.value.loading) return
         val offset = if (more) state.value.more ?: return else 0

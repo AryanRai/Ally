@@ -128,6 +128,7 @@ const pipAPI = {
     greeting: (provider: 'claude' | 'codex', model: string) => ipcRenderer.invoke('agent:greeting', provider, model),
     send: (opts: Record<string, unknown>) => ipcRenderer.invoke('agent:send', opts),
     stop: (runId: string) => ipcRenderer.invoke('agent:stop', runId),
+    runningSessions: () => ipcRenderer.invoke('agent:runningSessions'),
     listSessions: (provider: 'claude' | 'codex', limit?: number) => ipcRenderer.invoke('agent:listSessions', provider, limit),
     loadSession: (provider: 'claude' | 'codex', id: string, revision?: string) => ipcRenderer.invoke('agent:loadSession', provider, id, revision),
     onSessionsChanged: (callback: (provider: 'claude' | 'codex') => void) => {
