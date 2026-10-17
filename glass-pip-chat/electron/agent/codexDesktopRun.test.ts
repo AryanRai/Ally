@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { CodexDesktopClient, assertDesktopIdle, desktopTurns } from './codexDesktop';
+import { CodexChatUnownedError, CodexDesktopUnavailableError, CodexDesktopClient, assertDesktopIdle, desktopTurns } from './codexDesktop';
 import { runCodexDesktopTurn, applyDesktopPatches, desktopTurnRequest } from './codexDesktopRun';
 import type { AgentEvent } from './types';
 
@@ -117,4 +117,45 @@ describe('desktop state decoding', () => {
     const state = { ...idle(), turnHistory: { kind: 'canonical', history: { islands: [{ entries: [{ value: 'turn' }] }], entitiesByKey: { turn: { status: 'inProgress' } } } } };
     expect(desktopTurns(state)).toHaveLength(1); expect(() => assertDesktopIdle(state, 'same-chat')).toThrow();
   });
+});
+
+it('falls back only for a confirmed unowned chat before submitting and preserves Stop', async () => {
+  const { client } = desktop();
+  client.owner.mockRejectedValueOnce(new CodexChatUnownedError());
+  const events: AgentEvent[] = [];
+  const stop = vi.fn();
+  const fallback = vi.fn((emit: (event: AgentEvent) => void) => { emit({ kind: 'session', sessionId: 'same-chat' }); return { stop }; });
+  const run = runCodexDesktopTurn(opts, event => events.push(event), undefined, fallback);
+  await flush();
+  expect(fallback).toHaveBeenCalledOnce();
+  expect(client.request).not.toHaveBeenCalled();
+  expect(events).toContainEqual({ kind: 'session', sessionId: 'same-chat' });
+  run.stop(); expect(stop).toHaveBeenCalledOnce();
+});
+it('never falls back on a discovery timeout or an uncertain submitted turn', async () => {
+  const { client } = desktop();
+  const fallback = vi.fn();
+  client.owner.mockRejectedValueOnce(new Error('Desktop discovery timed out'));
+  runCodexDesktopTurn(opts, () => {}, undefined, fallback); await flush();
+  expect(fallback).not.toHaveBeenCalled();
+  client.request.mockRejectedValueOnce(new CodexChatUnownedError());
+  runCodexDesktopTurn(opts, () => {}, undefined, fallback); await flush();
+  expect(fallback).not.toHaveBeenCalled();
+});
+it('does not start fallback if Stop arrives during owner discovery', async () => {
+  const { client } = desktop();
+  let reject!: (error: Error) => void;
+  client.owner.mockImplementationOnce(() => new Promise((_, no) => { reject = no; }));
+  const fallback = vi.fn();
+  const run = runCodexDesktopTurn(opts, () => {}, undefined, fallback); await flush();
+  run.stop(); reject(new CodexChatUnownedError()); await flush();
+  expect(fallback).not.toHaveBeenCalled();
+});
+
+it('uses the previous connection if the desktop pipe is definitively absent', async () => {
+  desktop();
+  vi.mocked(CodexDesktopClient.connect).mockRejectedValueOnce(new CodexDesktopUnavailableError());
+  const fallback = vi.fn(() => ({ stop: vi.fn() }));
+  runCodexDesktopTurn(opts, () => {}, undefined, fallback); await flush();
+  expect(fallback).toHaveBeenCalledOnce();
 });
