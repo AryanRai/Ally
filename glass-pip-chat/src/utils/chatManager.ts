@@ -2,6 +2,26 @@ import { Chat, Message, ChatState } from '../types/chat';
 
 const CHAT_STORAGE_KEY = 'glass_pip_chats';
 
+/** Keep reported usage and interrupted output omitted by app-server history. */
+function retainUsage(previous: Message[], incoming: Message[]): Message[] {
+  const key = (m: Message) => `${m.role}:${m.content.replace(/<think>[\s\S]*?<\/think>/gi, '').trim()}`;
+  const candidates = new Map<string, Message[]>();
+  for (const m of previous) candidates.set(key(m), [...(candidates.get(key(m)) ?? []), m]);
+  let previousUser = -1;
+  return incoming.map(m => {
+    if (m.role === 'user') {
+      previousUser = previous.findIndex((old, index) => index > previousUser && old.role === 'user' && key(old) === key(m));
+    }
+    const localReply = previousUser >= 0 ? previous[previousUser + 1] : undefined;
+    if (m.role === 'assistant' && m.content.trim() === '⏹️ Stopped' && localReply?.role === 'assistant' && localReply.content.endsWith('⏹️ Stopped')) {
+      return { ...m, content: localReply.content, metadata: { ...localReply.metadata, usage: { ...localReply.metadata?.usage, ...m.metadata?.usage } } };
+    }
+    const old = candidates.get(key(m))?.shift();
+    if (!old?.metadata?.usage) return m;
+    return { ...m, metadata: { ...m.metadata, usage: { ...old.metadata.usage, ...m.metadata?.usage } } };
+  });
+}
+
 export class ChatManager {
   private static instance: ChatManager;
   private state: ChatState;
@@ -238,6 +258,15 @@ export class ChatManager {
     return { ...this.state };
   }
 
+  /** Keep send feedback independent of the periodically replaced native transcript. */
+  setSendFailure(chatId: string, failure?: Chat['sendFailure']): boolean {
+    const chat = this.getChatById(chatId);
+    if (!chat) return false;
+    chat.sendFailure = failure;
+    this.saveState();
+    return true;
+  }
+
   /** Link (or re-link) a chat to a Claude Code / Codex session */
   setChatAgent(chatId: string, agent: Chat['agent']): boolean {
     const chat = this.state.chats.find(c => c.id === chatId);
@@ -252,10 +281,10 @@ export class ChatManager {
    * that session (refreshing its messages) instead of creating a duplicate.
    */
   openAgentSession(agent: NonNullable<Chat['agent']>, title: string, messages: Message[]): Chat {
-    let chat = this.state.chats.find(c => c.agent?.provider === agent.provider && c.agent?.sessionId === agent.sessionId);
+    let chat = this.state.chats.find(c => c.agent?.provider === agent.provider && (c.agent?.sessionId === agent.sessionId || (!!agent.originalSessionId && c.agent?.sessionId === agent.originalSessionId)));
     const now = Date.now();
     if (chat) {
-      chat.messages = messages;
+      chat.messages = retainUsage(chat.messages, messages);
       chat.agent = agent;
       chat.updatedAt = now;
     } else {
@@ -271,6 +300,7 @@ export class ChatManager {
   syncAgentSession(chatId: string, provider: 'claude' | 'codex', sessionId: string, messages: Message[], cwd?: string): boolean {
     const chat = this.getChatById(chatId);
     if (!chat?.agent || chat.agent.provider !== provider || chat.agent.sessionId !== sessionId) return false;
+    messages = retainUsage(chat.messages, messages);
     if (JSON.stringify(chat.messages) === JSON.stringify(messages) && (!cwd || chat.agent.cwd === cwd)) return false;
     chat.messages = messages;
     if (cwd) chat.agent.cwd = cwd;

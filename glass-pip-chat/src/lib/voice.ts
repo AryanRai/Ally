@@ -1,4 +1,5 @@
 import { pcm16k, UtteranceBuffer, wav16k } from './voiceAudio';
+import { LiveUtterance, PcmPlayback } from './liveVoice';
 
 export interface SpeechStatus {
   connected: boolean; listening: boolean; device: string; modelsLoaded: boolean;
@@ -6,10 +7,12 @@ export interface SpeechStatus {
   backend: string; model: string; level: number;
 }
 interface VoiceSnapshot {
+  interimTranscript: string;
   status: SpeechStatus; lastRecognizedText: string | null; recognitionId: number;
   speechError: string | null; isSpeaking: boolean; voiceModeEnabled: boolean; droidModeEnabled: boolean;
 }
 let snapshot: VoiceSnapshot = {
+  interimTranscript: '',
   status: { connected: false, listening: false, device: 'local', modelsLoaded: false, phase: 'offline', backend: 'faster-whisper', model: '', level: 0 },
   lastRecognizedText: null, recognitionId: 0, speechError: null, isSpeaking: false, voiceModeEnabled: false, droidModeEnabled: false,
 };
@@ -30,6 +33,11 @@ let speakingGeneration = 0;
 let speechQueue = Promise.resolve();
 let playback: AudioContext | undefined;
 let currentSource: AudioBufferSourceNode | undefined;
+let cloudEnabled = false;
+let live: LiveUtterance | undefined;
+const utterances = new Set<LiveUtterance>();
+let pcmPlayback: PcmPlayback | undefined;
+const cancelUtterances = () => { utterances.forEach(u => u.cancel()); utterances.clear(); live = undefined; update({ interimTranscript: '' }); };
 
 export const voice = {
   subscribe(listener: () => void) { listeners.add(listener); return () => { listeners.delete(listener); }; },
@@ -41,6 +49,10 @@ export const voice = {
       const generation = connectionGeneration;
       status({ phase: 'connecting' }); update({ speechError: null });
       try {
+        const settings = await window.pip.speech.settings?.();
+        if (generation !== connectionGeneration) return;
+        cloudEnabled = settings?.cloud === true;
+        if (cloudEnabled) { status({ connected: true, modelsLoaded: true, backend: 'Google Cloud', model: 'Chirp 3 · Orbit', phase: 'ready' }); return; }
         const result = await window.pip.speech.connect();
         if (!result.success) throw new Error(result.error);
         const resultStatus = await window.pip.speech.getStatus();
@@ -81,11 +93,25 @@ export const voice = {
         let meterFrame = 0;
         node.port.onmessage = event => {
           if (capture?.node !== node) return;
-          const result = buffer.push(pcm16k(event.data, context!.sampleRate));
+          const frame = pcm16k(event.data, context!.sampleRate);
+          const result = buffer.push(frame);
           if (++meterFrame % 5 === 0) status({ level: Math.min(1, result.level * 10) });
           // Echo cancellation is requested above; near-end speech immediately cancels local playback.
           if (result.started && snapshot.isSpeaking) voice.stopCurrentSpeech();
-          if (result.utterance) void enqueueTranscription(wav16k(result.utterance));
+          if (cloudEnabled) {
+            if (result.started) {
+              const transcript = transcriptGeneration;
+              const utterance = new LiveUtterance(text => { if (transcript === transcriptGeneration) update({ interimTranscript: text }); }, text => {
+                utterances.delete(utterance);
+                if (transcript === transcriptGeneration) update({ lastRecognizedText: text, recognitionId: snapshot.recognitionId + 1, speechError: null });
+              }, bytes => { utterances.delete(utterance); if (transcript === transcriptGeneration) { update({ speechError: 'Live speech unavailable. Transcribing locally…' }); void enqueueTranscription(bytes); } });
+              live = utterance; utterances.add(utterance);
+              live.write(wav16k(result.startFrames ?? [frame]).subarray(44));
+            } else live?.write(wav16k([frame]).subarray(44));
+            if (result.utterance) { live?.finish(wav16k(result.utterance)); live = undefined; }
+            // Very short noise bursts are discarded by the energy gate.
+            else if (!buffer.active && live) { live.cancel(); utterances.delete(live); live = undefined; }
+          } else if (result.utterance) void enqueueTranscription(wav16k(result.utterance));
         };
         stream.getAudioTracks()[0].onended = () => { void voice.stopListening(false); update({ voiceModeEnabled: false }); fail(new Error('Microphone disconnected. Choose a microphone and enable voice again.')); };
         status({ listening: true, phase: 'listening', level: 0 }); update({ speechError: null });
@@ -105,8 +131,9 @@ export const voice = {
       current.stream.getTracks().forEach(track => { track.onended = null; track.stop(); });
       if (current.context.state !== 'closed') await current.context.close();
       const frames = current.buffer.flush();
-      if (flush && frames) void enqueueTranscription(wav16k(frames));
+      if (flush && frames) { if (live) { live.finish(wav16k(frames)); live = undefined; } else void enqueueTranscription(wav16k(frames)); }
     }
+    if (!flush) cancelUtterances();
     status({ listening: false, level: 0, phase: snapshot.status.connected ? 'ready' : 'offline' });
   },
   setVoiceModeEnabled(enabled: boolean) {
@@ -133,12 +160,31 @@ export const voice = {
       if (generation !== speakingGeneration) return;
       update({ isSpeaking: true }); status({ phase: 'speaking' });
       try {
-        let options: { engine?: 'local' | 'google'; volume?: number } = {};
+        const settings = await window.pip.speech.settings?.();
+        let options: { engine?: 'local' | 'google'; cloudVoice?: string; volume?: number } = {};
+        let fallbackReason: string | undefined;
         try { options = JSON.parse(localStorage.getItem('ally-voice-options') ?? '{}'); } catch { /* Use installed default. */ }
-        const result = await window.pip.speech.synthesize(text, options);
+        if (settings?.cloud) {
+          const player = new PcmPlayback(); pcmPlayback = player;
+          const id = crypto.randomUUID();
+          const detach = window.pip.speech.onLiveEvent(event => { if (event.id === id && event.type === 'audio' && event.audio && generation === speakingGeneration) player.push(event.audio, options.volume ?? .8); });
+          try {
+            await player.start();
+            if (generation !== speakingGeneration) return;
+            const streamed = await window.pip.speech.streamVoice(id, text, options.cloudVoice || settings.voice);
+            if (generation !== speakingGeneration) return;
+            await player.drain();
+            if (streamed.success && player.bytes) { update({ speechError: null }); return; }
+            if (player.bytes) throw new Error(streamed.error ?? 'Speech was interrupted.');
+            fallbackReason = 'Cloud speech unavailable. Using the Windows voice.';
+            update({ speechError: fallbackReason });
+          } finally { detach(); player.stop(); if (pcmPlayback === player) pcmPlayback = undefined; }
+        }
+        if (generation !== speakingGeneration) return;
+        const result = await window.pip.speech.synthesize(text, { ...options, engine: 'local' });
         if (generation !== speakingGeneration) return;
         if (!result.success || !result.audio_data) throw new Error(result.error ?? 'No audio returned by the installed voice.');
-        update({ speechError: result.warning ?? null });
+        update({ speechError: result.warning ?? fallbackReason ?? null });
         await voice.playGeneratedSpeech(result.audio_data, generation, result.provider === 'google' ? options.volume ?? 1 : 1);
       } catch (error) { if (generation === speakingGeneration) fail(error); }
       finally {
@@ -154,11 +200,12 @@ export const voice = {
     ++speakingGeneration;
     try { currentSource?.stop(); } catch { /* Already ended. */ }
     currentSource = undefined;
+    pcmPlayback?.stop(); pcmPlayback = undefined; window.pip?.speech.streamCancel?.();
     void window.pip?.speech.cancel();
     update({ isSpeaking: false });
   },
   async interruptAndSpeak(text: string) { voice.stopCurrentSpeech(); return voice.synthesizeSpeech(text); },
-  resetTTSQueue() { ++transcriptGeneration; pendingAudio = []; capture?.buffer.flush(); voice.stopCurrentSpeech(); },
+  resetTTSQueue() { ++transcriptGeneration; pendingAudio = []; cancelUtterances(); capture?.buffer.flush(); voice.stopCurrentSpeech(); },
 };
 
 async function enqueueTranscription(bytes: Uint8Array) {

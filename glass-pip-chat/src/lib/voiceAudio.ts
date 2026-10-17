@@ -37,7 +37,7 @@ export class UtteranceBuffer {
   private voiced = 0;
   private noise = .002;
   get active(): boolean { return this.frames.length > 0; }
-  push(frame: Float32Array): { level: number; started: boolean; utterance?: Float32Array[] } {
+  push(frame: Float32Array): { level: number; started: boolean; startFrames?: Float32Array[]; utterance?: Float32Array[] } {
     const rms = Math.sqrt(frame.reduce((sum, sample) => sum + sample * sample, 0) / frame.length);
     const speech = rms > Math.max(.009, this.noise * 3);
     let started = false;
@@ -51,7 +51,7 @@ export class UtteranceBuffer {
       if (speech) { this.voiced++; this.silence = 0; } else this.silence++;
       if (this.silence >= 35 || this.frames.length >= 1000) return { level: rms, started, utterance: this.flush() };
     }
-    return { level: rms, started };
+    return { level: rms, started, startFrames: started ? [...this.frames] : undefined };
   }
   flush(): Float32Array[] | undefined {
     const result = this.voiced >= 10 ? this.frames : undefined;

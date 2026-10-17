@@ -1,7 +1,8 @@
 import { Ref, useState } from 'react';
-import { Clipboard, ClipboardCopy, Cpu, FolderOpen, Lasso, Check, ArrowUp, Square, Eye, ShieldCheck, ShieldAlert } from 'lucide-react';
+import { Clipboard, ClipboardCopy, Cpu, FolderOpen, Lasso, LoaderCircle, Check, ArrowUp, Square, Eye, ShieldCheck, ShieldAlert } from 'lucide-react';
 import { PromptInput, PromptInputFooter, PromptInputSubmit, PromptInputTextarea } from '@/components/ai-elements/prompt-input';
 import ComposerTools from './ComposerTools';
+import AgentSelectors from './AgentSelectors';
 import AuroraGlow from '@/components/glow/AuroraGlow';
 import AgentPresence from '@/components/glow/AgentPresence';
 import type { OrbMood } from '@/components/glow/EnergyOrb';
@@ -9,7 +10,7 @@ import type { RobotStatus } from '@/components/glow/RobotAvatar';
 import { useLook } from '@/lib/look';
 import { cn } from '@/lib/utils';
 import type { Message } from '@/types/chat';
-import type { AgentPermission } from '@/types/agent';
+import type { AgentPermission, AgentProvider } from '@/types/agent';
 import type { ContextData } from '@/hooks/useContextMonitoring';
 
 interface ChatInputProps {
@@ -18,7 +19,10 @@ interface ChatInputProps {
   setInput: (value: string) => void;
   onSend: () => void;
   isTyping: boolean;
+  workingStatus?: string;
   onStop: () => void;
+  /** The turn belongs to another app, so Ally can show it but not stop it */
+  stopDisabledReason?: string;
   contextData: ContextData;
   onExplainClipboard: () => void;
   placeholder?: string;
@@ -38,18 +42,24 @@ interface ChatInputProps {
   /** The agent behind this chat */
   agent: {
     label: string;
+    provider: AgentProvider;
     model: string;
     folder: string;
+    homeFolder?: string;
+    recentFolders: string[];
     permission: AgentPermission;
     onPickFolder: () => void;
     onCyclePermission: () => void;
+    onModel: (id: string) => void;
+    onFolder: (folder: string) => void;
+    onPermission: (permission: AgentPermission) => void;
   };
 }
 
 const PERMISSION: Record<AgentPermission, { text: string; title: string }> = {
   readonly: { text: 'read-only', title: 'Agent can read but not change files (click to change)' },
   edit: { text: 'can edit', title: 'Agent can edit files in the folder; risky commands may be blocked (click to change)' },
-  full: { text: 'full access', title: 'Agent runs anything without asking (click to change)' },
+  full: { text: 'full access', title: 'Unrestricted files and fewer prompts; required browser confirmations still apply (click to change)' },
 };
 
 function folderName(p: string): string {
@@ -89,7 +99,9 @@ export default function ChatInput({
   setInput,
   onSend,
   isTyping,
+  workingStatus = 'Working…',
   onStop,
+  stopDisabledReason,
   contextData,
   onExplainClipboard,
   placeholder = 'Ask the agent…',
@@ -106,6 +118,8 @@ export default function ChatInput({
   const glowing = isTyping || voice.listening;
   const mood: OrbMood = isTyping ? 'busy' : voice.listening ? 'listening' : 'idle';
   const canSend = !!input.trim();
+  const normalized = (p?: string) => p?.replace(/[\\/]+/g, '/').replace(/\/$/, '').toLowerCase();
+  const folderLabel = agent.homeFolder && normalized(agent.folder) === normalized(agent.homeFolder) ? 'Home' : folderName(agent.folder);
 
   const copyChat = async () => {
     await navigator.clipboard.writeText(exportChat(messages, `${agent.label} · ${agent.model}`));
@@ -121,11 +135,23 @@ export default function ChatInput({
         {/* prxptn-style status line */}
         <div className="flex items-center gap-2 px-1">
           <span className={cn('size-1.5 shrink-0', robotMode ? 'bg-destructive' : 'bg-foreground', isTyping && 'animate-pulse')} />
-          <span className="px-label truncate">
-            {robotMode ? 'robot · ' : ''}{agent.label} · {agent.model} · {folderName(agent.folder)}
-            {isTyping ? ' · working' : voice.listening ? ' · listening' : ''}
-          </span>
+          <AgentSelectors
+            provider={agent.provider}
+            model={agent.model}
+            folder={agent.folder}
+            homeFolder={agent.homeFolder}
+            recentFolders={agent.recentFolders}
+            permission={agent.permission}
+            onModel={agent.onModel}
+            onFolder={agent.onFolder}
+            onPickFolder={agent.onPickFolder}
+            onPermission={agent.onPermission}
+            disabled={isTyping}
+            prefix={robotMode ? <span className="px-label px-1 text-destructive/90">robot ·</span> : undefined}
+          />
+          {voice.listening && <span className="px-label shrink-0">· listening</span>}
         </div>
+        {isTyping && <div role="status" className="flex min-w-0 items-center gap-1.5 px-1 text-xs text-foreground/80"><LoaderCircle aria-hidden="true" className="size-3.5 shrink-0 animate-spin" /><span className="truncate" title={workingStatus}>{workingStatus}</span></div>}
 
         <PromptInput
           onSubmit={() => {
@@ -171,7 +197,7 @@ export default function ChatInput({
                   detail: 'ctrl+shift+space',
                   onClick: () => window.pip?.circle.start(),
                 },
-                { id: 'folder', icon: <FolderOpen />, label: 'Working folder', detail: folderName(agent.folder), onClick: agent.onPickFolder },
+                { id: 'folder', icon: <FolderOpen />, label: 'Working folder', detail: folderLabel, onClick: agent.onPickFolder },
                 {
                   id: 'permission',
                   icon: agent.permission === 'readonly' ? <Eye /> : agent.permission === 'full' ? <ShieldAlert /> : <ShieldCheck />,
@@ -200,15 +226,20 @@ export default function ChatInput({
               ]}
             />
             <PromptInputSubmit
+              size={isTyping ? 'sm' : 'icon-sm'}
+              variant={isTyping ? 'outline' : 'default'}
               status={isTyping ? 'streaming' : 'ready'}
               onStop={onStop}
-              disabled={!isTyping && !canSend}
+              aria-label={isTyping ? 'Stop response' : 'Send message'}
+              title={isTyping ? stopDisabledReason ?? 'Stop response' : 'Send message'}
+              disabled={isTyping ? !!stopDisabledReason : !canSend}
               className={cn(
-                'size-[30px] shrink-0 rounded-full transition-colors',
-                isTyping || canSend ? 'bg-foreground text-background hover:bg-foreground/85' : 'bg-white/10 text-muted-foreground'
+                'h-[30px] shrink-0 rounded-full transition-colors',
+                isTyping ? 'min-w-[72px] gap-2 border-white/20 bg-white/5 px-3 text-foreground/85 hover:bg-white/10' : 'w-[30px]',
+                !isTyping && (canSend ? 'bg-foreground text-background hover:bg-foreground/85' : 'bg-white/10 text-muted-foreground')
               )}
             >
-              {isTyping ? <Square className="size-3" fill="currentColor" /> : <ArrowUp className="size-3.5" strokeWidth={2.5} />}
+              {isTyping ? <><Square className="size-3" fill="currentColor" /><span className="text-xs">Stop</span></> : <ArrowUp className="size-3.5" strokeWidth={2.5} />}
             </PromptInputSubmit>
           </PromptInputFooter>
         </PromptInput>

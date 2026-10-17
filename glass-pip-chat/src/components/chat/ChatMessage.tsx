@@ -8,6 +8,7 @@ import { Textarea } from '@/components/ui/textarea';
 import type { Message as ChatMessageType, Segment } from '@/types/chat';
 import type { AgentUsage } from '@/types/agent';
 import ToolCall, { ImageStrip } from './ToolCall';
+import { needsClaudeLogin, openClaudeLogin } from '@/lib/claudeLogin';
 
 const THINK_BLOCK = /<think>([\s\S]*?)<\/think>\s*/i;
 
@@ -134,6 +135,9 @@ export default function ChatMessage({ message, onEdit, onFork, onDelete, onRetry
           <AgentReply text={text} thinking={thinking} segments={message.metadata?.segments as Segment[] | undefined} />
         )}
       </MessageContent>
+      {!isUser && needsClaudeLogin(message.content) && (
+        <Button size="sm" variant="outline" className="w-fit" onClick={openClaudeLogin}>Sign in to Claude Code</Button>
+      )}
       {!!message.metadata?.images?.length && <ImageStrip images={message.metadata.images} className="ml-auto" />}
       {message.metadata?.usage && <UsageLine usage={message.metadata.usage} />}
       {message.metadata?.context && (

@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { AgentHistoryMessage } from '@/types/agent';
 import type { Message } from '@/types/chat';
 import type { ChatsApi } from './useChats';
@@ -11,8 +11,12 @@ export function sessionMessages(sessionId: string, messages: AgentHistoryMessage
   }));
 }
 
-/** Follow the selected on-disk conversation without acquiring an agent writer. */
-export function useSessionSync(chats: ChatsApi, locallyRunning: boolean) {
+/**
+ * Follow the selected on-disk conversation without acquiring an agent writer.
+ * Returns whether that conversation is mid-turn in another app (Claude Code / Codex).
+ */
+export function useSessionSync(chats: ChatsApi, locallyRunning: boolean): boolean {
+  const [externalRunning, setExternalRunning] = useState(false);
   const latest = useRef(chats);
   latest.current = chats;
   const chatId = chats.activeChat?.id;
@@ -20,6 +24,7 @@ export function useSessionSync(chats: ChatsApi, locallyRunning: boolean) {
   const sessionId = chats.activeChat?.agent?.sessionId;
   useEffect(() => {
     const api = window.pip?.agent;
+    setExternalRunning(false);
     if (!api || !chatId || !provider || !sessionId || locallyRunning) return;
     let disposed = false;
     let inFlight = false;
@@ -31,7 +36,10 @@ export function useSessionSync(chats: ChatsApi, locallyRunning: boolean) {
         const snapshot = await api.loadSession(provider, sessionId, revision);
         if (disposed) return;
         revision = snapshot.revision;
-        if (!snapshot.unchanged) latest.current.syncAgentSession(chatId, provider, sessionId, sessionMessages(sessionId, snapshot.messages), snapshot.cwd);
+        setExternalRunning(!!snapshot.running);
+        const resolved = snapshot.sessionId ?? sessionId;
+        if (resolved !== sessionId) latest.current.setAgent(chatId, { provider, sessionId: resolved, originalSessionId: snapshot.originalSessionId ?? sessionId, cwd: snapshot.cwd });
+        if (!snapshot.unchanged) latest.current.syncAgentSession(chatId, provider, resolved, sessionMessages(resolved, snapshot.messages), snapshot.cwd);
       } catch { /* A writer may rename its file. Keep the current view and retry. */ }
       finally { inFlight = false; }
     };
@@ -41,4 +49,5 @@ export function useSessionSync(chats: ChatsApi, locallyRunning: boolean) {
     void refresh();
     return () => { disposed = true; unsubscribe(); clearInterval(interval); window.removeEventListener('focus', refresh); };
   }, [chatId, provider, sessionId, locallyRunning]);
+  return externalRunning;
 }

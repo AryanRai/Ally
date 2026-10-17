@@ -52,6 +52,18 @@ const pipAPI = {
 
   // Speech: audio capture remains explicit in the renderer; credentials stay in main.
   speech: {
+    settings: () => ipcRenderer.invoke('speech:settings'),
+    saveSettings: (patch: unknown) => ipcRenderer.invoke('speech:saveSettings', patch),
+    liveStart: (id: string) => ipcRenderer.send('speech:liveStart', id),
+    liveAudio: (id: string, bytes: Uint8Array) => ipcRenderer.send('speech:liveAudio', id, bytes),
+    liveEnd: (id: string, cancel = false) => ipcRenderer.send('speech:liveEnd', id, cancel),
+    streamVoice: (id: string, text: string, name?: string) => ipcRenderer.invoke('speech:streamVoice', id, text, name),
+    streamCancel: () => ipcRenderer.send('speech:streamCancel'),
+    onLiveEvent: (callback: (event: unknown) => void) => {
+      const handler = (_: unknown, event: unknown) => callback(event);
+      ipcRenderer.on('speech:liveEvent', handler);
+      return () => ipcRenderer.removeListener('speech:liveEvent', handler);
+    },
     connect: () => ipcRenderer.invoke('speech:connect'),
     getStatus: () => ipcRenderer.invoke('speech:getStatus'),
     voices: () => ipcRenderer.invoke('speech:voices'),
@@ -62,6 +74,12 @@ const pipAPI = {
   },
 
   // Listen for speech toggle event
+  notifyReply: (notice: unknown) => ipcRenderer.send('reply:notify', notice),
+  onReplyOpen: (callback: (notice: any) => void) => {
+    const handler = (_: unknown, notice: any) => callback(notice);
+    ipcRenderer.on('reply:open', handler);
+    return () => ipcRenderer.removeListener('reply:open', handler);
+  },
   onToggleSpeech: (callback: () => void) => {
     ipcRenderer.on('toggle-speech', callback);
     return () => ipcRenderer.removeListener('toggle-speech', callback);
@@ -118,12 +136,23 @@ const pipAPI = {
       return () => ipcRenderer.removeListener('agent:sessionsChanged', handler);
     },
     pickFolder: (current?: string) => ipcRenderer.invoke('agent:pickFolder', current),
+    // Claude Code sign-in (drives `claude auth login`)
+    claudeAccount: () => ipcRenderer.invoke('claude:account'),
+    claudeLogin: {
+      start: () => ipcRenderer.invoke('claude:loginStart'),
+      onEvent: (callback: (event: any) => void) => {
+        const handler = (_: any, event: any) => callback(event);
+        ipcRenderer.on('claude:loginEvent', handler);
+        return () => ipcRenderer.removeListener('claude:loginEvent', handler);
+      },
+    },
     onEvent: (callback: (data: { runId: string; event: any }) => void) => {
       const handler = (_: any, data: { runId: string; event: any }) => callback(data);
       ipcRenderer.on('agent:event', handler);
       return () => ipcRenderer.removeListener('agent:event', handler);
     },
-  }
+  },
+
 };
 
 // Expose the API to the renderer process

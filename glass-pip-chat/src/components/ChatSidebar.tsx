@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
-import { ChevronRight, Folder, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Pencil, SquarePen, Trash2 } from 'lucide-react';
+import { ChevronRight, Folder, LoaderCircle, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Pencil, Square, SquarePen, Trash2 } from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -23,6 +23,10 @@ interface ChatSidebarProps {
   onToggleCollapse: () => void;
   theme: 'light' | 'dark';
   platform: string;
+  homeCwd?: string;
+  runningChatId?: string | null;
+  workingStatus?: string;
+  onStop?: () => void;
   /** Sessions from the Claude Code / Codex apps, listed alongside Ally's chats */
   externalSessions?: AgentSessionSummary[];
   /** Continue an existing Claude Code / Codex session as a chat */
@@ -39,12 +43,13 @@ interface ProjectGroup {
   path?: string;
   entries: Entry[];
   updatedAt: number;
+  provider: 'claude' | 'codex' | 'unassigned';
 }
 
 const NO_FOLDER = '__none__';
 const COLLAPSED_GROUPS_KEY = 'ally-sidebar-collapsed-projects';
 const ROWS_BEFORE_MORE = 6;
-const PROVIDER_TAG: Record<AgentSessionSummary['provider'], string> = { claude: 'cc', codex: 'cx' };
+const PROVIDER_TAG = { claude: 'Claude', codex: 'Codex', unassigned: 'No engine' };
 
 /** Same folder regardless of slash direction, case (Windows) or trailing slash */
 const folderKey = (p: string) => p.replace(/[\\/]+/g, '/').replace(/\/$/, '').toLowerCase();
@@ -65,25 +70,26 @@ function relativeTime(ts: number): string {
 }
 
 /**
- * Ally chats and Claude Code / Codex sessions grouped by project folder, newest
- * first (like Codex's Projects). A session already continued in Ally shows once, as its chat.
+ * Working folders within separate engine sections, newest first. A linked
+ * session (including its migration alias) appears once as its Ally chat.
  */
-function groupByProject(chats: Chat[], sessions: AgentSessionSummary[]): ProjectGroup[] {
+export function groupByProject(chats: Chat[], sessions: AgentSessionSummary[], homeCwd?: string): ProjectGroup[] {
   const groups = new Map<string, ProjectGroup>();
-  const add = (cwd: string | undefined, entry: Entry) => {
-    const key = cwd ? folderKey(cwd) : NO_FOLDER;
-    const group = groups.get(key) ?? { key, name: cwd ? folderName(cwd) : 'Chats', path: cwd, entries: [], updatedAt: 0 };
+  const add = (cwd: string | undefined, entry: Entry, provider: ProjectGroup['provider']) => {
+    const key = `${provider}:${cwd ? folderKey(cwd) : NO_FOLDER}`;
+    const home = cwd && homeCwd && folderKey(cwd) === folderKey(homeCwd);
+    const group = groups.get(key) ?? { key, provider, name: home ? 'Home' : cwd ? folderName(cwd) : 'No working folder', path: cwd, entries: [], updatedAt: 0 };
     group.entries.push(entry);
     group.updatedAt = Math.max(group.updatedAt, entry.updatedAt);
     groups.set(key, group);
   };
-  const linked = new Set(chats.map(c => c.agent?.sessionId).filter(Boolean));
-  for (const chat of chats) add(chat.agent?.cwd, { kind: 'chat', chat, updatedAt: chat.updatedAt });
+  const linked = new Set(chats.flatMap(c => [c.agent?.sessionId, c.agent?.originalSessionId].filter(Boolean).map(id => `${c.agent?.provider}:${id}`)));
+  for (const chat of chats) add(chat.agent?.cwd, { kind: 'chat', chat, updatedAt: chat.updatedAt }, chat.agent?.provider ?? 'unassigned');
   for (const session of sessions) {
-    if (!linked.has(session.id)) add(session.cwd, { kind: 'session', session, updatedAt: session.updatedAt });
+    if (!linked.has(`${session.provider}:${session.id}`) && !(session.originalSessionId && linked.has(`${session.provider}:${session.originalSessionId}`))) add(session.cwd, { kind: 'session', session, updatedAt: session.updatedAt }, session.provider);
   }
   for (const g of groups.values()) g.entries.sort((a, b) => b.updatedAt - a.updatedAt);
-  return [...groups.values()].sort((a, b) => b.updatedAt - a.updatedAt);
+  return [...groups.values()].sort((a, b) => a.provider.localeCompare(b.provider) || b.updatedAt - a.updatedAt);
 }
 
 /** A Claude Code / Codex session not yet opened in Ally; clicking continues it here. */
@@ -117,6 +123,8 @@ function ChatRow({
   onRename,
   onDelete,
   canDelete,
+  workingStatus,
+  onStop,
 }: {
   chat: Chat;
   active: boolean;
@@ -124,6 +132,8 @@ function ChatRow({
   onRename: (title: string) => void;
   onDelete: () => void;
   canDelete: boolean;
+  workingStatus?: string;
+  onStop?: () => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(chat.title);
@@ -166,11 +176,14 @@ function ChatRow({
         onClick={onSelect}
         onDoubleClick={() => setEditing(true)}
         className="min-w-0 flex-1 truncate py-1.5 pl-2.5 pr-1 text-left text-[13px] font-light"
-        title={chat.title}
+        title={`${chat.title}\n${PROVIDER_TAG[chat.agent?.provider ?? 'unassigned']}${chat.agent?.originalSessionId ? '\nContinues an original Codex chat; original history retained.' : ''}`}
       >
-        {chat.title || 'Untitled'}
+        <span className="block truncate">{chat.title || 'Untitled'}</span>
+        {workingStatus && <span role="status" className="mt-0.5 flex items-center gap-1 text-[10px] text-foreground/70"><LoaderCircle aria-hidden="true" className="size-3 shrink-0 animate-spin" /><span className="truncate">{workingStatus}</span></span>}
       </button>
-      <span className="shrink-0 pr-2 font-mono text-[10px] text-foreground/30 group-hover/row:hidden">{relativeTime(chat.updatedAt)}</span>
+      {workingStatus && onStop && <button type="button" onClick={onStop} aria-label={`Stop ${chat.title || 'Untitled'}`} title="Stop response" className="mr-1 grid size-7 shrink-0 place-items-center rounded-full border border-white/15 bg-white/5 text-foreground/70 hover:bg-white/15 hover:text-foreground"><Square aria-hidden="true" className="size-2.5" fill="currentColor" /></button>}
+      <span className="shrink-0 pr-1.5 text-[10px] text-foreground/45">{PROVIDER_TAG[chat.agent?.provider ?? 'unassigned']}</span>
+      {!workingStatus && <span className="shrink-0 pr-2 font-mono text-[10px] text-foreground/30 group-hover/row:hidden">{relativeTime(chat.updatedAt)}</span>}
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <button
@@ -199,7 +212,7 @@ function ChatRow({
   );
 }
 
-/** Chat list in the style of the Codex / Claude Code apps: New chat, then chats under their project folders. */
+/** Familiar folder layout, separated by large Claude and Codex headers. */
 export default function ChatSidebar({
   chats,
   activeChat,
@@ -211,8 +224,12 @@ export default function ChatSidebar({
   onToggleCollapse,
   externalSessions = [],
   onOpenAgentSession,
+  homeCwd,
+  runningChatId,
+  workingStatus = 'Working…',
+  onStop,
 }: ChatSidebarProps) {
-  const groups = useMemo(() => groupByProject(chats, externalSessions), [chats, externalSessions]);
+  const groups = useMemo(() => groupByProject(chats, externalSessions, homeCwd), [chats, externalSessions, homeCwd]);
   const [collapsedGroups, setCollapsedGroups] = useState(loadCollapsed);
   const [showAll, setShowAll] = useState<Set<string>>(new Set());
 
@@ -257,18 +274,24 @@ export default function ChatSidebar({
       {!isCollapsed && (
         <>
           <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2 scrollbar-thin">
-            <p className="px-2.5 pb-1 pt-2 text-[11px] text-foreground/40">Projects</p>
-            {groups.map(group => {
-              const closed = collapsedGroups.has(group.key);
+            {groups.map((group, index) => {
+              const hasRunningChat = group.entries.some(entry => entry.kind === 'chat' && entry.chat.id === runningChatId);
+              const closed = collapsedGroups.has(group.key) && !hasRunningChat;
               const expandedAll = showAll.has(group.key);
-              const shown = expandedAll ? group.entries : group.entries.slice(0, ROWS_BEFORE_MORE);
+              const shown = expandedAll ? group.entries : group.entries.filter((entry, i) => i < ROWS_BEFORE_MORE || (entry.kind === 'chat' && entry.chat.id === runningChatId));
               const hiddenCount = group.entries.length - shown.length;
               return (
                 <div key={group.key} className="mb-1">
+                  {(index === 0 || groups[index - 1].provider !== group.provider) && (
+                    <div className="px-2.5 pb-1 pt-4">
+                      <h2 className="text-[17px] font-semibold tracking-tight text-foreground/90">{group.provider === 'unassigned' ? 'Ally' : PROVIDER_TAG[group.provider]}</h2>
+                      <p className="mt-0.5 text-[10px] text-foreground/40" title="Grouped by where the agent works, independently of saved Codex projects">{group.provider === 'unassigned' ? 'Choose an engine to start' : 'Working folders'}</p>
+                    </div>
+                  )}
                   <button
                     type="button"
                     onClick={() => toggleGroup(group.key)}
-                    title={group.path ?? 'Chats without a working folder'}
+                    title={group.path ? `Working folder: ${group.path}` : 'Chats without a working folder'}
                     className="group/proj flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-[13px] text-foreground/80 transition-colors hover:bg-white/[0.05]"
                   >
                     <Folder className="size-4 shrink-0 text-foreground/50 group-hover/proj:hidden" />
@@ -286,7 +309,9 @@ export default function ChatSidebar({
                             onSelect={() => onChatSelect(entry.chat.id)}
                             onRename={title => onChatRename(entry.chat.id, title)}
                             onDelete={() => onChatDelete(entry.chat.id)}
-                            canDelete={chats.length > 1}
+                            canDelete={chats.length > 1 && entry.chat.id !== runningChatId}
+                            workingStatus={entry.chat.id === runningChatId ? workingStatus : undefined}
+                            onStop={onStop}
                           />
                         ) : (
                           <SessionRow

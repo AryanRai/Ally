@@ -1,33 +1,31 @@
-# Chat integration follow-up
+# Chat integration verification — 2026-10-17
 
-Two separate issues remain after the watch and speech update. Neither is fixed by that update.
+Normal Codex turns now use the documented stdio app-server, identifying the client as Ally. Claude retains its existing backend. Text, reasoning, tool output, plans, diffs, images, model and permission configuration, robot MCP configuration, usage and cancellation flow through the shared agent event model. Greetings remain ephemeral.
 
-## 1. Ally-created Codex chats are absent from Codex's normal chat list
+The existing folder layout is retained beneath larger Claude and Codex headers. Rows show their provider, groups are labeled working folders, and the actual home directory appears as Home. A running chat shows an animated loader, current activity and Stop. The composer also has a labeled Stop control. Streaming output remains attached to the originating chat when selection changes; sending another turn remains blocked until the current turn ends. Early Stop requests are remembered while the IPC run ID is pending.
 
-Ally currently launches normal Codex turns using `codex exec --json` in `electron/agent/runner.ts`. The conversation is persisted, but its source is `exec`. Codex's default app-server thread listing filters to interactive sources. Reading the affected conversation by ID works; its history has not disappeared.
+## History and identity
 
-Move normal Codex conversation execution to the documented app-server protocol, while retaining Claude's existing backend. Preserve streaming text, readable reasoning, tool activity, images, plans, diffs, usage, cancellation, permissions, model selection and robot MCP configuration. Keep auxiliary greetings ephemeral.
+Browsing uses read-only app-server APIs, including paginated history. It never resumes a thread merely to read it. Existing exec sessions fork through supported APIs only on explicit continuation. An atomic migration journal preserves old/new links, deduplicates concurrent requests and refuses to repeat an ambiguous interrupted fork. Original conversations are preserved. No Codex database is edited.
 
-Existing sessions require deliberate compatibility handling: a local probe confirmed that `thread/resume` preserves an old `exec` source. Do not assume that resuming alone makes an old chat visible. Prefer supported APIs, preserve original history, and verify any migration is idempotent. Do not edit Codex's database or pretend Ally is another first-party client to force visibility.
+Inherited first-party identity environment variables are removed from child processes. New production chats were verified with originator ally and an interactive source. Default app-server listing and the actual Codex desktop Recents sidebar both show them.
 
-The installed app-server probe created a new ephemeral thread with source `vscode`; verify persisted production chats in the actual desktop listing. Also verify continuation from each app, writer ownership, restart recovery and live history updates. Avoid taking a writer merely to browse history.
+## Live checks
+
+- The affected original two-turn conversation was recovered through a supported fork. Original and fork history items matched after reverting only the temporary verification turn. The original remains untouched, and the mapping survived restarting Ally.
+- A new chat created with the production runner appeared in Codex Recents. A continuation sent from Codex appeared when the same chat was opened in Ally.
+- Read-only Ally history works while Codex owns the writer. An Ally continuation correctly reports the ownership conflict.
+- An ephemeral streaming turn interrupted on first text completed without error and did not appear in the default chat listing.
+- Live UI checks confirmed both provider headers, working/writing loaders and Stop controls. Switching chats kept progress on the originating row; stopping from that row preserved selection. The watch bridge remained listening and the speech health endpoint reported ready.
+- Cancellation waits for backend completion before allowing another turn. Interrupted history shows a Stopped marker and retains locally streamed partial output if Codex omits the assistant item. Final-build UI verification stopped a response at 628; the partial output and marker remained after automatic history refresh.
+- The final renderer and Electron builds pass. TypeScript and all 77 desktop tests pass, including startup cancellation, interrupted-history retention and keeping sidebar progress on the running chat after selection changes.
+
+## Known app-server limitations
+
+Codex can keep a cached writer after navigating away from a chat or minimizing its window. Ally cannot resume that thread until Codex releases ownership. It reports the conflict instead of forcefully unlocking it. Codex was not restarted for verification.
+
+A newly forked exec chat may not appear in the default interactive list until its first new turn is persisted. Ally saves the fork mapping before sending input so cancellation or restart cannot silently create a second fork.
+
+Vite still reports its existing large-chunk warning. Physical microphone accuracy, acoustic interruption and the complete watch microphone-to-agent loop are outside these chat changes and remain separate live checks.
 
 Reference: https://developers.openai.com/codex/app-server
-
-## 2. Ally's combined sidebar makes engines and working folders ambiguous
-
-Ally combines Claude Code and Codex sessions under working-directory groups. A group named after the user's home directory can therefore appear even though no corresponding saved Codex project exists. This is distinct from issue 1.
-
-Make engine identity clear for every chat, including Ally-created chats, and distinguish working-folder groups from saved projects. Use a clear provider grouping/filter or equivalent familiar UI, consistent labels and an understandable home-folder label. Preserve existing chats, selection, session links and live updates. Do not represent a Claude chat as a native Codex conversation.
-
-## Relevant code
-
-- `glass-pip-chat/electron/agent/runner.ts`, `binaries.ts`, `parsers.ts`, `sessions.ts`, `sessionWatch.ts`, `ipc.ts`
-- `glass-pip-chat/src/hooks/useAgentChat.ts`, `useAgentConversation.ts`, `useSessionSync.ts`, `useChats.ts`
-- `glass-pip-chat/src/utils/chatManager.ts` and sidebar/chat components
-
-Current storage links Ally chats to engine session IDs. Preserve those links or explicitly update them after a supported migration. App-server's newer history storage may require API-based history reads rather than relying solely on JSONL files.
-
-## Baseline validation
-
-Before these follow-up changes: 58 desktop tests and TypeScript pass; Vite/Electron builds pass; six Python tests and six Android tests pass; Android build and lint pass. The updated app has been restarted and speech/bridge health checks are ready. Physical microphone accuracy, acoustic interruption and the full watch microphone-to-agent loop still need live verification.

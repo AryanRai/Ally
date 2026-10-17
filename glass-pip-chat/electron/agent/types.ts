@@ -2,6 +2,7 @@
 
 export type AgentProvider = 'claude' | 'codex';
 export type AgentPermission = 'full' | 'edit' | 'readonly';
+export type AgentInteractionHandler = (method: string, params: any, signal: AbortSignal) => Promise<unknown>;
 
 /** Extra context handed to the agent while Robot mode is on. */
 export interface AgentRobotContext {
@@ -27,13 +28,19 @@ export interface AgentRunOptions {
   images?: string[];
   /** Short auxiliary requests such as greetings must not create saved chats. */
   ephemeral?: boolean;
+  /** Experimental same-chat client coordination with Codex desktop (Windows). */
+  codexDesktop?: boolean;
 }
 
 export interface AgentSessionSnapshot {
+  sessionId?: string;
+  originalSessionId?: string;
   cwd?: string;
   messages: AgentHistoryMessage[];
   revision: string;
   unchanged?: boolean;
+  /** Mid-turn in another app (Claude Code / Codex), judged from the transcript */
+  running?: boolean;
 }
 
 export type AgentEvent =
@@ -58,10 +65,14 @@ export interface AgentUsage {
 }
 
 export interface AgentConfig {
+  /** Actual home directory, for working-folder labels. */
+  homeCwd?: string;
   defaultCwd: string;
   permission: AgentPermission;
   claudePath?: string;
   codexPath?: string;
+  /** Applies to existing Codex chats from both Ally desktop and the watch. */
+  codexDesktop?: boolean;
   robotMcpUrl?: string;
   /** DroidCore motion MCP server (DroidCore/runtime), passed alongside HowYouSeeMe in Robot mode */
   droidcoreMcpUrl?: string;
@@ -81,6 +92,7 @@ export interface AgentModel {
 }
 
 export interface AgentSessionSummary {
+  originalSessionId?: string;
   provider: AgentProvider;
   id: string;
   title: string;

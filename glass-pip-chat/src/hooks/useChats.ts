@@ -33,6 +33,7 @@ export function useChats() {
     remove: (chatId: string) => mutate(m => m.deleteChat(chatId)),
     rename: (chatId: string, title: string) => mutate(m => m.updateChatTitle(chatId, title)),
     addMessage: (chatId: string, message: Message) => mutate(m => m.addMessage(chatId, message)),
+    setSendFailure: (chatId: string, failure?: Chat['sendFailure']) => mutate(m => m.setSendFailure(chatId, failure)),
     updateMessage: (chatId: string, messageId: string, content: string) => mutate(m => m.updateMessage(chatId, messageId, content)),
     forkAtMessage: (chatId: string, messageId: string, content: string) => mutate(m => m.editMessage(chatId, messageId, content)),
     deleteMessage: (chatId: string, messageId: string) => mutate(m => m.deleteMessage(chatId, messageId)),

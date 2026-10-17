@@ -5,6 +5,7 @@ import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
+import java.io.IOException
 
 /** All network work stays off the UI thread. Connection settings are per installation. */
 class WatchApi(private val endpoint: () -> String, private val token: () -> String) {
@@ -29,7 +30,11 @@ class WatchApi(private val endpoint: () -> String, private val token: () -> Stri
             val status = connection.responseCode
             val stream = if (status in 200..299) connection.inputStream else connection.errorStream
             val text = stream?.bufferedReader()?.use { it.readText() } ?: ""
-            if (status !in 200..299) throw IllegalStateException(runCatching { JSONObject(text).optString("error") }.getOrDefault("Bridge error $status").ifBlank { "Bridge error $status" })
+            if (status !in 200..299) {
+                val message = runCatching { JSONObject(text).optString("error") }.getOrDefault("Bridge error $status").ifBlank { "Bridge error $status" }
+                if (ConnectionRecovery.transientHttpStatus(status)) throw IOException(message)
+                throw IllegalStateException(message)
+            }
             JSONObject(text)
         } finally { connection.disconnect() }
     }

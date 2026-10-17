@@ -29,6 +29,7 @@ export function SpeechControls({ className = '', onVoiceModeChange, onSettingsOp
       <div className="h-full bg-gradient-to-r from-orange-300 to-pink-400 transition-[width] duration-100" style={{ width: `${speech.status.level * 100}%` }} />
     </div>}
     {speech.speechError && <p role="alert" className="text-xs text-red-300">{speech.speechError}</p>}
-    {!compact && <p className="text-[10px] text-white/35">Speak, then pause to send · local transcription · speak over a reply to interrupt</p>}
+    {speech.interimTranscript && <p aria-live="polite" className="text-xs text-white/75">{speech.interimTranscript}</p>}
+    {!compact && <p className="text-[10px] text-white/35">Speak, then pause to send · {speech.status.backend} · speak over a reply to interrupt</p>}
   </div>;
 }

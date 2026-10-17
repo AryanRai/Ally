@@ -3,6 +3,8 @@ import { app, BrowserWindow, globalShortcut } from 'electron';
 import { createTray, createWindow, getWindow, registerWindowIpc } from './window.js';
 import { registerContextIpc, stopClipboardMonitoring } from './ipc/context.js';
 import { registerSpeechIpc } from './ipc/speech.js';
+import { registerLiveSpeechIpc } from './speech/liveIpc.js';
+import { registerReplyNotifications } from './notifications.js';
 import { registerCursorIpc, stopCursorWatch } from './ipc/cursor.js';
 import { registerAgentIpc } from './agent/ipc.js';
 import { registerCircleIpc, startCircle } from './capture/circle.js';
@@ -42,6 +44,8 @@ function registerShortcuts(): void {
 registerWindowIpc();
 registerContextIpc();
 registerSpeechIpc();
+registerLiveSpeechIpc();
+registerReplyNotifications();
 registerCursorIpc();
 registerCircleIpc();
 registerAgentIpc(getWindow, config => {

@@ -29,7 +29,7 @@ const PERMISSION_ORDER: AgentPermission[] = ['readonly', 'edit', 'full'];
 export function useAgentChat() {
   const available = typeof window !== 'undefined' && !!window.pip?.agent;
   const [config, setConfig] = useState<AgentConfig | null>(null);
-  const activeRun = useRef<{ runId: string; stop: () => void } | null>(null);
+  const activeRun = useRef<{ stop: () => void } | null>(null);
 
   useEffect(() => {
     if (!available) return;
@@ -66,6 +66,7 @@ export function useAgentChat() {
   ): Promise<AgentTurnResult> => {
     const agent = window.pip?.agent;
     if (!agent) throw new Error('Claude Code / Codex need the desktop app');
+    if (activeRun.current) throw new Error('A chat is already working');
 
     const segments: Segment[] = [];
     const tools = new Map<string, ToolExecution>();
@@ -88,6 +89,7 @@ export function useAgentChat() {
     return new Promise<AgentTurnResult>((resolve, reject) => {
       let runId: string | null = null;
       let settled = false;
+      let cancelRequested = false;
       const pending: Array<{ runId: string; event: AgentEvent }> = [];
 
       const finish = (result: Partial<AgentTurnResult>) => {
@@ -103,6 +105,7 @@ export function useAgentChat() {
       };
 
       const handle = ({ event: ev }: { runId: string; event: AgentEvent }) => {
+        if (settled) return;
         switch (ev.kind) {
           case 'session':
             if (ev.sessionId !== sessionId) {
@@ -126,7 +129,7 @@ export function useAgentChat() {
           case 'tool_update': {
             const exec = tools.get(ev.id);
             if (!exec) break;
-            exec.parameters = ev.input;
+            exec.parameters = { ...exec.parameters, ...ev.input };
             emitSegments();
             break;
           }
@@ -152,7 +155,7 @@ export function useAgentChat() {
           }
           case 'done':
             if (ev.sessionId) sessionId = ev.sessionId;
-            finish({ ...(ev.isError ? { error: ev.error || 'Agent failed' } : {}), usage: ev.usage });
+            finish({ ...(ev.isError && !cancelRequested ? { error: ev.error || 'Agent failed' } : {}), stopped: cancelRequested, usage: ev.usage });
             break;
           case 'stderr':
             break;
@@ -165,18 +168,27 @@ export function useAgentChat() {
         else if (data.runId === runId) handle(data);
       });
 
+      const cancel = () => {
+        if (settled || cancelRequested) return;
+        cancelRequested = true;
+        if (runId !== null) {
+          void agent.stop(runId).catch(error => finish({ error: `Could not stop: ${String(error)}` }));
+        }
+      };
+      activeRun.current = { stop: cancel };
+
       agent.send(opts)
         .then(id => {
           runId = id;
-          activeRun.current = {
-            runId: id,
-            stop: () => { agent.stop(id); finish({ stopped: true }); },
-          };
           for (const data of pending.splice(0)) if (data.runId === id) handle(data);
+          if (cancelRequested && !settled) {
+            void agent.stop(id).catch(error => finish({ error: `Could not stop: ${String(error)}` }));
+          }
         })
         .catch(err => {
           settled = true;
           unsubscribe();
+          activeRun.current = null;
           reject(err);
         });
     });

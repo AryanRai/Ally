@@ -41,12 +41,13 @@ internal fun Text(text: String, modifier: Modifier = Modifier, color: Color = Co
 
 /** Inward light from Ally's Orbit palette; no offscreen blur or continuous idle animation. */
 @Composable
-internal fun PresenceGlow(active: Boolean) {
-    if (!active) return
+internal fun PresenceGlow(active: Boolean, look: WatchLook) {
+    if (!active || look.glow == GlowLevel.OFF) return
     Canvas(Modifier.fillMaxSize()) {
         val radius = size.maxDimension * .52f
         drawCircle(Brush.radialGradient(0f to Color.Transparent, .83f to Color.Transparent,
-            .95f to Sunset.copy(alpha = .08f), 1f to Rose.copy(alpha = .23f),
+            .95f to look.palette.colors[0].copy(alpha = .08f * look.glow.strength),
+            1f to look.palette.colors[1].copy(alpha = .23f * look.glow.strength),
             center = center, radius = radius), radius)
     }
 }

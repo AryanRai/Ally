@@ -18,6 +18,7 @@ describe('shared voice lifecycle', () => {
     window.pip.speech = { connect, getStatus: vi.fn().mockResolvedValue({ ready: true }), cancel: vi.fn().mockResolvedValue({ success: true }) } as unknown as typeof window.pip.speech;
     const { voice } = await import('./voice');
     const pending = voice.connect();
+    await vi.waitFor(() => expect(connect).toHaveBeenCalledTimes(1));
     await voice.disconnect();
     resolveConnect({ success: true });
     await pending;

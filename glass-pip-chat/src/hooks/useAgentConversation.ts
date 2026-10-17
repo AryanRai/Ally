@@ -2,7 +2,7 @@ import { useCallback, useRef, useState } from 'react';
 import type { Segment } from '../types/chat';
 import { ROBOT_INSTRUCTIONS } from '../config/robotPersona';
 import type { Message } from '../types/chat';
-import { AGENT_LABEL, AGENT_MODEL_PREFIX, AgentSessionSummary, DEFAULT_AGENT_MODEL, parseAgentModel } from '../types/agent';
+import { AGENT_LABEL, AGENT_MODEL_PREFIX, AgentPermission, AgentSessionSummary, DEFAULT_AGENT_MODEL, parseAgentModel } from '../types/agent';
 import { useAgentChat } from './useAgentChat';
 import type { ChatsApi } from './useChats';
 import { sessionMessages, useSessionSync } from './useSessionSync';
@@ -28,11 +28,14 @@ export function useAgentConversation({ chats, robotMode, onSentence }: Options) 
   const agent = useAgentChat();
   const [model, setModelState] = useState(() => localStorage.getItem(MODEL_KEY) || DEFAULT_AGENT_MODEL);
   const [isTyping, setIsTyping] = useState(false);
+  const [runningChatId, setRunningChatId] = useState<string | null>(null);
+  const busy = useRef(false);
   const [currentResponse, setCurrentResponse] = useState('');
   const [streamingSegments, setStreamingSegments] = useState<Segment[]>([]);
   const [thinkingText, setThinkingText] = useState('');
   const spokenUpTo = useRef(0);
-  useSessionSync(chats, isTyping);
+  // The active chat is running in the Claude Code / Codex app rather than in Ally
+  const externalRunning = useSessionSync(chats, isTyping);
 
   const parsed = parseAgentModel(model) ?? parseAgentModel(DEFAULT_AGENT_MODEL)!;
   const cwd = chats.activeChat?.agent?.cwd || agent.config?.defaultCwd || '';
@@ -60,7 +63,10 @@ export function useAgentConversation({ chats, robotMode, onSentence }: Options) 
   /** Run one turn in `chatId` (the user message must already be in the chat). */
   const runTurn = useCallback(async (chatId: string, prompt: string, history: Message[], images?: string[]) => {
     const chat = chats.getChat(chatId);
-    if (!chat) return;
+    if (!chat || busy.current) return;
+    busy.current = true;
+    chats.setSendFailure(chatId);
+    const failedText = [...chat.messages].reverse().find(m => m.role === 'user')?.content ?? prompt;
     const { provider } = parsed;
 
     // Switching agent mid-chat starts a fresh session for the new provider
@@ -79,12 +85,14 @@ export function useAgentConversation({ chats, robotMode, onSentence }: Options) 
     }
 
     const link = (id: string) => {
+      const originalSessionId = linked?.originalSessionId ?? (sessionId && sessionId !== id ? sessionId : undefined);
       sessionId = id;
-      chats.setAgent(chatId, { provider, sessionId: id, cwd: runCwd });
+      chats.setAgent(chatId, { provider, sessionId: id, originalSessionId, cwd: runCwd });
     };
     if (!linked || linked.cwd !== runCwd) chats.setAgent(chatId, { provider, sessionId, cwd: runCwd });
 
     setIsTyping(true);
+    setRunningChatId(chatId);
     setCurrentResponse('');
     setStreamingSegments([]);
     setThinkingText('');
@@ -104,12 +112,15 @@ export function useAgentConversation({ chats, robotMode, onSentence }: Options) 
         },
       );
       if (result.sessionId && result.sessionId !== sessionId) link(result.sessionId);
+      if (result.error) chats.setSendFailure(chatId, { message: result.error, text: failedText });
       if (!result.stopped) speakNewSentences(result.text, true);
+      if (!result.stopped) window.pip?.notifyReply?.({ id: `reply-${chatId}-${Date.now()}`, chatId, title: result.error ? 'Ally needs attention' : chat.title || 'Ally reply', text: result.error || result.text });
 
       let content = result.text;
       if (result.thinking) content = `<think>${result.thinking}</think>\n\n${content}`;
       if (result.error) content += `${content ? '\n\n' : ''}⚠️ ${AGENT_LABEL[provider]}: ${result.error}`;
       else if (result.stopped) content += `${content ? '\n\n' : ''}⏹️ Stopped`;
+      if (result.error || result.stopped) result.segments.push({ type: 'text', content: result.error ? `⚠️ ${AGENT_LABEL[provider]}: ${result.error}` : '⏹️ Stopped' });
 
       const hasTools = result.segments.some(s => s.type === 'tool');
       const rich = result.segments.some(s => s.type !== 'text');
@@ -125,15 +136,21 @@ export function useAgentConversation({ chats, robotMode, onSentence }: Options) 
           },
         });
       }
+      return { error: result.error };
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      chats.setSendFailure(chatId, { message, text: failedText });
       chats.addMessage(chatId, {
         id: `error-${Date.now()}`,
         role: 'assistant',
         content: `⚠️ ${error instanceof Error ? error.message : String(error)}`,
         timestamp: Date.now(),
       });
+      return { error: message };
     } finally {
+      busy.current = false;
       setIsTyping(false);
+      setRunningChatId(null);
       setCurrentResponse('');
       setStreamingSegments([]);
       setThinkingText('');
@@ -148,7 +165,7 @@ export function useAgentConversation({ chats, robotMode, onSentence }: Options) 
   ) => {
     const { context, image } = extras;
     const chat = chats.activeChat;
-    if (!chat || !text.trim() || isTyping) return;
+    if (!chat || !text.trim() || busy.current) return;
     const history = chat.messages;
     chats.addMessage(chat.id, {
       id: `user-${Date.now()}`,
@@ -158,13 +175,13 @@ export function useAgentConversation({ chats, robotMode, onSentence }: Options) 
       metadata: { source, context, image: image?.thumbnail },
     });
     const prompt = context ? `Context (from my clipboard):\n${context}\n\n${text}` : text;
-    await runTurn(chat.id, prompt, history, image ? [image.path] : undefined);
+    return await runTurn(chat.id, prompt, history, image ? [image.path] : undefined);
   }, [chats, isTyping, runTurn]);
 
   /** Re-ask the user message before `messageId` (the assistant reply is replaced). */
   const regenerate = useCallback(async (messageId: string) => {
     const chat = chats.activeChat;
-    if (!chat || isTyping) return;
+    if (!chat || busy.current) return;
     const index = chat.messages.findIndex(m => m.id === messageId);
     const userMessage = chat.messages[index - 1];
     if (index < 1 || userMessage?.role !== 'user') return;
@@ -177,19 +194,17 @@ export function useAgentConversation({ chats, robotMode, onSentence }: Options) 
   /** Continue an existing Claude Code / Codex session as an Ally chat. */
   const openSession = useCallback(async (session: AgentSessionSummary) => {
     if (!window.pip?.agent || isTyping) return;
-    const { cwd: sessionCwd, messages } = await window.pip.agent.loadSession(session.provider, session.id);
+    const { cwd: sessionCwd, messages, sessionId = session.id, originalSessionId } = await window.pip.agent.loadSession(session.provider, session.id);
     chats.openAgentSession(
-      { provider: session.provider, sessionId: session.id, cwd: sessionCwd ?? session.cwd },
+      { provider: session.provider, sessionId, originalSessionId: originalSessionId ?? session.originalSessionId, cwd: sessionCwd ?? session.cwd },
       session.title,
-      sessionMessages(session.id, messages),
+      sessionMessages(sessionId, messages),
     );
     // Follow-ups should go to the same agent
     if (parseAgentModel(model)?.provider !== session.provider) setModel(`${AGENT_MODEL_PREFIX[session.provider]}default`);
   }, [chats, isTyping, model, setModel]);
 
-  const pickFolder = useCallback(async () => {
-    const folder = await agent.pickFolder(cwd);
-    if (!folder) return;
+  const setFolder = useCallback(async (folder: string) => {
     await agent.updateConfig({ defaultCwd: folder });
     const linked = chats.activeChat?.agent;
     if (chats.activeChat && linked) {
@@ -200,7 +215,14 @@ export function useAgentConversation({ chats, robotMode, onSentence }: Options) 
         cwd: folder,
       });
     }
-  }, [agent, chats, cwd]);
+  }, [agent, chats]);
+
+  const pickFolder = useCallback(async () => {
+    const folder = await agent.pickFolder(cwd);
+    if (folder) await setFolder(folder);
+  }, [agent, cwd, setFolder]);
+
+  const setPermission = useCallback((permission: AgentPermission) => agent.updateConfig({ permission }), [agent]);
 
   return {
     model,
@@ -209,10 +231,15 @@ export function useAgentConversation({ chats, robotMode, onSentence }: Options) 
     providerLabel: AGENT_LABEL[parsed.provider],
     modelName: parsed.model,
     cwd,
+    homeCwd: agent.config?.homeCwd,
     permission: agent.config?.permission ?? 'edit',
     cyclePermission: agent.cyclePermission,
+    setPermission,
     pickFolder,
+    setFolder,
     isTyping,
+    runningChatId,
+    externalRunning,
     currentResponse,
     streamingSegments,
     thinkingText,

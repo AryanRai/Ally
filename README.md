@@ -63,7 +63,7 @@ Voice: start `speech-service` (`speech-service/start.ps1`), then toggle voice mo
 
 Appearance: open **Settings → Orb, glow & robot**. Changes apply immediately and persist across restarts. The preview can simulate seeing/hearing without starting a microphone or camera. Windows uses native rounded acrylic, so window padding and corner-radius controls are shown only on other platforms.
 
-Existing sessions appear under project folders in the sidebar (`cc` for Claude Code, `cx` for Codex). Usage and reasoning appear only when recorded by the agent; Ally does not estimate missing costs or recover hidden reasoning. Codex file-change events without patch text show the changed file list.
+Existing sessions appear under large **Claude** and **Codex** headers, with working folders underneath and an engine label on every chat. **Home** means the user's home working folder; these groups are independent of saved Codex projects. Usage and reasoning appear only when reported by the agent. Codex file-change events without patch text show the changed file list.
 
 Open linked chats follow changes from the Claude Code / Codex app automatically. File notifications refresh the transcript as it is written, with a two-second polling fallback. Codex continuation files are combined into one conversation. Ally pauses disk refresh while it is running its own turn, and switching chats discards outdated refresh results. External updates appear at the granularity the engine saves to disk; unflushed token deltas are not available to this reader.
 
@@ -76,8 +76,8 @@ Input greetings are written by the selected engine/model in a separate unsaved r
 ## How a turn works
 
 1. The chat's agent and working folder are shown under the input; the first message starts a new agent session (earlier non-agent turns are handed over as a transcript).
-2. `electron/agent/runner.ts` runs `claude -p --output-format stream-json …` or `codex exec --json …`, prompt over stdin, follow-ups via `--resume` / `exec resume`.
-3. The parser turns the JSONL stream into text / thinking / tool events, rendered live as inline tool pills.
+2. `electron/agent/runner.ts` runs Claude's streaming CLI or the documented Codex stdio app-server. Codex uses `thread/start` / `thread/resume` and `turn/start`; prompts and configuration travel over stdin. Auxiliary greetings stay ephemeral.
+3. The parsers normalize text, readable reasoning, tool output, images, plans, diffs and usage into the live chat UI. Codex history reads use its paginated APIs without acquiring a writer. Old `exec` chats gain a history-preserving interactive fork on continuation; Ally stores the identity mapping and retains the original. A chat still owned by Codex cannot be written by Ally until Codex releases it.
 4. Permissions map to `--permission-mode` (Claude) and the sandbox mode (Codex): read-only, can edit, or full access.
 
 ## Development

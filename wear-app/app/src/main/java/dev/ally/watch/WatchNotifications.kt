@@ -12,12 +12,19 @@ import android.os.Build
 
 /** Shared entry point for response alerts and a future authenticated push transport. */
 object WatchNotifications {
-    fun show(context: Context, title: String, text: String) {
+    @Volatile var foreground = false
+    @Synchronized fun show(context: Context, title: String, text: String, id: String, chat: String) {
+        val prefs = context.getSharedPreferences("ally-watch", 0)
+        if (!prefs.getBoolean("replyAlerts", true) || prefs.getBoolean("muted", false)) return
+        val seen = prefs.getStringSet("notifiedTurns", emptySet())!!.toMutableSet()
+        if (id in seen) return
+        seen.add(id); prefs.edit().putStringSet("notifiedTurns", seen.toList().takeLast(100).toSet()).commit()
+        if (foreground) return
         if (Build.VERSION.SDK_INT >= 33 && context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) return
         val manager = context.getSystemService(NotificationManager::class.java)
         manager.createNotificationChannel(NotificationChannel("ally-replies", "Ally responses", NotificationManager.IMPORTANCE_DEFAULT))
-        val open = PendingIntent.getActivity(context, 0, Intent(context, MainActivity::class.java), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-        manager.notify(1, Notification.Builder(context, "ally-replies").setSmallIcon(R.drawable.ic_ally)
+        val open = PendingIntent.getActivity(context, id.hashCode(), Intent(context, MainActivity::class.java).putExtra("openChat", chat).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+        manager.notify(id.hashCode(), Notification.Builder(context, "ally-replies").setSmallIcon(R.drawable.ic_ally)
             .setContentTitle(title.take(80)).setContentText(text.take(160)).setContentIntent(open).setAutoCancel(true).build())
     }
 }

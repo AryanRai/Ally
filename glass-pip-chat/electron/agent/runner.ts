@@ -5,9 +5,11 @@ import os from 'node:os';
 import path from 'node:path';
 import readline from 'node:readline';
 import { childEnv, isWin, launcherFor, resolveAgentBinary } from './binaries.js';
-import { ClaudeStreamParser, CodexStreamParser, StreamParser } from './parsers.js';
+import { ClaudeStreamParser, StreamParser } from './parsers.js';
+import { runCodexTurn } from './codexRun.js';
+import { runCodexDesktopTurn } from './codexDesktopRun.js';
 import { thumbnails } from './thumbs.js';
-import type { AgentEvent, AgentRobotContext, AgentRunOptions } from './types.js';
+import type { AgentEvent, AgentRobotContext, AgentRunOptions, AgentInteractionHandler } from './types.js';
 
 interface ActiveRun {
   child: ChildProcess;
@@ -15,6 +17,7 @@ interface ActiveRun {
 }
 
 const runs = new Map<string, ActiveRun>();
+const codexRuns = new Map<string, { stop: () => void }>();
 let runCounter = 0;
 
 /** MCP servers Robot mode hands the agent, by server name: perception (HowYouSeeMe) and motion (DroidCore). */
@@ -58,33 +61,6 @@ function claudeArgs(opts: AgentRunOptions, robot: { promptFile?: string; mcpFile
   return args;
 }
 
-export function codexArgs(opts: AgentRunOptions): string[] {
-  const args = ['exec'];
-  if (opts.sessionId) args.push('resume');
-  // `-i` takes several files, so it must be followed by another flag, not the `-` stdin marker
-  for (const image of opts.images ?? []) args.push('-i', image);
-  args.push('--json', '--skip-git-repo-check');
-  if (opts.ephemeral) args.push('--ephemeral');
-  if (opts.permission === 'full') {
-    args.push('--dangerously-bypass-approvals-and-sandbox');
-  } else {
-    // `-s` isn't accepted by `exec resume`, so set the sandbox via config instead
-    const sandbox = opts.permission === 'readonly' ? 'read-only' : 'workspace-write';
-    args.push('-c', `sandbox_mode="${sandbox}"`, '-c', 'approval_policy="never"');
-  }
-  if (opts.model && opts.model !== 'default') args.push('-m', opts.model);
-  if (opts.robot) {
-    // JSON string escapes are valid TOML basic-string escapes
-    args.push('-c', `developer_instructions=${JSON.stringify(opts.robot.instructions)}`);
-    for (const [name, url] of Object.entries(robotMcpServers(opts.robot))) {
-      args.push('-c', `mcp_servers.${name}.url=${JSON.stringify(url)}`);
-    }
-  }
-  if (opts.sessionId) args.push(opts.sessionId);
-  args.push('-'); // prompt comes from stdin
-  return args;
-}
-
 /** stdin payload: plain prompt, or a stream-json user message carrying images (Claude). */
 function stdinPayload(opts: AgentRunOptions): string {
   if (opts.provider !== 'claude' || !opts.images?.length) return opts.prompt;
@@ -111,7 +87,19 @@ export async function startAgentRun(
   opts: AgentRunOptions,
   emit: (runId: string, ev: AgentEvent) => void,
   binOverride?: string,
+  interact?: AgentInteractionHandler,
+  interactionSurface: 'watch' | 'desktop' = 'watch',
 ): Promise<string> {
+  if (opts.provider === 'codex' && opts.codexDesktop && opts.sessionId && !opts.ephemeral) {
+    const runId = `run-${Date.now()}-${++runCounter}`;
+    const run = runCodexDesktopTurn(opts, ev => {
+      if (ev.kind === 'done') codexRuns.delete(runId);
+      if (ev.kind === 'tool_end' && ev.images) ev = { ...ev, images: thumbnails(ev.images) };
+      emit(runId, ev);
+    }, interact);
+    codexRuns.set(runId, run);
+    return runId;
+  }
   const bin = await resolveAgentBinary(opts.provider, binOverride);
   if (!bin) {
     throw new Error(opts.provider === 'claude'
@@ -123,10 +111,19 @@ export async function startAgentRun(
   }
 
   const runId = `run-${Date.now()}-${++runCounter}`;
+  if (opts.provider === 'codex') {
+    const run = runCodexTurn(opts, ev => {
+      if (ev.kind === 'done') codexRuns.delete(runId);
+      if (ev.kind === 'tool_end' && ev.images) ev = { ...ev, images: thumbnails(ev.images) };
+      emit(runId, ev);
+    }, bin, interact, interactionSurface);
+    codexRuns.set(runId, run);
+    return runId;
+  }
   const robot = writeRobotFiles(runId, opts);
   const cleanup = () => robot.files.forEach(f => fs.rmSync(f, { force: true }));
 
-  const args = opts.provider === 'claude' ? claudeArgs(opts, robot) : codexArgs(opts);
+  const args = claudeArgs(opts, robot);
   const launcher = launcherFor(bin);
   if (launcher.shell && !args.every(a => SHELL_SAFE_ARG.test(a))) {
     cleanup();
@@ -143,7 +140,7 @@ export async function startAgentRun(
   runs.set(runId, { child, cleanup });
   child.stdin?.end(stdinPayload(opts));
 
-  const parser: StreamParser = opts.provider === 'claude' ? new ClaudeStreamParser() : new CodexStreamParser();
+  const parser: StreamParser = new ClaudeStreamParser();
   let finished = false;
   const startedAt = Date.now();
   const send = (ev: AgentEvent) => {
@@ -199,6 +196,8 @@ export async function startAgentRun(
 }
 
 export function stopAgentRun(runId: string): boolean {
+  const codex = codexRuns.get(runId);
+  if (codex) { codex.stop(); return true; }
   const run = runs.get(runId);
   if (!run) return false;
   const pid = run.child.pid;
@@ -214,5 +213,6 @@ export function stopAgentRun(runId: string): boolean {
 }
 
 export function stopAllAgentRuns(): void {
+  for (const run of codexRuns.values()) run.stop();
   for (const id of [...runs.keys()]) stopAgentRun(id);
 }

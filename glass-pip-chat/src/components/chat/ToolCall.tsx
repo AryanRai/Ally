@@ -249,7 +249,7 @@ export default function ToolCall({ tool }: { tool: ToolExecution }) {
   const d = describeTool(tool);
   const running = tool.status === 'executing' || tool.status === 'pending';
   const failed = tool.status === 'error';
-  const output = asText(tool.error ?? tool.result);
+  const output = asText(tool.error ?? tool.result ?? tool.parameters?.output);
   const diff = editDiff(tool);
   const todos = todosOf(tool);
   const changes = Array.isArray(tool.parameters?.changes) ? (tool.parameters!.changes as { path?: string; kind?: string }[]) : null;
