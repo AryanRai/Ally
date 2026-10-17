@@ -73,7 +73,7 @@ class MainActivity : ComponentActivity() {
             WatchApp(model, ::pulse, { checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED })
         } }
     }
-    override fun onResume() { super.onResume(); model.foreground = true; WatchNotifications.foreground = true; model.refresh(); intent.getStringExtra("openChat")?.let { model.openNotification(it); intent.removeExtra("openChat") } }
+    override fun onResume() { super.onResume(); dev.ally.device.DeviceLink.resume(this); model.foreground = true; WatchNotifications.foreground = true; model.refresh(); intent.getStringExtra("openChat")?.let { model.openNotification(it); intent.removeExtra("openChat") } }
     override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); setIntent(intent); intent.getStringExtra("openChat")?.let { model.openNotification(it); intent.removeExtra("openChat") } }
     override fun onStop() { model.foreground = false; WatchNotifications.foreground = false; model.cancelRecording(); model.stopSpeaking(); super.onStop() }
     private fun pulse(long: Boolean) {

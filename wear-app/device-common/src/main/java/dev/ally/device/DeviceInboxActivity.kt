@@ -59,6 +59,9 @@ class DeviceInboxActivity : Activity() {
                 card.addView(button("Dismiss") { if (item.optBoolean("command")) DeviceLink.receipt(this@DeviceInboxActivity, item.optString("id"), "rejected"); DeviceLink.dismiss(this@DeviceInboxActivity, item.optString("id")) })
                 rows.addView(card, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = 16 })
             }
+            if (items.any { it.optBoolean("command") || it.optString("id") == intent.getStringExtra("id") }) {
+                scroll.post { scroll.smoothScrollTo(0, (rows.top - 16).coerceAtLeast(0)) }
+            }
         } }
     }
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, results: IntArray) {
