@@ -33,6 +33,7 @@ export interface AgentRunOptions {
 }
 
 export interface AgentSessionSnapshot {
+  title?: string;
   sessionId?: string;
   originalSessionId?: string;
   cwd?: string;

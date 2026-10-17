@@ -12,7 +12,7 @@ import { parseWatchReply, WATCH_INSTRUCTIONS, type WatchReply } from './protocol
 import { ensureSpeechRuntime, getSpeechRuntimeStatus } from '../speech/runtime.js';
 import { WatchConversations, chatSummary } from './conversations.js';
 import { listRunningSessions } from '../agent/runningSessions.js';
-import { listCodexChats, loadCodexChat } from '../agent/codexHistory.js';
+import { listCodexChats, loadCodexChat, repairCodexDeviceTitle } from '../agent/codexHistory.js';
 import { listAgentSessions, loadAgentSession } from '../agent/sessions.js';
 import { startWatchTransport, type WatchTransportConfig } from './transport.js';
 import { startCloudTunnel, type CloudTunnelConfig } from './cloudTunnel.js';
@@ -48,6 +48,7 @@ export function startWatchBridge(getConfig: () => AgentConfig): (() => void) | u
     list: async (provider, limit) => provider === 'codex' ? listCodexChats(limit) : listAgentSessions(provider, limit),
     load: async (provider, id) => provider === 'codex' ? loadCodexChat(id) : loadAgentSession(provider, id),
   }, config.sessions, getConfig().defaultCwd);
+  void conversations.repairTitles(repairCodexDeviceTitle);
   const turns = new Map<string, Turn>();
   const followups = new Map<string, FollowupReceipts>();
   const timeouts = new Map<string, ReturnType<typeof setTimeout>>();
@@ -135,9 +136,10 @@ export function startWatchBridge(getConfig: () => AgentConfig): (() => void) | u
         const chat = await conversations.get(decodeURIComponent(url.pathname.slice('/v1/chats/'.length)));
         const active = [...turns.values()].find(t => t.chatId === chat.id && t.status === 'thinking');
         const messages = active ? chat.messages : await conversations.history(chat);
+        const running = !!active || !!(chat.sessionId && (await listRunningSessions()).some(s => s.provider === chat.provider && s.id === chat.sessionId));
         const before = url.searchParams.has('before') ? Math.max(0, Math.min(messages.length, Number(url.searchParams.get('before')) || 0)) : messages.length;
         const start = Math.max(0, before - 30);
-        send(res, 200, { chat: chatSummary(chat), messages: messages.slice(start, before), before: start > 0 ? start : null, activeTurnId: active?.id }); return;
+        send(res, 200, { chat: chatSummary(chat), messages: messages.slice(start, before), before: start > 0 ? start : null, activeTurnId: active?.id, running }); return;
       }
       if (req.method === 'GET' && url.pathname.startsWith('/v1/turns/')) {
         const turn = turns.get(url.pathname.slice('/v1/turns/'.length));

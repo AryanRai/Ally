@@ -36,6 +36,8 @@ export function useSessionSync(chats: ChatsApi, locallyRunning: boolean): boolea
         const snapshot = await api.loadSession(provider, sessionId, revision);
         if (disposed) return;
         revision = snapshot.revision;
+        const title = latest.current.activeChat?.title;
+        if (snapshot.title && title?.startsWith('You are Ally on a round smartwatch.')) latest.current.rename(chatId, snapshot.title);
         setExternalRunning(!!snapshot.running);
         const resolved = snapshot.sessionId ?? sessionId;
         if (resolved !== sessionId) latest.current.setAgent(chatId, { provider, sessionId: resolved, originalSessionId: snapshot.originalSessionId ?? sessionId, cwd: snapshot.cwd });

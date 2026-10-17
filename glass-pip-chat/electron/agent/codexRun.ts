@@ -1,3 +1,4 @@
+import { chatTitle } from './chatTitle.js';
 import { CodexRpc } from './codexRpc.js';
 import { CodexEventParser } from './codexEvents.js';
 import { interactiveCodexSession } from './codexMigration.js';
@@ -78,6 +79,7 @@ export function runCodexTurn(opts: AgentRunOptions, emit: (event: AgentEvent) =>
         await rpc.request('thread/resume', { threadId: sessionId, ...config, excludeTurns: true });
       } else {
         sessionId = (await rpc.request('thread/start', { ...config, ephemeral: !!opts.ephemeral })).thread.id;
+        if (!opts.ephemeral) await rpc.request('thread/name/set', { threadId: sessionId, name: chatTitle(opts.prompt) }).catch(() => { /* Naming must never prevent an authorized send. */ });
       }
       if (!opts.ephemeral && !finished) emit({ kind: 'session', sessionId: sessionId! });
       if (stopped) { finish({ kind: 'done' }); return; }

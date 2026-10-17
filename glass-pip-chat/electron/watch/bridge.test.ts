@@ -11,8 +11,8 @@ const fake = vi.hoisted(() => ({ root: '', load: vi.fn(), start: vi.fn(), stop: 
 vi.mock('electron', () => ({ app: { getPath: () => fake.root } }));
 vi.mock('../agent/runner.js', () => ({ startAgentRun: fake.start, stopAgentRun: fake.stop, steerAgentRun: vi.fn() }));
 vi.mock('../agent/sessions.js', () => ({ listAgentSessions: vi.fn(), loadAgentSession: fake.load }));
-vi.mock('../agent/codexHistory.js', () => ({ listCodexChats: vi.fn(), loadCodexChat: fake.load }));
-vi.mock('../agent/runningSessions.js', () => ({ listRunningSessions: vi.fn() }));
+vi.mock('../agent/codexHistory.js', () => ({ listCodexChats: vi.fn(), loadCodexChat: fake.load, repairCodexDeviceTitle: vi.fn(async () => {}) }));
+vi.mock('../agent/runningSessions.js', () => ({ listRunningSessions: vi.fn(async () => []) }));
 vi.mock('../speech/runtime.js', () => ({ ensureSpeechRuntime: vi.fn(async () => ({})), getSpeechRuntimeStatus: vi.fn() }));
 vi.mock('../speech/settings.js', () => ({ speechSettings: vi.fn() }));
 vi.mock('./speechSocket.js', () => ({ attachSpeechSocket: () => () => {} }));
@@ -44,6 +44,7 @@ it('publishes partial replies before completion and keeps exact-session routing,
   const message = { provider: 'claude', chatId: 'chat', requestId: 'one', permission: 'readonly', text: 'Synthetic test only' };
   const accepted = await request('/v1/messages', message);
   await vi.waitFor(() => expect(fake.start).toHaveBeenCalledTimes(1));
+  expect(await request('/v1/chats/chat')).toMatchObject({ running: true, activeTurnId: accepted.id });
   expect(fake.start.mock.calls[0][0]).toMatchObject({ cwd: fake.root, sessionId: 'original', permission: 'readonly' });
   emit({ kind: 'text', text: 'Checking…\n{"text":"Hel' });
   expect(await request(`/v1/turns/${accepted.id}`)).toMatchObject({ status: 'thinking', liveText: 'Checking…\n\nHel' });
@@ -55,6 +56,7 @@ it('publishes partial replies before completion and keeps exact-session routing,
   emit({ kind: 'text', text: '{"text":"Follow-up complete","components":[]}' });
   emit({ kind: 'done' });
   expect(await request(`/v1/turns/${accepted.id}`)).toMatchObject({ status: 'done', reply: { text: 'Follow-up complete', components: [] } });
+  expect(await request('/v1/chats/chat')).toMatchObject({ running: false });
   const next = await request('/v1/messages', { ...message, requestId: 'two' });
   await vi.waitFor(() => expect(fake.start).toHaveBeenCalledTimes(2));
   emit({ kind: 'text', text: 'Partial work remains visible' });

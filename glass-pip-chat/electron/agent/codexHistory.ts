@@ -4,6 +4,9 @@ import { CodexRpc } from './codexRpc.js';
 import { CodexEventParser } from './codexEvents.js';
 import { codexMigrationAliases, mappedCodexSession } from './codexMigration.js';
 import { thumbnails } from './thumbs.js';
+import { readCodexActivity } from './codexActivity.js';
+import { isManagedSessionRunning } from './runningSessions.js';
+import { chatTitle, isDeviceProtocolTitle } from './chatTitle.js';
 import { codexTurnsPending } from './sessionActivity.js';
 import type { AgentHistoryMessage, AgentSessionSnapshot, AgentSessionSummary, AgentToolExecution } from './types.js';
 
@@ -41,7 +44,7 @@ export async function listCodexChats(limit = 40): Promise<AgentSessionSummary[]>
     });
     for (const t of page.data) {
       if (aliases[t.id]) continue;
-      result.push({ provider: 'codex', id: t.id, title: (t.name || t.preview || 'Codex chat').slice(0, 80),
+      result.push({ provider: 'codex', id: t.id, title: chatTitle(t.name || t.preview || 'Codex chat'),
         cwd: t.cwd, updatedAt: t.updatedAt * 1000, originalSessionId: originals[t.id] });
       if (result.length >= limit) return result;
     }
@@ -77,10 +80,14 @@ export async function loadCodexChat(id: string, previousRevision?: string): Prom
   } else {
     turns.push(...(await rpc.request('thread/read', { threadId: sessionId, includeTurns: true })).thread.turns);
   }
-  const revision = createHash('sha256').update(JSON.stringify([sessionId, thread.cwd, turns])).digest('hex');
-  const identity = { sessionId, ...(sessionId !== id ? { originalSessionId: id } : {}) };
-  // The app-server reports live turn status, so no staleness guess is needed here
-  const running = codexTurnsPending(turns);
+  const activity = await readCodexActivity(thread.path).catch(() => undefined);
+  const managed = isManagedSessionRunning('codex', sessionId);
+  const last = turns.at(-1);
+  // Only correct the matching active turn. Never erase an earlier real Stop.
+  if (activity?.pending && (activity.recent || managed) && last?.id === activity.turnId && last.status === 'interrupted') last.status = 'inProgress';
+  const running = managed || codexTurnsPending(turns);
+  const revision = createHash('sha256').update(JSON.stringify([sessionId, thread.name, thread.cwd, turns, running])).digest('hex');
+  const identity = { sessionId, title: thread.name ? chatTitle(thread.name) : undefined, ...(sessionId !== id ? { originalSessionId: id } : {}) };
   if (revision === previousRevision) return { ...identity, cwd: thread.cwd, revision, unchanged: true, messages: [], running };
   return { ...identity, cwd: thread.cwd, revision, running, messages: codexHistoryMessages(turns, thread.createdAt * 1000) };
 }
@@ -112,7 +119,7 @@ export function codexHistoryMessages(turns: any[], createdAt: number): AgentHist
         messages.push({ role: 'user', content: content.filter((c: any) => c.type === 'text').map((c: any) => c.text).join('\n'), timestamp: ts, images: thumbnails(userImages(content)) });
         continue;
       }
-      for (const ev of parser.handle('item/completed', { item })) {
+      for (const ev of parser.handle(turn.status === 'inProgress' && item.status === 'inProgress' && !['agentMessage', 'reasoning'].includes(item.type) ? 'item/started' : 'item/completed', { item })) {
         if (!assistant) { assistant = { role: 'assistant', content: '', timestamp: ts, segments: [] }; messages.push(assistant); }
         if (ev.kind === 'text' || ev.kind === 'thinking') {
           const type = ev.kind;
@@ -138,4 +145,13 @@ export function codexHistoryMessages(turns: any[], createdAt: number): AgentHist
   }
   for (const m of messages) m.content = m.content.trim();
   return messages;
+}
+
+/** Explicit metadata repair for linked device chats; never used by history polling. */
+export async function repairCodexDeviceTitle(id: string, title: string): Promise<void> {
+  const rpc = await reader();
+  const { thread } = await rpc.request('thread/read', { threadId: mappedCodexSession(id) });
+  if (thread.name && !isDeviceProtocolTitle(thread.name)) return;
+  if (!isDeviceProtocolTitle(thread.preview ?? '') && !isDeviceProtocolTitle(thread.name ?? '')) return;
+  await rpc.request('thread/name/set', { threadId: thread.id ?? mappedCodexSession(id), name: chatTitle(title) });
 }

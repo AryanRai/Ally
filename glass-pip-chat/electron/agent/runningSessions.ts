@@ -3,11 +3,16 @@ import os from 'node:os';
 import path from 'node:path';
 import { claudeTurnPending, isRunning } from './sessionActivity.js';
 import type { AgentProvider, AgentSessionSummary } from './types.js';
+import { readCodexActivity } from './codexActivity.js';
+import { chatTitle } from './chatTitle.js';
 
 const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
 const managed = new Map<string, AgentSessionSummary>();
 const settled = new Map<string, number>();
 const finishedRuns = new Set<string>();
+export function isManagedSessionRunning(provider: AgentProvider, id: string) {
+  return [...managed.values()].some(s => s.provider === provider && s.id === id);
+}
 export function trackRunningSession(runId: string, session?: AgentSessionSummary) {
   if (session && !finishedRuns.has(runId)) managed.set(runId, session);
 }
@@ -20,35 +25,6 @@ export function finishRunningSession(runId: string) {
 }
 const jsonl = (text: string): any[] => text.split('\n').flatMap(line => { try { return [JSON.parse(line)]; } catch { return []; } });
 const textContent = (content: any): string => typeof content === 'string' ? content : Array.isArray(content) ? content.filter(b => b.type === 'text' || b.type === 'input_text').map(b => b.text ?? '').join(' ') : '';
-
-/** Find the latest turn marker even when a long turn exceeds the tail preview.
- * Walk backwards in chunks, skipping oversized lines (tool/image payloads).
- */
-async function codexPending(file: string, size: number): Promise<boolean> {
-  const handle = await fs.open(file, 'r');
-  let end = size;
-  let remainder = '';
-  try {
-    while (end > 0) {
-      const length = Math.min(end, 65536);
-      end -= length;
-      const buffer = Buffer.alloc(length);
-      await handle.read(buffer, 0, length, end);
-      const lines = (buffer.toString() + remainder).split('\n');
-      remainder = lines.shift() ?? '';
-      if (end === 0) lines.unshift(remainder);
-      for (let i = lines.length - 1; i >= 0; i--) {
-        if (lines[i].length > 65536 || !/task_started|task_complete|turn_aborted/.test(lines[i])) continue;
-        const r = jsonl(lines[i])[0];
-        if (r?.type !== 'event_msg') continue;
-        if (r.payload?.type === 'task_started') return true;
-        if (r.payload?.type === 'task_complete' || r.payload?.type === 'turn_aborted') return false;
-      }
-      if (remainder.length > 65536) remainder = ''; // no lifecycle event has a giant payload
-    }
-    return false;
-  } finally { await handle.close(); }
-}
 
 /** Read bounded transcript previews, never history images or a writer. */
 async function edges(file: string, size: number) {
@@ -88,10 +64,10 @@ export async function scanRunningSessions(home = os.homedir(), now = Date.now())
         const custom = [...records].reverse().find(r => r.type === 'custom-title' || r.type === 'ai-title');
         const customTitle = custom?.customTitle || custom?.aiTitle;
         const title = titles.get(id) || (customTitle !== 'Chat' ? customTitle : '') || textContent(prompt?.message?.content ?? prompt?.payload?.content).replace(/<[^>]+>[\s\S]*?<\/[^>]+>/g, '').trim() || `${provider === 'codex' ? 'Codex' : 'Claude'} chat`;
-        const summary = { id, provider, title: title.slice(0, 80), cwd, updatedAt: stat.mtimeMs };
+        const summary = { id, provider, title: chatTitle(title), cwd, updatedAt: stat.mtimeMs };
         const key = `${provider}:${id}`;
         // Continuations belong to the original chat. The latest written file wins.
-        if ((result.get(key)?.summary.updatedAt ?? 0) <= stat.mtimeMs) result.set(key, { summary, pending: provider === 'codex' ? await codexPending(file, stat.size) : claudeTurnPending(tail) });
+        if ((result.get(key)?.summary.updatedAt ?? 0) <= stat.mtimeMs) result.set(key, { summary, pending: provider === 'codex' ? (await readCodexActivity(file, now))?.pending === true : claudeTurnPending(tail) });
       } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
     }
   };

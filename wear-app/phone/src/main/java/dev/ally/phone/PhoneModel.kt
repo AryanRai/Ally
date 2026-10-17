@@ -22,7 +22,7 @@ data class PhoneChat(val id: String, val title: String, val provider: String, va
 data class PhoneMessage(val id: String, val role: String, val text: String, val cards: List<ReplyCard> = emptyList())
 data class PhoneState(val chats: List<PhoneChat> = emptyList(), val messages: List<PhoneMessage> = emptyList(), val selected: PhoneChat? = null,
     val running: List<PhoneChat> = emptyList(), val runningStatus: String = "Checking live status…", val liveText: String = "",
-    val provider: String = "codex", val permission: String = "readonly", val busy: Boolean = false, val loading: Boolean = false, val error: String = "", val activity: String = "", val approval: JSONObject? = null,
+    val externalRunning: Boolean = false, val syncStatus: String = "", val provider: String = "codex", val permission: String = "readonly", val busy: Boolean = false, val loading: Boolean = false, val error: String = "", val activity: String = "", val approval: JSONObject? = null,
     val inputStatus: String = "", val more: Int? = null, val before: Int? = null, val recording: Boolean = false, val transcribing: Boolean = false,
     val microphoneLevel: Float = 0f, val recordingSeconds: Float = 0f, val liveTranscript: String = "", val voiceDraft: String = "")
 private typealias BridgeError = BridgeHttpError
@@ -78,9 +78,21 @@ class PhoneModel(app: Application) : AndroidViewModel(app) {
             state.update { it.copy(running = emptyList(), runningStatus = "Live status unavailable · reconnect to desktop") }
         }
     }
+    private var refreshingSelected = false
+    suspend fun refreshSelected() {
+        val id = state.value.selected?.id ?: return
+        if (refreshingSelected || voiceActive || state.value.loading || state.value.busy || turn != null || pendingText != null) return
+        refreshingSelected = true
+        try {
+            history(id, expectedSelection = id)
+            if (turn != null) poll()
+        } catch (e: CancellationException) { throw e } catch (_: Exception) {
+            if (state.value.selected?.id == id) state.update { it.copy(externalRunning = false, syncStatus = "Live status unavailable · reconnecting…") }
+        } finally { refreshingSelected = false }
+    }
     fun voiceError(message: String) { state.update { it.copy(error = message) } }
     fun startRecording() {
-        if (voiceActive || state.value.loading || pendingText != null || inputText != null) return
+        if (state.value.externalRunning || voiceActive || state.value.loading || pendingText != null || inputText != null) return
         if (state.value.selected == null) { voiceError("Choose a conversation before talking."); return }
         try {
             voiceTurn = turn
@@ -130,12 +142,14 @@ class PhoneModel(app: Application) : AndroidViewModel(app) {
         if (voiceActive || state.value.busy || state.value.loading || (state.value.selected != null && (turn != null || pendingText != null || inputText != null))) return
         task { history(id); if (turn != null) poll() }
     }
-    private suspend fun history(id: String, older: Boolean = false) {
+    private suspend fun history(id: String, older: Boolean = false, expectedSelection: String? = null) {
         val before = if (older) "?before=${state.value.before ?: return}" else ""
-        val r = request("/v1/chats/${enc(id)}$before"); val selected = chat(r.getJSONObject("chat")); val a = r.optJSONArray("messages") ?: JSONArray()
+        val r = request("/v1/chats/${enc(id)}$before")
+        if (expectedSelection != null && (state.value.selected?.id != expectedSelection || state.value.loading || state.value.busy || voiceActive || turn != null)) return
+        val selected = chat(r.getJSONObject("chat")); val a = r.optJSONArray("messages") ?: JSONArray()
         val messages = (0 until a.length()).map { val m = a.getJSONObject(it); val reply = ReplyContentParser.parse(m); PhoneMessage(m.optString("id"), m.optString("role"), reply.text, reply.cards) }
         prefs.edit().putString("phoneChat", selected.id).apply()
-        state.update { it.copy(selected = selected, provider = selected.provider, liveText = if (it.selected?.id == selected.id) it.liveText else "", messages = if (older) (messages + it.messages).distinctBy { m -> m.id } else messages, before = if (r.isNull("before")) null else r.optInt("before"), permission = prefs.getString("phonePermission:${selected.id}", "readonly")!!) }
+        state.update { it.copy(selected = selected, provider = selected.provider, externalRunning = r.optBoolean("running") && r.optString("activeTurnId").let { t -> t.isBlank() || t == "null" }, syncStatus = "", liveText = if (it.selected?.id == selected.id) it.liveText else "", messages = if (older) (messages + it.messages).distinctBy { m -> m.id } else if (expectedSelection != null) mergePhoneHistory(it.messages, messages) else messages, before = if (expectedSelection != null && it.messages.isNotEmpty()) it.before else if (r.isNull("before")) null else r.optInt("before"), permission = prefs.getString("phonePermission:${selected.id}", "readonly")!!) }
         r.optString("activeTurnId").takeIf { it.isNotBlank() && it != "null" }?.let { turn = it; prefs.edit().putString("phoneTurn", it).apply() }
     }
     fun older() { if(voiceActive) return; val id = state.value.selected?.id ?: return; task { history(id, true) } }
@@ -147,6 +161,7 @@ class PhoneModel(app: Application) : AndroidViewModel(app) {
     fun send(text: String) {
         val chat = state.value.selected ?: return
         if (voiceActive || state.value.loading || text.isBlank()) return
+        if (state.value.externalRunning) { state.update { it.copy(error = "This chat is working in another app. Wait for it to finish before sending.") }; return }
         if (state.value.busy || turn != null) { addInput(text); return }
         if (inputText != null) { state.update { it.copy(error = "Retry the unconfirmed input first.", voiceDraft = text) }; return }
         if (pendingText != null && text != pendingText) { state.update { it.copy(error = "Retry the previous message first; its delivery is uncertain.") }; return }

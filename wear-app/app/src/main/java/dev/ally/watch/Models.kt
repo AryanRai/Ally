@@ -44,6 +44,7 @@ data class WatchStep(val id: String, val name: String, val status: String, val d
     }
 }
 data class WatchState(
+    val externalRunning: Boolean = false,
     val inputRecording: Boolean = false,
     val inputSending: Boolean = false,
     val inputStatus: String = "",
