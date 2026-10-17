@@ -22,10 +22,12 @@ object DeviceLink {
     fun prefs(c: Context) = c.getSharedPreferences("ally-watch", Context.MODE_PRIVATE)
     fun kind(c: Context) = if (c.packageName.endsWith(".watch")) "watch" else "phone"
     /** Phone notifications open its full Compose UI; the watch keeps its compact screen. */
-    fun inboxIntent(c: Context, page: String = "Inbox"): Intent =
-        ((if (kind(c) == "phone") c.packageManager.getLaunchIntentForPackage(c.packageName)?.putExtra("allyPage", page) else null)
-            ?: Intent(c, DeviceInboxActivity::class.java))
-            .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+    fun inboxIntent(c: Context, page: String = "Inbox"): Intent {
+        if (kind(c) == "phone") c.packageManager.getLaunchIntentForPackage(c.packageName)?.let {
+            return it.putExtra("allyPage", page).addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        }
+        return Intent(c, DeviceInboxActivity::class.java)
+    }
     fun load(c: Context) { val a = runCatching { JSONArray(prefs(c).getString("deviceInbox", "[]")) }.getOrDefault(JSONArray()); inbox.value = (0 until a.length()).mapNotNull { a.optJSONObject(it) } }
     @Synchronized fun save(c: Context, item: JSONObject) { load(c); inbox.value = (listOf(item) + inbox.value.filter { it.optString("id") != item.optString("id") }).take(30); persist(c) }
     private fun persist(c: Context) { prefs(c).edit().putString("deviceInbox", JSONArray(inbox.value).toString()).commit() }

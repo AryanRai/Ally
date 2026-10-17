@@ -329,4 +329,3 @@ private fun ChatApproval(request: JSONObject, sending: Boolean, answer: (String,
         for (i in 0 until (actions?.length() ?: 0)) { val action = actions!!.getJSONObject(i); Button(onClick = { answer(action.getString("value"), values) }, enabled = !sending && (complete || action.optString("value") in setOf("decline", "cancel", "reject"))) { Text(action.optString("label")) } }
     }
 }
-
