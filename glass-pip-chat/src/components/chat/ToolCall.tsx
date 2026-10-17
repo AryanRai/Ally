@@ -4,11 +4,13 @@ import { Terminal } from '@/components/ai-elements/terminal';
 import { Shimmer } from '@/components/ai-elements/shimmer';
 import { cn } from '@/lib/utils';
 import type { ToolExecution } from '@/types/chat';
+import { browserActivity } from '../../../electron/agent/browserActivity';
 
 interface Described {
   /** Past tense once done ("Ran"), present while running ("Running") */
   done: string;
   running: string;
+  failed?: string;
   target?: string;
   /** Show the target in mono (commands, paths, patterns) */
   mono?: boolean;
@@ -37,6 +39,8 @@ export function describeTool(tool: ToolExecution): Described {
   const name = tool.name;
   const lower = name.toLowerCase();
   const path = str(p.file_path) ?? str(p.path) ?? str(p.notebook_path);
+  const browser = browserActivity(name, p);
+  if (browser) return { done: 'Used browser', running: 'Using browser', failed: 'Browser action failed', target: browser.context };
 
   if ((lower === 'exec' || lower === 'functions.exec') && str(p.input)) {
     return { done: 'Ran', running: 'Running', target: 'script', command: str(p.input) };
@@ -275,7 +279,7 @@ export default function ToolCall({ tool }: { tool: ToolExecution }) {
           {running ? (
             <Shimmer as="span" duration={1.4} className="shrink-0 font-medium">{d.running}</Shimmer>
           ) : (
-            <span className={cn('shrink-0 font-medium', failed ? 'text-destructive/90' : 'text-foreground/75')}>{d.done}</span>
+            <span className={cn('shrink-0 font-medium', failed ? 'text-destructive/90' : 'text-foreground/75')}>{failed ? d.failed ?? d.done : d.done}</span>
           )}
           {d.target && (
             <span className={cn('truncate text-foreground/45', d.mono && 'font-mono text-[11.5px]')} title={d.target}>
@@ -289,7 +293,7 @@ export default function ToolCall({ tool }: { tool: ToolExecution }) {
               {removed > 0 && <span className="text-red-400/80">−{removed}</span>}
             </span>
           )}
-          {failed && <span className="shrink-0 text-[11px] text-destructive/70">failed</span>}
+          {failed && !d.failed && <span className="shrink-0 text-[11px] text-destructive/70">failed</span>}
         </span>
         {hasDetails && (
           <ChevronRight className={cn('size-3 shrink-0 text-foreground/30 opacity-0 transition-all group-hover/tool:opacity-100', open && 'rotate-90 opacity-100')} />
@@ -302,6 +306,7 @@ export default function ToolCall({ tool }: { tool: ToolExecution }) {
 
       {open && (
         <div className="mb-1.5 ml-3.5 mt-1 space-y-2 border-l border-border pl-3">
+          {d.failed && <div className="font-mono text-[11px] text-foreground/40">{tool.name}</div>}
           {d.command !== undefined ? (
             <Terminal output={`$ ${d.command}\n${output}`} isStreaming={running} className="max-h-72" />
           ) : diff ? (

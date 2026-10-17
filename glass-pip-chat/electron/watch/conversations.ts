@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import type { AgentHistoryMessage, AgentProvider, AgentSessionSnapshot, AgentSessionSummary, AgentUsage } from '../agent/types.js';
 import { parseWatchReply, type WatchReply } from './protocol.js';
 import type { ActivityState } from './activity.js';
+import { browserActivity } from '../agent/browserActivity.js';
 
 export interface WatchMessage extends WatchReply { id: string; role: 'user' | 'assistant'; timestamp: number; steps?: ActivityState['steps']; usage?: AgentUsage }
 export interface WatchChat { id: string; provider: AgentProvider; title: string; cwd: string; sessionId?: string; updatedAt: number; messages: WatchMessage[] }
@@ -19,6 +20,7 @@ export function watchHistory(messages: AgentHistoryMessage[]): WatchMessage[] {
     ...(m.role === 'user' ? { text: userText(m.content), components: [] } : parseWatchReply(m.content || m.segments?.filter(s => s.type === 'text').map(s => s.content).join('\n') || '')),
     usage: m.usage,
     steps: m.segments?.flatMap(s => s.toolExecution ? [{ id: s.toolExecution.id, name: s.toolExecution.name,
+      ...(browserActivity(s.toolExecution.name, s.toolExecution.parameters) ?? (/cua_repl/i.test(s.toolExecution.name) ? { kind: 'other' as const } : {})),
       status: s.toolExecution.status === 'executing' ? 'running' as const : s.toolExecution.status === 'error' ? 'error' as const : 'done' as const,
       detail: String(s.toolExecution.error ?? s.toolExecution.result ?? '').slice(0, 3200) }] : []),
   }));

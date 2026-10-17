@@ -28,8 +28,15 @@ object ChatParser {
         }
     }
 }
-data class WatchStep(val id: String, val name: String, val status: String, val detail: String) {
+data class WatchStep(val id: String, val name: String, val status: String, val detail: String, val kind: String = "", val context: String = "") {
     val label: String get() {
+        val browser = kind == "browser" || (kind.isEmpty() && Regex("^(mcp__)?cua_repl(?:__|\\.| · )(js|js_reset)$").matches(name))
+        if (browser) return when (status) {
+            "running" -> "Using browser"
+            "error" -> "Browser action failed"
+            "interrupted" -> "Browser action interrupted"
+            else -> "Used browser"
+        } + if (context.isBlank()) "" else " · $context"
         val tool = name.substringAfterLast("__").replace('_', ' ')
         return when (status) {
             "running" -> "Running $tool"
@@ -85,7 +92,7 @@ object ActivityParser {
             val step = array.optJSONObject(i) ?: return@mapNotNull null
             val status = step.optString("status")
             if (status !in setOf("running", "done", "error", "interrupted")) return@mapNotNull null
-            WatchStep(step.optString("id").take(160), step.optString("name").take(100), status, step.optString("detail").take(3202))
+            WatchStep(step.optString("id").take(160), step.optString("name").take(100), status, step.optString("detail").take(3202), step.optString("kind"), step.optString("context").take(120))
         }
     }
     fun usage(json: JSONObject): String {
