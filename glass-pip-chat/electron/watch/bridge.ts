@@ -17,6 +17,7 @@ import { WatchApprovals, watchPermission } from './approvals.js';
 import { attachSpeechSocket } from './speechSocket.js';
 import { speechSettings } from '../speech/settings.js';
 import { notifyReply } from '../notifications.js';
+import { attachDeviceSocket } from '../devices/socket.js';
 
 interface BridgeConfig { enabled: boolean; token: string; port: number; sessions: Partial<Record<AgentProvider, string>>; transport?: WatchTransportConfig; cloudTunnel?: CloudTunnelConfig }
 interface Turn extends ActivityState { chatId: string; id: string; requestId: string; provider: AgentProvider; permission: AgentPermission; status: 'thinking' | 'done' | 'error'; activity: string; transcript: string; reply?: WatchReply; error?: string; runId?: string; startedAt: number }
@@ -125,6 +126,13 @@ export function startWatchBridge(getConfig: () => AgentConfig): (() => void) | u
         send(res, turn ? 200 : 404, turn ? { ...turn, approvals: approvals.list(turn.id) } : { error: 'This response expired after the desktop restarted. Check chat history before sending again.' }); return;
       }
       const approvalRoute = req.method === 'POST' && /^\/v1\/turns\/([^/]+)\/approvals\/([^/]+)$/.exec(url.pathname);
+      const stopRoute = req.method === 'POST' && /^\/v1\/turns\/([^/]+)\/stop$/.exec(url.pathname);
+      if (stopRoute) {
+        req.resume(); const turn = turns.get(stopRoute[1]);
+        if (!turn) { send(res, 404, { error: 'Turn not found' }); return; }
+        if (turn.status === 'thinking') { if (turn.runId) stopAgentRun(turn.runId); finish(turn, 'Stopped by you'); }
+        send(res, 200, { stopped: true }); return;
+      }
       if (approvalRoute) {
         const turn = turns.get(approvalRoute[1]);
         if (!turn || turn.status !== 'thinking') { send(res, 409, { error: 'This turn is no longer waiting' }); return; }
@@ -191,11 +199,12 @@ export function startWatchBridge(getConfig: () => AgentConfig): (() => void) | u
   });
   server.requestTimeout = 15000;
   const stopSpeech = attachSpeechSocket(server, header => authorized(header, config.token));
-  server.maxConnections = 8;
+  const stopDevices = attachDeviceSocket(server, header => authorized(header, config.token));
+  server.maxConnections = 20;
   server.on('error', error => console.error('Watch bridge:', error.message));
   server.listen(config.port, '127.0.0.1', () => {
     console.log(`Ally watch bridge listening on localhost:${config.port}`);
     if (!closed && config.cloudTunnel) stopCloudTunnel = startCloudTunnel(config.cloudTunnel, app.getPath('userData'));
   });
-  return () => { closed = true; stopSpeech(); stopCloudTunnel?.(); transport?.stop(); for (const timer of timeouts.values()) clearTimeout(timer); for (const t of turns.values()) { approvals.cancel(t.id); if (t.status === 'thinking' && t.runId) stopAgentRun(t.runId); } server.close(); server.closeAllConnections(); };
+  return () => { closed = true; stopDevices(); stopSpeech(); stopCloudTunnel?.(); transport?.stop(); for (const timer of timeouts.values()) clearTimeout(timer); for (const t of turns.values()) { approvals.cancel(t.id); if (t.status === 'thinking' && t.runId) stopAgentRun(t.runId); } server.close(); server.closeAllConnections(); };
 }

@@ -5,6 +5,8 @@ import { registerContextIpc, stopClipboardMonitoring } from './ipc/context.js';
 import { registerSpeechIpc } from './ipc/speech.js';
 import { registerLiveSpeechIpc } from './speech/liveIpc.js';
 import { registerReplyNotifications } from './notifications.js';
+import { registerPerceptionIpc } from './perception/ipc.js';
+import { registerChatsMcp } from './chatsMcp/index.js';
 import { registerCursorIpc, stopCursorWatch } from './ipc/cursor.js';
 import { registerAgentIpc } from './agent/ipc.js';
 import { registerCircleIpc, startCircle } from './capture/circle.js';
@@ -46,6 +48,8 @@ registerContextIpc();
 registerSpeechIpc();
 registerLiveSpeechIpc();
 registerReplyNotifications();
+registerPerceptionIpc(getWindow);
+registerChatsMcp(getWindow);
 registerCursorIpc();
 registerCircleIpc();
 registerAgentIpc(getWindow, config => {

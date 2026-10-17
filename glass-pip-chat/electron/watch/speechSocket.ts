@@ -7,6 +7,7 @@ import { speechSettings } from '../speech/settings.js';
 export function attachSpeechSocket(server: Server, authorize: (header?: string) => boolean): () => void {
   const sockets = new WebSocketServer({ noServer: true, maxPayload: 24_000 });
   server.on('upgrade', (request, socket, head) => {
+    if (request.url === '/v1/devices/live') return; // handled by the companion transport
     if (request.url !== '/v1/speech/live' || request.headers.origin || !authorize(request.headers.authorization) || sockets.clients.size >= 4) {
       socket.write('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n'); socket.destroy(); return;
     }

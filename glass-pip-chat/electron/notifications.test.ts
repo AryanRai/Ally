@@ -16,3 +16,10 @@ it('respects focus and the notification switch', async () => {
   mocks.focused = false; mocks.enabled = false; notifyReply({ id: 'b', title: 'Reply', text: 'Done' });
   expect(mocks.show).not.toHaveBeenCalled();
 });
+
+it('keeps perception desktop notices off the phone reply stream', async () => {
+  const { notifyReply, onReplyNotice } = await import('./notifications'); const listener = vi.fn(); const off = onReplyNotice(listener);
+  notifyReply({ id: 'desktop-card', title: 'Note', text: 'Desktop only', desktopOnly: true }); expect(listener).not.toHaveBeenCalled();
+  mocks.focused = true; notifyReply({ id: 'reply-card', title: 'Reply', text: 'Done' }); expect(listener).toHaveBeenCalledTimes(1);
+  off(); notifyReply({ id: 'later', title: 'Reply', text: 'Done' }); expect(listener).toHaveBeenCalledTimes(1);
+});

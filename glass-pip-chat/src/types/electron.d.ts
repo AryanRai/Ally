@@ -107,6 +107,17 @@ export interface PipAPI {
     pickFolder: (current?: string) => Promise<string | null>;
     onEvent: (callback: (data: { runId: string; event: AgentEvent }) => void) => () => void;
   };
+  /** ally-chats MCP server (electron/chatsMcp) */
+  chatsMcp: {
+    status: () => Promise<{ running: boolean; port?: number; tools: string[]; indexed: number }>;
+    /** null = that app isn't installed */
+    appStatus: () => Promise<{ claude: boolean | null; codex: boolean | null }>;
+    addToApps: () => Promise<{ claude: string; codex: string }>;
+    removeFromApps: () => Promise<void>;
+    onOpenChat: (callback: (req: { provider: AgentProvider; sessionId: string; title: string; cwd?: string }) => void) => () => void;
+  };
+  /** Realtime perception sessions (electron/perception) */
+  perception: import('./perception').PerceptionApi;
 }
 
 declare global {

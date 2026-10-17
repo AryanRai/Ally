@@ -1,16 +1,20 @@
 import { v2 } from '@google-cloud/speech';
 import { TextToSpeechClient } from '@google-cloud/text-to-speech';
 import type { SpeechSettings } from './settings.js';
+import { speakerSegments, type SpeakerSegment } from './speakers.js';
 
-export type SpeechEvent = { id: string; type: 'transcript' | 'complete' | 'audio' | 'error'; text?: string; final?: boolean; audio?: string; error?: string };
+export type SpeechEvent = { id: string; type: 'transcript' | 'complete' | 'audio' | 'error'; text?: string; final?: boolean; audio?: string; error?: string; speaker?: string; speakers?: SpeakerSegment[]; speakerWarning?: string };
 export interface Recognition { write(bytes: Uint8Array): void; end(): void; cancel(): void }
 
 /** One bounded utterance. Only final Google segments are committed; partials are previews. */
-export function recognizeLive(settings: SpeechSettings, emit: (event: Omit<SpeechEvent, 'id'>) => void): Recognition {
+export function recognizeLive(settings: SpeechSettings, emit: (event: Omit<SpeechEvent, 'id'>) => void, options: { diarization?: boolean } = {}): Recognition {
   if (!settings.cloud || !settings.project) throw new Error('Enable Google Cloud speech in Voice settings.');
   const client = new v2.SpeechClient({ projectId: settings.project, apiEndpoint: 'us-speech.googleapis.com', quotaProjectId: settings.project });
   const stream = client._streamingRecognize();
   let text = ''; let ended = false; let inputEnded = false; let bytes = 0;
+  const identifySpeakers = options.diarization === true && settings.diarization === true;
+  const audio: Buffer[] = [];
+  let finishing = false;
   const timer = setTimeout(() => fail('Live transcription timed out. Use the recorded audio fallback.'), 80_000);
   const cleanup = () => { clearTimeout(timer); stream.destroy(); void client.close(); };
   const fail = (error: string) => { if (ended) return; ended = true; emit({ type: 'error', error }); cleanup(); };
@@ -23,7 +27,25 @@ export function recognizeLive(settings: SpeechSettings, emit: (event: Omit<Speec
       emit({ type: 'transcript', text: result.isFinal ? text : `${text} ${part}`.trim(), final: !!result.isFinal });
     }
   });
-  stream.on('end', () => { if (ended) return; ended = true; emit({ type: 'complete', text }); cleanup(); });
+  stream.on('end', async () => {
+    if (ended || finishing) return; finishing = true;
+    let speakers: SpeakerSegment[] | undefined, speakerWarning: string | undefined;
+    if (identifySpeakers && bytes > 0) {
+      try {
+        // Chirp 3 streaming has no diarization. Recognize supports it in en-US;
+        // keep the original en-AU stream as fallback and never upload to storage.
+        const [response] = await client.recognize({ recognizer: `projects/${settings.project}/locations/us/recognizers/_`, content: Buffer.concat(audio),
+          config: { explicitDecodingConfig: { encoding: 'LINEAR16', sampleRateHertz: 16000, audioChannelCount: 1 }, languageCodes: ['en-US'], model: 'chirp_3', features: { diarizationConfig: {} } },
+        }, { timeout: 20_000 });
+        speakers = speakerSegments(response.results ?? []);
+        if (!speakers.length || speakers.every(s => s.speaker === 'Unassigned speaker')) { speakers = undefined; speakerWarning = 'Speaker labels unavailable for this utterance.'; }
+      } catch { speakerWarning = 'Speaker identification unavailable; kept the live transcript.'; }
+    }
+    if (ended) return;
+    ended = true;
+    emit({ type: 'complete', text: speakers?.map(s => s.text).join(' ') || text,
+      ...(speakers ? { speakers, ...(new Set(speakers.map(s => s.speaker)).size === 1 ? { speaker: speakers[0].speaker } : {}) } : {}), ...(speakerWarning ? { speakerWarning } : {}) }); cleanup();
+  });
   stream.write({ recognizer: `projects/${settings.project}/locations/us/recognizers/_`, streamingConfig: {
     config: { explicitDecodingConfig: { encoding: 'LINEAR16', sampleRateHertz: 16000, audioChannelCount: 1 }, languageCodes: ['en-AU'], model: 'chirp_3' },
     streamingFeatures: { interimResults: true },
@@ -33,6 +55,7 @@ export function recognizeLive(settings: SpeechSettings, emit: (event: Omit<Speec
       if (ended || inputEnded) return;
       bytes += chunk.byteLength;
       if (!chunk.byteLength || chunk.byteLength % 2 || chunk.byteLength > 24_000 || bytes > 1_920_000 || stream.writableLength > 100) { fail('Live audio limit exceeded.'); return; }
+      if (identifySpeakers) audio.push(Buffer.from(chunk));
       stream.write({ audio: Buffer.from(chunk) });
     },
     end() { if (!ended && !inputEnded) { inputEnded = true; stream.end(); } },

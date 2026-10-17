@@ -4,11 +4,14 @@ import { interactiveCodexSession } from './codexMigration.js';
 import type { AgentEvent, AgentRunOptions, AgentInteractionHandler } from './types.js';
 import { startUserQuestions, WATCH_QUESTION_INSTRUCTIONS } from './userQuestions.js';
 import { ALLY_BROWSER_INSTRUCTIONS } from './browserContext.js';
+import { allyChatsMcpServers } from '../chatsMcp/registry.js';
 
 export function codexThreadConfig(opts: AgentRunOptions, interactive = false): Record<string, unknown> {
   const servers: Record<string, { url: string }> = {};
   if (opts.robot?.mcpUrl) servers.howyouseeme = { url: opts.robot.mcpUrl };
   if (opts.robot?.motionMcpUrl) servers.droidcore = { url: opts.robot.motionMcpUrl };
+  // Ally's cross-chat tools (find / read / forward to other chats)
+  for (const [name, url] of Object.entries(allyChatsMcpServers(opts))) servers[name] = { url };
   return {
     cwd: opts.cwd, approvalPolicy: interactive ? 'on-request' : 'never',
     // Full access reduces eligible prompts through Codex's supported reviewer.
@@ -17,7 +20,7 @@ export function codexThreadConfig(opts: AgentRunOptions, interactive = false): R
     sandbox: opts.permission === 'full' ? 'danger-full-access' : opts.permission === 'readonly' ? 'read-only' : 'workspace-write',
     ...(opts.model && opts.model !== 'default' ? { model: opts.model } : {}),
     ...(!opts.ephemeral || opts.robot ? { developerInstructions: [!opts.ephemeral && ALLY_BROWSER_INSTRUCTIONS, opts.robot?.instructions].filter(Boolean).join('\n\n') } : {}),
-    ...(opts.robot ? { config: { mcp_servers: servers } } : {}),
+    ...(Object.keys(servers).length ? { config: { mcp_servers: servers } } : {}),
   };
 }
 

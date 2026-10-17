@@ -9,8 +9,10 @@ export default function SpeechSettingsSection() {
   const [cloudLoading, setCloudLoading] = useState(false);
   const [project, setProject] = useState('');
   const [notifications, setNotifications] = useState(true);
+  const [diarization, setDiarization] = useState(false);
   useEffect(() => { void window.pip.speech.settings().then(settings => {
     setProject(settings.project); setNotifications(settings.notifications);
+    setDiarization(settings.diarization === true);
     setOptions(previous => ({ ...previous, engine: settings.cloud ? 'google' : 'local', cloudVoice: settings.voice }));
   }); }, []);
   const [options, setOptions] = useState<{ voice: string; rate: number; volume: number; engine: 'local' | 'google'; cloudVoice: string }>(() => {
@@ -39,6 +41,9 @@ export default function SpeechSettingsSection() {
   }, [options.engine]);
   return <section className="space-y-3 text-xs">
     <h3 className="text-sm font-medium text-white/80">Voice</h3>
+    <label className="flex items-start gap-2 text-white/60"><input type="checkbox" checked={diarization} onChange={event => { setDiarization(event.target.checked); void window.pip.speech.saveSettings({ diarization: event.target.checked }); }} />
+      Identify speakers in realtime sessions. Adds a Google recognition pass after each utterance (English US model, billed usage). Labels reset each utterance; names are not identified.
+    </label>
     <div className="border border-white/10 bg-white/[.025] p-3 space-y-3">
       <div className="flex items-center justify-between gap-3">
         <span className="font-mono uppercase tracking-wide text-white/60">{speech.status.phase}</span>

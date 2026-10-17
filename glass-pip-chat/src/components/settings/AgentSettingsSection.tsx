@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { FolderOpen, CheckCircle2, XCircle, LoaderCircle } from 'lucide-react';
 import { openClaudeLogin } from '@/lib/claudeLogin';
+import ChatsMcpSettings from './ChatsMcpSettings';
 import type { ClaudeAccount } from '../../../electron/agent/claudeLogin';
 import { cn } from '../../lib/utils';
 import type { AgentConfig, AgentPermission, AgentProvider } from '../../types/agent';
@@ -111,6 +112,7 @@ export default function AgentSettingsSection({ platform, theme }: AgentSettingsS
               className="accent-white mt-0.5" />
           </label>
         )}
+        <ChatsMcpSettings muted={muted} box={box} />
         <div className="space-y-1">
           <span className={cn('text-xs block', muted)}>Default working folder</span>
           <button

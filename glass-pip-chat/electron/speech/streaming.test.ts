@@ -1,7 +1,7 @@
 import { EventEmitter } from 'node:events';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-const mocks = vi.hoisted(() => ({ input: null as any, output: null as any, close: vi.fn() }));
-vi.mock('@google-cloud/speech', () => ({ v2: { SpeechClient: class { _streamingRecognize() { return mocks.input; } close = mocks.close; } } }));
+const mocks = vi.hoisted(() => ({ input: null as any, output: null as any, close: vi.fn(), recognize: vi.fn() }));
+vi.mock('@google-cloud/speech', () => ({ v2: { SpeechClient: class { _streamingRecognize() { return mocks.input; } recognize = mocks.recognize; close = mocks.close; } } }));
 vi.mock('@google-cloud/text-to-speech', () => ({ TextToSpeechClient: class { streamingSynthesize() { return mocks.output; } close = mocks.close; } }));
 import { recognizeLive, synthesizeLive } from './streaming';
 const settings = { cloud: true, project: 'test-project', voice: 'en-AU-Chirp3-HD-Aoede', notifications: true };
@@ -41,5 +41,33 @@ describe('bounded Google speech streams', () => {
     expect(mocks.output.write.mock.calls[0][0].streamingConfig.streamingAudioConfig).toEqual({ audioEncoding: 'PCM', sampleRateHertz: 24000 });
     abort.abort(); mocks.output.emit('data', { audioContent: Buffer.from([0, 0]) });
     await rejected; expect(audio).toHaveBeenCalledTimes(1);
+  });
+});
+
+
+describe('utterance speaker pass', () => {
+  beforeEach(() => { vi.clearAllMocks(); mocks.input = stream(); });
+  it('adds local labels only when opted in, retaining live previews', async () => {
+    mocks.recognize.mockResolvedValue([{ results: [{ alternatives: [{ words: [{ word: 'Hello', speakerLabel: '0' }, { word: 'there', speakerLabel: '0' }, { word: 'Hi!', speakerLabel: '1' }] }] }] }]);
+    const emit = vi.fn(); const mic = recognizeLive({ ...settings, diarization: true }, emit, { diarization: true });
+    mic.write(new Uint8Array(640)); mic.end(); mocks.input.emit('end'); await Promise.resolve();
+    expect(emit).toHaveBeenCalledWith({ type: 'complete', text: 'Hello there Hi!', speakers: [{ speaker: 'Speaker 1', text: 'Hello there' }, { speaker: 'Speaker 2', text: 'Hi!' }] });
+    expect(mocks.recognize.mock.calls[0][0].config.languageCodes).toEqual(['en-US']);
+  });
+  it('retains the stream transcript when speaker recognition fails', async () => {
+    mocks.recognize.mockRejectedValue(Error('unavailable')); const emit = vi.fn();
+    const mic = recognizeLive({ ...settings, diarization: true }, emit, { diarization: true }); mic.write(new Uint8Array(640));
+    mocks.input.emit('data', { results: [{ isFinal: true, alternatives: [{ transcript: 'Original' }] }] }); mic.end(); mocks.input.emit('end'); await Promise.resolve();
+    expect(emit).toHaveBeenCalledWith({ type: 'complete', text: 'Original', speakerWarning: expect.any(String) });
+  });
+  it('suppresses a speaker result arriving after cancellation', async () => {
+    let resolve!: (v: unknown) => void; mocks.recognize.mockImplementation(() => new Promise(r => { resolve = r; }));
+    const emit = vi.fn(); const mic = recognizeLive({ ...settings, diarization: true }, emit, { diarization: true });
+    mic.write(new Uint8Array(640)); mic.end(); mocks.input.emit('end'); mic.cancel(); resolve([{ results: [] }]); await Promise.resolve();
+    expect(emit).not.toHaveBeenCalled();
+  });
+  it('does not bill a speaker pass for ordinary voice input', () => {
+    const mic = recognizeLive({ ...settings, diarization: true }, vi.fn()); mic.write(new Uint8Array(640)); mic.end(); mocks.input.emit('end');
+    expect(mocks.recognize).not.toHaveBeenCalled();
   });
 });

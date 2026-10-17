@@ -9,6 +9,7 @@ import { ClaudeStreamParser, StreamParser } from './parsers.js';
 import { runCodexTurn } from './codexRun.js';
 import { runCodexDesktopTurn } from './codexDesktopRun.js';
 import { thumbnails } from './thumbs.js';
+import { allyChatsMcpServers } from '../chatsMcp/registry.js';
 import type { AgentEvent, AgentRobotContext, AgentRunOptions, AgentInteractionHandler } from './types.js';
 
 interface ActiveRun {
@@ -28,16 +29,23 @@ export function robotMcpServers(robot?: AgentRobotContext): Record<string, strin
   return servers;
 }
 
-/** Robot context goes through temp files so long text never hits the command line. */
+/**
+ * Robot context and MCP servers go through temp files so long text never hits the
+ * command line. Every non-ephemeral run also gets Ally's ally_chats server.
+ */
 function writeRobotFiles(runId: string, opts: AgentRunOptions): { files: string[]; promptFile?: string; mcpFile?: string } {
-  if (!opts.robot) return { files: [] };
+  const servers = Object.entries({ ...robotMcpServers(opts.robot), ...allyChatsMcpServers(opts) });
+  if (!opts.robot && !servers.length) return { files: [] };
   const dir = path.join(os.tmpdir(), 'ally-agent');
   fs.mkdirSync(dir, { recursive: true });
-  const promptFile = path.join(dir, `${runId}-prompt.md`);
-  fs.writeFileSync(promptFile, opts.robot.instructions);
-  const files = [promptFile];
+  const files: string[] = [];
+  let promptFile: string | undefined;
+  if (opts.robot) {
+    promptFile = path.join(dir, `${runId}-prompt.md`);
+    fs.writeFileSync(promptFile, opts.robot.instructions);
+    files.push(promptFile);
+  }
   let mcpFile: string | undefined;
-  const servers = Object.entries(robotMcpServers(opts.robot));
   if (servers.length) {
     mcpFile = path.join(dir, `${runId}-mcp.json`);
     const mcpServers = Object.fromEntries(servers.map(([name, url]) => [name, { type: 'http', url }]));
@@ -56,6 +64,12 @@ function claudeArgs(opts: AgentRunOptions, robot: { promptFile?: string; mcpFile
   if (opts.sessionId) args.push('--resume', opts.sessionId);
   if (robot.promptFile) args.push('--append-system-prompt-file', robot.promptFile);
   if (robot.mcpFile) args.push('--mcp-config', robot.mcpFile);
+  // Non-interactive runs can't answer permission prompts: pre-allow Ally's own chat tools (read-only ones for read-only runs)
+  if (Object.keys(allyChatsMcpServers(opts)).length) {
+    args.push('--allowedTools', opts.permission === 'readonly'
+      ? ['ally_list_chats', 'ally_search_chats', 'ally_read_chat'].map(t => `mcp__ally_chats__${t}`).join(',')
+      : 'mcp__ally_chats');
+  }
   // Images can't ride on a plain-text prompt; send the turn as a stream-json user message
   if (opts.images?.length) args.push('--input-format', 'stream-json');
   return args;

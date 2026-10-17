@@ -3,6 +3,8 @@ package dev.ally.watch
 import android.Manifest
 import android.content.pm.PackageManager
 import android.content.Intent
+import androidx.compose.ui.platform.LocalContext
+import dev.ally.device.DeviceInboxActivity
 import android.os.Bundle
 import android.os.VibrationEffect
 import android.os.Vibrator
@@ -147,7 +149,7 @@ private fun InputScreen(state: WatchState, micHint: Boolean, start: () -> Unit, 
         Column(Modifier.fillMaxSize().padding(horizontal = 24.dp, vertical = 16.dp), horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center) {
             Text("ALLY", fontFamily = Tanker, fontSize = 17.sp, lineHeight = 19.sp, letterSpacing = 2.sp, modifier = Modifier.clickable(onClick = chats).semantics { contentDescription = "Choose chat" })
-            Text("${state.context.uppercase()} ▾", fontFamily = Mono, color = Muted, fontSize = 8.sp, lineHeight = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.clickable(onClick = chats))
+            Text("CHATS ▾ · ${state.chatTitle}", fontFamily = Mono, color = Muted, fontSize = 9.sp, lineHeight = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.clickable(onClick = chats).padding(vertical = 4.dp))
             Spacer(Modifier.height(3.dp))
             Orb(state.look, state.phase, state.microphoneLevel, canTalk, orbSize.value, if (state.phase in setOf(Phase.OFFLINE, Phase.ERROR)) retry else start, finish, cancel)
             Text(when {
@@ -269,6 +271,7 @@ private fun TextEntry(title: String, hint: String, submit: (String) -> Unit, bac
 
 @Composable
 private fun SettingsScreen(model: WatchViewModel, state: WatchState, back: () -> Unit, chats: () -> Unit, appearance: () -> Unit) {
+    val deviceContext = LocalContext.current
     var endpoint by remember { mutableStateOf(model.endpoint) }
     var token by remember { mutableStateOf(model.token) }
     val notifications = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted -> model.replyAlerts(granted) }
@@ -279,6 +282,7 @@ private fun SettingsScreen(model: WatchViewModel, state: WatchState, back: () ->
         Button(onClick = chats) { Text("Choose chat") }
         Button(onClick = appearance) { Text("Appearance") }
         Text("Voice & alerts", color = Muted, fontSize = 12.sp)
+        Button(onClick = { deviceContext.startActivity(Intent(deviceContext, DeviceInboxActivity::class.java)) }) { Text("Cards & device connection", fontSize = 11.sp) }
         Text(if (state.liveSpeech) "Google live voice · Orbit. Audio and reply text go to Google." else "Local speech · hold to record", color = Muted, fontSize = 10.sp, textAlign = TextAlign.Center)
         Button(onClick = { model.autoRead(!state.autoRead) }) { Text(if (state.autoRead) "Auto-read: On" else "Auto-read: Off", fontSize = 12.sp) }
         Button(onClick = { model.readReply("Hello. Ally is ready when you are.") }, enabled = !state.muted) { Text("Test voice", fontSize = 12.sp) }
