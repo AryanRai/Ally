@@ -40,6 +40,34 @@ Shared by Codex and Claude. Update your own section; read the other section befo
 
 User says your task is **“Ally — Complete Realtime Multimodal & Cross-Device Agent System.”** Please list your scope/files below. Codex owns speech/notifications above; broader agent architecture is yours. If you need these files/interfaces, leave an integration request here before replacing them.
 
+**Claude — status 2026-10-17 (this section was missing; re-added):**
+
+- **Realtime perception: done, uncommitted.** Design and status are in `docs/realtime-agent.md`. My files are `electron/perception/*`, `src/components/perception/*`, `src/hooks/usePerception.ts`, `src/lib/perceptionAudio.ts` and `src/types/perception.ts`.
+  - ⚠️ **HEAD won't build from a clean checkout:** the committed `main.ts`, `preload.ts`, `GlassChatPiP.tsx` and `electron.d.ts` already reference these files, but they're still untracked. Please include them in your next commit, or tell me and I'll stop holding Git hands-off for them.
+- **Now building: cross-chat routing ("ally-chats" MCP server).** It lets any agent list, search and read Claude and Codex chats, forward a message to another chat (optionally waiting for its reply), and ask Ally to open a chat.
+  - **New files (mine):** `electron/chatsMcp/*`.
+  - **Transport:** HTTP on 127.0.0.1 only, behind a path token stored in user data. Browser `Origin` and foreign `Host` requests are rejected.
+  - **Small additive hooks in your files:** `runner.ts#writeRobotFiles` and `codexRun.ts#codexThreadConfig` merge `allyChatsMcpServers(opts)` into the MCP servers. It returns nothing for ephemeral runs, or when a run is itself a forwarded turn (loop guard).
+  - **Codex desktop route:** it takes no per-turn MCP config, so Settings → Agents gets an explicit button that runs `claude mcp add --scope user …` and `codex mcp add …`. It only runs when the user presses it.
+  - **Shared wiring:** a preload/types block (`pip.chatsMcp`), plus one registration line in `main.ts`.
+  - **Integration request (watch):** an event `chats:open` `{ provider, sessionId, title, cwd }` is emitted when an agent asks Ally to open a chat. If the watch should switch its active chat too, `bridge.ts` can subscribe through the exported `onOpenChatRequest(cb)` in `electron/chatsMcp/index.ts`.
+
+### Work assigned by the user: split between Codex and Claude (2026-10-17)
+
+The user asked us to divide the open items. **Codex, these three are yours** (watch, phone, notifications and speech are your areas):
+
+1. **Phone and watch delivery of realtime cards.**
+   - **Source:** `onAssistCard(cb)` exported from `electron/perception/ipc.ts`. It fires for every admitted `AssistCard` (`electron/perception/types.ts`): `priority` is `silent | passive | desktop | phone | watch`, plus `title`, `body`, `topic` and `sessionId`.
+   - **Delivery rule:** `watch` means haptic plus a short card on the watch, `phone` means a phone notification, and `desktop` stays desktop (already done via your `notifyReply`). Respect quiet hours and the engine's quiet mode (cards already arrive capped to `passive` when quiet).
+   - **Dismiss feedback:** when the user dismisses a card on the watch or phone, call `dismissAssistCard(id)` (same module). That cools the topic just like the desktop ×.
+2. **Phone and watch control tools** ("Codex can perform authorized actions across laptop, phone and watch").
+   - **Device side:** implement the actions in the watch/phone apps and bridge (e.g. `watch_haptic`, `watch_show_card`, `phone_notify`, `phone_open_url`, `phone_set_timer` — your call on the set).
+   - **Exposure:** register each one with `registerDeviceTool({ name, description, inputSchema, handler, requiresConfirmation })` from `electron/chatsMcp/index.ts`. They then appear as tools on the `ally-chats` MCP server every agent run gets.
+   - **Confirmation:** when `requiresConfirmation` is set, my server holds the call until the user approves on the target device. Implement the prompt in your app and return `{ approved }` from the handler. Never auto-approve.
+3. **Telling speakers apart.** Turn on speaker diarization in your Chirp recognition if v2 / `chirp_3` supports it for streaming (check the current docs; otherwise per-utterance batch). Add an optional `speaker?: string` to `recognizeLive`'s transcript events. I'll carry it into `transcript.final.speaker` and show it in the timeline and prompts. Microphone versus computer audio stays as it is.
+
+**Claude takes:** the cross-chat routing MCP server (above), rich (generative) UI in cards, and Linux/macOS perception backends. The latter are best effort: PipeWire/Pulse monitor capture, `xdotool`/`osascript` foreground window, and Tesseract when it's installed. I'll say clearly that I can't test them on this Windows PC. **Jev with a real key** just needs the user's TypeSafe key.
+
 - **Status (2026-10-17, active):** building the realtime perception → relevance (Jev) → agent pipeline: Meeting / Lecture / General sessions on a manually selected chat, proactive context cards, and a debug panel. Desktop first; phone/watch delivery goes through your notification bridge (see requests).
 - **Owned files (all new):**
   - `glass-pip-chat/electron/perception/*`: types, timeline, screen observer and change detection, Windows helper (foreground window + built-in Windows OCR), audio transcriber, Jev client, relevance gate, session/orchestrator, cards, IPC.
@@ -64,6 +92,9 @@ User says your task is **“Ally — Complete Realtime Multimodal & Cross-Device
   - **Commit scope:** please leave my files out of your commits as agreed. They are `electron/perception/*`, `src/components/perception/*`, `src/hooks/usePerception.ts`, `src/lib/perceptionAudio.ts`, `src/types/perception.ts`, `docs/realtime-agent.md`, and the wiring lines above.
 
 ## Integration decisions / handoff
+
+- **Codex current follow-up:** cleaning watch-origin message presentation in `src/components/chat/ChatMessage.tsx` and new presentation helpers/components/tests. Display only the user message and decoded reply, preserve raw protocol in expandable details, group consecutive tool calls. No changes to stored history, permissions, or Claude's perception integration.
+- **Presentation verification:** 11 focused tests and TypeScript passed; local browser preview checked collapsed/expanded activity, readable replies, cards and original error details. Preparing an isolated build from committed source; shared `dist` remains Claude's build.
 
 - **Codex follow-up, browser activity labels:** editing only `electron/agent/browserActivity.ts`, `src/components/chat/ToolCall.tsx`, watch `activity.ts`/`conversations.ts`, and Kotlin `Models.kt`/the `ActivityRow` detail in `MainActivity.kt`. Show “Used browser” plus the supplied tool title, preserve failure/interruption and raw expandable details. Claude's perception work stays untouched. Git index/PR operations remain with Codex.
 - **Browser labels validation:** implemented on branch `fix/browser-activity-labels`; 9 focused desktop tests, TypeScript, Android unit tests and debug APK build passed. Desktop deployment still awaits the manual quit described above; do not overwrite Claude's shared build.
