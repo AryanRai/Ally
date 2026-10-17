@@ -21,18 +21,23 @@ function buildConicGradient(
   colors: readonly string[],
   coverage: number,
 ): string {
-  const usable = colors.filter(c => c !== "transparent")
+  const usable = colors
   if (usable.length === 0) return "transparent"
-  if (usable.length === 1) return usable[0]
+  if (usable.length === 1 && coverage >= 1) return usable[0]
 
   const span = Math.max(0.08, Math.min(1, coverage)) * 360
   const stops = usable.map((color, i) => {
-    const pct = (i / Math.max(1, usable.length - 1)) * span
+    const phase = i / Math.max(1, coverage >= 1 ? usable.length : usable.length - 1)
+    const pct = (coverage >= 1 ? phase : 0.08 + phase * 0.84) * span
     return `${color} ${pct.toFixed(1)}deg`
   })
-  stops.push(`${usable[0]} ${span.toFixed(1)}deg`)
-  stops.push(`transparent ${span.toFixed(1)}deg`)
-  stops.push("transparent 360deg")
+  if (coverage < 1) {
+    // Fade the exposed ends instead of cutting a hard wedge through the halo.
+    stops.unshift("transparent 0deg")
+    stops.push(`transparent ${span.toFixed(1)}deg`, "transparent 360deg")
+  } else {
+    stops.push(`${usable[0]} 360deg`)
+  }
   return `conic-gradient(from ${angleDeg.toFixed(2)}deg, ${stops.join(", ")})`
 }
 
@@ -54,12 +59,10 @@ function animatedSpread(layer: ResolvedGlowLayer, angleDeg: number): number {
 function layerAngle(
   baseAngle: number,
   layer: ResolvedGlowLayer,
-  reverseSpin: boolean,
 ): number {
   const dir = layer.reverseAngle ? -1 : 1
-  const spin = reverseSpin ? -1 : 1
   const offset = layer.relativeOffset * 360
-  return baseAngle * dir * spin * layer.speedMultiplier + offset
+  return baseAngle * dir * layer.speedMultiplier + offset
 }
 
 /** Native Skia uses gaussian(abs(d), 0, glowSize) — map glowSize → blur sigma. */
@@ -103,12 +106,6 @@ export function AnimatedPanelGlowWeb({
   const rafRef = React.useRef(0)
   const intensityRef = React.useRef(preview ? 1 : 0)
   const angleRef = React.useRef(0)
-  const animStartRef = React.useRef(0)
-  const animFromRef = React.useRef(0)
-  const animToRef = React.useRef(0)
-  const animDurationRef = React.useRef(0)
-  const activeRef = React.useRef(active || preview)
-  const reducedMotionRef = React.useRef(false)
 
   const glowStrength = Math.max(0, Math.min(1, intensity))
   const previewScale = preview ? PANEL_GLOW_PREVIEW_APPEARANCE_SCALE : 1
@@ -123,83 +120,74 @@ export function AnimatedPanelGlowWeb({
   const outline = resolved.outlineWidth
   const outerRadius = panelRadius + outline
 
+  // The host changes size when the sidebar/pill opens. Cap halo widths against
+  // both dimensions so a short collapsed window never becomes a solid fill.
   React.useEffect(() => {
-    if (preview) return
-    activeRef.current = active
-    animStartRef.current = performance.now()
-    animFromRef.current = intensityRef.current
-    animToRef.current = active ? 1 : 0
-    animDurationRef.current = active ? PANEL_GLOW_FADE_IN_MS : PANEL_GLOW_FADE_OUT_MS
-  }, [active, preview])
-
-  React.useEffect(() => {
-    const mq = window.matchMedia("(prefers-reduced-motion: reduce)")
-    const apply = () => { reducedMotionRef.current = mq.matches }
-    apply()
-    mq.addEventListener("change", apply)
-    return () => mq.removeEventListener("change", apply)
+    const root = rootRef.current
+    if (!root) return
+    const measure = () => {
+      const { width, height } = root.getBoundingClientRect()
+      root.style.setProperty("--panel-glow-limit", `${Math.max(0, Math.min(width, height) / 6)}px`)
+    }
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(root)
+    return () => observer.disconnect()
   }, [])
 
   React.useEffect(() => {
     const root = rootRef.current
     if (!root) return
-
-    const speed = Math.abs(resolved.animationSpeed) || 1
-    const reverseSpin = resolved.animationSpeed < 0
-    const rotationPeriodMs =
-      (PANEL_GLOW_ROTATION_S / speed) * 1000 / (resolved.borderSpeedMultiplier || 1)
+    const mq = window.matchMedia("(prefers-reduced-motion: reduce)")
+    const target = active || preview ? 1 : 0
+    const from = intensityRef.current
+    const started = performance.now()
+    const duration = target ? PANEL_GLOW_FADE_IN_MS : PANEL_GLOW_FADE_OUT_MS
+    const rotationPeriodMs = PANEL_GLOW_ROTATION_S * 1000 /
+      (Math.abs(resolved.animationSpeed) || 1) / (resolved.borderSpeedMultiplier || 1)
+    let last = started
 
     const tick = (now: number) => {
-      if (!preview) {
-        const elapsed = now - animStartRef.current
-        const dur = animDurationRef.current
-        const t = dur > 0 ? Math.min(1, elapsed / dur) : 1
-        intensityRef.current =
-          animFromRef.current + (animToRef.current - animFromRef.current) * easeInOutCubic(t)
+      const t = Math.min(1, Math.max(0, (now - started) / duration))
+      intensityRef.current = preview ? 1 : from + (target - from) * easeInOutCubic(t)
+      if (!mq.matches) {
+        const step = resolved.animationSpeed < 0 ? -1 : 1
+        const elapsed = Math.min(64, Math.max(0, now - last))
+        angleRef.current = (angleRef.current + step * 360 * elapsed / rotationPeriodMs) % 360
       }
-
-      const reduced = reducedMotionRef.current
-      if (!reduced) {
-        const step = reverseSpin ? -1 : 1
-        angleRef.current = (angleRef.current + step * (360 / rotationPeriodMs) * (1000 / 60)) % 360
-      }
-
-      const fade = preview
-        ? 1
-        : reduced && activeRef.current
-          ? Math.max(intensityRef.current, 0.85)
-          : intensityRef.current
-
-      root.style.setProperty("--panel-glow-intensity", String(fade))
+      last = now
+      root.style.setProperty("--panel-glow-intensity", String(intensityRef.current))
       root.style.setProperty("--panel-glow-angle", `${angleRef.current}deg`)
-
       resolved.layers.forEach((layer, index) => {
-        const spread = animatedSpread(layer, angleRef.current) * renderStrength
-        const angle = layerAngle(angleRef.current, layer, reverseSpin)
+        // Intensity dims the inward light, rather than shrinking it out of existence.
+        const spread = animatedSpread(layer, layerAngle(angleRef.current, layer)) * (inward ? 1 : renderStrength)
         root.style.setProperty(`--panel-glow-layer-${index}-spread`, `${spread}px`)
-        root.style.setProperty(
-          `--panel-glow-layer-${index}-gradient`,
-          buildConicGradient(angle, layer.colors, layer.coverage),
-        )
+        root.style.setProperty(`--panel-glow-layer-${index}-gradient`,
+          buildConicGradient(layerAngle(angleRef.current, layer), layer.colors, layer.coverage))
       })
-
       if (resolved.borderStops) {
-        root.style.setProperty(
-          "--panel-glow-border-gradient",
-          buildConicGradient(
-            angleRef.current,
-            [...resolved.borderStops, resolved.borderStops[0]],
-            1,
-          ),
-        )
+        root.style.setProperty("--panel-glow-border-gradient",
+          buildConicGradient(angleRef.current, resolved.borderStops, 1))
       }
-
-      rafRef.current = requestAnimationFrame(tick)
+      // Idle, hidden and settled reduced-motion glows consume no animation frames.
+      if (!document.hidden && renderStrength > 0 && (t < 1 || (target && !mq.matches))) {
+        rafRef.current = requestAnimationFrame(tick)
+      }
     }
-
-    rafRef.current = requestAnimationFrame(tick)
-    return () => cancelAnimationFrame(rafRef.current)
-  }, [preview, resolved, renderStrength])
+    const wake = () => {
+      cancelAnimationFrame(rafRef.current)
+      last = performance.now()
+      tick(last)
+    }
+    mq.addEventListener("change", wake)
+    document.addEventListener("visibilitychange", wake)
+    wake()
+    return () => {
+      cancelAnimationFrame(rafRef.current)
+      mq.removeEventListener("change", wake)
+      document.removeEventListener("visibilitychange", wake)
+    }
+  }, [active, preview, resolved, renderStrength, inward])
 
   const behindLayers = resolved.layers.filter(l => l.placement === "behind")
   const overLayers = resolved.layers.filter(l => l.placement === "over")
@@ -243,12 +231,17 @@ export function AnimatedPanelGlowWeb({
 
   /** Outward "over" edge halos: dual-pass soft + core ring with XOR mask. */
   const renderEdgeHalo = (layer: ResolvedGlowLayer, globalIndex: number, zIndex: number) => {
-    const spreadVar = `var(--panel-glow-layer-${globalIndex}-spread, ${layer.glowSizeMax}px)`
+    const spreadVar = `min(var(--panel-glow-layer-${globalIndex}-spread, 0px), var(--panel-glow-limit, 20px))`
     const gradientVar = `var(--panel-glow-layer-${globalIndex}-gradient, transparent)`
     const scaledSize = layer.glowSizeMax * renderStrength
-    const coreBlur = haloBlurPx(scaledSize, false)
-    const softBlur = Math.max(coreBlur + 4, Math.round(scaledSize * 1.35))
-    const softRing = `calc(${spreadVar} * 1.55 + ${Math.max(2, Math.round(scaledSize * 0.25))}px)`
+    const coreBlur = inward ? `max(1px, calc(${spreadVar} * 0.7))` : `${haloBlurPx(scaledSize, false)}px`
+    const softBlur = inward ? `max(3px, calc(${spreadVar} * 1.4))` : `${Math.max(7, Math.round(scaledSize * 1.35))}px`
+    const softRing = `calc(${spreadVar} * 1.55 + 2px)`
+    // Center the light on the edge. The window clips its outer half, leaving
+    // the same soft Gaussian falloff as Mary's external halo inside Ally.
+    const ringInset = inward ? `calc(-1 * ${spreadVar})` : 0
+    const ringRadius = inward ? `calc(${panelRadius}px + ${spreadVar})` : panelRadius
+    const ringWidth = inward ? `calc(${spreadVar} * 2)` : spreadVar
     const blendMode = layer.placement === "over" ? "screen" : "plus-lighter"
 
     return (
@@ -257,31 +250,31 @@ export function AnimatedPanelGlowWeb({
           aria-hidden
           style={{
             position:            "absolute",
-            inset:               0,
-            borderRadius:        panelRadius,
-            filter:              `blur(${softBlur}px)`,
+            inset:               ringInset,
+            borderRadius:        ringRadius,
+            filter:              `blur(${softBlur})`,
             opacity:             layerOpacityExpr(layer.opacity * 0.42),
             mixBlendMode:        blendMode,
             pointerEvents:       "none",
             zIndex,
           }}
         >
-          <div style={{ position: 'absolute', inset: 0, borderRadius: panelRadius, padding: softRing, background: gradientVar, WebkitMask: EDGE_MASK, WebkitMaskComposite: 'xor', maskComposite: 'exclude' }} />
+          <div style={{ position: 'absolute', inset: 0, borderRadius: ringRadius, boxSizing: 'border-box', padding: inward ? ringWidth : softRing, background: gradientVar, WebkitMask: EDGE_MASK, WebkitMaskComposite: 'xor', maskComposite: 'exclude' }} />
         </div>
         <div
           aria-hidden
           style={{
             position:            "absolute",
-            inset:               0,
-            borderRadius:        panelRadius,
-            filter:              `blur(${coreBlur}px)`,
+            inset:               ringInset,
+            borderRadius:        ringRadius,
+            filter:              `blur(${coreBlur})`,
             opacity:             layerOpacityExpr(layer.opacity),
             mixBlendMode:        blendMode,
             pointerEvents:       "none",
             zIndex,
           }}
         >
-          <div style={{ position: 'absolute', inset: 0, borderRadius: panelRadius, padding: spreadVar, background: gradientVar, WebkitMask: EDGE_MASK, WebkitMaskComposite: 'xor', maskComposite: 'exclude' }} />
+          <div style={{ position: 'absolute', inset: 0, borderRadius: ringRadius, boxSizing: 'border-box', padding: ringWidth, background: gradientVar, WebkitMask: EDGE_MASK, WebkitMaskComposite: 'xor', maskComposite: 'exclude' }} />
         </div>
       </React.Fragment>
     )
@@ -290,6 +283,8 @@ export function AnimatedPanelGlowWeb({
   return (
     <div
       ref={rootRef}
+      data-panel-glow
+      data-active={active || preview}
       style={{
         position:      "relative",
         display:       "flex",
@@ -298,10 +293,10 @@ export function AnimatedPanelGlowWeb({
         height:        "100%",
         minHeight:     preview ? undefined : 0,
         isolation:     "isolate",
-        overflow:      "visible",
+        overflow:      inward ? "hidden" : "visible",
+        borderRadius:  panelRadius,
+        pointerEvents: children ? undefined : "none",
         boxSizing:     "border-box",
-        ["--panel-glow-intensity" as string]: preview ? String(renderStrength) : "0",
-        ["--panel-glow-angle" as string]:     "0deg",
       }}
     >
       {resolved.layers.map((layer, index) => {
