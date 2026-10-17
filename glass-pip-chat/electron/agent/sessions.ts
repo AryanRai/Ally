@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { extractImages, stringifyToolOutput } from './parsers.js';
 import { thumbnails } from './thumbs.js';
+import { claudeTurnPending, codexRolloutPending, isRunning } from './sessionActivity.js';
 import type { AgentHistoryMessage, AgentModel, AgentProvider, AgentSessionSummary, AgentToolExecution, AgentUsage, AgentSessionSnapshot } from './types.js';
 
 // ---------------------------------------------------------------------------
@@ -232,6 +233,9 @@ export function listAgentSessions(provider: AgentProvider, limit = 40): AgentSes
   return provider === 'claude' ? listClaudeSessions(limit) : listCodexSessions(limit);
 }
 
+/** Whether the last parsed revision ended mid-turn, so unchanged polls can still answer. */
+const pendingByRevision = new Map<string, boolean>();
+
 /** Rebuild a session's visible conversation (user turns + assistant text and tool pills). */
 export function loadAgentSession(provider: AgentProvider, id: string, previousRevision?: string): AgentSessionSnapshot {
   const files = provider === 'claude'
@@ -239,10 +243,14 @@ export function loadAgentSession(provider: AgentProvider, id: string, previousRe
     : codexRolloutFiles().get(id) ?? [];
   if (!files.length) throw new Error(`${provider} session ${id} not found`);
   const revision = fileRevision(files);
-  if (revision === previousRevision) return { revision, unchanged: true, messages: [] };
+  const lastWrite = Math.max(...files.map(f => { try { return fs.statSync(f).mtimeMs; } catch { return 0; } }));
+  if (revision === previousRevision) return { revision, unchanged: true, messages: [], running: isRunning(pendingByRevision.get(revision) ?? false, lastWrite) };
   const records = provider === 'codex' ? mergeSessionRecords(files.map(readJsonl)) : readJsonl(files[0]);
   if (!records.length) return { revision: previousRevision ?? '', unchanged: true, messages: [] };
-  return { ...(provider === 'claude' ? rebuildClaudeHistory(records) : rebuildCodexHistory(records)), revision };
+  const pending = provider === 'claude' ? claudeTurnPending(records) : codexRolloutPending(records);
+  if (pendingByRevision.size > 50) pendingByRevision.clear();
+  pendingByRevision.set(revision, pending);
+  return { ...(provider === 'claude' ? rebuildClaudeHistory(records) : rebuildCodexHistory(records)), revision, running: isRunning(pending, lastWrite) };
 }
 
 class HistoryBuilder {

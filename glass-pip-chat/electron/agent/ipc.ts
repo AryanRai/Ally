@@ -6,7 +6,11 @@ import { resolveAgentBinary } from './binaries.js';
 import { startAgentRun, stopAgentRun, stopAllAgentRuns } from './runner.js';
 import { listAgentModels, listAgentSessions, loadAgentSession } from './sessions.js';
 import { watchAgentSessions } from './sessionWatch.js';
+import { configureCodexMigrations } from './codexMigration.js';
+import { configureCodexHistory, listCodexChats, loadCodexChat, closeCodexHistory } from './codexHistory.js';
 import { generateGreeting } from './greeting.js';
+import { registerClaudeLoginIpc } from './claudeLogin.js';
+import { desktopInteraction } from './desktopApprovals.js';
 import { startWatchBridge } from '../watch/bridge.js';
 import type { AgentConfig, AgentProvider, AgentRunOptions } from './types.js';
 
@@ -30,20 +34,24 @@ function loadConfig(): AgentConfig {
 /** Registers `agent:*` IPC; `onConfig` sees the config at startup and after every change. */
 export function registerAgentIpc(getWindow: () => BrowserWindow | null, onConfig?: (config: AgentConfig) => void): void {
   let config = loadConfig();
+  configureCodexMigrations(path.join(app.getPath('userData'), 'codex-migrations.json'));
+  configureCodexHistory(config.codexPath);
   onConfig?.(config);
   void app.whenReady().then(() => {
     const stopBridge = startWatchBridge(() => config);
     if (stopBridge) app.on('will-quit', stopBridge);
   });
   const binPath = (provider: AgentProvider) => (provider === 'claude' ? config.claudePath : config.codexPath);
+  registerClaudeLoginIpc(getWindow, () => config.claudePath);
 
-  ipcMain.handle('agent:getConfig', () => config);
+  ipcMain.handle('agent:getConfig', () => ({ ...config, homeCwd: app.getPath('home') }));
 
   ipcMain.handle('agent:updateConfig', (_, patch: Partial<AgentConfig>) => {
     config = { ...config, ...patch };
     fs.writeFileSync(CONFIG_FILE(), JSON.stringify(config, null, 2));
     onConfig?.(config);
-    return config;
+    configureCodexHistory(config.codexPath);
+    return { ...config, homeCwd: app.getPath('home') };
   });
 
   ipcMain.handle('agent:status', async () => {
@@ -64,6 +72,7 @@ export function registerAgentIpc(getWindow: () => BrowserWindow | null, onConfig
         ...opts,
         cwd: opts.cwd || config.defaultCwd,
         permission: opts.permission ?? config.permission,
+        codexDesktop: config.codexDesktop === true,
         robot: opts.robot && {
           instructions: opts.robot.instructions,
           mcpUrl: config.robotMcpUrl,
@@ -72,14 +81,21 @@ export function registerAgentIpc(getWindow: () => BrowserWindow | null, onConfig
       },
       (runId, ev) => { if (!sender.isDestroyed()) sender.send('agent:event', { runId, event: ev }); },
       binPath(opts.provider),
+      opts.provider === 'codex' ? desktopInteraction(async options => {
+        if (sender.isDestroyed()) return 0;
+        const parent = BrowserWindow.fromWebContents(sender);
+        const result = parent ? await dialog.showMessageBox(parent, options) : await dialog.showMessageBox(options);
+        return result.response;
+      }) : undefined,
+      'desktop',
     );
   });
 
   ipcMain.handle('agent:stop', (_, runId: string) => stopAgentRun(runId));
 
-  ipcMain.handle('agent:listSessions', (_, provider: AgentProvider, limit?: number) => listAgentSessions(provider, limit));
+  ipcMain.handle('agent:listSessions', (_, provider: AgentProvider, limit?: number) => provider === 'codex' ? listCodexChats(limit) : listAgentSessions(provider, limit));
 
-  ipcMain.handle('agent:loadSession', (_, provider: AgentProvider, id: string, revision?: string) => loadAgentSession(provider, id, revision));
+  ipcMain.handle('agent:loadSession', (_, provider: AgentProvider, id: string, revision?: string) => provider === 'codex' ? loadCodexChat(id, revision) : loadAgentSession(provider, id, revision));
   const stopWatching = watchAgentSessions(provider => {
     const win = getWindow();
     if (win && !win.isDestroyed()) win.webContents.send('agent:sessionsChanged', provider);
@@ -98,4 +114,5 @@ export function registerAgentIpc(getWindow: () => BrowserWindow | null, onConfig
   });
 
   app.on('will-quit', stopAllAgentRuns);
+  app.on('will-quit', closeCodexHistory);
 }

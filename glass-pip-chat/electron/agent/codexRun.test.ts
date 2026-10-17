@@ -1,0 +1,141 @@
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { CodexRpc } from './codexRpc';
+import { runCodexTurn, codexThreadConfig } from './codexRun';
+import type { AgentEvent } from './types';
+import { startUserQuestions } from './userQuestions';
+import { ALLY_BROWSER_INSTRUCTIONS } from './browserContext';
+vi.mock('./codexMigration.js', () => ({ interactiveCodexSession: async (_rpc: unknown, id: string) => id }));
+vi.mock('./userQuestions.js', () => ({ startUserQuestions: vi.fn(async () => ({ config: { url: 'http://localhost:1234/mcp' }, close: vi.fn() })), WATCH_QUESTION_INSTRUCTIONS: 'Ask on the watch.' }));
+afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers(); });
+const opts = { provider: 'codex' as const, cwd: '/work', prompt: 'hello' };
+const flush = async () => { for (let i = 0; i < 12; i++) await Promise.resolve(); };
+
+function server() {
+  const rpc = {
+    onNotification: undefined as CodexRpc['onNotification'],
+    onClose: undefined as CodexRpc['onClose'],
+    onRequest: undefined as CodexRpc['onRequest'],
+    request: vi.fn(async (method: string) => method === 'turn/start' ? { turn: { id: 'turn' } } : { thread: { id: 'thread' } }),
+    close: vi.fn(),
+  };
+  vi.spyOn(CodexRpc, 'connect').mockResolvedValue(rpc as unknown as CodexRpc);
+  return rpc;
+}
+describe('Codex turn lifecycle', () => {
+  it.each(['desktop', 'watch'] as const)('keeps required forms interactive in Full access on %s', async surface => {
+    const rpc = server();
+    const interact = vi.fn(async () => ({ action: 'decline', content: null, _meta: null }));
+    runCodexTurn({ ...opts, permission: 'full' }, () => {}, undefined, interact, surface); await flush();
+    expect(rpc.request).toHaveBeenCalledWith('thread/start', expect.objectContaining({ approvalPolicy: 'on-request', approvalsReviewer: 'auto_review', sandbox: 'danger-full-access' }));
+    const request = { threadId: 'thread', turnId: 'turn', mode: 'form', message: 'Allow this upload?' };
+    expect(await rpc.onRequest?.('mcpServer/elicitation/request', request, 1)).toMatchObject({ action: 'decline' });
+    expect(interact).toHaveBeenCalledOnce();
+    rpc.onNotification?.('turn/completed', { threadId: 'thread', turn: { status: 'completed' } });
+  });
+  it('restores human review when switching away from Full access', () => {
+    for (const permission of ['readonly', 'edit'] as const) {
+      expect(codexThreadConfig({ ...opts, permission }, true)).toMatchObject({
+        approvalPolicy: 'on-request', approvalsReviewer: 'user', sandbox: permission === 'readonly' ? 'read-only' : 'workspace-write',
+      });
+    }
+  });
+  it('enables desktop approvals without attaching the watch question channel', async () => {
+    const rpc = server();
+    vi.mocked(startUserQuestions).mockClear();
+    const interact = vi.fn(async () => ({ action: 'accept', content: {}, _meta: null }));
+    runCodexTurn(opts, () => {}, undefined, interact, 'desktop'); await flush();
+    expect(rpc.request).toHaveBeenCalledWith('thread/start', expect.objectContaining({ approvalPolicy: 'on-request', approvalsReviewer: 'user', sandbox: 'workspace-write' }));
+    expect(startUserQuestions).not.toHaveBeenCalled();
+    expect(await rpc.onRequest?.('mcpServer/elicitation/request', { threadId: 'thread', turnId: 'turn', mode: 'form' }, 1)).toMatchObject({ action: 'accept' });
+    rpc.onNotification?.('turn/completed', { threadId: 'thread', turn: { status: 'completed' } });
+  });
+  it('supplies Chrome context on resume while preserving robot configuration', async () => {
+    const rpc = server();
+    runCodexTurn({ ...opts, sessionId: 'existing', robot: { instructions: 'Robot context', mcpUrl: 'http://localhost:9000/mcp' } }, () => {});
+    await flush();
+    expect(rpc.request).toHaveBeenCalledWith('thread/resume', expect.objectContaining({
+      threadId: 'existing', developerInstructions: ALLY_BROWSER_INSTRUCTIONS + '\n\nRobot context',
+      config: { mcp_servers: { howyouseeme: { url: 'http://localhost:9000/mcp' } } },
+    }));
+    rpc.onNotification?.('turn/completed', { threadId: 'existing', turn: { status: 'completed' } });
+  });
+  it('reports a writer conflict without submitting or retrying the message', async () => {
+    const rpc = server(); const events: AgentEvent[] = [];
+    rpc.request.mockRejectedValueOnce(new Error('thread old already has an active writer'));
+    runCodexTurn({ ...opts, sessionId: 'old' }, event => events.push(event)); await flush();
+    expect(events.at(-1)).toMatchObject({ kind: 'done', isError: true, error: expect.stringContaining('Your message was not sent') });
+    expect(rpc.request.mock.calls.some(([method]) => method === 'turn/start')).toBe(false);
+    expect(rpc.request.mock.calls.map(([method]) => method)).toEqual(['thread/resume']);
+    expect(events.some(event => event.kind === 'tool_start')).toBe(false);
+    expect(rpc.close).toHaveBeenCalledOnce();
+  });
+  it('never replays when turn/start fails after resume', async () => {
+    const rpc = server();
+    rpc.request.mockImplementation(async method => {
+      if (method === 'turn/start') throw new Error('already has an active writer');
+      return { thread: { id: 'old' } } as any;
+    });
+    runCodexTurn({ ...opts, sessionId: 'old' }, () => {}); await flush();
+    expect(rpc.request.mock.calls.map(([method]) => method)).toEqual(['thread/resume', 'turn/start']);
+    expect(rpc.request.mock.calls.filter(([m]) => m === 'turn/start')).toHaveLength(1);
+  });
+  it('routes watch approvals to the user while preserving the selected sandbox', async () => {
+    const rpc = server(); const interact = vi.fn(async () => ({ decision: 'decline' }));
+    runCodexTurn({ ...opts, permission: 'readonly' }, () => {}, undefined, interact); await flush();
+    expect(rpc.request).toHaveBeenCalledWith('thread/start', expect.objectContaining({ approvalPolicy: 'on-request', approvalsReviewer: 'user', sandbox: 'read-only' }));
+    expect(rpc.request).toHaveBeenCalledWith('thread/start', expect.objectContaining({ config: { mcp_servers: { ally_watch: { url: 'http://localhost:1234/mcp' } } }, developerInstructions: ALLY_BROWSER_INSTRUCTIONS + '\n\nAsk on the watch.' }));
+    expect(await rpc.onRequest?.('item/commandExecution/requestApproval', { threadId: 'thread', turnId: 'turn', command: 'test' }, 1)).toEqual({ decision: 'decline' });
+    await expect(rpc.onRequest?.('item/commandExecution/requestApproval', { threadId: 'other' }, 2)).rejects.toThrow('no longer active');
+    expect(interact).toHaveBeenCalledTimes(1);
+    rpc.onNotification?.('turn/completed', { threadId: 'thread', turn: { status: 'completed' } });
+    expect((await vi.mocked(startUserQuestions).mock.results.at(-1)!.value).close).toHaveBeenCalled();
+  });
+  it('aborts an approval when the server resolves or cancels it', async () => {
+    const rpc = server(); let signal: AbortSignal | undefined;
+    const interact = vi.fn((_method, _params, s: AbortSignal) => { signal = s; return new Promise(resolve => s.addEventListener('abort', () => resolve({ decision: 'cancel' }))); });
+    runCodexTurn(opts, () => {}, undefined, interact); await flush();
+    const waiting = rpc.onRequest?.('item/commandExecution/requestApproval', { threadId: 'thread', turnId: 'turn' }, 3);
+    rpc.onNotification?.('serverRequest/resolved', { threadId: 'thread', requestId: 3 });
+    expect(signal?.aborted).toBe(true); expect(await waiting).toEqual({ decision: 'cancel' });
+    rpc.onNotification?.('turn/completed', { threadId: 'thread', turn: { status: 'completed' } });
+  });
+  it('uses structured text/images, releases ownership and completes once', async () => {
+    const rpc = server(); const events: AgentEvent[] = [];
+    runCodexTurn({ ...opts, images: ['/tmp/image.png'] }, e => events.push(e));
+    await flush();
+    expect(rpc.request).toHaveBeenCalledWith('turn/start', { threadId: 'thread', input: [{ type: 'text', text: 'hello' }, { type: 'localImage', path: '/tmp/image.png' }] });
+    rpc.onNotification?.('turn/completed', { threadId: 'thread', turn: { status: 'completed' } });
+    rpc.onClose?.(new Error('closed'));
+    expect(rpc.close).toHaveBeenCalledTimes(1);
+    expect(events.filter(e => e.kind === 'done')).toHaveLength(1);
+  });
+  it('interrupts the actual turn, then force-closes a stalled cancellation', async () => {
+    vi.useFakeTimers(); const rpc = server(); const events: AgentEvent[] = [];
+    const run = runCodexTurn(opts, e => events.push(e));
+    await flush(); run.stop();
+    expect(rpc.request).toHaveBeenCalledWith('turn/interrupt', { threadId: 'thread', turnId: 'turn' }, 3000);
+    await vi.advanceTimersByTimeAsync(4000);
+    expect(rpc.close).toHaveBeenCalledTimes(1);
+    expect(events.at(-1)).toMatchObject({ kind: 'done', sessionId: 'thread' });
+  });
+  it('keeps greetings ephemeral and never resumes their supplied session', async () => {
+    const rpc = server(); const events: AgentEvent[] = [];
+    runCodexTurn({ ...opts, ephemeral: true, sessionId: 'old' }, e => events.push(e));
+    await flush();
+    expect(rpc.request).toHaveBeenCalledWith('thread/start', expect.objectContaining({ ephemeral: true }));
+    expect(rpc.request.mock.calls.some(([m]) => m === 'thread/resume')).toBe(false);
+    expect(events.some(e => e.kind === 'session')).toBe(false);
+    rpc.onNotification?.('turn/completed', { threadId: 'thread', turn: { status: 'completed' } });
+  });
+  it('does not submit a prompt when canceled while initializing', async () => {
+    let connected!: (rpc: CodexRpc) => void;
+    const rpc = server();
+    vi.mocked(CodexRpc.connect).mockReturnValue(new Promise(resolve => { connected = resolve; }));
+    const events: AgentEvent[] = [];
+    const run = runCodexTurn(opts, e => events.push(e)); run.stop();
+    connected(rpc as unknown as CodexRpc); await flush();
+    expect(rpc.request).not.toHaveBeenCalled();
+    expect(rpc.close).toHaveBeenCalledTimes(1);
+    expect(events).toHaveLength(1);
+  });
+});

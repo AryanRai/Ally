@@ -20,7 +20,7 @@ export function watchAgentSessions(changed: (provider: AgentProvider) => void): 
   ] as const) {
     try {
       const watcher = fs.watch(path.join(os.homedir(), folder), { recursive }, (_, name) => {
-        if (!name || String(name).endsWith('.jsonl')) notify(provider);
+        if (!name || String(name).endsWith('.jsonl') || (provider === 'codex' && /\.sqlite(?:-wal)?$/.test(String(name)))) notify(provider);
       });
       watcher.on('error', () => watcher.close());
       watchers.push(watcher);

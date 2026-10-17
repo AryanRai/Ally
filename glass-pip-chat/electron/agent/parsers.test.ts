@@ -50,10 +50,19 @@ describe('ClaudeStreamParser', () => {
   it('reports auth failures once, as an error result', () => {
     const events = feed(new ClaudeStreamParser(), [
       { type: 'assistant', session_id: 's2', message: { model: '<synthetic>', content: [{ type: 'text', text: 'Failed to authenticate' }] } },
-      { type: 'result', session_id: 's2', is_error: true, result: 'Failed to authenticate' },
+      { type: 'result', session_id: 's2', is_error: true, api_error_status: 401, result: 'Failed to authenticate. API Error: 401' },
     ]);
     expect(events.filter(e => e.kind === 'text')).toHaveLength(0);
-    expect(events.at(-1)).toMatchObject({ kind: 'done', isError: true, error: 'Failed to authenticate' });
+    expect(events.at(-1)).toMatchObject({ kind: 'done', isError: true, error: expect.stringContaining('/login') });
+  });
+
+  it('explains execution errors that carry errors[] instead of result', () => {
+    const [done] = feed(new ClaudeStreamParser(), [
+      { type: 'result', subtype: 'error_during_execution', is_error: true, errors: ['No conversation found with session ID: x'] },
+    ]);
+    expect(done).toMatchObject({ kind: 'done', isError: true, error: 'No conversation found with session ID: x' });
+    const [bare] = feed(new ClaudeStreamParser(), [{ type: 'result', subtype: 'error_max_turns', is_error: true }]);
+    expect(bare).toMatchObject({ error: 'Claude Code stopped: error max turns' });
   });
 
   it('ignores subagent traffic', () => {

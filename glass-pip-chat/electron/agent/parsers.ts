@@ -36,6 +36,23 @@ export function extractImages(content: unknown): string[] {
   return out;
 }
 
+/**
+ * Readable text for a failed `result` event. Execution errors carry `errors[]`
+ * instead of `result`; a stale CLI login (401) gets the one fix that works.
+ */
+export function claudeError(e: any): string {
+  const detail = [e.result, ...(Array.isArray(e.errors) ? e.errors : [])]
+    .map(x => (typeof x === 'string' ? x : x?.message ?? ''))
+    .filter(Boolean)
+    .join('\n')
+    .trim();
+  if (e.api_error_status === 401 || /authenticat|oauth|401/i.test(detail)) {
+    return 'Claude Code is not logged in (its saved login expired). Run `claude` in a terminal and use /login, then try again.';
+  }
+  if (detail) return detail;
+  return e.subtype && e.subtype !== 'success' ? `Claude Code stopped: ${e.subtype.replace(/_/g, ' ')}` : 'Claude Code reported an error';
+}
+
 /** `claude -p --output-format stream-json --verbose --include-partial-messages` */
 export class ClaudeStreamParser implements StreamParser {
   sessionId?: string;
@@ -110,7 +127,7 @@ export class ClaudeStreamParser implements StreamParser {
           kind: 'done',
           sessionId: e.session_id,
           isError: !!e.is_error,
-          error: e.is_error ? String(e.result ?? 'Claude Code reported an error') : undefined,
+          error: e.is_error ? claudeError(e) : undefined,
           costUsd: e.total_cost_usd,
           usage: {
             inputTokens: e.usage ? (e.usage.input_tokens ?? 0) + (e.usage.cache_read_input_tokens ?? 0) + (e.usage.cache_creation_input_tokens ?? 0) : undefined,

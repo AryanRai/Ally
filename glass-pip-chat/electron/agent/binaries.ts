@@ -93,6 +93,8 @@ export function launcherFor(bin: string): Launcher {
  */
 export function childEnv(): NodeJS.ProcessEnv {
   const env = { ...process.env };
+  // A launch from Codex must not impersonate the host or attach tools to its chat.
+  for (const key of ['CODEX_INTERNAL_ORIGINATOR_OVERRIDE', 'CODEX_THREAD_ID', 'CODEX_SESSION_ID', 'CODEX_TOOL_CALL_ID', 'CODEX_APP_TOOLS_PIPE_PATH']) delete env[key];
   const fromClaudeHost = !!env.CLAUDE_CODE_ENTRYPOINT || !!env.CLAUDECODE;
   for (const key of Object.keys(env)) {
     if (key === 'CLAUDECODE' || key.startsWith('CLAUDE_CODE_') || key.startsWith('CLAUDE_AGENT_SDK') ||

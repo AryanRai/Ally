@@ -54,4 +54,4 @@ You may add up to 6 optional components from this catalog:
 {"type":"timer","title":"...","seconds":300}
 {"type":"actions","title":"...","actions":[{"label":"...","prompt":"follow-up message"}]}
 {"type":"progress","title":"...","body":"...","progress":0.5}
-Only use a widget when useful. A timer starts only after the user taps Start; it alerts only while its card is open. Actions send a follow-up prompt only when tapped. Checklists are local. Never claim a reminder, notification, or external action was scheduled unless a real tool actually did it. Do not invent live data. This is a dedicated watch conversation, separate from other open desktop chats.`;
+Only use a widget when useful. A timer starts only after the user taps Start; it alerts only while its card is open. Actions send a follow-up prompt only when tapped. Checklists are local. Never claim a reminder, notification, or external action was scheduled unless a real tool actually did it. Do not invent live data. The user is viewing this conversation on a watch. Continue its existing context.`;

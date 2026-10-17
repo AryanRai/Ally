@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { codexArgs, robotMcpServers } from './runner';
+import { robotMcpServers } from './runner';
+import { codexThreadConfig } from './codexRun';
 
 const robot = {
   instructions: 'be a robot',
@@ -18,9 +19,7 @@ describe('robot MCP servers', () => {
   });
 
   it('passes both servers to Codex as config overrides', () => {
-    const args = codexArgs({ provider: 'codex', prompt: 'hi', cwd: '.', robot });
-    expect(args).toContain('mcp_servers.howyouseeme.url="http://localhost:8090/mcp"');
-    expect(args).toContain('mcp_servers.droidcore.url="http://localhost:8091/mcp"');
-    expect(args[args.length - 1]).toBe('-');
+    const config = codexThreadConfig({ provider: 'codex', prompt: 'hi', cwd: '.', robot });
+    expect(config).toMatchObject({ config: { mcp_servers: { howyouseeme: { url: robot.mcpUrl }, droidcore: { url: robot.motionMcpUrl } } } });
   });
 });
