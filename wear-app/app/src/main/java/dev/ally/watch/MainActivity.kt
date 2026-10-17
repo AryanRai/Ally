@@ -16,6 +16,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.foundation.*
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
@@ -89,12 +90,16 @@ private fun WatchApp(model: WatchViewModel, pulse: (Boolean) -> Unit, hasMic: ()
     val scope = rememberCoroutineScope()
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     var chats by rememberSaveable { mutableStateOf(false) }
+    var quickChats by rememberSaveable { mutableStateOf(false) }
     val openChats = { model.listChats(); chats = true }
+    val openQuickChats = { quickChats = true }
     var settings by rememberSaveable { mutableStateOf(false) }
     var appearance by rememberSaveable { mutableStateOf(false) }
     var textInput by rememberSaveable { mutableStateOf(false) }
-    BackHandler(chats || settings || textInput || appearance) {
+    BackHandler(chats || quickChats || settings || textInput || appearance) {
         if (appearance) appearance = false
+        else if (chats) chats = false
+        else if (quickChats) quickChats = false
         else { chats = false; settings = false; textInput = false }
     }
     var micHint by remember { mutableStateOf(false) }
@@ -116,12 +121,19 @@ private fun WatchApp(model: WatchViewModel, pulse: (Boolean) -> Unit, hasMic: ()
     }
     LaunchedEffect(lifecycle) { lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
         var ticks = 0
-        while (true) { delay(2500); model.refreshSelected(); if (++ticks % 6 == 0) model.refresh() }
+        while (true) {
+            delay(2500)
+            if (!quickChats && !chats && !settings && !appearance && !textInput) {
+                model.refreshSelected()
+                if (++ticks % 6 == 0) model.refresh()
+            }
+        }
     } }
     val pendingApproval = state.approval
     CompositionLocalProvider(LocalBezelHaptics provides !state.muted) { when {
         pendingApproval != null -> ApprovalScreen(pendingApproval, state.answeringApproval, state.approvalError, model::answerApproval)
-        chats -> ChatPicker(model, state, { chats = false })
+        chats -> ChatPicker(model, state, { chats = false }, { chats = false; quickChats = false; scope.launch { pager.scrollToPage(0) } })
+        quickChats -> QuickChats(model, state, { quickChats = false }, openChats, { quickChats = false; scope.launch { pager.scrollToPage(0) } })
         appearance -> AppearanceScreen(state.look, model::appearance, { appearance = false })
         settings -> SettingsScreen(model, state, { settings = false }, { settings = false; openChats() }, { appearance = true })
         textInput -> TextEntry(if(state.turnId != null) "Add input" else "Ask Ally", "What’s on your mind?", { text -> model.send(text); textInput = false }, { textInput = false })
@@ -130,14 +142,27 @@ private fun WatchApp(model: WatchViewModel, pulse: (Boolean) -> Unit, hasMic: ()
             HorizontalPager(pager, userScrollEnabled = state.phase != Phase.RECORDING && !state.inputRecording) { page ->
                 Box(Modifier.fillMaxSize().hierarchicalFocusGroup(pager.currentPage == page && !pager.isScrollInProgress)) {
                 if (page == 0) InputScreen(if(state.inputRecording) state.copy(phase=Phase.RECORDING,detail=state.inputStatus) else if(state.inputSending) state.copy(phase=Phase.UPLOADING,detail=state.inputStatus) else if(state.inputStatus.isNotBlank()) state.copy(detail=state.inputStatus) else state, micHint, start, model::finishRecording, model::cancelRecording,
-                    { textInput = true }, { settings = true }, { if (state.speaking) model.stopSpeaking() else model.mute() }, model::retry, openChats,
+                    { textInput = true }, { settings = true }, { if (state.speaking) model.stopSpeaking() else model.mute() }, model::retry, openQuickChats,
                     pager.currentPage == 0 && !pager.isScrollInProgress,
                     { scope.launch { pager.animateScrollToPage(1) } })
-                else HistoryScreen(state, model::send, { scope.launch { pager.animateScrollToPage(0) } }, pulse, openChats, model::olderMessages, model::readReply, model::stopSpeaking)
+                else HistoryScreen(state, model::send, { scope.launch { pager.animateScrollToPage(0) } }, pulse, openQuickChats, model::olderMessages, model::readReply, model::stopSpeaking)
                 }
             }
-            if (pager.currentPage == 0) Row(Modifier.align(Alignment.BottomCenter).padding(bottom = 8.dp), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-                repeat(2) { Box(Modifier.size(if (pager.currentPage == it) 5.dp else 4.dp).background(if (pager.currentPage == it) White else Muted.copy(alpha = .35f), CircleShape)) }
+            if (pager.currentPage == 0 && state.phase != Phase.RECORDING && !state.inputRecording) {
+                val threshold = with(androidx.compose.ui.platform.LocalDensity.current) { 18.dp.toPx() }
+                val open by rememberUpdatedState(openQuickChats)
+                Column(Modifier.align(Alignment.BottomCenter).padding(bottom = 3.dp).width(130.dp).height(32.dp)
+                    .pointerInput(Unit) {
+                        var distance = 0f
+                        detectVerticalDragGestures(onDragStart = { distance = 0f }, onVerticalDrag = { change, amount ->
+                            change.consume(); distance += amount
+                            if (distance < -threshold) { distance = Float.POSITIVE_INFINITY; open() }
+                        })
+                    }.clickable(onClick = openQuickChats).semantics { contentDescription = "Swipe up or tap to switch chats" },
+                    horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+                    Box(Modifier.width(18.dp).height(2.dp).background(Muted, CircleShape))
+                    Text("Swipe up · Chats", color = Muted, fontSize = 9.sp, modifier = Modifier.padding(top = 3.dp))
+                }
             }
         }
     } }
@@ -149,12 +174,11 @@ private fun InputScreen(state: WatchState, micHint: Boolean, start: () -> Unit, 
     active: Boolean, replies: () -> Unit) {
     val canTalk = !state.externalRunning && !state.muted && state.phase !in setOf(Phase.UPLOADING)
     BoxWithConstraints(Modifier.fillMaxSize().bezelReplies(active && state.phase != Phase.RECORDING, replies)) {
-        val orbSize = maxHeight * .34f
-        Column(Modifier.fillMaxSize().padding(horizontal = 24.dp, vertical = 16.dp), horizontalAlignment = Alignment.CenterHorizontally,
+        val orbSize = maxHeight * .25f
+        Column(Modifier.fillMaxSize().padding(start = 24.dp, end = 24.dp, top = 8.dp, bottom = 34.dp), horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center) {
             Text("ALLY", fontFamily = Tanker, fontSize = 17.sp, lineHeight = 19.sp, letterSpacing = 2.sp, modifier = Modifier.clickable(onClick = chats).semantics { contentDescription = "Choose chat" })
-            Text("CHATS ▾ · ${state.chatTitle}", fontFamily = Mono, color = Muted, fontSize = 9.sp, lineHeight = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.clickable(onClick = chats).padding(vertical = 4.dp))
-            Spacer(Modifier.height(3.dp))
+            Text("CHATS ▾ · ${state.chatTitle}", fontFamily = Mono, color = Muted, fontSize = 9.sp, lineHeight = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.clickable(onClick = chats).padding(vertical = 2.dp))
             Orb(state.look, if (state.externalRunning) Phase.THINKING else state.phase, state.microphoneLevel, canTalk, orbSize.value, if (state.phase in setOf(Phase.OFFLINE, Phase.ERROR)) retry else start, finish, cancel)
             Text(when {
                 state.externalRunning -> "Thinking…"
@@ -171,7 +195,7 @@ private fun InputScreen(state: WatchState, micHint: Boolean, start: () -> Unit, 
             }, color = Color.White, fontSize = 14.sp, lineHeight = 18.sp)
             Text(if (state.externalRunning) "Working in another app" else if (micHint) "Allow microphone, then hold again" else if (state.phase == Phase.RECORDING && state.liveTranscript.isNotBlank()) state.liveTranscript else if (state.detail == "Hold to talk") "Swipe or turn bezel for replies" else state.detail, color = Muted,
                 fontSize = 10.sp, lineHeight = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center,
-                modifier = Modifier.heightIn(min = 20.dp).padding(horizontal = 5.dp))
+                modifier = Modifier.heightIn(min = 16.dp).padding(horizontal = 5.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
                 MiniButton("Aa", "Type a message", type, state.phase !in setOf(Phase.RECORDING, Phase.UPLOADING))
                 MiniButton(if (state.speaking) "■" else if (state.muted) "▶" else "Ⅱ", if (state.speaking) "Stop audio" else if (state.muted) "Resume microphone and haptics" else "Pause microphone and haptics", mute)
@@ -230,14 +254,14 @@ internal fun ActivityRow(step: WatchStep) {
 @Composable
 internal fun GeneratedCard(card: WatchCard, send: (String) -> Unit, pulse: (Boolean) -> Unit, enabled: Boolean) {
     Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(6.dp)).background(Panel).border(1.dp, Hairline, RoundedCornerShape(6.dp)).padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(card.title, color = White, fontSize = 13.sp, lineHeight = 17.sp)
-        if (card.body.isNotBlank()) Text(card.body, color = Color.White, fontSize = 12.sp, lineHeight = 16.sp)
+        if (card.title.isNotBlank()) RichReply(card.title, title = true)
+        if (card.body.isNotBlank()) RichReply(card.body)
         when (card.type) {
             "checklist" -> card.items.forEach { item ->
                 var checked by rememberSaveable(item) { mutableStateOf(false) }
                 Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).clickable { checked = !checked }.padding(vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
                     Text(if (checked) "✓" else "○", color = White)
-                    Text(item, color = if (checked) Muted else Color.White, fontSize = 12.sp, lineHeight = 16.sp)
+                    Box(Modifier.weight(1f)) { RichReply(item) }
                 }
             }
             "actions" -> card.actions.forEach { action -> Button(onClick = { send(action.prompt) }, enabled = enabled, modifier = Modifier.fillMaxWidth()) { Text(action.label, fontSize = 12.sp) } }

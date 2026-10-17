@@ -26,7 +26,7 @@ import androidx.compose.ui.unit.sp
 import androidx.wear.compose.material3.Button
 
 @Composable
-internal fun ChatPicker(model: WatchViewModel, state: WatchState, back: () -> Unit) {
+internal fun ChatPicker(model: WatchViewModel, state: WatchState, back: () -> Unit, chosen: () -> Unit = back) {
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     LaunchedEffect(lifecycle) {
         lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
@@ -42,8 +42,8 @@ internal fun ChatPicker(model: WatchViewModel, state: WatchState, back: () -> Un
         item { Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             Text("‹", fontSize = 22.sp, modifier = Modifier.clickable(onClick = back).semantics { contentDescription = "Back" }.padding(8.dp))
             Text("Chats", fontFamily = Tanker, fontSize = 20.sp)
-            Text("+", color = if (model.busy) Muted else White, fontSize = 22.sp,
-                modifier = Modifier.clickable(enabled = !model.busy) { model.newChat(state.chatProvider); back() }.semantics { contentDescription = "New chat" }.padding(8.dp))
+            Text("+", color = if (model.canSwitchChat) White else Muted, fontSize = 22.sp,
+                modifier = Modifier.clickable(enabled = model.canSwitchChat) { model.newChat(state.chatProvider); chosen() }.semantics { contentDescription = "New chat" }.padding(8.dp))
         } }
         item { Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             listOf("codex", "claude").forEach { provider ->
@@ -51,17 +51,17 @@ internal fun ChatPicker(model: WatchViewModel, state: WatchState, back: () -> Un
                     fontSize = 12.sp, modifier = Modifier.clip(RoundedCornerShape(12.dp)).background(Panel).clickable { model.listChats(provider) }.padding(10.dp))
             }
         } }
-        if (model.busy) item { Text("Finish this turn before switching chats", color = Muted, fontSize = 10.sp) }
+        if (!model.canSwitchChat) item { Text("Finish this turn or resolve your draft to switch chats", color = Muted, fontSize = 10.sp) }
         item { Text(if (state.chatProvider == "codex") "Codex chats" else "Claude chats", fontFamily = Tanker, fontSize = 20.sp) }
         item { Field(query, { query = it }, "Find chat or folder") }
         item { Text("RUNNING · ${state.running.size}", fontFamily = Mono, color = Amber, fontSize = 10.sp, modifier = Modifier.fillMaxWidth()) }
         items(state.running.filter { it.title.contains(query, true) || it.cwd.contains(query, true) }, key = { "running:${it.id}" }) { chat ->
-            ChatChoice(chat, state.chatId, !model.busy) { model.selectChat(chat.id); back() }
+            ChatChoice(chat, state.chatId, model.canSwitchChat) { model.selectChat(chat.id); chosen() }
         }
         if (state.runningStatus.isNotBlank()) item { Text(state.runningStatus, color = Muted, fontSize = 10.sp) }
         if (query.isBlank() && state.chats.isNotEmpty()) {
             item { Text("RECENT", fontFamily = Mono, color = Muted, fontSize = 10.sp, modifier = Modifier.fillMaxWidth()) }
-            items(state.chats.sortedByDescending { it.updatedAt }.take(3), key = { "recent:${it.id}" }) { chat -> ChatChoice(chat, state.chatId, !model.busy) { model.selectChat(chat.id); back() } }
+            items(state.chats.sortedByDescending { it.updatedAt }.take(3), key = { "recent:${it.id}" }) { chat -> ChatChoice(chat, state.chatId, model.canSwitchChat) { model.selectChat(chat.id); chosen() } }
         }
         item { Text("PROJECTS & FOLDERS", fontFamily = Mono, color = Muted, fontSize = 10.sp, modifier = Modifier.fillMaxWidth()) }
         folders.forEach { folder ->
@@ -72,7 +72,7 @@ internal fun ChatPicker(model: WatchViewModel, state: WatchState, back: () -> Un
                     if (folder.parent.isNotBlank()) Text(folder.parent, color = Muted, fontSize = 9.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
-            if (open) items(folder.chats, key = { "folder-chat:${it.id}" }) { chat -> ChatChoice(chat, state.chatId, !model.busy) { model.selectChat(chat.id); back() } }
+            if (open) items(folder.chats, key = { "folder-chat:${it.id}" }) { chat -> ChatChoice(chat, state.chatId, model.canSwitchChat) { model.selectChat(chat.id); chosen() } }
         }
         if (query.isNotBlank() && folders.isEmpty()) item { Text("No matching chats in the loaded list", color = Muted, fontSize = 11.sp) }
         if (state.loadingChats) item { Text("Loading chats…", color = Muted, fontSize = 11.sp) }
@@ -84,9 +84,9 @@ internal fun ChatPicker(model: WatchViewModel, state: WatchState, back: () -> Un
 }
 
 @Composable
-private fun ChatChoice(chat: WatchChat, selected: String?, enabled: Boolean, choose: () -> Unit) {
+internal fun ChatChoice(chat: WatchChat, selected: String?, enabled: Boolean, choose: () -> Unit) {
     Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(if (chat.id == selected) White.copy(alpha = .12f) else Panel)
-        .clickable(enabled = enabled, onClick = choose).padding(10.dp)) {
+        .clickable(enabled = enabled, onClick = choose).heightIn(min = 48.dp).padding(10.dp)) {
         Text((if (chat.id == selected) "✓ " else "") + chat.title, color = White, fontSize = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
         Text("${if (chat.provider == "codex") "Codex" else "Claude"} · " + chat.cwd.replace('\\', '/').substringAfterLast('/').ifBlank { "Other chats" }, color = Muted, fontSize = 9.sp, maxLines = 1)
     }
@@ -124,7 +124,7 @@ internal fun HistoryScreen(state: WatchState, send: (String) -> Unit, back: () -
                     modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(6.dp)).background(Panel).border(1.dp, Hairline, RoundedCornerShape(6.dp)).padding(10.dp))
                 else {
                     message.steps.forEach { step -> key(message.id, step.id) { ActivityRow(step) } }
-                    if (message.reply.text.isNotBlank()) Text(message.reply.text, fontSize = 13.sp, lineHeight = 18.sp)
+                    if (message.reply.text.isNotBlank()) RichReply(message.reply.text)
                     message.reply.cards.forEachIndexed { index, card -> key(message.id, index, card) { GeneratedCard(card, send, pulse, !working && !state.loadingHistory && state.phase != Phase.RECORDING) } }
                     val spokenText = remember(message.reply) { message.reply.readAloudText() }
                     if (spokenText.isNotBlank()) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
@@ -139,7 +139,7 @@ internal fun HistoryScreen(state: WatchState, send: (String) -> Unit, back: () -
         if (state.liveText.isNotBlank()) item(key = "live-reply") {
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(if (working) "Reply in progress" else "Partial reply", color = Muted, fontSize = 10.sp)
-                Text(state.liveText, fontSize = 13.sp, lineHeight = 18.sp)
+                RichReply(state.liveText)
             }
         }
         if (working) item {

@@ -38,6 +38,7 @@ class WatchViewModel(application: Application) : AndroidViewModel(application) {
     private var requestId: String? = null
     var foreground = false
     val busy get() = mutable.value.inputRecording || mutable.value.inputSending || mutable.value.loadingHistory || mutable.value.phase in setOf(Phase.RECORDING, Phase.UPLOADING, Phase.THINKING)
+    val canSwitchChat get() = !busy && !prefs.contains("turn") && inputText == null
 
     init {
         inputText?.let { text -> mutable.update { it.copy(inputDraft = text, inputStatus = "Input delivery unconfirmed · retry") } }
@@ -159,6 +160,21 @@ class WatchViewModel(application: Application) : AndroidViewModel(application) {
         } catch (e: CancellationException) { throw e } catch (e: Exception) {
             mutable.update { it.copy(running = emptyList(), runningStatus = "Live status unavailable") }
         }
+    }
+    suspend fun refreshQuickChats() = supervisorScope {
+        mutable.update { it.copy(loadingQuickChats = true, quickChatsError = "") }
+        try {
+            val results = listOf("codex", "claude").map { provider -> async {
+                try { Result.success(ChatParser.chats(api.request("/v1/chats?provider=$provider&offset=0"))) }
+                catch (e: CancellationException) { throw e }
+                catch (e: Exception) { Result.failure<List<WatchChat>>(e) }
+            } }.awaitAll()
+            mutable.update { current -> current.copy(
+                quickChats = results.flatMap { it.getOrDefault(emptyList()) }
+                    .let { if (results.all { r -> r.isFailure }) current.quickChats else it }.distinctBy { it.id },
+                quickChatsError = if (results.any { it.isFailure }) "Some recent chats couldn’t load. Tap to retry." else "",
+            ) }
+        } finally { mutable.update { it.copy(loadingQuickChats = false) } }
     }
     fun listChats(provider: String = mutable.value.provider, more: Boolean = false) {
         catalogWork?.cancel()
