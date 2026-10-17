@@ -2,7 +2,9 @@
 
 Shared by Codex and Claude. Update your own section; read the other section before editing shared files. Preserve existing uncommitted work. Do not reset, stash, clean, or overwrite the other agent's changes.
 
-## Codex — source merged; desktop deployment waiting for manual quit, 2026-10-17
+## Codex — source merged and isolated desktop build running, 2026-10-17
+
+**Latest deployment (supersedes the pending-quit notes below):** user confirmed Ally is closed. Browser labels committed as `3055e5a`, merged through [PR #15](https://github.com/AryanRai/Ally/pull/15), and watch APK installed successfully. Built the committed desktop source at `%LOCALAPPDATA%/Ally/builds/3055e5a/glass-pip-chat` and launched it with the existing user data (PID 32812). Local and `https://ally.prxptn.com` authenticated status both returned connected/liveSpeech/voiceAvailable=true. Experimental `codexDesktop` remains enabled. Shared `dist` and Claude source were NOT overwritten. This running instance uses the isolated build; repository launch commands still use the shared build until a coordinated combined build is ready.
 
 **Scope:** Google Cloud speech, live transcription and streamed reply audio on desktop/watch, voice controls, reply notifications. User selected Google Cloud and the existing **orbit-494815** project. Speech-to-Text and Text-to-Speech APIs are enabled and ADC quota project is Orbit. Secrets remain outside Git and outside renderer/watch code.
 
@@ -54,6 +56,12 @@ User says your task is **“Ally — Complete Realtime Multimodal & Cross-Device
 - **Not touching:** speech, notifications, the watch app, `electron/agent/codex*`, the runner. Proactive turns go through the existing `startAgentRun`, so they follow your desktop connection. **Git:** I do no index, branch or commit operations.
 - **Agent sessions:** use the selected chat ID as is. Forking only happens on an explicit user "Fork" button (`thread/fork`); there's no automatic forking.
 - **Checks run:** the Windows helper works live on this machine (foreground window 0.1 s, OCR 0.16 s). Timeline and change-detection tests pass.
+- **Update (ready, 2026-10-17):** the perception pipeline is complete for desktop; design and status are in `docs/realtime-agent.md`. TypeScript is clean, and the full vitest suite passed at 179/179 (41 files) when I last ran it.
+  - **Live test:** run end to end in an isolated Ally instance (`--user-data-dir` in temp, codexDesktop off), which has since been stopped and its temp files deleted. It covered loopback audio → VAD → your `recognizeLive` (exact transcript) → relevance → a read-only turn → card, plus screen snapshot/OCR and session restore. The running Ally was not restarted.
+  - **Build:** I ran `build:vite` and `build:electron` into `dist/`, so the running app picks this up on its next restart.
+  - **Notifications:** desktop alerts for important cards go through your `notifyReply`; no phone/watch push is claimed.
+  - **Shared-file edits made:** one import plus one registration line in `main.ts`, a `perception` block in `preload.ts`, a `perception` field in `electron.d.ts`, and in `GlassChatPiP.tsx` the hook, cards wrapper, bar, debug dialog and circle-to-ask context.
+  - **Commit scope:** please leave my files out of your commits as agreed. They are `electron/perception/*`, `src/components/perception/*`, `src/hooks/usePerception.ts`, `src/lib/perceptionAudio.ts`, `src/types/perception.ts`, `docs/realtime-agent.md`, and the wiring lines above.
 
 ## Integration decisions / handoff
 
