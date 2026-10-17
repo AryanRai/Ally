@@ -10,6 +10,17 @@ data class WatchCard(
 )
 data class WatchAction(val label: String, val prompt: String)
 data class WatchReply(val text: String, val cards: List<WatchCard>)
+data class WatchStep(val id: String, val name: String, val status: String, val detail: String) {
+    val label: String get() {
+        val tool = name.substringAfterLast("__").replace('_', ' ')
+        return when (status) {
+            "running" -> "Running $tool"
+            "error" -> "Failed · $tool"
+            "interrupted" -> "Interrupted · $tool"
+            else -> "Ran $tool"
+        }
+    }
+}
 data class WatchState(
     val phase: Phase = Phase.OFFLINE,
     val provider: String = "codex",
@@ -17,10 +28,34 @@ data class WatchState(
     val detail: String = "Connecting to Ally…",
     val transcript: String = "",
     val reply: WatchReply = WatchReply("", emptyList()),
+    val steps: List<WatchStep> = emptyList(),
+    val usage: String = "",
     val turnId: String? = null,
     val muted: Boolean = false,
     val readySequence: Int = 0,
 )
+
+object ActivityParser {
+    fun steps(json: JSONObject): List<WatchStep> {
+        val array = json.optJSONArray("steps") ?: return emptyList()
+        return (maxOf(0, array.length() - 24) until array.length()).mapNotNull { i ->
+            val step = array.optJSONObject(i) ?: return@mapNotNull null
+            val status = step.optString("status")
+            if (status !in setOf("running", "done", "error", "interrupted")) return@mapNotNull null
+            WatchStep(step.optString("id").take(160), step.optString("name").take(100), status, step.optString("detail").take(3202))
+        }
+    }
+    fun usage(json: JSONObject): String {
+        val usage = json.optJSONObject("usage") ?: return ""
+        val parts = mutableListOf<String>()
+        for ((key, label) in listOf("inputTokens" to "in", "outputTokens" to "out")) {
+            if (usage.has(key) && !usage.isNull(key)) usage.optLong(key, -1).takeIf { it >= 0 }?.let { parts += "$it $label" }
+        }
+        if (usage.has("durationMs")) usage.optLong("durationMs", -1).takeIf { it >= 0 }?.let { parts += "${it / 1000}s" }
+        if (usage.has("costUsd")) usage.optDouble("costUsd", -1.0).takeIf { it.isFinite() && it >= 0 }?.let { parts += "$" + String.format(java.util.Locale.US, "%.3f", it) }
+        return parts.joinToString(" · ")
+    }
+}
 
 /** Explicit allowlist: backend data never becomes executable code or HTML. */
 object CardParser {

@@ -33,6 +33,9 @@ class WatchViewModel(application: Application) : AndroidViewModel(application) {
         runCatching { JSONObject(prefs.getString("reply", "{}")!!) }.getOrNull()?.let { saved ->
             mutable.update { it.copy(reply = CardParser.parse(saved)) }
         }
+        runCatching { JSONObject(prefs.getString("activity", "{}")!!) }.getOrNull()?.let { saved ->
+            mutable.update { it.copy(steps = ActivityParser.steps(saved), usage = ActivityParser.usage(saved), transcript = saved.optString("transcript")) }
+        }
         val savedTurn = prefs.getString("turn", null)
         if (savedTurn != null) work = viewModelScope.launch { poll(savedTurn) } else refresh()
     }
@@ -59,9 +62,9 @@ class WatchViewModel(application: Application) : AndroidViewModel(application) {
     fun provider(value: String) {
         if (busy || prefs.contains("turn")) return
         lastText = null; lastAudio = null; requestId = null
-        prefs.edit().putString("provider", value).remove("reply").apply()
+        prefs.edit().putString("provider", value).remove("reply").remove("activity").apply()
         mutable.update { it.copy(provider = value, context = "Watch · ${if (value == "codex") "Codex" else "Claude"}",
-            reply = WatchReply("", emptyList()), transcript = "", turnId = null, phase = Phase.IDLE, detail = "Hold to talk") }
+            reply = WatchReply("", emptyList()), steps = emptyList(), usage = "", transcript = "", turnId = null, phase = Phase.IDLE, detail = "Hold to talk") }
     }
     fun mute() {
         val muted = !mutable.value.muted
@@ -78,7 +81,8 @@ class WatchViewModel(application: Application) : AndroidViewModel(application) {
     }
     fun finishRecording() {
         if (mutable.value.phase != Phase.RECORDING) return
-        mutable.update { it.copy(phase = Phase.UPLOADING, detail = "Sending your voice…") }
+        clearReply()
+        mutable.update { it.copy(phase = Phase.UPLOADING, transcript = "", detail = "Sending your voice…") }
         work = viewModelScope.launch {
             try {
                 val audio = voice.stop()
@@ -94,6 +98,7 @@ class WatchViewModel(application: Application) : AndroidViewModel(application) {
     }
     fun send(text: String) {
         if (busy || text.isBlank()) return
+        clearReply()
         lastText = text.take(4000); lastAudio = null; requestId = UUID.randomUUID().toString()
         mutable.update { it.copy(phase = Phase.UPLOADING, transcript = text, detail = "Sending…") }
         work = viewModelScope.launch { try { submit(lastText, null) } catch (e: Exception) { fail(e) } }
@@ -105,6 +110,10 @@ class WatchViewModel(application: Application) : AndroidViewModel(application) {
         if (lastText == null && lastAudio == null) { mutable.update { it.copy(phase = Phase.OFFLINE) }; refresh(); return }
         mutable.update { it.copy(phase = Phase.UPLOADING, detail = "Retrying…") }
         work = viewModelScope.launch { try { submit(lastText, lastAudio) } catch (e: Exception) { fail(e) } }
+    }
+    private fun clearReply() {
+        prefs.edit().remove("reply").remove("activity").apply()
+        mutable.update { it.copy(reply = WatchReply("", emptyList()), steps = emptyList(), usage = "", turnId = null) }
     }
     private suspend fun submit(text: String?, audio: ByteArray?) {
         val provider = mutable.value.provider
@@ -121,11 +130,11 @@ class WatchViewModel(application: Application) : AndroidViewModel(application) {
             repeat(240) {
                 val result = api.request("/v1/turns/$id")
                 result.optString("transcript").takeIf { it.isNotBlank() }?.let { lastText = it }
-                mutable.update { it.copy(transcript = result.optString("transcript", it.transcript), detail = result.optString("activity", "Thinking…")) }
+                mutable.update { it.copy(transcript = result.optString("transcript", it.transcript), detail = result.optString("activity", "Thinking…"), steps = ActivityParser.steps(result), usage = ActivityParser.usage(result)) }
                 when (result.optString("status")) {
                     "done" -> {
                         val json = result.getJSONObject("reply")
-                        prefs.edit().remove("turn").putString("reply", json.toString()).apply()
+                        prefs.edit().remove("turn").putString("reply", json.toString()).putString("activity", JSONObject().put("steps", result.optJSONArray("steps")).put("usage", result.optJSONObject("usage")).put("transcript", result.optString("transcript")).toString()).apply()
                         mutable.update { it.copy(phase = Phase.READY, reply = CardParser.parse(json), detail = "Response ready", readySequence = it.readySequence + 1) }
                         if (!foreground && !mutable.value.muted) WatchNotifications.show(getApplication(), "Ally has your answer", json.optString("text"))
                         return

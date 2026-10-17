@@ -1,11 +1,38 @@
 export interface WatchReply { text: string; components: Record<string, unknown>[] }
 const short = (s: unknown, max: number) => typeof s === 'string' ? s.slice(0, max) : '';
 
+/** CLI text can include commentary before the final structured answer. */
+function lastReplyObject(raw: string): unknown {
+  let start = -1, depth = 0, quoted = false, escaped = false;
+  let reply: unknown;
+  for (let i = 0; i < raw.length; i++) {
+    const char = raw[i];
+    if (start < 0) {
+      if (char === '{') { start = i; depth = 1; }
+      continue;
+    }
+    if (quoted) {
+      if (escaped) escaped = false;
+      else if (char === '\\') escaped = true;
+      else if (char === '"') quoted = false;
+    } else if (char === '"') quoted = true;
+    else if (char === '{') depth++;
+    else if (char === '}' && --depth === 0) {
+      try {
+        const candidate = JSON.parse(raw.slice(start, i + 1));
+        if (typeof candidate?.text === 'string') reply = candidate;
+      } catch { /* Plain commentary can contain braces. */ }
+      start = -1;
+    }
+  }
+  return reply;
+}
+
 /** Never execute agent-authored UI. Only this small data catalog crosses the bridge. */
 export function parseWatchReply(raw: string): WatchReply {
   const plain = raw.trim().replace(/^```(?:json)?\s*/, '').replace(/\s*```$/, '');
   let value: any;
-  try { value = JSON.parse(plain); } catch { return { text: raw.slice(0, 12000), components: [] }; }
+  try { value = JSON.parse(plain); } catch { value = lastReplyObject(plain); }
   if (!value || typeof value !== 'object' || typeof value.text !== 'string') return { text: raw.slice(0, 12000), components: [] };
   const components: Record<string, unknown>[] = [];
   for (const c of (Array.isArray(value.components) ? value.components : []).slice(0, 6)) {
@@ -20,7 +47,7 @@ export function parseWatchReply(raw: string): WatchReply {
   return { text: value.text.slice(0, 12000), components };
 }
 
-export const WATCH_INSTRUCTIONS = `You are Ally on a round smartwatch. Keep answers concise and glanceable. Reply with one JSON object, without markdown fences: {"text":"your answer","components":[]}.
+export const WATCH_INSTRUCTIONS = `You are Ally on a round smartwatch. Keep answers concise and glanceable. Your final answer must be one JSON object, without markdown fences: {"text":"your answer","components":[]}. If you give progress commentary before tools, use plain text; reserve the JSON object for the final answer.
 You may add up to 6 optional components from this catalog:
 {"type":"card","title":"...","body":"..."}
 {"type":"checklist","title":"...","items":["..."]}

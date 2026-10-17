@@ -28,7 +28,6 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -48,16 +47,11 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.wear.compose.material3.Button
 import androidx.wear.compose.material3.MaterialTheme
-import androidx.wear.compose.material3.Text
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.cos
 import kotlin.math.sin
 
-private val Ink = Color(0xFF070D12)
-private val Mint = Color(0xFF91E8D1)
-private val Muted = Color(0xFF8B9DA7)
-private val Panel = Color(0xFF142129)
 
 class MainActivity : ComponentActivity() {
     private val model: WatchViewModel by viewModels()
@@ -69,7 +63,7 @@ class MainActivity : ComponentActivity() {
             val token = intent.getStringExtra("token")
             if (endpoint != null && token != null) model.configure(endpoint, token)
         }
-        setContent { MaterialTheme(colorScheme = MaterialTheme.colorScheme.copy(primary = Mint, onPrimary = Ink)) {
+        setContent { MaterialTheme(colorScheme = MaterialTheme.colorScheme.copy(primary = White, onPrimary = Ink)) {
             WatchApp(model, ::pulse, { checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED })
         } }
     }
@@ -108,13 +102,14 @@ private fun WatchApp(model: WatchViewModel, pulse: (Boolean) -> Unit, hasMic: ()
         settings -> SettingsScreen(model, state, { settings = false })
         textInput -> TextEntry("Ask Ally", "What’s on your mind?", { text -> model.send(text); textInput = false }, { textInput = false })
         else -> Box(Modifier.fillMaxSize().background(Ink)) {
+            PresenceGlow(state.phase in setOf(Phase.RECORDING, Phase.UPLOADING, Phase.THINKING))
             HorizontalPager(pager, userScrollEnabled = state.phase != Phase.RECORDING) { page ->
                 if (page == 0) InputScreen(state, micHint, start, model::finishRecording, model::cancelRecording,
                     { textInput = true }, { settings = true }, { model.mute() }, model::retry)
                 else OutputScreen(state, model::send, { scope.launch { pager.animateScrollToPage(0) } }, pulse)
             }
-            Row(Modifier.align(Alignment.BottomCenter).padding(bottom = 8.dp), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-                repeat(2) { Box(Modifier.size(if (pager.currentPage == it) 5.dp else 4.dp).background(if (pager.currentPage == it) Mint else Muted.copy(alpha = .35f), CircleShape)) }
+            if (pager.currentPage == 0) Row(Modifier.align(Alignment.BottomCenter).padding(bottom = 8.dp), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                repeat(2) { Box(Modifier.size(if (pager.currentPage == it) 5.dp else 4.dp).background(if (pager.currentPage == it) White else Muted.copy(alpha = .35f), CircleShape)) }
             }
         }
     }
@@ -128,8 +123,8 @@ private fun InputScreen(state: WatchState, micHint: Boolean, start: () -> Unit, 
         val orbSize = maxHeight * .34f
         Column(Modifier.fillMaxSize().padding(horizontal = 24.dp, vertical = 16.dp), horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center) {
-            Text("ALLY", color = Mint, fontSize = 12.sp, lineHeight = 14.sp, letterSpacing = 4.sp)
-            Text(state.context, color = Muted, fontSize = 10.sp, lineHeight = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text("ALLY", fontFamily = Tanker, fontSize = 17.sp, lineHeight = 19.sp, letterSpacing = 2.sp)
+            Text(state.context.uppercase(), fontFamily = Mono, color = Muted, fontSize = 8.sp, lineHeight = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Spacer(Modifier.height(3.dp))
             Orb(state.phase, canTalk, orbSize.value, if (state.phase in setOf(Phase.OFFLINE, Phase.ERROR)) retry else start, finish, cancel)
             Text(when {
@@ -156,7 +151,8 @@ private fun InputScreen(state: WatchState, micHint: Boolean, start: () -> Unit, 
 
 @Composable
 private fun Orb(phase: Phase, enabled: Boolean, diameter: Float, start: () -> Unit, finish: () -> Unit, cancel: () -> Unit) {
-    val active = phase == Phase.RECORDING || phase == Phase.THINKING || phase == Phase.UPLOADING
+    val lifecycleState by LocalLifecycleOwner.current.lifecycle.currentStateFlow.collectAsState()
+    val active = lifecycleState.isAtLeast(Lifecycle.State.STARTED) && phase in setOf(Phase.RECORDING, Phase.THINKING, Phase.UPLOADING)
     val rotation = if (active) {
         val transition = rememberInfiniteTransition(label = "orb")
         val value by transition.animateFloat(0f, 360f, infiniteRepeatable(tween(4500, easing = LinearEasing)), label = "halo")
@@ -180,61 +176,93 @@ private fun Orb(phase: Phase, enabled: Boolean, diameter: Float, start: () -> Un
             }
         })
     }) {
-        val color = when (phase) { Phase.RECORDING -> Mint; Phase.THINKING, Phase.UPLOADING -> Color(0xFFB2A4FF); Phase.OFFLINE -> Muted; else -> Mint }
-        val r = size.minDimension * .34f
-        drawCircle(Brush.radialGradient(listOf(color.copy(alpha = .28f), Color.Transparent), center, r * 1.5f), r * 1.5f)
-        drawCircle(Brush.radialGradient(listOf(color.copy(alpha = .9f), Color(0xFF225663), Color(0xFF0E2029)), center - Offset(r * .28f, r * .4f), r * 1.8f), r)
-        drawCircle(color.copy(alpha = .65f), r, style = Stroke(1.dp.toPx()))
-        drawArc(color.copy(alpha = .6f), rotation, 125f, false,
-            topLeft = center - Offset(r * 1.15f, r * 1.15f), size = androidx.compose.ui.geometry.Size(r * 2.3f, r * 2.3f), style = Stroke(1.dp.toPx()))
+        // Soft overlapping energy fields use the same sunset palette as Orbit's EnergyOrb.
+        val r = size.minDimension * .47f
         val angle = rotation * Math.PI / 180
-        drawCircle(color, 2.dp.toPx(), center + Offset((cos(angle) * r * 1.15).toFloat(), (sin(angle) * r * 1.15).toFloat()))
-    }
-}
-
-@Composable
-private fun MiniButton(label: String, description: String, action: () -> Unit, enabled: Boolean = true) {
-    Box(Modifier.size(40.dp).clip(CircleShape).background(Panel).clickable(enabled = enabled, onClick = action)
-        .semantics { contentDescription = description; role = Role.Button }, contentAlignment = Alignment.Center) {
-        Text(label, color = if (enabled) Mint else Muted.copy(alpha = .4f), fontSize = 15.sp)
-    }
-}
-
-@Composable
-private fun OutputScreen(state: WatchState, send: (String) -> Unit, back: () -> Unit, pulse: (Boolean) -> Unit) {
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 25.dp, vertical = 32.dp),
-        horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Text("FOR YOU", color = Mint, fontSize = 11.sp, lineHeight = 15.sp, letterSpacing = 2.sp)
-        if (state.reply.text.isBlank()) {
-            Spacer(Modifier.height(12.dp))
-            Text(if (state.phase == Phase.THINKING) "Ally is on it" else "A little space\nfor big ideas.", textAlign = TextAlign.Center, color = Color.White, fontSize = 19.sp)
-            Text("Your answer and useful cards will appear here.", textAlign = TextAlign.Center, color = Muted, fontSize = 12.sp)
-            Button(onClick = back) { Text("Talk to Ally") }
-        } else {
-            if (state.transcript.isNotBlank()) Text(state.transcript, color = Muted, fontSize = 10.sp, lineHeight = 14.sp, maxLines = 3, overflow = TextOverflow.Ellipsis)
-            Text(state.reply.text, color = Color.White, fontSize = 14.sp, lineHeight = 19.sp)
-            state.reply.cards.forEachIndexed { index, card -> key(state.turnId, index, card) { GeneratedCard(card, send, pulse, state.phase !in setOf(Phase.THINKING, Phase.UPLOADING, Phase.RECORDING)) } }
-            Text("Swipe back to talk", color = Muted, fontSize = 10.sp)
+        val drift = Offset((cos(angle) * r * .2).toFloat(), (sin(angle) * r * .18).toFloat())
+        val offline = phase == Phase.OFFLINE || phase == Phase.ERROR
+        val warm = if (offline) Muted else Sunset
+        val pink = if (offline) Muted else Rose
+        val gold = if (offline) Muted else Amber
+        drawCircle(Brush.radialGradient(listOf(pink.copy(alpha = .6f), pink.copy(alpha = .16f), Color.Transparent), center + drift, r), r, center + drift)
+        drawCircle(Brush.radialGradient(listOf(warm.copy(alpha = .95f), warm.copy(alpha = .5f), Color.Transparent), center - drift, r * .8f), r * .8f, center - drift)
+        drawCircle(Brush.radialGradient(listOf(gold.copy(alpha = .95f), gold.copy(alpha = .3f), Color.Transparent), center + Offset(-r * .15f, -r * .2f), r * .55f), r * .55f, center + Offset(-r * .15f, -r * .2f))
+        if (phase == Phase.RECORDING) {
+            // Ally's perceptive presence: two quiet eyes appear while it listens.
+            for (x in listOf(-.17f, .17f)) drawRoundRect(Ink.copy(alpha = .8f),
+                topLeft = center + Offset(r * x - 2.dp.toPx(), -4.dp.toPx()),
+                size = androidx.compose.ui.geometry.Size(4.dp.toPx(), 8.dp.toPx()),
+                cornerRadius = androidx.compose.ui.geometry.CornerRadius(2.dp.toPx()))
         }
     }
 }
 
 @Composable
+private fun MiniButton(label: String, description: String, action: () -> Unit, enabled: Boolean = true) {
+    Box(Modifier.size(40.dp).clip(CircleShape).background(Panel).border(1.dp, Hairline, CircleShape).clickable(enabled = enabled, onClick = action)
+        .semantics { contentDescription = description; role = Role.Button }, contentAlignment = Alignment.Center) {
+        Text(label, color = if (enabled) White else Muted.copy(alpha = .4f), fontSize = 15.sp)
+    }
+}
+
+@Composable
+private fun OutputScreen(state: WatchState, send: (String) -> Unit, back: () -> Unit, pulse: (Boolean) -> Unit) {
+    val working = state.phase in setOf(Phase.THINKING, Phase.UPLOADING)
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 25.dp, vertical = 30.dp),
+        horizontalAlignment = Alignment.Start, verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Text(state.context.uppercase(), fontFamily = Mono, color = Muted, fontSize = 9.sp,
+            modifier = Modifier.align(Alignment.CenterHorizontally))
+        if (state.transcript.isNotBlank()) Text(state.transcript, color = White, fontSize = 12.sp, lineHeight = 16.sp,
+            modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(6.dp)).background(Panel).border(1.dp, Hairline, RoundedCornerShape(6.dp)).padding(10.dp))
+        state.steps.forEach { step -> key(state.turnId, step.id) { ActivityRow(step) } }
+        if (working) Text(state.detail, color = Muted, fontSize = 11.sp)
+        if (state.phase == Phase.ERROR || state.phase == Phase.OFFLINE) Text(state.detail, color = Amber, fontSize = 11.sp)
+        if (state.reply.text.isNotBlank()) {
+            Text(state.reply.text, fontSize = 13.sp, lineHeight = 18.sp)
+            state.reply.cards.forEachIndexed { index, card -> key(state.turnId, index, card) { GeneratedCard(card, send, pulse, !working && state.phase != Phase.RECORDING) } }
+            if (state.usage.isNotBlank()) Text(state.usage, fontFamily = Mono, color = Muted, fontSize = 8.sp, lineHeight = 12.sp)
+        } else if (!working && state.steps.isEmpty() && state.phase !in setOf(Phase.ERROR, Phase.OFFLINE)) {
+            Spacer(Modifier.height(12.dp))
+            Text("What’s on your mind?", fontSize = 19.sp, textAlign = TextAlign.Center)
+            Text("Answers and agent activity appear here.", color = Muted, fontSize = 12.sp, textAlign = TextAlign.Center)
+            Button(onClick = back) { Text("Talk to Ally") }
+        }
+        Text("‹ Swipe back to talk", color = Muted, fontSize = 9.sp, modifier = Modifier.align(Alignment.CenterHorizontally))
+    }
+}
+
+@Composable
+private fun ActivityRow(step: WatchStep) {
+    var expanded by rememberSaveable { mutableStateOf(false) }
+    Column(Modifier.fillMaxWidth()) {
+        Row(Modifier.fillMaxWidth().heightIn(min = 40.dp).clickable { expanded = !expanded }.padding(vertical = 5.dp),
+            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+            Box(Modifier.size(4.dp).background(when (step.status) { "running" -> Sunset; "error" -> Rose; else -> Muted }, CircleShape))
+            Text(step.label, color = if (step.status == "running") White else Muted, fontSize = 11.sp, maxLines = 2,
+                overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+            Text(if (expanded) "−" else "+", color = Muted, fontSize = 12.sp)
+        }
+        if (expanded) Text(step.detail.ifBlank { "No additional detail" }, fontFamily = Mono, color = Muted, fontSize = 9.sp,
+            lineHeight = 13.sp, modifier = Modifier.fillMaxWidth().background(Panel).padding(8.dp))
+    }
+}
+
+@Composable
 private fun GeneratedCard(card: WatchCard, send: (String) -> Unit, pulse: (Boolean) -> Unit, enabled: Boolean) {
-    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(Panel).padding(13.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(card.title, color = Mint, fontSize = 13.sp, lineHeight = 17.sp)
+    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(6.dp)).background(Panel).border(1.dp, Hairline, RoundedCornerShape(6.dp)).padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(card.title, color = White, fontSize = 13.sp, lineHeight = 17.sp)
         if (card.body.isNotBlank()) Text(card.body, color = Color.White, fontSize = 12.sp, lineHeight = 16.sp)
         when (card.type) {
             "checklist" -> card.items.forEach { item ->
                 var checked by rememberSaveable(item) { mutableStateOf(false) }
                 Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).clickable { checked = !checked }.padding(vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-                    Text(if (checked) "✓" else "○", color = Mint)
+                    Text(if (checked) "✓" else "○", color = White)
                     Text(item, color = if (checked) Muted else Color.White, fontSize = 12.sp, lineHeight = 16.sp)
                 }
             }
             "actions" -> card.actions.forEach { action -> Button(onClick = { send(action.prompt) }, enabled = enabled, modifier = Modifier.fillMaxWidth()) { Text(action.label, fontSize = 12.sp) } }
             "progress" -> {
-                Box(Modifier.fillMaxWidth().height(5.dp).clip(CircleShape).background(Ink)) { Box(Modifier.fillMaxWidth(card.progress).fillMaxHeight().background(Mint)) }
+                Box(Modifier.fillMaxWidth().height(5.dp).clip(CircleShape).background(Ink)) { Box(Modifier.fillMaxWidth(card.progress).fillMaxHeight().background(White)) }
                 Text("${(card.progress * 100).toInt()}%", color = Muted, fontSize = 11.sp)
             }
             "timer" -> {
@@ -258,7 +286,7 @@ private fun GeneratedCard(card: WatchCard, send: (String) -> Unit, pulse: (Boole
 private fun TextEntry(title: String, hint: String, submit: (String) -> Unit, back: () -> Unit) {
     var text by rememberSaveable { mutableStateOf("") }
     Column(Modifier.fillMaxSize().background(Ink).verticalScroll(rememberScrollState()).padding(horizontal = 27.dp, vertical = 32.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Text(title, color = Mint, fontSize = 15.sp)
+        Text(title, color = White, fontSize = 15.sp)
         Field(text, { text = it.take(4000) }, hint)
         Button(onClick = { submit(text) }, enabled = text.isNotBlank()) { Text("Send") }
         Button(onClick = back) { Text("Back") }
@@ -271,7 +299,7 @@ private fun SettingsScreen(model: WatchViewModel, state: WatchState, back: () ->
     var token by remember { mutableStateOf(model.token) }
     val notifications = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
     Column(Modifier.fillMaxSize().background(Ink).verticalScroll(rememberScrollState()).padding(horizontal = 27.dp, vertical = 32.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Text("Your Ally", color = Mint, fontSize = 18.sp)
+        Text("Your Ally", color = White, fontSize = 18.sp)
         Text("A dedicated watch chat", color = Muted, fontSize = 11.sp)
         Button(onClick = { model.provider(if (state.provider == "codex") "claude" else "codex") }, enabled = !model.busy) { Text(if (state.provider == "codex") "Engine · Codex" else "Engine · Claude") }
         Text("Connection", color = Muted, fontSize = 11.sp)
@@ -287,7 +315,7 @@ private fun SettingsScreen(model: WatchViewModel, state: WatchState, back: () ->
 @Composable
 private fun Field(value: String, change: (String) -> Unit, hint: String, secret: Boolean = false) {
     BasicTextField(value, change, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).clip(RoundedCornerShape(12.dp)).background(Panel).padding(12.dp),
-        textStyle = TextStyle(color = Color.White, fontSize = 13.sp), cursorBrush = SolidColor(Mint),
+        textStyle = TextStyle(color = Color.White, fontSize = 13.sp, fontFamily = Geist), cursorBrush = SolidColor(White),
         visualTransformation = if (secret) PasswordVisualTransformation() else VisualTransformation.None,
         decorationBox = { inner -> if (value.isEmpty()) Text(hint, color = Muted, fontSize = 12.sp); inner() })
 }

@@ -1,3 +1,4 @@
+import { recordActivity, settleActivity, type ActivityState } from './activity.js';
 import { app } from 'electron';
 import http from 'node:http';
 import fs from 'node:fs';
@@ -8,7 +9,7 @@ import type { AgentConfig, AgentProvider } from '../agent/types.js';
 import { parseWatchReply, WATCH_INSTRUCTIONS, type WatchReply } from './protocol.js';
 
 interface BridgeConfig { enabled: boolean; token: string; port: number; sessions: Partial<Record<AgentProvider, string>> }
-interface Turn { id: string; requestId: string; provider: AgentProvider; status: 'thinking' | 'done' | 'error'; activity: string; transcript: string; reply?: WatchReply; error?: string; runId?: string; startedAt: number }
+interface Turn extends ActivityState { id: string; requestId: string; provider: AgentProvider; status: 'thinking' | 'done' | 'error'; activity: string; transcript: string; reply?: WatchReply; error?: string; runId?: string; startedAt: number }
 const MAX_AUDIO = 2_000_044; // 60 seconds of 16 kHz mono PCM plus WAV header.
 
 export function authorized(header: string | undefined, token: string): boolean {
@@ -34,6 +35,7 @@ export function startWatchBridge(getConfig: () => AgentConfig): (() => void) | u
     if (turn.status !== 'thinking') return;
     clearTimeout(timeouts.get(turn.id)); timeouts.delete(turn.id);
     turn.status = error ? 'error' : 'done';
+    settleActivity(turn);
     turn.activity = error ? 'Try again' : 'Response ready';
     turn.error = error;
     if (!error) turn.reply = parseWatchReply(raw ?? '');
@@ -49,6 +51,7 @@ export function startWatchBridge(getConfig: () => AgentConfig): (() => void) | u
         prompt: `${WATCH_INSTRUCTIONS}\n\nUser message:\n${turn.transcript}`,
       }, (_, event) => {
         if (closed || turn.status !== 'thinking') return;
+        recordActivity(turn, event);
         if (event.kind === 'session') { config.sessions[turn.provider] = event.sessionId; save(); }
         if (event.kind === 'text') output = (output + event.text).slice(-64000);
         if (event.kind === 'tool_start') turn.activity = `Using ${event.name.slice(0, 70)}`;
@@ -99,7 +102,7 @@ export function startWatchBridge(getConfig: () => AgentConfig): (() => void) | u
         const oldest = [...turns.values()].find(t => t.status !== 'thinking');
         if (oldest) turns.delete(oldest.id);
       }
-      const turn: Turn = { id: randomUUID(), requestId, provider, status: 'thinking', activity: audio ? 'Transcribing…' : 'Thinking…', transcript: audio ? '' : message.text.trim(), startedAt: Date.now() };
+      const turn: Turn = { steps: [], id: randomUUID(), requestId, provider, status: 'thinking', activity: audio ? 'Transcribing…' : 'Thinking…', transcript: audio ? '' : message.text.trim(), startedAt: Date.now() };
       turns.set(turn.id, turn);
       timeouts.set(turn.id, setTimeout(() => { finish(turn, 'This request took too long. Please try again.'); if (turn.runId) stopAgentRun(turn.runId); }, 5 * 60_000));
       send(res, 202, { id: turn.id });

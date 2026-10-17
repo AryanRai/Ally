@@ -2,6 +2,12 @@ import { describe, expect, it } from 'vitest';
 import { parseWatchReply } from './protocol';
 
 describe('watch UI catalog', () => {
+  it('selects the final reply after tool commentary, respecting escaped quotes and braces', () => {
+    const final = { text: 'Folder {Ally} says "ready"', components: [{ type: 'checklist', items: ['Review'] }] };
+    const result = parseWatchReply('{"text":"Checking…","components":[]}\nTool complete.\n```json\n' + JSON.stringify(final) + '\n```');
+    expect(result.text).toBe(final.text);
+    expect(result.components[0].items).toEqual(['Review']);
+  });
   it('preserves plain replies when the agent does not emit JSON', () => {
     expect(parseWatchReply('Hello from Ally')).toEqual({ text: 'Hello from Ally', components: [] });
   });

@@ -5,6 +5,8 @@ A native Kotlin / Compose for Wear OS companion with Wear Material 3 controls. T
 ## Experience
 
 - Two horizontally swipeable pages: the hold-to-talk orb and a scrollable answer with structured cards.
+- Ally / prxptn typography and neutral surfaces, Orbit's sunset energy palette and inward activity glow. The orb animates only during foreground recording/processing and shows Ally's listening eyes while recording.
+- Codex-style compact, expandable tool rows update with the existing 1.5-second turn polling, followed by the answer and engine-reported usage. Up to 24 recent tool entries are retained; details are bounded for the watch. Missing tool completion events are marked interrupted, never assumed successful.
 - Hold the orb to record; release to upload. A cancelled gesture or leaving the app cancels recording. Maximum recording: 60 seconds. Audio is held in memory, sent through the bridge, and never saved by Ally.
 - Start/stop/response haptics, pause microphone and haptics, text fallback, connection state, engine/context label, retry, and optional background reply notifications while the app process remains alive.
 - Cards, local checklists, foreground timers, progress and follow-up buttons. The renderer accepts an explicit catalog; arbitrary scripts, HTML and URLs are not executed. Actions submit a prompt only on a tap. Timers only alert while their card is open; they are not background alarms or scheduled reminders.
@@ -49,7 +51,7 @@ The ADB reverse tunnel must be recreated after disconnects/reboots. Keep the PC,
 - `GET /v1/status`: connection and voice readiness.
 - `POST /v1/messages`: `{provider, requestId, text}` → `{id}`.
 - `POST /v1/audio?provider=codex&requestId=UUID`: `audio/wav` → `{id}`.
-- `GET /v1/turns/{id}`: `thinking | done | error`, activity, transcript and final reply.
+- `GET /v1/turns/{id}`: `thinking | done | error`, activity, bounded `steps`, reported `usage`, transcript and final reply.
 
 Request IDs make repeated uploads idempotent in the running bridge. One active request per engine prevents writer conflicts. Polling is bounded, retries preserve a pending turn, and the bridge retains the latest 100 turns in memory. Restarting the bridge expires pending responses; engine conversation history remains on disk.
 
@@ -60,3 +62,7 @@ Request IDs make repeated uploads idempotent in the running bridge. One active r
 ## Layout
 
 `MainActivity.kt`: screens and gestures. `WatchViewModel.kt`: request/recording state. `VoiceRecorder.kt`: bounded PCM capture. `WatchApi.kt`: authenticated transport. `Models.kt`: safe card catalog. `WatchNotifications.kt`: notification entry point. Desktop adapter: `glass-pip-chat/electron/watch/`. Speech worker: `tools/transcribe.py`.
+
+## Fonts
+
+`AllyStyle.kt` shares Ally's Geist / Geist Mono text and Tanker wordmark. Geist's static weights were generated from the existing Fontsource variable fonts; Tanker is copied unchanged from the prxptn frontend. Licenses and copyright notices are in `licenses/` and packaged in the APK's `assets/licenses/`.
