@@ -1,0 +1,13 @@
+# Device chat identity and active status
+
+Device chats keep their original Codex session IDs. New Codex chats receive a readable name through `thread/name/set`, derived from the actual user message rather than the device protocol wrapper. Startup repairs only unnamed/protocol-named linked device chats; explicit native renames remain untouched. Native names and recency are reflected in the device catalog. Browsing never resumes or forks a session.
+
+Codex desktop already listed the affected home-folder chats through its API. They have no saved project association and appear in Recents beneath project groups. The native UI was visually checked after metadata repair: both `hi` and `Can you do alley chat…` appear there. No databases, grouping preferences, project paths or permissions were modified.
+
+A separate read-only app-server can reconstruct another server’s active turn as `interrupted`. Ally now checks the rollout’s exact turn lifecycle, bounded by activity freshness, and the local managed-run registry. Only the matching active turn is corrected; genuine previous cancellations remain visible. Running state is included in the history revision. Tools with an in-progress status remain visibly executing.
+
+Phone/watch selected chats refresh while foregrounded, including work initiated elsewhere. Existing bridge turns retain their own polling, real approvals, steering and Stop controls. External work gets a distinct thinking indicator and read-only progress; it is not submitted again. Phone shows progress beside the fixed chat title as well as in the conversation. Passive history refresh preserves earlier loaded pages and ignores results after selection or local input changes.
+
+Validation: TypeScript and desktop builds passed. 34 focused tests passed; the full suite passed 256 of 257 before a newly required mock export was fixed, and that bridge test then passed independently (including running/finished HTTP state). Android unit tests, both APK builds and phone lint passed; the subsequent phone pagination regression test, final phone build and lint passed, and that APK was installed. Live read-only probes reproduced private-reader `interrupted` versus the exact active lifecycle, and the deployed cloud bridge returned `running: true` without a trailing Stopped marker. Native Recents and watch Thinking were visually verified. No real model test prompt was sent.
+
+Reference: [Codex app-server APIs](https://learn.chatgpt.com/docs/app-server), including read-only history and persisted thread naming. Native Codex runtime indicators remain controlled by Codex’s owning runtime; Ally does not impersonate its owner.

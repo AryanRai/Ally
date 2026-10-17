@@ -94,7 +94,7 @@ private fun ChatChoice(chat: WatchChat, selected: String?, enabled: Boolean, cho
 
 @Composable
 internal fun HistoryScreen(state: WatchState, send: (String) -> Unit, back: () -> Unit, pulse: (Boolean) -> Unit, chats: () -> Unit, older: () -> Unit, read: (String) -> Unit, stopAudio: () -> Unit) {
-    val working = state.phase in setOf(Phase.THINKING, Phase.UPLOADING)
+    val working = state.externalRunning || state.phase in setOf(Phase.THINKING, Phase.UPLOADING)
     val scroll = rememberLazyListState()
     LaunchedEffect(state.chatId, state.readySequence, state.messages.isEmpty()) {
         if (state.messages.isNotEmpty()) {
@@ -146,7 +146,10 @@ internal fun HistoryScreen(state: WatchState, send: (String) -> Unit, back: () -
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (state.transcript.isNotBlank()) Text(state.transcript, color = White, fontSize = 12.sp, modifier = Modifier.fillMaxWidth().background(Panel).padding(10.dp))
                 state.steps.forEach { step -> key(state.turnId, step.id) { ActivityRow(step) } }
-                Text(state.detail, color = Muted, fontSize = 11.sp)
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    androidx.wear.compose.material3.CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                    Text(if (state.externalRunning) "Thinking · working in another app…" else state.detail, color = Muted, fontSize = 11.sp)
+                }
             }
         }
         if (state.phase in setOf(Phase.ERROR, Phase.OFFLINE)) item { Text(state.detail, color = Amber, fontSize = 11.sp) }

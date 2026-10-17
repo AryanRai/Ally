@@ -137,6 +137,21 @@ class WatchViewModel(application: Application) : AndroidViewModel(application) {
             } finally { mutable.update { it.copy(answeringApproval = false) } }
         }
     }
+    private var refreshingSelected = false
+    suspend fun refreshSelected() {
+        val id = mutable.value.chatId ?: return
+        if (refreshingSelected || busy || work?.isActive == true || prefs.contains("turn") || mutable.value.phase == Phase.OFFLINE) return
+        refreshingSelected = true
+        try {
+            val result = api.request("/v1/chats/${encoded(id)}")
+            if (mutable.value.chatId != id || busy || work?.isActive == true || prefs.contains("turn")) return
+            applyHistory(result, preserveOlder = true)
+            val active = result.optString("activeTurnId").takeIf { it.isNotBlank() && it != "null" }
+            if (active != null) { prefs.edit().putString("turn", active).apply(); work = viewModelScope.launch { poll(active) } }
+        } catch (e: CancellationException) { throw e } catch (_: Exception) {
+            if (mutable.value.chatId == id) mutable.update { it.copy(externalRunning = false, detail = "Live status unavailable · reconnecting…") }
+        } finally { refreshingSelected = false }
+    }
     suspend fun refreshRunning() {
         try {
             val rows = ChatParser.chats(api.request("/v1/running")).distinctBy { it.id }
@@ -179,7 +194,7 @@ class WatchViewModel(application: Application) : AndroidViewModel(application) {
         selected(ChatParser.chat(result.getJSONObject("chat")))
         val messages = ChatParser.messages(result)
         if (!older) prefs.edit().putString("history", result.toString()).apply()
-        mutable.update { it.copy(messages = if (older) (messages + it.messages).distinctBy { m -> m.id } else if (preserveOlder) it.messages.filter { old -> old.id.startsWith("history-") && old.id.substringAfter("history-").toIntOrNull()?.let { n -> n < (messages.firstOrNull()?.id?.substringAfter("history-")?.toIntOrNull() ?: 0) } == true } + messages else messages,
+        mutable.update { it.copy(externalRunning = result.optBoolean("running") && result.optString("activeTurnId").let { t -> t.isBlank() || t == "null" }, messages = if (older) (messages + it.messages).distinctBy { m -> m.id } else if (preserveOlder) it.messages.filter { old -> old.id.startsWith("history-") && old.id.substringAfter("history-").toIntOrNull()?.let { n -> n < (messages.firstOrNull()?.id?.substringAfter("history-")?.toIntOrNull() ?: 0) } == true } + messages else messages,
             historyBefore = if (preserveOlder && it.messages.isNotEmpty()) it.historyBefore else if (result.isNull("before")) null else result.getInt("before")) }
     }
     private suspend fun loadHistory(older: Boolean = false) {
@@ -207,7 +222,7 @@ class WatchViewModel(application: Application) : AndroidViewModel(application) {
     }
     fun startRecording() {
         if (prefs.contains("turn")) { startInputRecording(); return }
-        if (busy || prefs.contains("turn") || mutable.value.muted || mutable.value.phase == Phase.OFFLINE || mutable.value.chatId == null) return
+        if (mutable.value.externalRunning || busy || prefs.contains("turn") || mutable.value.muted || mutable.value.phase == Phase.OFFLINE || mutable.value.chatId == null) return
         if (!mutable.value.voiceReady) { refresh(); return }
         stopSpeaking()
         try {
@@ -251,7 +266,7 @@ class WatchViewModel(application: Application) : AndroidViewModel(application) {
     fun send(text: String) {
         if (prefs.contains("turn") && text.isNotBlank()) { sendInput(text); return }
         if (inputText != null) { mutable.update { it.copy(inputStatus = "Retry or dismiss your previous input in Settings first") }; return }
-        if (busy || text.isBlank() || prefs.contains("turn") || mutable.value.chatId == null) return
+        if (mutable.value.externalRunning || busy || text.isBlank() || prefs.contains("turn") || mutable.value.chatId == null) return
         stopSpeaking()
         clearReply()
         lastText = text.take(4000); lastAudio = null; requestId = UUID.randomUUID().toString()

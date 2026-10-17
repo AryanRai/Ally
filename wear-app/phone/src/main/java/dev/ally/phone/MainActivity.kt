@@ -91,6 +91,10 @@ private fun PhoneApp(model: PhoneModel,destination: Pair<String,Int>?, changeLoo
     val keyboard = LocalSoftwareKeyboardController.current
     fun navigate(target: String) { model.cancelRecording(); keyboard?.hide(); page=target; scope.launch { drawer.close() }; if(target=="Chats") model.catalog() }
     LaunchedEffect(state.voiceDraft) { if(state.voiceDraft.isNotBlank()) { draft=listOf(draft,state.voiceDraft).filter { it.isNotBlank() }.joinToString(" "); model.voiceDraftRead() } }
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    LaunchedEffect(lifecycle) { lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+        while (isActive) { model.refreshSelected(); delay(2500) }
+    } }
     LaunchedEffect(destination) { destination?.let { navigate(it.first) } }
     BackHandler(drawer.isOpen || page!="Chat") { if(drawer.isOpen) scope.launch { drawer.close() } else page="Chat" }
     ModalNavigationDrawer(drawerState=drawer,gesturesEnabled=drawer.isOpen,drawerContent={
@@ -129,6 +133,10 @@ private fun PhoneApp(model: PhoneModel,destination: Pair<String,Int>?, changeLoo
                         Column(Modifier.weight(1f)) {
                             Text(state.selected!!.title.replace(Regex("\\s+")," "),fontFamily=Geist,fontSize=15.sp,maxLines=1,overflow=TextOverflow.Ellipsis)
                             MicroLabel(folderName(state.selected!!.cwd),Modifier.padding(top=5.dp))
+                        }
+                        if (state.busy || state.externalRunning) Row(verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(6.dp)) {
+                            CircularProgressIndicator(Modifier.size(14.dp).semantics { contentDescription = "Chat is working" },color=Muted,strokeWidth=2.dp)
+                            Text("Thinking…",color=Muted,fontSize=11.sp)
                         }
                         Glyph("down",Modifier.padding(start=12.dp).size(16.dp),Muted)
                     }
@@ -193,7 +201,8 @@ private fun Conversation(state: PhoneState,model: PhoneModel,modifier: Modifier,
                 MicroLabel(if(state.busy) "Reply in progress" else "Latest reply",Modifier.padding(bottom=10.dp))
                 MessageBody(state.liveText)
             } }
-            if(state.busy) item(key="activity") { Row(verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(10.dp)) { PresenceOrb(Modifier.size(26.dp),true); Text(state.activity,color=Muted,fontSize=12.sp) } }
+            if(state.busy || state.externalRunning) item(key="activity") { Row(verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(10.dp)) { CircularProgressIndicator(Modifier.size(18.dp),color=Muted,strokeWidth=2.dp); Text(if(state.busy) state.activity else "Thinking · working in another app…",color=Muted,fontSize=12.sp) } }
+            if(state.syncStatus.isNotBlank()) item(key="sync-status") { Text(state.syncStatus,color=Muted,fontSize=12.sp) }
             state.approval?.let { approval -> item(key="approval") { ChatApproval(approval,state.loading,model::answer) } }
             if(state.inputStatus.isNotBlank()) item(key="input-status") { Column {
                 Text(state.inputStatus,color=Muted,fontSize=12.sp)

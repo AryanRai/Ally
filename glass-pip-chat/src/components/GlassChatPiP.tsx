@@ -106,7 +106,7 @@ export default function GlassChatPiP() {
   const externalTool = externalWorking
     ? [...((messages.at(-1)?.metadata?.segments ?? []) as Segment[])].reverse().find(s => s.type === 'tool' && s.toolExecution?.status === 'executing')?.toolExecution
     : undefined;
-  const externalStatus = `Working in ${externalApp}${externalTool ? ` · ${externalTool.name}` : '…'}`;
+  const externalStatus = externalTool ? `Working · ${externalTool.name}` : 'Thinking…';
   const greeting = useAgentGreeting(conversation.provider, conversation.modelName);
 
   const headerTitleEdit = useEditState({

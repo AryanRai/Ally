@@ -115,7 +115,8 @@ private fun WatchApp(model: WatchViewModel, pulse: (Boolean) -> Unit, hasMic: ()
         if (state.phase == Phase.THINKING && state.liveText.isNotBlank() && !state.inputRecording && !state.inputSending) pager.animateScrollToPage(1)
     }
     LaunchedEffect(lifecycle) { lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
-        while (true) { delay(15000); model.refresh() }
+        var ticks = 0
+        while (true) { delay(2500); model.refreshSelected(); if (++ticks % 6 == 0) model.refresh() }
     } }
     val pendingApproval = state.approval
     CompositionLocalProvider(LocalBezelHaptics provides !state.muted) { when {
@@ -146,7 +147,7 @@ private fun WatchApp(model: WatchViewModel, pulse: (Boolean) -> Unit, hasMic: ()
 private fun InputScreen(state: WatchState, micHint: Boolean, start: () -> Unit, finish: () -> Unit, cancel: () -> Unit,
     type: () -> Unit, settings: () -> Unit, mute: () -> Unit, retry: () -> Unit, chats: () -> Unit,
     active: Boolean, replies: () -> Unit) {
-    val canTalk = !state.muted && state.phase !in setOf(Phase.UPLOADING)
+    val canTalk = !state.externalRunning && !state.muted && state.phase !in setOf(Phase.UPLOADING)
     BoxWithConstraints(Modifier.fillMaxSize().bezelReplies(active && state.phase != Phase.RECORDING, replies)) {
         val orbSize = maxHeight * .34f
         Column(Modifier.fillMaxSize().padding(horizontal = 24.dp, vertical = 16.dp), horizontalAlignment = Alignment.CenterHorizontally,
@@ -154,8 +155,9 @@ private fun InputScreen(state: WatchState, micHint: Boolean, start: () -> Unit, 
             Text("ALLY", fontFamily = Tanker, fontSize = 17.sp, lineHeight = 19.sp, letterSpacing = 2.sp, modifier = Modifier.clickable(onClick = chats).semantics { contentDescription = "Choose chat" })
             Text("CHATS ▾ · ${state.chatTitle}", fontFamily = Mono, color = Muted, fontSize = 9.sp, lineHeight = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.clickable(onClick = chats).padding(vertical = 4.dp))
             Spacer(Modifier.height(3.dp))
-            Orb(state.look, state.phase, state.microphoneLevel, canTalk, orbSize.value, if (state.phase in setOf(Phase.OFFLINE, Phase.ERROR)) retry else start, finish, cancel)
+            Orb(state.look, if (state.externalRunning) Phase.THINKING else state.phase, state.microphoneLevel, canTalk, orbSize.value, if (state.phase in setOf(Phase.OFFLINE, Phase.ERROR)) retry else start, finish, cancel)
             Text(when {
+                state.externalRunning -> "Thinking…"
                 state.muted -> "Paused"
                 state.speaking -> "Speaking…"
                 state.phase == Phase.RECORDING -> "Listening · ${state.recordingSeconds.toInt()}s"
@@ -167,7 +169,7 @@ private fun InputScreen(state: WatchState, micHint: Boolean, start: () -> Unit, 
                 state.phase == Phase.READY -> "Ready when you are"
                 else -> "Hold to talk"
             }, color = Color.White, fontSize = 14.sp, lineHeight = 18.sp)
-            Text(if (micHint) "Allow microphone, then hold again" else if (state.phase == Phase.RECORDING && state.liveTranscript.isNotBlank()) state.liveTranscript else if (state.detail == "Hold to talk") "Swipe or turn bezel for replies" else state.detail, color = Muted,
+            Text(if (state.externalRunning) "Working in another app" else if (micHint) "Allow microphone, then hold again" else if (state.phase == Phase.RECORDING && state.liveTranscript.isNotBlank()) state.liveTranscript else if (state.detail == "Hold to talk") "Swipe or turn bezel for replies" else state.detail, color = Muted,
                 fontSize = 10.sp, lineHeight = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center,
                 modifier = Modifier.heightIn(min = 20.dp).padding(horizontal = 5.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
