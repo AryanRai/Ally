@@ -1,0 +1,7 @@
+.gradle/
+.kotlin/
+.venv/
+__pycache__/
+local.properties
+**/build/
+*.jks

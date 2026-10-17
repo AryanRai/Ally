@@ -69,6 +69,10 @@ Open linked chats follow changes from the Claude Code / Codex app automatically.
 
 Input greetings are written by the selected engine/model in a separate unsaved request and cached for six hours. If the engine is unavailable, the input shows a neutral “Ask Codex…” or “Ask Claude Code…” hint.
 
+## Galaxy Watch companion
+
+`wear-app/` is the native Kotlin / Wear Compose companion: hold-to-talk orb, text fallback, two swipeable pages, and structured answer cards. It connects to Ally's opt-in localhost bridge using a paired ADB tunnel during development. A separate local Whisper worker transcribes watch audio. See [wear-app/README.md](wear-app/README.md) for build, installation, protocol and current limitations.
+
 ## How a turn works
 
 1. The chat's agent and working folder are shown under the input; the first message starts a new agent session (earlier non-agent turns are handed over as a transcript).

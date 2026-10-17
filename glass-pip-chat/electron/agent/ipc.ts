@@ -7,6 +7,7 @@ import { startAgentRun, stopAgentRun, stopAllAgentRuns } from './runner.js';
 import { listAgentModels, listAgentSessions, loadAgentSession } from './sessions.js';
 import { watchAgentSessions } from './sessionWatch.js';
 import { generateGreeting } from './greeting.js';
+import { startWatchBridge } from '../watch/bridge.js';
 import type { AgentConfig, AgentProvider, AgentRunOptions } from './types.js';
 
 const CONFIG_FILE = () => path.join(app.getPath('userData'), 'agent-config.json');
@@ -30,6 +31,10 @@ function loadConfig(): AgentConfig {
 export function registerAgentIpc(getWindow: () => BrowserWindow | null, onConfig?: (config: AgentConfig) => void): void {
   let config = loadConfig();
   onConfig?.(config);
+  void app.whenReady().then(() => {
+    const stopBridge = startWatchBridge(() => config);
+    if (stopBridge) app.on('will-quit', stopBridge);
+  });
   const binPath = (provider: AgentProvider) => (provider === 'claude' ? config.claudePath : config.codexPath);
 
   ipcMain.handle('agent:getConfig', () => config);
