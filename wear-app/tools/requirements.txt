@@ -1,0 +1,1 @@
+-r ../../speech-service/requirements-local.txt

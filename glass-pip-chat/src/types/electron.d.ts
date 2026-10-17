@@ -35,34 +35,12 @@ export interface PipAPI {
   // Speech service
   speech: {
     connect: () => Promise<{ success: boolean; error?: string }>;
-    disconnect: () => Promise<{ success: boolean; error?: string }>;
-    isConnected: () => Promise<boolean>;
-    startListening: () => Promise<{ success: boolean; error?: string }>;
-    stopListening: () => Promise<{ success: boolean; error?: string }>;
-    synthesize: (text: string) => Promise<{ success: boolean; error?: string }>;
-    synthesizeStreaming: (text: string) => Promise<{ success: boolean; error?: string }>;
-    clearTTSQueue: () => Promise<{ success: boolean; error?: string }>;
-    getTTSQueueStatus: () => Promise<any>;
-    skipCurrentTTS: () => Promise<{ success: boolean; error?: string }>;
-    sendGGWave: (text: string) => Promise<{ success: boolean; error?: string }>;
-    getStatus: () => Promise<{ success: boolean; error?: string }>;
-    
-    onConnected: (callback: () => void) => () => void;
-    onDisconnected: (callback: () => void) => () => void;
-    onSpeechRecognized: (callback: (result: any) => void) => () => void;
-    onSpeechInterim: (callback: (data: { text: string }) => void) => () => void;
-    onSpeechInterrupted: (callback: () => void) => () => void;
-    onSpeechGenerated: (callback: (data: any) => void) => () => void;
-    onSpeechError: (callback: (error: string) => void) => () => void;
-    onGGWaveSent: (callback: (data: any) => void) => () => void;
-    onGGWaveError: (callback: (error: string) => void) => () => void;
-    onStatusUpdate: (callback: (status: any) => void) => () => void;
-    onListeningStarted: (callback: () => void) => () => void;
-    onListeningStopped: (callback: () => void) => () => void;
-    onTTSStreamStart: (callback: (data: any) => void) => () => void;
-    onTTSStreamChunk: (callback: (data: any) => void) => () => void;
-    onTTSStreamComplete: (callback: (data: any) => void) => () => void;
-    onTTSStreamError: (callback: (error: string) => void) => () => void;
+    getStatus: () => Promise<{ ready: boolean; state: string; backend?: string; model?: string; error?: string }>;
+    voices: () => Promise<{ success: boolean; voices?: string[]; error?: string }>;
+    cloudVoices: () => Promise<{ success: boolean; voices?: Array<{ name: string; languageCodes: string[] }>; error?: string }>;
+    transcribe: (bytes: Uint8Array) => Promise<{ success: boolean; text?: string; error?: string; status?: number }>;
+    synthesize: (text: string, options?: { voice?: string; rate?: number; volume?: number; engine?: 'local' | 'google'; cloudVoice?: string }) => Promise<{ success: boolean; audio_data?: string; error?: string; warning?: string; provider?: string }>;
+    cancel: () => Promise<{ success: boolean }>;
   };
 
   // Speech toggle event
