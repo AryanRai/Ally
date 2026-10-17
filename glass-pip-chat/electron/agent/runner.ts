@@ -8,6 +8,7 @@ import { childEnv, isWin, launcherFor, resolveAgentBinary } from './binaries.js'
 import { ClaudeStreamParser, StreamParser } from './parsers.js';
 import { runCodexTurn } from './codexRun.js';
 import { runCodexDesktopTurn } from './codexDesktopRun.js';
+import { trackRunningSession, finishRunningSession } from './runningSessions.js';
 import { thumbnails } from './thumbs.js';
 import { allyChatsMcpServers } from '../chatsMcp/registry.js';
 import type { AgentEvent, AgentRobotContext, AgentRunOptions, AgentInteractionHandler } from './types.js';
@@ -98,6 +99,26 @@ const SHELL_SAFE_ARG = /^[\w.:=\-"/\\@]+$/;
  * as the process is spawned so the caller can stop it.
  */
 export async function startAgentRun(
+  opts: AgentRunOptions,
+  emit: (runId: string, ev: AgentEvent) => void,
+  binOverride?: string,
+  interact?: AgentInteractionHandler,
+  interactionSurface: 'watch' | 'desktop' = 'watch',
+): Promise<string> {
+  let sessionId = opts.sessionId;
+  let finished = false;
+  const summary = () => sessionId && !opts.ephemeral ? { provider: opts.provider, id: sessionId, title: opts.prompt.slice(-80), cwd: opts.cwd, updatedAt: Date.now() } : undefined;
+  const runId = await startTrackedRun(opts, (id, event) => {
+    if (event.kind === 'session') sessionId = event.sessionId;
+    if (event.kind === 'done') { finished = true; finishRunningSession(id); }
+    else trackRunningSession(id, summary());
+    emit(id, event);
+  }, binOverride, interact, interactionSurface);
+  if (!finished) trackRunningSession(runId, summary());
+  return runId;
+}
+
+async function startTrackedRun(
   opts: AgentRunOptions,
   emit: (runId: string, ev: AgentEvent) => void,
   binOverride?: string,
@@ -210,6 +231,7 @@ export async function startAgentRun(
 }
 
 export function stopAgentRun(runId: string): boolean {
+  finishRunningSession(runId);
   const codex = codexRuns.get(runId);
   if (codex) { codex.stop(); return true; }
   const run = runs.get(runId);
@@ -227,6 +249,6 @@ export function stopAgentRun(runId: string): boolean {
 }
 
 export function stopAllAgentRuns(): void {
-  for (const run of codexRuns.values()) run.stop();
+  for (const [id, run] of codexRuns) { finishRunningSession(id); run.stop(); }
   for (const id of [...runs.keys()]) stopAgentRun(id);
 }

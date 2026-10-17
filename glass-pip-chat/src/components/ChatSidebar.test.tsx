@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, within } from '@testing-library/react';
-import ChatSidebar, { groupByProject } from './ChatSidebar';
+import ChatSidebar, { groupByProject, runningEntries } from './ChatSidebar';
 import type { Chat } from '@/types/chat';
 
 const chat = (provider: 'claude' | 'codex', sessionId: string): Chat => ({ id: provider, title: `${provider} conversation`, messages: [], createdAt: 1, updatedAt: 2, agent: { provider, sessionId, cwd: 'C:\\Users\\test' } });
@@ -40,4 +40,21 @@ describe('provider sections', () => {
     expect(screen.getAllByText('Home')).toHaveLength(2);
     expect(screen.queryByText('Projects')).not.toBeInTheDocument();
   });
+});
+
+it('deduplicates a linked running session and keeps exact cross-provider destinations', () => {
+  const sessions = [
+    { provider: 'codex' as const, id: 'x', title: 'Coding', updatedAt: 2 },
+    { provider: 'claude' as const, id: 'x', title: 'Review', updatedAt: 1 },
+  ];
+  const entries = runningEntries([chat('codex', 'x')], sessions, 'codex');
+  expect(entries).toHaveLength(2);
+  const open = vi.fn(); const select = vi.fn();
+  render(<ChatSidebar chats={[chat('codex', 'x')]} activeChat={null} runningSessions={sessions} onChatSelect={select} onOpenAgentSession={open} onChatCreate={() => {}} onChatDelete={() => {}} onChatRename={() => {}} isCollapsed={false} onToggleCollapse={() => {}} theme="dark" platform="win32" />);
+  const running = screen.getByRole('region', { name: 'Running chats' });
+  fireEvent.click(within(running).getByText('codex conversation'));
+  expect(select).toHaveBeenCalledWith('codex');
+  fireEvent.click(within(running).getByText('Review'));
+  expect(open).toHaveBeenCalledWith(sessions[1]);
+  expect(running.compareDocumentPosition(screen.getByRole('region', { name: 'Recent chats' })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 });

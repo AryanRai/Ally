@@ -38,5 +38,22 @@ export function useExternalSessions() {
     };
   }, [refresh]);
 
-  return { sessions, refresh };
+  const [running, setRunning] = useState<AgentSessionSummary[]>([]);
+  const [runningError, setRunningError] = useState('');
+  useEffect(() => {
+    let alive = true;
+    let timer: ReturnType<typeof setTimeout>;
+    const poll = async () => {
+      try {
+        const rows = await window.pip?.agent?.runningSessions();
+        if (alive) { setRunning(rows ?? []); setRunningError(''); }
+      } catch {
+        if (alive) { setRunning([]); setRunningError('Live status unavailable'); }
+      }
+      if (alive) timer = setTimeout(poll, 5000);
+    };
+    void poll();
+    return () => { alive = false; clearTimeout(timer); };
+  }, []);
+  return { sessions, refresh, running, runningError };
 }

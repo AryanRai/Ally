@@ -19,6 +19,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.repeatOnLifecycle
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -207,6 +212,12 @@ private fun Composer(state: PhoneState,draft: String,onDraft: (String)->Unit,mod
 
 @Composable
 private fun ChatLibrary(state: PhoneState,model: PhoneModel,modifier: Modifier,onSelect: ()->Unit) {
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    LaunchedEffect(lifecycle) {
+        lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            while (isActive) { model.refreshRunning(); delay(5000) }
+        }
+    }
     var search by rememberSaveable { mutableStateOf("") }
     val visible=state.chats.filter { it.title.contains(search,true) || it.cwd.contains(search,true) }
     LazyColumn(modifier.fillMaxWidth(),contentPadding=PaddingValues(24.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
@@ -217,6 +228,15 @@ private fun ChatLibrary(state: PhoneState,model: PhoneModel,modifier: Modifier,o
             TextButton({model.catalog(provider)},enabled=!state.loading,shape=RoundedCornerShape(8.dp),colors=ButtonDefaults.textButtonColors(containerColor=if(selected) Panel else Color.Transparent),contentPadding=PaddingValues(horizontal=18.dp)) { Text(provider.replaceFirstChar { it.uppercase() },color=if(selected) White else Muted,fontSize=13.sp) }
         } } }
         if(state.busy) item { Text("Finish the current response before switching chats.",color=Warm,fontSize=12.sp) }
+        item { MicroLabel("Running · ${state.running.size}",color=Warm) }
+        items(state.running.filter { it.title.contains(search,true) || it.cwd.contains(search,true) },key={"running:${it.id}"}) { chat ->
+            LibraryChoice(chat,state.selected?.id,!state.busy && !state.loading) { model.select(chat.id); onSelect() }
+        }
+        if(state.runningStatus.isNotBlank()) item { Text(state.runningStatus,color=Muted,fontSize=12.sp,modifier=Modifier.padding(vertical=8.dp)) }
+        if(search.isBlank() && state.chats.isNotEmpty()) {
+            item { MicroLabel("Most recent") }
+            items(state.chats.take(3),key={"recent:${it.id}"}) { chat -> LibraryChoice(chat,state.selected?.id,!state.busy && !state.loading) { model.select(chat.id); onSelect() } }
+        }
         visible.groupBy { it.cwd }.forEach { (folder,chats) ->
             item(key="folder:$folder") { Row(Modifier.padding(top=14.dp,bottom=8.dp),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(8.dp)) { Glyph("folder",Modifier.size(14.dp),Muted); MicroLabel(folderName(folder)); Text("${chats.size}",fontFamily=Mono,color=Muted,fontSize=9.sp) } }
             items(chats,key={it.id}) { chat ->
@@ -231,6 +251,17 @@ private fun ChatLibrary(state: PhoneState,model: PhoneModel,modifier: Modifier,o
         if(state.more!=null) item { TextButton({model.catalog(more=true)},enabled=!state.loading) { Text("Load more conversations") } }
         if(state.loading) item { LinearProgressIndicator(Modifier.fillMaxWidth(),color=Muted,trackColor=Panel) }
         if(state.error.isNotBlank()) item { Text(state.error,color=Warm); TextButton({model.catalog()}) { Text("Retry") } }
+    }
+}
+
+@Composable
+private fun LibraryChoice(chat: PhoneChat,selectedId: String?,enabled: Boolean,choose: ()->Unit) {
+    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(if(chat.id==selectedId) Panel else Color.Transparent).clickable(enabled=enabled,onClick=choose).padding(horizontal=12.dp,vertical=12.dp),verticalAlignment=Alignment.CenterVertically) {
+        Column(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(4.dp)) {
+            Text(chat.title.replace(Regex("\\s+")," "),fontSize=14.sp,maxLines=2,overflow=TextOverflow.Ellipsis)
+            Text("${if(chat.provider=="codex") "Codex" else "Claude"} · ${folderName(chat.cwd)}",fontSize=10.sp,color=Muted,maxLines=1,overflow=TextOverflow.Ellipsis)
+        }
+        if(chat.id==selectedId) Glyph("check",Modifier.padding(start=12.dp).size(14.dp),Muted)
     }
 }
 

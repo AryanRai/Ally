@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { resolveAgentBinary } from './binaries.js';
 import { startAgentRun, stopAgentRun, stopAllAgentRuns } from './runner.js';
+import { listRunningSessions } from './runningSessions.js';
 import { listAgentModels, listAgentSessions, loadAgentSession } from './sessions.js';
 import { watchAgentSessions } from './sessionWatch.js';
 import { configureCodexMigrations } from './codexMigration.js';
@@ -93,6 +94,7 @@ export function registerAgentIpc(getWindow: () => BrowserWindow | null, onConfig
 
   ipcMain.handle('agent:stop', (_, runId: string) => stopAgentRun(runId));
 
+  ipcMain.handle('agent:runningSessions', () => listRunningSessions());
   ipcMain.handle('agent:listSessions', (_, provider: AgentProvider, limit?: number) => provider === 'codex' ? listCodexChats(limit) : listAgentSessions(provider, limit));
 
   ipcMain.handle('agent:loadSession', (_, provider: AgentProvider, id: string, revision?: string) => provider === 'codex' ? loadCodexChat(id, revision) : loadAgentSession(provider, id, revision));

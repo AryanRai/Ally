@@ -95,6 +95,7 @@ export interface PipAPI {
       images?: string[];
     }) => Promise<string>;
     stop: (runId: string) => Promise<boolean>;
+    runningSessions: () => Promise<AgentSessionSummary[]>;
     listSessions: (provider: AgentProvider, limit?: number) => Promise<AgentSessionSummary[]>;
     loadSession: (provider: AgentProvider, id: string, revision?: string) => Promise<import('../../electron/agent/types').AgentSessionSnapshot>;
     /** Claude Code sign-in state, verified with a real request */

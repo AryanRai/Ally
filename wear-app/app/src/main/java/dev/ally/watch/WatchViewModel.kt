@@ -131,6 +131,14 @@ class WatchViewModel(application: Application) : AndroidViewModel(application) {
             } finally { mutable.update { it.copy(answeringApproval = false) } }
         }
     }
+    suspend fun refreshRunning() {
+        try {
+            val rows = ChatParser.chats(api.request("/v1/running")).distinctBy { it.id }
+            mutable.update { it.copy(running = rows, runningStatus = if (rows.isEmpty()) "No active chats" else "") }
+        } catch (e: CancellationException) { throw e } catch (e: Exception) {
+            mutable.update { it.copy(running = emptyList(), runningStatus = "Live status unavailable") }
+        }
+    }
     fun listChats(provider: String = mutable.value.provider, more: Boolean = false) {
         catalogWork?.cancel()
         val offset = if (more) mutable.value.chatsOffset ?: return else 0

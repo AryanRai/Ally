@@ -62,6 +62,8 @@ data class WatchState(
     val chatTitle: String = "New watch chat",
     val messages: List<ChatMessage> = emptyList(),
     val chats: List<WatchChat> = emptyList(),
+    val running: List<WatchChat> = emptyList(),
+    val runningStatus: String = "Checking live status…",
     val chatProvider: String = "codex",
     val chatsOffset: Int? = null,
     val historyBefore: Int? = null,

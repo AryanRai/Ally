@@ -407,6 +407,8 @@ export default function GlassChatPiP() {
               theme={theme}
               platform={platform}
               externalSessions={external.sessions}
+              runningSessions={external.running}
+              runningError={external.runningError}
               onOpenAgentSession={session => void conversation.openSession(session).then(external.refresh)}
             />
           </div>

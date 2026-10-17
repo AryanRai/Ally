@@ -9,6 +9,7 @@ import type { AgentConfig, AgentProvider, AgentPermission } from '../agent/types
 import { parseWatchReply, WATCH_INSTRUCTIONS, type WatchReply } from './protocol.js';
 import { ensureSpeechRuntime, getSpeechRuntimeStatus } from '../speech/runtime.js';
 import { WatchConversations, chatSummary } from './conversations.js';
+import { listRunningSessions } from '../agent/runningSessions.js';
 import { listCodexChats, loadCodexChat } from '../agent/codexHistory.js';
 import { listAgentSessions, loadAgentSession } from '../agent/sessions.js';
 import { startWatchTransport, type WatchTransportConfig } from './transport.js';
@@ -106,6 +107,9 @@ export function startWatchBridge(getConfig: () => AgentConfig): (() => void) | u
         const voice = await getSpeechRuntimeStatus();
         const voiceDetail = voice.ready ? 'Hold to talk' : voice.state === 'loading' || voice.state === 'starting' ? 'Voice model loading · text ready' : 'Voice unavailable · reconnect on desktop';
         send(res, 200, { connected: true, voiceAvailable: speechSettings().cloud || voice.ready, liveSpeech: speechSettings().cloud, voiceState: voice.state, voiceDetail, providers: ['codex', 'claude'], context: 'Selected chat', permission: 'per-chat', approvals: ['codex'] }); return;
+      }
+      if (req.method === 'GET' && url.pathname === '/v1/running') {
+        send(res, 200, conversations.running(await listRunningSessions(), [...turns.values()].filter(t => t.status === 'thinking').map(t => t.chatId))); return;
       }
       if (req.method === 'GET' && url.pathname === '/v1/chats') {
         const provider = url.searchParams.get('provider');

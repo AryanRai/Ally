@@ -78,6 +78,20 @@ export class WatchConversations {
     const all = [...this.chats.filter(c => c.provider === provider).map(chatSummary), ...external.filter(s => !linked.has(s.id) && !(s.originalSessionId && linked.has(s.originalSessionId))).map(s => ({ id: `${provider}:${s.id}`, provider, sessionId: s.id, title: userText(s.title), cwd: s.cwd ?? '', updatedAt: s.updatedAt }))].sort((a, b) => b.updatedAt - a.updatedAt);
     return { chats: all.slice(offset, offset + 30), nextOffset: all.length > offset + 30 ? offset + 30 : null };
   }
+  running(sessions: AgentSessionSummary[], activeChatIds: string[] = []) {
+    const rows = new Map<string, ReturnType<typeof chatSummary>>();
+    for (const session of sessions) {
+      const linked = this.chats.find(c => c.provider === session.provider && (c.sessionId === session.id || (!!session.originalSessionId && c.sessionId === session.originalSessionId)));
+      const row = linked ? { ...chatSummary(linked), title: userText(session.title), cwd: session.cwd ?? linked.cwd, updatedAt: session.updatedAt }
+        : { id: `${session.provider}:${session.id}`, provider: session.provider, sessionId: session.id, title: userText(session.title), cwd: session.cwd ?? '', updatedAt: session.updatedAt };
+      rows.set(row.id, row);
+    }
+    for (const id of activeChatIds) {
+      const chat = this.chats.find(c => c.id === id);
+      if (chat && !rows.has(id)) rows.set(id, chatSummary(chat));
+    }
+    return { chats: [...rows.values()].sort((a, b) => b.updatedAt - a.updatedAt) };
+  }
   link(chat: WatchChat, sessionId: string) { chat.sessionId = sessionId; this.save(); }
   record(chat: WatchChat, transcript: string, reply: WatchReply, activity: ActivityState, turnId: string) {
     chat.messages.push({ id: `${turnId}-user`, role: 'user', text: transcript, components: [], timestamp: Date.now() }, { id: `${turnId}-assistant`, role: 'assistant', ...reply, steps: activity.steps, usage: activity.usage, timestamp: Date.now() });
