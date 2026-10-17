@@ -15,7 +15,7 @@
 | **Circle to Ask**: `Ctrl+Shift+Space` (or shake the cursor) freezes the screen; circle anything, then Ask / Search web / Explain / Fix / Copy text / Translate | Pixel-style Circle to Search, but the circled pixels go straight to Claude Code or Codex as an image |
 | **Robot avatar**: collapsing turns Ally into a little robot ([agent-robot-avatar](https://github.com/CX-ArtLab/agent-robot-avatar)) whose eyes follow your cursor anywhere and whose face shows what the agent is doing | Ambient status without a window in the way |
 | **Clipboard context**: copy something, hit *Explain* | Quick capture without switching windows |
-| **Robot mode**: DroidCore persona + the HowYouSeeMe MCP server handed to the agent | Lets either agent see through the robot |
+| **Robot mode**: DroidCore persona + two MCP servers handed to the agent: HowYouSeeMe (perception, :8090) and DroidCore (motion, :8091) | Lets either agent see through the robot and move it, behind a safety gate |
 
 Retired in v2 (the agents now cover them): Ally's own Ollama/OpenRouter/Gemini chat, its homemade MCP/ACP/PTC tool loop, Supabase sync + web build + `ally-remote-service`/Discord (use Claude Code Remote Control/Channels or Codex Remote), the terminal panel, and the browser extension.
 
@@ -53,6 +53,8 @@ npm run dev
 ```
 
 Requirements: the `claude` CLI (`npm i -g @anthropic-ai/claude-code`, then run `claude` once to log in) and/or Codex (the Codex desktop app's bundled CLI is found automatically, or `npm i -g @openai/codex`). Set CLI paths, the default working folder, permissions and the robot MCP URL in **Settings → Agents**.
+
+Robot mode needs the two MCP servers running. The motion server (with a simulated Unitree G1 in MuJoCo) lives in the DroidCore repo: see `DroidCore/runtime/README.md`. Quick start there: `droidcore-mcp --backend mujoco --viewer`, which serves `http://localhost:8091/mcp` (the default DroidCore URL). `docker/compose.yaml` in that folder runs the sim together with HowYouSeeMe.
 
 Voice: start `speech-service` (`speech-service/start.ps1`), then toggle voice mode in the overlay.
 

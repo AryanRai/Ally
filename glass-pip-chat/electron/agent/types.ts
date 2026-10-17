@@ -7,8 +7,10 @@ export type AgentPermission = 'full' | 'edit' | 'readonly';
 export interface AgentRobotContext {
   /** Persona / instructions appended to the agent's system prompt */
   instructions: string;
-  /** HowYouSeeMe MCP endpoint the agent can call for perception + robot tools */
+  /** HowYouSeeMe MCP endpoint the agent can call for perception tools */
   mcpUrl?: string;
+  /** DroidCore MCP endpoint for motion tools (move, rotate, stop, scan, speak) */
+  motionMcpUrl?: string;
 }
 
 export interface AgentRunOptions {
@@ -40,6 +42,8 @@ export interface AgentConfig {
   claudePath?: string;
   codexPath?: string;
   robotMcpUrl?: string;
+  /** DroidCore motion MCP server (DroidCore/runtime), passed alongside HowYouSeeMe in Robot mode */
+  droidcoreMcpUrl?: string;
   /** Shake the cursor to open Circle to Ask */
   shakeToCircle?: boolean;
 }

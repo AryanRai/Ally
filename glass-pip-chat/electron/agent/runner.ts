@@ -6,7 +6,7 @@ import path from 'node:path';
 import readline from 'node:readline';
 import { childEnv, isWin, launcherFor, resolveAgentBinary } from './binaries.js';
 import { ClaudeStreamParser, CodexStreamParser, StreamParser } from './parsers.js';
-import type { AgentEvent, AgentRunOptions } from './types.js';
+import type { AgentEvent, AgentRobotContext, AgentRunOptions } from './types.js';
 
 interface ActiveRun {
   child: ChildProcess;
@@ -15,6 +15,14 @@ interface ActiveRun {
 
 const runs = new Map<string, ActiveRun>();
 let runCounter = 0;
+
+/** MCP servers Robot mode hands the agent, by server name: perception (HowYouSeeMe) and motion (DroidCore). */
+export function robotMcpServers(robot?: AgentRobotContext): Record<string, string> {
+  const servers: Record<string, string> = {};
+  if (robot?.mcpUrl) servers.howyouseeme = robot.mcpUrl;
+  if (robot?.motionMcpUrl) servers.droidcore = robot.motionMcpUrl;
+  return servers;
+}
 
 /** Robot context goes through temp files so long text never hits the command line. */
 function writeRobotFiles(runId: string, opts: AgentRunOptions): { files: string[]; promptFile?: string; mcpFile?: string } {
@@ -25,9 +33,11 @@ function writeRobotFiles(runId: string, opts: AgentRunOptions): { files: string[
   fs.writeFileSync(promptFile, opts.robot.instructions);
   const files = [promptFile];
   let mcpFile: string | undefined;
-  if (opts.robot.mcpUrl) {
+  const servers = Object.entries(robotMcpServers(opts.robot));
+  if (servers.length) {
     mcpFile = path.join(dir, `${runId}-mcp.json`);
-    fs.writeFileSync(mcpFile, JSON.stringify({ mcpServers: { howyouseeme: { type: 'http', url: opts.robot.mcpUrl } } }));
+    const mcpServers = Object.fromEntries(servers.map(([name, url]) => [name, { type: 'http', url }]));
+    fs.writeFileSync(mcpFile, JSON.stringify({ mcpServers }));
     files.push(mcpFile);
   }
   return { files, promptFile, mcpFile };
@@ -46,7 +56,7 @@ function claudeArgs(opts: AgentRunOptions, robot: { promptFile?: string; mcpFile
   return args;
 }
 
-function codexArgs(opts: AgentRunOptions): string[] {
+export function codexArgs(opts: AgentRunOptions): string[] {
   const args = ['exec'];
   if (opts.sessionId) args.push('resume');
   // `-i` takes several files, so it must be followed by another flag, not the `-` stdin marker
@@ -63,7 +73,9 @@ function codexArgs(opts: AgentRunOptions): string[] {
   if (opts.robot) {
     // JSON string escapes are valid TOML basic-string escapes
     args.push('-c', `developer_instructions=${JSON.stringify(opts.robot.instructions)}`);
-    if (opts.robot.mcpUrl) args.push('-c', `mcp_servers.howyouseeme.url=${JSON.stringify(opts.robot.mcpUrl)}`);
+    for (const [name, url] of Object.entries(robotMcpServers(opts.robot))) {
+      args.push('-c', `mcp_servers.${name}.url=${JSON.stringify(url)}`);
+    }
   }
   if (opts.sessionId) args.push(opts.sessionId);
   args.push('-'); // prompt comes from stdin

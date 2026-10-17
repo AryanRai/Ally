@@ -14,6 +14,7 @@ function loadConfig(): AgentConfig {
     defaultCwd: app.getPath('home'),
     permission: 'edit',
     robotMcpUrl: 'http://localhost:8090/mcp',
+    droidcoreMcpUrl: 'http://localhost:8091/mcp',
     shakeToCircle: true,
   };
   try {
@@ -55,7 +56,11 @@ export function registerAgentIpc(getWindow: () => BrowserWindow | null, onConfig
         ...opts,
         cwd: opts.cwd || config.defaultCwd,
         permission: opts.permission ?? config.permission,
-        robot: opts.robot && { instructions: opts.robot.instructions, mcpUrl: config.robotMcpUrl },
+        robot: opts.robot && {
+          instructions: opts.robot.instructions,
+          mcpUrl: config.robotMcpUrl,
+          motionMcpUrl: config.droidcoreMcpUrl,
+        },
       },
       (runId, ev) => { if (!sender.isDestroyed()) sender.send('agent:event', { runId, event: ev }); },
       binPath(opts.provider),
