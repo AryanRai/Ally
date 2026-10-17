@@ -22,3 +22,5 @@ Ctrl/Cmd+R, Shift+Ctrl/Cmd+R and F5 reload with a draft/active-turn confirmation
 ## Validation
 
 TypeScript and the desktop suite cover device consent boundaries, stale/offline requests, WebSocket authentication and speech coexistence, speaker fallback/cancellation, and existing features. Android unit tests cover folder grouping/search, permission parsing, and connection recovery. Live Android validation uses the Pixel 7 and Galaxy Watch5; no personal messages need to be sent for a smoke check. Linux/macOS perception helpers remain unverified on this Windows machine.
+
+Local services use separate ports: watch bridge 18765, speech worker 18766, chat-routing MCP 18767 (or the next free non-reserved port). Existing MCP settings on 18765/18766 migrate on launch. Existing external Claude/Codex registrations must use the new endpoint; Settings -> Agents -> Add to apps refreshes them. Isolated desktop deployments must include the sibling speech-service directory and its Python environment for local fallback.

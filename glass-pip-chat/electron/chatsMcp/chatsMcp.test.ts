@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { authorize } from './index';
+import { authorize, chatServerPort } from './index';
 import { handleRpc } from './protocol';
 import { allyChatsMcpServers, forwarding, setEndpoint } from './registry';
 import { ChatIndex, scoreChat, terms } from './search';
@@ -113,4 +113,10 @@ describe('registry', () => {
     forwarding.clear();
     setEndpoint(null);
   });
+});
+
+it('keeps chat routing off bridge and speech ports, including old saved settings', () => {
+  expect(chatServerPort(18765)).toBe(18767); expect(chatServerPort(18766)).toBe(18767);
+  expect(chatServerPort(18768)).toBe(18768); expect(chatServerPort(undefined)).toBe(18767);
+  expect(chatServerPort(65535)).toBe(18767); expect(chatServerPort(-1)).toBe(18767);
 });
