@@ -71,8 +71,7 @@ export interface PipAPI {
   // Global hotkey events from the main process
   onShortcut: (callback: (event: 'focus-main-input' | 'show-collapsed-and-focus-quick' | 'toggle-collapse' | 'cycle-size' | 'toggle-context') => void) => () => void;
 
-  // Avatar mode
-  setAvatarMode: (on: boolean) => void;
+  // Robot eyes
   /** Start/stop the global cursor feed (window-relative coordinates) */
   watchCursor: (on: boolean) => void;
   onCursorMoved: (callback: (pos: { x: number; y: number }) => void) => () => void;

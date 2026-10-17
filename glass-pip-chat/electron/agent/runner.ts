@@ -6,6 +6,7 @@ import path from 'node:path';
 import readline from 'node:readline';
 import { childEnv, isWin, launcherFor, resolveAgentBinary } from './binaries.js';
 import { ClaudeStreamParser, CodexStreamParser, StreamParser } from './parsers.js';
+import { thumbnails } from './thumbs.js';
 import type { AgentEvent, AgentRobotContext, AgentRunOptions } from './types.js';
 
 interface ActiveRun {
@@ -142,11 +143,14 @@ export async function startAgentRun(
 
   const parser: StreamParser = opts.provider === 'claude' ? new ClaudeStreamParser() : new CodexStreamParser();
   let finished = false;
+  const startedAt = Date.now();
   const send = (ev: AgentEvent) => {
     if (ev.kind === 'done') {
       if (finished) return;
       finished = true;
+      ev = { ...ev, usage: { ...ev.usage, durationMs: ev.usage?.durationMs ?? Date.now() - startedAt } };
     }
+    if (ev.kind === 'tool_end' && ev.images) ev = { ...ev, images: thumbnails(ev.images) };
     emit(runId, ev);
   };
 

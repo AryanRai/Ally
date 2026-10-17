@@ -24,7 +24,7 @@ npm run build:electron   # compiles electron/ to dist/electron (rootDir pinned)
 - **Renderer**: `GlassChatPiP.tsx` is layout only. Chat persistence is `useChats` (wrapping `utils/chatManager.ts`); a turn is `useAgentConversation`; streaming IPC is `useAgentChat`.
 - A chat's `agent` field (`provider`, `sessionId`, `cwd`) links it to a real agent session; forks keep provider/cwd but drop the session.
 - **Circle to Ask** (`electron/capture/circle.ts` + `src/circle/`): hide Ally, grab the display with `desktopCapturer`, show a fullscreen overlay page, crop in physical pixels, then send `circle:ask` to the chat window. Images reach Codex via `-i` (must precede other flags; it is variadic) and Claude via `--input-format stream-json` base64 blocks.
-- **Avatar mode** (`src/components/AvatarMode.tsx`): the window drops its acrylic material; `ipc/cursor.ts` streams the global cursor, replayed as synthetic `pointermove`s so the eyes track off-window.
+- **Appearance** (`src/lib/look.ts`): one persisted store for orb, palette, glow and robot options. `AgentPresence` morphs the orb into `RobotAvatar` during perception; the collapsed UI is one acrylic pill. `ipc/cursor.ts` streams the global cursor only while a visible robot needs it. Settings previews do not subscribe to this feed.
 
 ## Gotchas
 

@@ -110,13 +110,17 @@ export function useAgentConversation({ chats, robotMode, onSentence }: Options) 
       else if (result.stopped) content += `${content ? '\n\n' : ''}⏹️ Stopped`;
 
       const hasTools = result.segments.some(s => s.type === 'tool');
+      const rich = result.segments.some(s => s.type !== 'text');
       if (content || hasTools) {
         chats.addMessage(chatId, {
           id: `assistant-${Date.now()}`,
           role: 'assistant',
           content: content || '(no text reply)',
           timestamp: Date.now(),
-          metadata: hasTools ? { segments: JSON.parse(JSON.stringify(result.segments)) } : undefined,
+          metadata: {
+            ...(rich ? { segments: JSON.parse(JSON.stringify(result.segments)) } : {}),
+            ...(result.usage ? { usage: result.usage } : {}),
+          },
         });
       }
     } catch (error) {
@@ -178,9 +182,9 @@ export function useAgentConversation({ chats, robotMode, onSentence }: Options) 
       messages.map((m, i) => ({
         id: `${m.role}-${session.id}-${i}`,
         role: m.role,
-        content: m.content || '(tool calls only)',
+        content: m.content || (m.role === 'user' ? '' : '(tool calls only)'),
         timestamp: m.timestamp,
-        metadata: m.segments ? { segments: m.segments } : undefined,
+        metadata: m.segments || m.images || m.usage ? { segments: m.segments, images: m.images, usage: m.usage } : undefined,
       })),
     );
     // Follow-ups should go to the same agent

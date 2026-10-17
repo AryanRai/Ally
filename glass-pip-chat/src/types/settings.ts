@@ -4,8 +4,6 @@ export interface UISettings {
   messagePadding: 'tight' | 'normal' | 'spacious';
   windowPadding: number; // 0-32px padding around the chat container
   borderRadius: 'none' | 'sm' | 'md' | 'lg' | 'xl' | '2xl' | '3xl';
-  /** What collapsing turns into: the floating robot or the compact quick-input pill */
-  collapseStyle?: 'avatar' | 'pill';
 }
 
 export interface GreetingSettings {
@@ -27,8 +25,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
     messageSpacing: 'normal',
     messagePadding: 'normal',
     windowPadding: 8,
-    borderRadius: '2xl',
-    collapseStyle: 'avatar'
+    borderRadius: '2xl'
   },
   theme: 'dark',
   contextToggleEnabled: true,

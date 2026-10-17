@@ -1,21 +1,11 @@
+import { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { 
-  Grip, 
-  Maximize2, 
-  Square, 
-  CornerDownLeft,
-  X,
-  Clipboard,
-  ChevronDown,
-  Volume2,
-  VolumeX,
-  Eye,
-  EyeOff
-} from 'lucide-react';
-import { cn } from '../../lib/utils';
-import { ThemeUtils } from '../../utils/themeUtils';
-import { Message } from '../../types/chat';
-import AnimatedOrb from '../AnimatedOrb';
+import { ArrowUp, ChevronDown, Clipboard, GripVertical, Lasso, Maximize2, MoreHorizontal, Square, Volume2, VolumeX, X } from 'lucide-react';
+import { cn } from '@/lib/utils';
+import type { Message } from '@/types/chat';
+import AgentPresence from '@/components/glow/AgentPresence';
+import type { OrbMood } from '@/components/glow/EnergyOrb';
+import type { RobotPulse, RobotStatus } from '@/components/glow/RobotAvatar';
 import CollapsedChatPreview from './CollapsedChatPreview';
 import CollapsedResponsePreview from './CollapsedResponsePreview';
 import { UnifiedModelSelector } from '../UnifiedModelSelector';
@@ -38,16 +28,14 @@ interface CollapsedHeaderProps {
   onMessageFork?: (messageId: string, newContent: string) => void;
   onMessageDelete?: (messageId: string) => void;
   onCopyCode?: (text: string, codeId: string) => void;
-  onRunCode?: (command: string, codeId: string) => void;
   onRecompute?: (messageId: string) => void;
   isResizing: boolean;
   size: string;
   hasNewContext: boolean;
-  contextData: any;
+  contextData: { clipboard?: string; selectedText?: string };
   contextToggleEnabled: boolean;
   showContext?: boolean;
   onContextToggle?: () => void;
-  onContextToggleChange?: (enabled: boolean) => void;
   uiSettings?: any;
   currentResponse?: string;
   currentModel: string;
@@ -56,16 +44,27 @@ interface CollapsedHeaderProps {
   onModelSelect: (model: string) => void;
   voiceModeEnabled?: boolean;
   onVoiceModeToggle?: () => void;
-  onSpeechSettingsOpen?: () => void;
   speechServiceConnected?: boolean;
   isContextExpanded?: boolean;
   onContextExpandedChange?: (expanded: boolean) => void;
-  isSpeaking?: boolean;
-  isListening?: boolean;
   placeholder?: string;
-  orbState?: 'idle' | 'listening' | 'thinking' | 'speaking' | 'processing' | 'ggwave';
+  /** Agent face: orb normally, robot while sensing (and on hover) */
+  mood: OrbMood;
+  sensing: boolean;
+  robotStatus: RobotStatus;
+  pulse: RobotPulse | null;
+  /** The hover extras row grows the window, so tell the shell when it shows */
+  onExtrasChange?: (open: boolean) => void;
 }
 
+const noDrag = { WebkitAppRegion: 'no-drag' } as React.CSSProperties;
+const iconButton = 'grid size-7 shrink-0 place-items-center rounded-[8px] text-foreground/55 transition-colors hover:bg-white/8 hover:text-foreground disabled:opacity-40 [&>svg]:size-3.5';
+
+/**
+ * Collapsed Ally: one pill holding the agent's face (the robot whose eyes follow
+ * your cursor, or Mary's orb), a quick input, and the rarely used controls tucked
+ * into a hover row, like the composer's tool strip.
+ */
 export default function CollapsedHeader({
   platform,
   theme,
@@ -84,7 +83,6 @@ export default function CollapsedHeader({
   onMessageFork,
   onMessageDelete,
   onCopyCode,
-  onRunCode,
   onRecompute,
   isResizing,
   size,
@@ -93,7 +91,6 @@ export default function CollapsedHeader({
   contextToggleEnabled,
   showContext,
   onContextToggle,
-  onContextToggleChange,
   uiSettings,
   currentResponse,
   currentModel,
@@ -102,321 +99,215 @@ export default function CollapsedHeader({
   onModelSelect,
   voiceModeEnabled,
   onVoiceModeToggle,
-  onSpeechSettingsOpen,
-  speechServiceConnected,
   isContextExpanded,
   onContextExpandedChange,
-  isSpeaking,
-  isListening,
   placeholder = 'Balalalala',
-  orbState
+  mood,
+  sensing,
+  robotStatus,
+  pulse,
+  onExtrasChange,
 }: CollapsedHeaderProps) {
+  const [extras, setExtras] = useState(false);
+  const [hovering, setHovering] = useState(false);
+  const closeTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const contextExpanded = isContextExpanded ?? false;
+  const hasClipboard = hasNewContext && !!(contextData.clipboard || contextData.selectedText);
+
+  useEffect(() => () => clearTimeout(closeTimer.current), []);
+
+  const showExtras = (open: boolean) => {
+    clearTimeout(closeTimer.current);
+    if (open) {
+      setExtras(true);
+      onExtrasChange?.(true);
+    } else if (!showModelSelector) {
+      // Small grace period so moving between rows doesn't flicker
+      closeTimer.current = setTimeout(() => {
+        setExtras(false);
+        onExtrasChange?.(false);
+      }, 350);
+    }
+  };
+
+  const extraItems = [
+    {
+      id: 'voice',
+      icon: voiceModeEnabled ? <Volume2 /> : <VolumeX />,
+      label: 'Voice',
+      active: voiceModeEnabled,
+      onClick: onVoiceModeToggle,
+    },
+    { id: 'circle', icon: <Lasso />, label: 'Circle', onClick: () => window.pip?.circle.start() },
+    { id: 'clipboard', icon: <Clipboard />, label: 'Clipboard', active: showContext && hasClipboard, dot: hasClipboard, onClick: onContextToggle },
+    { id: 'size', icon: <Square />, label: `Size ${size}`, disabled: isResizing, onClick: onSizeChange },
+  ];
 
   return (
-    <div className="flex flex-col">
-      {/* Header with controls */}
-      <div className="flex items-center gap-2 px-3 py-2">
-        {/* Draggable area */}
-        <div 
-          className="flex items-center gap-2 flex-1"
-          style={{
-            WebkitAppRegion: 'drag',
-            WebkitUserSelect: 'none',
-            userSelect: 'none'
-          } as React.CSSProperties}
+    <div className="flex flex-col" onMouseEnter={() => setHovering(true)} onMouseLeave={() => { setHovering(false); showExtras(false); }} onFocusCapture={() => clearTimeout(closeTimer.current)}>
+      {/* The pill */}
+      <div className="flex items-center gap-1.5 px-1.5 py-1.5">
+        <span
+          className="grid h-9 w-3 shrink-0 cursor-grab place-items-center text-foreground/25 hover:text-foreground/60"
+          style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
+          title="Drag"
         >
-          <Grip className="w-3 h-3 opacity-50 shrink-0" />
-          <AnimatedOrb 
-            isActive={isTyping || voiceModeEnabled || isSpeaking || isListening} 
-            size="sm" 
-            state={
-              orbState ?? (
-                isTyping ? 'thinking' : 
-                isSpeaking ? 'speaking' :
-                isListening ? 'listening' :
-                voiceModeEnabled && speechServiceConnected ? 'listening' : 
-                'idle'
-              )
-            }
-          />
+          <GripVertical className="size-3.5" />
+        </span>
 
-          {/* Optimized context indicator - removed separate indicator, will be combined with eye icon */}
-        </div>
+        <button type="button" onClick={onCollapseToggle} style={noDrag} className="shrink-0 cursor-pointer" title="Open chat">
+          <AgentPresence size={36} mood={mood} sensing={sensing} robotStatus={robotStatus} pulse={pulse} forceRobot={hovering && !isTyping} />
+        </button>
 
-        {/* Control buttons - no-drag region */}
-        <div 
-          className="flex items-center gap-1 shrink-0"
-          style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
-        >
-          {/* Voice Mode Toggle with Dropdown */}
-          {onVoiceModeToggle && (
-            <div className="relative">
-              <button
-                onClick={onVoiceModeToggle}
-                onContextMenu={(e) => {
-                  e.preventDefault();
-                  onSpeechSettingsOpen?.();
-                }}
-                disabled={!speechServiceConnected}
-                className={cn(
-                  "p-1.5 rounded-lg transition-colors relative group",
-                  voiceModeEnabled && speechServiceConnected
-                    ? "bg-white/10 text-white hover:bg-white/15"
-                    : "bg-gray-500/20 text-gray-400 hover:bg-gray-500/30",
-                  !speechServiceConnected && "opacity-50 cursor-not-allowed"
-                )}
-                title={
-                  !speechServiceConnected 
-                    ? "Connect to speech service first" 
-                    : `Voice mode: ${voiceModeEnabled ? 'ON' : 'OFF'} - Click to toggle, right-click for settings`
-                }
-              >
-                {voiceModeEnabled ? (
-                  <Volume2 className="w-3.5 h-3.5" />
-                ) : (
-                  <VolumeX className="w-3.5 h-3.5" />
-                )}
-                {/* Status indicator */}
-                <div className={cn(
-                  "absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full",
-                  voiceModeEnabled && speechServiceConnected ? "bg-white/10" : "bg-gray-400"
-                )} />
-                {/* Settings indicator */}
-                <div className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 bg-white/10 rounded-full opacity-0 group-hover:opacity-100 transition-opacity" />
-              </button>
-            </div>
-          )}
-
-          {/* Model selector (same picker as the expanded header) */}
-          <UnifiedModelSelector
-            platform={platform}
-            theme={theme}
-            currentModel={currentModel}
-            onModelSelect={onModelSelect}
-            showSelector={showModelSelector}
-            onToggleSelector={onModelSelectorToggle}
-            compact={true}
-            windowSize="S"
-          />
-
-          {/* Combined Context Control - Eye + Clipboard with smart indicators */}
-          {onContextToggle && (
-            <button
-              onClick={onContextToggle}
-              onContextMenu={(e) => {
-                e.preventDefault();
-                onContextToggleChange?.(!contextToggleEnabled);
-              }}
-              className={cn(
-                "p-1.5 rounded-lg hover:bg-white/10 transition-colors relative",
-                showContext && hasNewContext && (contextData.clipboard || contextData.selectedText) && "bg-white/10",
-                contextToggleEnabled && "ring-1 ring-green-400/30"
-              )}
-              title={`Context: ${showContext ? 'Visible' : 'Hidden'} | Monitoring: ${contextToggleEnabled ? 'ON' : 'OFF'} | Click: toggle view, Right-click: toggle monitoring`}
-            >
-              {/* Main icon - Eye for visibility, Clipboard overlay for monitoring */}
-              <div className="relative">
-                {showContext ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-                {/* Clipboard overlay indicator */}
-                <Clipboard className={cn(
-                  "w-2 h-2 absolute -bottom-0.5 -right-0.5",
-                  contextToggleEnabled ? "text-green-400" : "text-red-400 opacity-60"
-                )} />
-              </div>
-              
-              {/* New context notification */}
-              {hasNewContext && (contextData.clipboard || contextData.selectedText) && (
-                <div className="absolute -top-1 -left-1 w-2.5 h-2.5 bg-white/10 rounded-full animate-pulse">
-                  <span className="absolute inset-0 text-[8px] font-bold text-white flex items-center justify-center">N</span>
-                </div>
-              )}
-            </button>
-          )}
-
-          <button
-            onClick={onSizeChange}
-            className={cn(
-              "p-1.5 rounded-lg hover:bg-white/10 transition-all duration-200",
-              isResizing && "bg-white/10 scale-110"
-            )}
-            title={`Resize (${size} → ${size === 'S' ? 'M' : size === 'M' ? 'L' : 'S'})`}
-            disabled={isResizing}
-          >
-            <div className="relative">
-              <div className="w-3.5 h-3.5 border border-current rounded-xs" />
-              <div className="absolute -top-0.5 -right-0.5 w-2 h-2 border border-current rounded-xs bg-current/20" />
-            </div>
-          </button>
-          <button
-            onClick={onCollapseToggle}
-            className={cn(
-              "p-2 rounded-lg transition-all duration-200 border border-white/20",
-              "hover:bg-white/10 hover:border-white/25 hover:scale-105",
-              "bg-white/5 backdrop-blur-xs",
-              isResizing && "opacity-50"
-            )}
-            title="Expand Chat"
-            disabled={isResizing}
-          >
-            <Maximize2 className="w-4 h-4" />
-          </button>
-          <button
-            onClick={onHide}
-            className="p-1.5 rounded-lg hover:bg-white/10 transition-colors"
-            title="Close"
-          >
-            <X className="w-3.5 h-3.5" />
-          </button>
-        </div>
-      </div>
-
-      {/* Input section */}
-      <div 
-        className="px-3 pb-2"
-        style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
-      >
         <form
-          onSubmit={(e) => {
+          onSubmit={e => {
             e.preventDefault();
-            onSend(quickInput, true);
+            if (isTyping) onStop();
+            else onSend(quickInput, true);
           }}
-          className="flex items-center gap-2"
-          style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+          className="flex min-w-0 flex-1 items-center rounded-[18px] border border-white/10 bg-white/[0.06] pl-3 pr-1 transition-colors focus-within:border-white/30"
+          style={noDrag}
         >
           <input
             id="quick-input"
             type="text"
             value={quickInput}
-            onChange={(e) => setQuickInput(e.target.value)}
+            onChange={e => setQuickInput(e.target.value)}
             placeholder={placeholder}
-            className={cn(
-              "flex-1 px-3 py-2 text-sm rounded-xl",
-              platform !== 'win32' && "backdrop-blur-md",
-              ThemeUtils.getInputClass(platform, theme)
-            )}
+            className="min-w-0 flex-1 bg-transparent py-1.5 text-[13px] font-light outline-none placeholder:text-foreground/35"
           />
-
-
-
           <button
             type="submit"
             disabled={!quickInput.trim() && !isTyping}
-            onClick={(e) => {
-              if (isTyping) {
-                e.preventDefault();
-                onStop();
-              }
-            }}
             className={cn(
-              "p-2 rounded-xl transition-all shrink-0",
-              "disabled:opacity-50 disabled:cursor-not-allowed",
-              platform !== 'win32' && "backdrop-blur-md",
-              isTyping
-                ? "bg-red-500/20 hover:bg-red-500/30 text-red-300"
-                : ThemeUtils.getBackgroundClass(platform, theme, 'hover')
+              'grid size-6 shrink-0 place-items-center rounded-full transition-colors disabled:opacity-30',
+              isTyping ? 'bg-destructive/25 text-destructive' : 'bg-foreground text-background'
             )}
-            title={isTyping ? "Stop" : "Send"}
+            title={isTyping ? 'Stop' : 'Send'}
           >
-            {isTyping ? <Square className="w-4 h-4" /> : <CornerDownLeft className="w-4 h-4" />}
+            {isTyping ? <Square className="size-3" /> : <ArrowUp className="size-3.5" />}
           </button>
         </form>
+
+        <div className="flex shrink-0 items-center" style={noDrag}>
+          <button
+            type="button"
+            className={cn(iconButton, 'relative', extras && 'bg-white/8 text-foreground')}
+            onMouseEnter={() => showExtras(true)}
+            onFocus={() => showExtras(true)}
+            onClick={() => showExtras(true)}
+            aria-expanded={extras}
+            title="More"
+          >
+            <MoreHorizontal />
+            {hasClipboard && <span className="absolute right-1 top-1 size-1 animate-pulse rounded-full bg-foreground" />}
+          </button>
+          <button type="button" className={iconButton} onClick={onCollapseToggle} disabled={isResizing} title="Expand chat">
+            <Maximize2 />
+          </button>
+          <button type="button" className={cn(iconButton, 'hover:bg-destructive/20')} onClick={onHide} title="Close">
+            <X />
+          </button>
+        </div>
       </div>
 
-      {/* Current Response Preview - Auto-reader */}
-      <CollapsedResponsePreview
-        platform={platform}
-        theme={theme}
-        response={currentResponse || ''}
-        isTyping={isTyping}
-        onStop={onStop}
-        onExpand={onCollapseToggle}
-      />
-
-      {/* Unified Context Element */}
-      {hasNewContext && (contextData.clipboard || contextData.selectedText) && (
-        <div 
-          className="px-3 pb-2"
-          style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
-        >
-          <div className={cn(
-            "border rounded-lg overflow-hidden",
-            ThemeUtils.getBorderClass(platform, theme)
-          )}>
-            {/* Context Header - Collapsible */}
-            <button
-              onClick={() => onContextExpandedChange?.(!contextExpanded)}
-              className={cn(
-                "w-full flex items-center justify-between p-2 text-left transition-colors",
-                "hover:bg-white/5 rounded-lg"
-              )}
-              style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
-            >
-              <div className="flex items-center gap-2">
-                <Clipboard className="w-3 h-3 opacity-60" />
-                <span className="text-xs font-medium opacity-80">
-                  Context
-                </span>
-                {contextToggleEnabled && (
-                  <span className="text-xs opacity-50">(auto-attach)</span>
-                )}
-                <div className="w-1.5 h-1.5 bg-white/10 rounded-full animate-pulse" />
-              </div>
-              <ChevronDown className={cn(
-                "w-3 h-3 opacity-60 transition-transform duration-200",
-                contextExpanded && "rotate-180"
-              )} />
-            </button>
-
-            {/* Context Content - Expandable */}
-            <AnimatePresence>
-              {contextExpanded && (
-                <motion.div
-                  initial={{ opacity: 0, height: 0 }}
-                  animate={{ opacity: 1, height: 'auto' }}
-                  exit={{ opacity: 0, height: 0 }}
-                  transition={{ duration: 0.2, ease: 'easeInOut' }}
-                  className="overflow-hidden"
+      {/* Hover extras: the controls the pill doesn't need all the time */}
+      <AnimatePresence initial={false}>
+        {extras && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            exit={{ opacity: 0, height: 0 }}
+            transition={{ duration: 0.18, ease: 'easeOut' }}
+            className="overflow-hidden"
+            style={noDrag}
+            onMouseEnter={() => showExtras(true)}
+          >
+            <div className="flex flex-wrap items-center gap-1 px-2 pb-1.5">
+              {extraItems.map(item => (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={item.onClick}
+                  disabled={item.disabled}
+                  className={cn(
+                    'relative flex h-7 items-center gap-1.5 rounded-[8px] border border-white/10 px-2 text-[11px] transition-colors disabled:opacity-40 [&>svg]:size-3.5',
+                    item.active ? 'bg-white/12 text-foreground' : 'bg-white/[0.03] text-foreground/60 hover:bg-white/8 hover:text-foreground'
+                  )}
                 >
-                  <div className={cn(
-                    "px-3 pb-3 border-t",
-                    ThemeUtils.getBorderClass(platform, theme)
-                  )}>
-                    <div className="text-xs opacity-70 font-medium mb-2">Context Details:</div>
-                    <div className={cn(
-                      "p-2 rounded-sm max-h-32 overflow-y-auto",
-                      "bg-black/20 text-xs font-mono",
-                      ThemeUtils.getScrollbarClass(platform, theme)
-                    )}>
-                      <pre className="whitespace-pre-wrap">
-                        {contextData.clipboard || contextData.selectedText || ''}
-                      </pre>
-                    </div>
-                  </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
+                  {item.icon}
+                  {item.label}
+                  {item.dot && <span className="size-1 animate-pulse rounded-full bg-foreground" />}
+                </button>
+              ))}
+              <div className="ml-auto">
+                <UnifiedModelSelector
+                  platform={platform}
+                  theme={theme}
+                  currentModel={currentModel}
+                  onModelSelect={onModelSelect}
+                  showSelector={showModelSelector}
+                  onToggleSelector={() => { clearTimeout(closeTimer.current); onModelSelectorToggle(); }}
+                  compact
+                  windowSize="S"
+                />
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Live reply while the agent works */}
+      <div style={noDrag}>
+        <CollapsedResponsePreview
+          platform={platform}
+          theme={theme}
+          response={currentResponse || ''}
+          isTyping={isTyping}
+          onStop={onStop}
+          onExpand={onCollapseToggle}
+        />
+      </div>
+
+      {/* Clipboard context, when shown */}
+      {hasClipboard && showContext && (
+        <div className="px-2 pb-1.5" style={noDrag}>
+          <div className="overflow-hidden rounded-lg border border-white/10">
+            <button
+              type="button"
+              onClick={() => onContextExpandedChange?.(!contextExpanded)}
+              className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-[11px] text-foreground/70 hover:bg-white/5"
+            >
+              <Clipboard className="size-3 opacity-60" />
+              <span className="flex-1">Clipboard{contextToggleEnabled ? ' · auto-attach' : ''}</span>
+              <ChevronDown className={cn('size-3 opacity-60 transition-transform', contextExpanded && 'rotate-180')} />
+            </button>
+            {contextExpanded && (
+              <pre className="max-h-24 overflow-y-auto whitespace-pre-wrap border-t border-white/10 bg-black/20 p-2 font-mono text-[11px] text-foreground/70">
+                {contextData.clipboard || contextData.selectedText || ''}
+              </pre>
+            )}
           </div>
         </div>
       )}
 
-      {/* Chat Preview */}
-      <CollapsedChatPreview
-        platform={platform}
-        theme={theme}
-        messages={messages}
-        isTyping={isTyping}
-        currentResponse={currentResponse}
-        onCopyMessage={onCopyMessage}
-        onPreviewToggle={onPreviewToggle}
-        onMessageEdit={onMessageEdit}
-        onMessageFork={onMessageFork}
-        onMessageDelete={onMessageDelete}
-        onCopyCode={onCopyCode}
-        onRunCode={onRunCode}
-        onRecompute={onRecompute}
-        uiSettings={uiSettings}
-      />
+      <div style={noDrag}>
+        <CollapsedChatPreview
+          platform={platform}
+          theme={theme}
+          messages={messages}
+          isTyping={isTyping}
+          currentResponse={currentResponse}
+          onCopyMessage={onCopyMessage}
+          onPreviewToggle={onPreviewToggle}
+          onMessageEdit={onMessageEdit}
+          onMessageFork={onMessageFork}
+          onMessageDelete={onMessageDelete}
+          onCopyCode={onCopyCode}
+          onRecompute={onRecompute}
+          uiSettings={uiSettings}
+        />
+      </div>
     </div>
   );
 }

@@ -70,17 +70,21 @@ export const UnifiedModelSelector: React.FC<UnifiedModelSelectorProps> = ({
       setSearchQuery('');
       return;
     }
-    setTimeout(() => searchInputRef.current?.focus(), 100);
-    const rect = buttonRef.current?.getBoundingClientRect();
-    if (!rect) return;
-    const dropdownWidth = 320;
-    let left = rect.left;
-    if (left + dropdownWidth > window.innerWidth - 10) left = Math.max(10, rect.right - dropdownWidth);
-    setDropdownPosition({
-      top: rect.bottom + 5,
-      left: Math.max(10, left),
-      maxHeight: Math.max(200, Math.min(400, window.innerHeight - rect.bottom - 20)),
-    });
+    const focusTimer = setTimeout(() => searchInputRef.current?.focus(), 100);
+    const position = () => {
+      const rect = buttonRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      const dropdownWidth = Math.min(320, window.innerWidth - 20);
+      const left = Math.min(rect.left, window.innerWidth - dropdownWidth - 10);
+      setDropdownPosition({
+        top: rect.bottom + 5,
+        left: Math.max(10, left),
+        maxHeight: Math.max(120, Math.min(400, window.innerHeight - rect.bottom - 20)),
+      });
+    };
+    position();
+    window.addEventListener('resize', position);
+    return () => { clearTimeout(focusTimer); window.removeEventListener('resize', position); };
   }, [showSelector]);
 
   const groups = useMemo(() => {
@@ -133,7 +137,7 @@ export const UnifiedModelSelector: React.FC<UnifiedModelSelectorProps> = ({
               initial={{ opacity: 0, scale: 0.9, y: -10 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.9, y: -10 }}
-              className={cn('fixed w-80 z-999999', ThemeUtils.getModalClass(platform, theme))}
+              className={cn('fixed w-80 max-w-[calc(100vw-20px)] z-999999', ThemeUtils.getModalClass(platform, theme))}
               style={{ top: dropdownPosition.top, left: dropdownPosition.left, pointerEvents: 'auto' } as React.CSSProperties}
             >
               <div className="p-3">

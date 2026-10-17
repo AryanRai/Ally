@@ -13,11 +13,12 @@ import { useEditState } from '../hooks/useEditState';
 import { useChats } from '../hooks/useChats';
 import { useAgentConversation } from '../hooks/useAgentConversation';
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
+import { useExternalSessions } from '../hooks/useExternalSessions';
 
 import FlowField, { FlowFieldState } from './FlowField';
-import EdgeGlow from './glow/EdgeGlow';
-import { DEFAULT_GLOW_PALETTE, GLOW_PALETTES } from './glow/palette';
-import AvatarMode, { AVATAR_WINDOW, AvatarPulse, AvatarStatus } from './AvatarMode';
+import WindowGlow from './glow/WindowGlow';
+import type { OrbMood } from './glow/EnergyOrb';
+import type { RobotPulse, RobotStatus } from './glow/RobotAvatar';
 import ChatSidebar from './ChatSidebar';
 import SettingsModal from './SettingsModal';
 import { SpeechControls } from './SpeechControls';
@@ -32,7 +33,8 @@ const SIDEBAR_WIDTH = { expanded: 280, collapsed: 48 };
 const MAX_CONTENT = { width: 850, height: 800 }; // larger windows overflow the acrylic background
 const COLLAPSED = {
   widthBySize: { S: 320, M: 360, L: 420 } as Record<string, number>,
-  baseHeight: 140,
+  baseHeight: 96,
+  extrasHeight: 40,
   previewHeight: 340,
   contextHeight: 96,
   responseHeight: 140,
@@ -45,6 +47,7 @@ export default function GlassChatPiP() {
   const context = useContextMonitoring();
   const speech = useSpeechService();
   const chats = useChats();
+  const external = useExternalSessions();
 
   const [settingsManager] = useState(() => SettingsManager.getInstance());
   const [appSettings, setAppSettings] = useState<AppSettings>(() => settingsManager.getSettings());
@@ -141,6 +144,8 @@ export default function GlassChatPiP() {
   };
 
   const toggleCollapse = () => {
+    setExtrasOpen(false);
+    setShowModelSelector(false);
     if (!state.collapsed) {
       setIsPreviewExpanded(false);
     }
@@ -207,55 +212,53 @@ export default function GlassChatPiP() {
     return 'idle';
   }, [isTyping, toolRunning, thinkingText, speech.droidModeEnabled, speech.isSpeaking]);
 
-  const orbState = useMemo(() => {
-    if (isTyping) return toolRunning ? 'processing' : 'thinking';
-    if (speech.voiceModeEnabled && speech.isListening) return 'listening';
-    if (speech.droidModeEnabled && speech.isSpeaking) return 'speaking';
-    return 'idle';
-  }, [isTyping, toolRunning, speech.voiceModeEnabled, speech.isListening, speech.droidModeEnabled, speech.isSpeaking]) as
-    'idle' | 'listening' | 'thinking' | 'speaking' | 'processing';
-
-  // ---- Avatar mode -------------------------------------------------------------
-
-  const avatarMode = state.collapsed && (appSettings.ui.collapseStyle ?? 'avatar') === 'avatar';
-  const avatarStatus: AvatarStatus = isTyping
-    ? toolRunning ? 'tool' : 'thinking'
-    : speech.voiceModeEnabled && speech.isListening ? 'listening' : 'idle';
+  // Seeing or hearing: voice input, a circled screenshot being looked at, or a
+  // perception / image tool running. The orb morphs into the robot for these.
+  const lastUser = [...messages].reverse().find(m => m.role === 'user');
+  const perceiving = streamingSegments.some(s =>
+    s.type === 'tool' && s.toolExecution?.status === 'executing' &&
+    /howyouseeme|droidcore|camera|vision|screenshot|view_image|perceive|look|see|hear|listen|audio|\.(png|jpe?g|gif|webp)\b/i.test(
+      s.toolExecution.name + ' ' + JSON.stringify(s.toolExecution.parameters ?? {}))
+  );
+  const listening = speech.voiceModeEnabled && speech.isListening;
+  const sensing = listening || (isTyping && (perceiving || !!lastUser?.metadata?.image));
+  const mood: OrbMood = isTyping ? 'busy' : listening ? 'listening' : 'idle';
+  const robotStatus: RobotStatus = listening ? 'listening' : isTyping ? (sensing ? 'seeing' : toolRunning ? 'tool' : 'thinking') : 'idle';
+  const [extrasOpen, setExtrasOpen] = useState(false);
 
   // When a turn ends, react to how it went
-  const [avatarPulse, setAvatarPulse] = useState<AvatarPulse | null>(null);
+  const [robotPulse, setRobotPulse] = useState<RobotPulse | null>(null);
   const wasTyping = useRef(false);
   useEffect(() => {
     if (wasTyping.current && !isTyping) {
       const last = messages[messages.length - 1];
       const failed = last?.role === 'assistant' && last.content.includes('⚠️');
-      setAvatarPulse({ kind: failed ? 'failure' : 'success', at: Date.now() });
+      setRobotPulse({ kind: failed ? 'failure' : 'success', at: Date.now() });
     }
     wasTyping.current = isTyping;
   }, [isTyping]);
 
-  useEffect(() => {
-    window.pip?.setAvatarMode(avatarMode);
-  }, [avatarMode]);
-
   // ---- Window sizing ---------------------------------------------------------
 
-  const padding = avatarMode ? 0 : appSettings.ui.windowPadding;
+  // On Windows the OS draws the rounded acrylic window, so the app fills it edge to edge;
+  // elsewhere the app draws its own rounded glass inside a transparent window
+  const nativeFrame = platform === 'win32';
+  const padding = nativeFrame ? 0 : appSettings.ui.windowPadding;
   const hasContext = context.hasNewContext && !!context.contextData.clipboard;
   let collapsedHeight = isPreviewExpanded ? COLLAPSED.previewHeight : COLLAPSED.baseHeight;
-  if (isContextExpanded && hasContext) collapsedHeight += COLLAPSED.contextHeight;
+  if (extrasOpen) collapsedHeight += COLLAPSED.extrasHeight + (state.size === 'S' ? 32 : 0);
+  if (isContextExpanded && hasContext && context.showContext) collapsedHeight += COLLAPSED.contextHeight;
   if (currentResponse || isTyping) collapsedHeight += COLLAPSED.responseHeight;
+  // Portals still live inside the native window; make room for the agent picker.
+  if (showModelSelector) collapsedHeight = Math.max(collapsedHeight, 440);
+  if (showSettings) collapsedHeight = Math.max(collapsedHeight, 600);
 
   const sidebarWidth = state.collapsed ? 0 : sidebarCollapsed ? SIDEBAR_WIDTH.collapsed : SIDEBAR_WIDTH.expanded;
-  const contentWidth = avatarMode
-    ? AVATAR_WINDOW.width
-    : Math.min(
-      state.collapsed ? COLLAPSED.widthBySize[state.size] ?? 360 : sizePx[state.size].w + sidebarWidth,
-      MAX_CONTENT.width - padding * 2,
-    );
-  const contentHeight = avatarMode
-    ? AVATAR_WINDOW.height
-    : Math.min(state.collapsed ? collapsedHeight : sizePx[state.size].h, MAX_CONTENT.height - padding * 2);
+  const contentWidth = Math.min(
+    state.collapsed ? COLLAPSED.widthBySize[state.size] ?? 360 : sizePx[state.size].w + sidebarWidth,
+    MAX_CONTENT.width - padding * 2,
+  );
+  const contentHeight = Math.min(state.collapsed ? collapsedHeight : sizePx[state.size].h, MAX_CONTENT.height - padding * 2);
 
   // The expanded sidebar doesn't fit next to the largest chat area
   useEffect(() => {
@@ -294,19 +297,6 @@ export default function GlassChatPiP() {
     onRecompute: conversation.regenerate,
   };
 
-  if (avatarMode) {
-    return (
-      <div className="fixed inset-0 bg-transparent" style={{ width: contentWidth, height: contentHeight }}>
-        <AvatarMode
-          status={avatarStatus}
-          pulse={avatarPulse}
-          caption={isTyping ? `${conversation.providerLabel} is working…` : undefined}
-          onExpand={toggleCollapse}
-        />
-      </div>
-    );
-  }
-
   return (
     <motion.div
       className={cn(
@@ -316,25 +306,26 @@ export default function GlassChatPiP() {
       )}
       style={{ width: contentWidth + padding * 2, height: contentHeight + padding * 2, zIndex: 50 }}
       initial={{ opacity: 0, scale: 0.9 }}
-      animate={{ opacity: 1, scale: isResizing ? 1.02 : 1 }}
+      animate={{ opacity: 1, scale: isResizing && !nativeFrame ? 1.02 : 1 }}
       transition={{ type: 'spring', stiffness: 400, damping: 35 }}
     >
       <motion.div
         layout
         className={cn(
           'overflow-hidden relative flex transition-all duration-300 chat-container acrylic-container',
-          ThemeUtils.getBorderRadiusClass(appSettings.ui.borderRadius, platform),
-          // prxptn: dark translucent glass, hairline border; the OS acrylic/blur still shows through
-          'border border-border bg-black/60 text-foreground shadow-[0_12px_48px_rgba(0,0,0,0.55)]',
-          isResizing && 'shadow-lg scale-[1.01]',
+          // prxptn: dark translucent glass; the OS acrylic/blur still shows through
+          'bg-black/60 text-foreground',
+          !nativeFrame && ThemeUtils.getBorderRadiusClass(appSettings.ui.borderRadius, platform),
+          !nativeFrame && 'border border-border shadow-[0_12px_48px_rgba(0,0,0,0.55)]',
+          !nativeFrame && isResizing && 'shadow-lg scale-[1.01]',
           platform === 'linux' && 'linux-blur',
           platform !== 'win32' && platform !== 'linux' && 'backdrop-blur-2xl backdrop-saturate-150'
         )}
         style={{ width: contentWidth, height: contentHeight, margin: `${padding}px` }}
       >
         <FlowField state={backdropState} />
-        {/* Orbit Mary-style side glow while the agent works */}
-        <EdgeGlow active={isTyping} colors={GLOW_PALETTES[DEFAULT_GLOW_PALETTE]} />
+        {/* Orbit Mary's panel glow: while the agent works and while you type */}
+        <WindowGlow agentWorking={isTyping} userTyping={!!(state.collapsed ? quickInput : input).trim()} />
 
         {!state.collapsed && (
           <div className={cn('chat-sidebar', sidebarCollapsed && 'collapsed')}>
@@ -349,7 +340,8 @@ export default function GlassChatPiP() {
               onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
               theme={theme}
               platform={platform}
-              onOpenAgentSession={conversation.openSession}
+              externalSessions={external.sessions}
+              onOpenAgentSession={session => void conversation.openSession(session).then(external.refresh)}
             />
           </div>
         )}
@@ -391,7 +383,6 @@ export default function GlassChatPiP() {
                 contextToggleEnabled={context.contextToggleEnabled}
                 showContext={context.showContext}
                 onContextToggle={() => context.setShowContext(!context.showContext)}
-                onContextToggleChange={context.setContextToggleEnabled}
                 uiSettings={appSettings.ui}
                 currentResponse={currentResponse}
                 currentModel={conversation.model}
@@ -400,22 +391,21 @@ export default function GlassChatPiP() {
                 onModelSelect={conversation.setModel}
                 voiceModeEnabled={speech.voiceModeEnabled}
                 onVoiceModeToggle={() => setVoiceMode(!speech.voiceModeEnabled)}
-                onSpeechSettingsOpen={() => setShowSettings(true)}
                 speechServiceConnected={speech.isConnected}
                 isContextExpanded={isContextExpanded}
                 onContextExpandedChange={setIsContextExpanded}
-                isSpeaking={speech.isSpeaking}
-                isListening={speech.isListening}
                 placeholder={greeting}
-                orbState={orbState}
+                mood={mood}
+                sensing={sensing}
+                robotStatus={robotStatus}
+                pulse={robotPulse}
+                onExtrasChange={setExtrasOpen}
               />
             ) : (
               <ExpandedHeader
                 platform={platform}
                 theme={theme}
                 isResizing={isResizing}
-                sidebarCollapsed={sidebarCollapsed}
-                onSidebarToggle={() => setSidebarCollapsed(!sidebarCollapsed)}
                 activeChat={activeChat}
                 headerTitleEdit={headerTitleEdit}
                 hasNewContext={context.hasNewContext}
@@ -498,7 +488,8 @@ export default function GlassChatPiP() {
                   messages={messages}
                   robotMode={robotMode}
                   onRobotModeToggle={toggleRobotMode}
-                  palette={GLOW_PALETTES[DEFAULT_GLOW_PALETTE]}
+                  sensing={sensing}
+                  robotStatus={robotStatus}
                   voice={{ enabled: speech.voiceModeEnabled, listening: speech.voiceModeEnabled && speech.isListening, onToggle: () => setVoiceMode(!speech.voiceModeEnabled) }}
                   agent={agentProps}
                 />

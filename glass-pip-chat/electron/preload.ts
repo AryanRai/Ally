@@ -163,8 +163,7 @@ const pipAPI = {
   },
 
 
-  // Avatar mode: transparent window + global cursor feed for the robot's eyes
-  setAvatarMode: (on: boolean) => ipcRenderer.send('window:avatar-mode', on),
+  // Global cursor feed for the robot's eyes
   watchCursor: (on: boolean) => ipcRenderer.send('cursor:watch', on),
   onCursorMoved: (callback: (pos: { x: number; y: number }) => void) => {
     const handler = (_: any, pos: { x: number; y: number }) => callback(pos);

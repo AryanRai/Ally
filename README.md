@@ -13,7 +13,9 @@
 | **Agent sessions browser**: continue any Claude Code / Codex session in Ally | Ally chats *are* real agent sessions, resumed by id |
 | **Voice loop**: speech in, spoken replies out, barge-in | Claude Code only dictates; it never speaks replies |
 | **Circle to Ask**: `Ctrl+Shift+Space` (or shake the cursor) freezes the screen; circle anything, then Ask / Search web / Explain / Fix / Copy text / Translate | Pixel-style Circle to Search, but the circled pixels go straight to Claude Code or Codex as an image |
-| **Robot avatar**: collapsing turns Ally into a little robot ([agent-robot-avatar](https://github.com/CX-ArtLab/agent-robot-avatar)) whose eyes follow your cursor anywhere and whose face shows what the agent is doing | Ambient status without a window in the way |
+| **Quick pill with orb / robot**: one compact input with hover controls; the orb morphs into a [robot](https://github.com/CX-ArtLab/agent-robot-avatar) during seeing/hearing and on pill hover | Ambient status without a window in the way |
+| **Shared appearance settings**: four Orbit orb styles, six Mary glow styles, shared palettes/custom colours, and robot options | The composer, pill and inward window glow stay coordinated |
+| **Rich agent activity**: expandable commands, edits/diffs, exposed reasoning, image thumbnails, plans and reported usage | Both live turns and imported history preserve the details the CLI provides |
 | **Clipboard context**: copy something, hit *Explain* | Quick capture without switching windows |
 | **Robot mode**: DroidCore persona + two MCP servers handed to the agent: HowYouSeeMe (perception, :8090) and DroidCore (motion, :8091) | Lets either agent see through the robot and move it, behind a safety gate |
 
@@ -36,7 +38,8 @@ glass-pip-chat/          Electron + React app
     ipc/                 clipboard context, speech bridge, global cursor feed
     speech/client.ts     WebSocket client for speech-service
   src/
-    components/          GlassChatPiP shell, AvatarMode, headers, messages, settings
+    components/          GlassChatPiP shell, headers, messages, settings, glow/orbs
+    lib/look.ts          persisted orb, palette, glow and robot appearance
     circle/              the Circle to Ask overlay page (circle.html)
     hooks/               useChats, useAgentConversation, useAgentChat,
                          useSpeechService, useContextMonitoring, useKeyboardShortcuts…
@@ -57,6 +60,10 @@ Requirements: the `claude` CLI (`npm i -g @anthropic-ai/claude-code`, then run `
 Robot mode needs the two MCP servers running. The motion server (with a simulated Unitree G1 in MuJoCo) lives in the DroidCore repo: see `DroidCore/runtime/README.md`. Quick start there: `droidcore-mcp --backend mujoco --viewer`, which serves `http://localhost:8091/mcp` (the default DroidCore URL). `docker/compose.yaml` in that folder runs the sim together with HowYouSeeMe.
 
 Voice: start `speech-service` (`speech-service/start.ps1`), then toggle voice mode in the overlay.
+
+Appearance: open **Settings → Orb, glow & robot**. Changes apply immediately and persist across restarts. The preview can simulate seeing/hearing without starting a microphone or camera. Windows uses native rounded acrylic, so window padding and corner-radius controls are shown only on other platforms.
+
+Existing sessions appear under project folders in the sidebar (`cc` for Claude Code, `cx` for Codex). Usage and reasoning appear only when recorded by the agent; Ally does not estimate missing costs or recover hidden reasoning. Codex file-change events without patch text show the changed file list.
 
 ## How a turn works
 

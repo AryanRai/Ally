@@ -6,6 +6,7 @@ import { useSpeechService } from '../hooks/useSpeechService';
 import { AppSettings } from '../types/settings';
 import ShortcutsPanel from './settings/ShortcutsPanel';
 import AgentSettingsSection from './settings/AgentSettingsSection';
+import LookSettingsSection from './settings/LookSettingsSection';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -306,8 +307,8 @@ export default function SettingsModal({
                     </div>
                   </div>
 
-                  {/* Window Padding — desktop only */}
-                  <>
+                  {/* Native Windows acrylic owns the window edge and corner radius. */}
+                  {platform !== 'win32' && <>
                   <div className="space-y-2">
                     <label className={cn(
                       "text-xs font-medium",
@@ -344,27 +345,6 @@ export default function SettingsModal({
                     )}>
                       Spacing around chat container (0px = full window)
                     </p>
-                  </div>
-
-                  {/* Collapse style */}
-                  <div className="space-y-2">
-                    <label className="text-xs font-medium">Collapse into</label>
-                    <div className="grid grid-cols-2 gap-1">
-                      {([['avatar', '🤖 Robot'], ['pill', '💊 Quick pill']] as const).map(([style, label]) => (
-                        <button
-                          key={style}
-                          onClick={() => onSettingsChange({ ui: { ...appSettings.ui, collapseStyle: style } })}
-                          className={cn(
-                            'px-2 py-1 text-xs rounded-sm border transition-colors',
-                            (appSettings.ui.collapseStyle ?? 'avatar') === style
-                              ? 'bg-white/13 border-white/25 text-white'
-                              : 'bg-white/5 border-white/10 hover:bg-white/10'
-                          )}
-                        >
-                          {label}
-                        </button>
-                      ))}
-                    </div>
                   </div>
 
                   {/* Border Radius */}
@@ -406,9 +386,11 @@ export default function SettingsModal({
                       Rounded corners of chat container
                     </p>
                   </div>
-                  </>
+                  </>}
                 </div>
               </div>
+
+              <LookSettingsSection dark={platform === 'win32' || theme === 'dark'} />
 
                 {/* Windows Acrylic Settings — desktop only */}
                 <div className="space-y-3">

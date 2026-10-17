@@ -8,6 +8,10 @@ export interface Message {
     context?: string;
     /** Small JPEG data URL of a circled screen region attached to this message */
     image?: string;
+    /** Images attached in a Claude Code / Codex session (data URLs) */
+    images?: string[];
+    /** Tokens / cost / time the agent reported for this reply */
+    usage?: import('./agent').AgentUsage;
     toolCalls?: ToolCall[];
     toolResults?: ToolResult[];
     /** Persisted streaming segments (interleaved text + tool pills) for agentic messages.
@@ -57,14 +61,16 @@ export interface ToolExecution {
   status: 'pending' | 'executing' | 'success' | 'error';
   result?: any;
   error?: string;
+  /** Images the tool returned (data URLs) */
+  images?: string[];
   startTime: number;
   endTime?: number;
   isParallel?: boolean;
 }
 
-/** Assistant reply content in order: text chunks interleaved with tool calls. */
+/** Assistant reply content in order: text and reasoning interleaved with tool calls. */
 export interface Segment {
-  type: 'text' | 'tool';
+  type: 'text' | 'tool' | 'thinking';
   content?: string;
   toolExecution?: ToolExecution;
 }

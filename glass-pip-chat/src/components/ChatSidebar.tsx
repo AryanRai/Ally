@@ -11,7 +11,6 @@ import {
 import { cn } from '@/lib/utils';
 import type { Chat } from '@/types/chat';
 import type { AgentSessionSummary } from '@/types/agent';
-import AgentSessionsPanel from './chat/AgentSessionsPanel';
 
 interface ChatSidebarProps {
   chats: Chat[];
@@ -24,20 +23,31 @@ interface ChatSidebarProps {
   onToggleCollapse: () => void;
   theme: 'light' | 'dark';
   platform: string;
+  /** Sessions from the Claude Code / Codex apps, listed alongside Ally's chats */
+  externalSessions?: AgentSessionSummary[];
   /** Continue an existing Claude Code / Codex session as a chat */
   onOpenAgentSession?: (session: AgentSessionSummary) => void;
 }
+
+type Entry =
+  | { kind: 'chat'; chat: Chat; updatedAt: number }
+  | { kind: 'session'; session: AgentSessionSummary; updatedAt: number };
 
 interface ProjectGroup {
   key: string;
   name: string;
   path?: string;
-  chats: Chat[];
+  entries: Entry[];
   updatedAt: number;
 }
 
 const NO_FOLDER = '__none__';
 const COLLAPSED_GROUPS_KEY = 'ally-sidebar-collapsed-projects';
+const ROWS_BEFORE_MORE = 6;
+const PROVIDER_TAG: Record<AgentSessionSummary['provider'], string> = { claude: 'cc', codex: 'cx' };
+
+/** Same folder regardless of slash direction, case (Windows) or trailing slash */
+const folderKey = (p: string) => p.replace(/[\\/]+/g, '/').replace(/\/$/, '').toLowerCase();
 
 function folderName(p: string): string {
   const parts = p.split(/[\\/]/).filter(Boolean);
@@ -54,19 +64,42 @@ function relativeTime(ts: number): string {
   return days < 7 ? `${days}d` : `${Math.floor(days / 7)}w`;
 }
 
-/** Chats grouped by the project folder their agent works in, newest first (like Codex's Projects). */
-function groupByProject(chats: Chat[]): ProjectGroup[] {
+/**
+ * Ally chats and Claude Code / Codex sessions grouped by project folder, newest
+ * first (like Codex's Projects). A session already continued in Ally shows once, as its chat.
+ */
+function groupByProject(chats: Chat[], sessions: AgentSessionSummary[]): ProjectGroup[] {
   const groups = new Map<string, ProjectGroup>();
-  for (const chat of chats) {
-    const cwd = chat.agent?.cwd;
-    const key = cwd ?? NO_FOLDER;
-    const group = groups.get(key) ?? { key, name: cwd ? folderName(cwd) : 'Chats', path: cwd, chats: [], updatedAt: 0 };
-    group.chats.push(chat);
-    group.updatedAt = Math.max(group.updatedAt, chat.updatedAt);
+  const add = (cwd: string | undefined, entry: Entry) => {
+    const key = cwd ? folderKey(cwd) : NO_FOLDER;
+    const group = groups.get(key) ?? { key, name: cwd ? folderName(cwd) : 'Chats', path: cwd, entries: [], updatedAt: 0 };
+    group.entries.push(entry);
+    group.updatedAt = Math.max(group.updatedAt, entry.updatedAt);
     groups.set(key, group);
+  };
+  const linked = new Set(chats.map(c => c.agent?.sessionId).filter(Boolean));
+  for (const chat of chats) add(chat.agent?.cwd, { kind: 'chat', chat, updatedAt: chat.updatedAt });
+  for (const session of sessions) {
+    if (!linked.has(session.id)) add(session.cwd, { kind: 'session', session, updatedAt: session.updatedAt });
   }
-  for (const g of groups.values()) g.chats.sort((a, b) => b.updatedAt - a.updatedAt);
+  for (const g of groups.values()) g.entries.sort((a, b) => b.updatedAt - a.updatedAt);
   return [...groups.values()].sort((a, b) => b.updatedAt - a.updatedAt);
+}
+
+/** A Claude Code / Codex session not yet opened in Ally; clicking continues it here. */
+function SessionRow({ session, onOpen }: { session: AgentSessionSummary; onOpen: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      title={`${session.title}\nFrom ${session.provider === 'claude' ? 'Claude Code' : 'Codex'} · click to continue in Ally`}
+      className="flex w-full items-center rounded-md text-left text-foreground/55 transition-colors hover:bg-white/[0.05] hover:text-foreground"
+    >
+      <span className="min-w-0 flex-1 truncate py-1.5 pl-2.5 pr-1 text-[13px] font-light">{session.title}</span>
+      <span className="shrink-0 pr-1 font-mono text-[9px] uppercase tracking-[0.1em] text-foreground/30">{PROVIDER_TAG[session.provider]}</span>
+      <span className="shrink-0 pr-2 font-mono text-[10px] text-foreground/30">{relativeTime(session.updatedAt)}</span>
+    </button>
+  );
 }
 
 function loadCollapsed(): Set<string> {
@@ -176,10 +209,12 @@ export default function ChatSidebar({
   onChatRename,
   isCollapsed,
   onToggleCollapse,
+  externalSessions = [],
   onOpenAgentSession,
 }: ChatSidebarProps) {
-  const groups = useMemo(() => groupByProject(chats), [chats]);
+  const groups = useMemo(() => groupByProject(chats, externalSessions), [chats, externalSessions]);
   const [collapsedGroups, setCollapsedGroups] = useState(loadCollapsed);
+  const [showAll, setShowAll] = useState<Set<string>>(new Set());
 
   const toggleGroup = (key: string) => {
     setCollapsedGroups(prev => {
@@ -225,6 +260,9 @@ export default function ChatSidebar({
             <p className="px-2.5 pb-1 pt-2 text-[11px] text-foreground/40">Projects</p>
             {groups.map(group => {
               const closed = collapsedGroups.has(group.key);
+              const expandedAll = showAll.has(group.key);
+              const shown = expandedAll ? group.entries : group.entries.slice(0, ROWS_BEFORE_MORE);
+              const hiddenCount = group.entries.length - shown.length;
               return (
                 <div key={group.key} className="mb-1">
                   <button
@@ -239,17 +277,39 @@ export default function ChatSidebar({
                   </button>
                   {!closed && (
                     <div className="ml-[18px] border-l border-border pl-1.5">
-                      {group.chats.map(chat => (
-                        <ChatRow
-                          key={chat.id}
-                          chat={chat}
-                          active={chat.id === activeChat}
-                          onSelect={() => onChatSelect(chat.id)}
-                          onRename={title => onChatRename(chat.id, title)}
-                          onDelete={() => onChatDelete(chat.id)}
-                          canDelete={chats.length > 1}
-                        />
-                      ))}
+                      {shown.map(entry =>
+                        entry.kind === 'chat' ? (
+                          <ChatRow
+                            key={entry.chat.id}
+                            chat={entry.chat}
+                            active={entry.chat.id === activeChat}
+                            onSelect={() => onChatSelect(entry.chat.id)}
+                            onRename={title => onChatRename(entry.chat.id, title)}
+                            onDelete={() => onChatDelete(entry.chat.id)}
+                            canDelete={chats.length > 1}
+                          />
+                        ) : (
+                          <SessionRow
+                            key={entry.session.provider + entry.session.id}
+                            session={entry.session}
+                            onOpen={() => onOpenAgentSession?.(entry.session)}
+                          />
+                        )
+                      )}
+                      {(hiddenCount > 0 || expandedAll) && group.entries.length > ROWS_BEFORE_MORE && (
+                        <button
+                          type="button"
+                          onClick={() => setShowAll(prev => {
+                            const next = new Set(prev);
+                            if (next.has(group.key)) next.delete(group.key);
+                            else next.add(group.key);
+                            return next;
+                          })}
+                          className="w-full rounded-md py-1 pl-2.5 text-left text-[11px] text-foreground/40 transition-colors hover:text-foreground/70"
+                        >
+                          {expandedAll ? 'Show less' : `Show ${hiddenCount} more`}
+                        </button>
+                      )}
                     </div>
                   )}
                 </div>
@@ -257,7 +317,6 @@ export default function ChatSidebar({
             })}
           </div>
 
-          {onOpenAgentSession && <AgentSessionsPanel onOpen={onOpenAgentSession} />}
         </>
       )}
     </motion.nav>

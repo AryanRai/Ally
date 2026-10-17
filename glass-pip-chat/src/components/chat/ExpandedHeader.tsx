@@ -1,4 +1,12 @@
-import { Maximize2, Minus, X, Settings, Clipboard, Check, Mic, MicOff, PanelLeft } from 'lucide-react';
+import { Maximize2, Minus, X, Settings, Clipboard, ClipboardX, Check, Mic, GripVertical, MoreHorizontal } from 'lucide-react';
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { UnifiedModelSelector } from '../UnifiedModelSelector';
@@ -7,8 +15,6 @@ interface ExpandedHeaderProps {
   platform: string;
   theme: 'light' | 'dark';
   isResizing: boolean;
-  sidebarCollapsed: boolean;
-  onSidebarToggle: () => void;
   activeChat: { title?: string } | null;
   headerTitleEdit: any;
   hasNewContext: boolean;
@@ -38,8 +44,6 @@ export default function ExpandedHeader({
   platform,
   theme,
   isResizing,
-  sidebarCollapsed,
-  onSidebarToggle,
   activeChat,
   headerTitleEdit,
   hasNewContext,
@@ -65,16 +69,10 @@ export default function ExpandedHeader({
   return (
     <>
       <div className="flex min-w-0 flex-1 items-center gap-2">
-        <Button
-          variant="ghost"
-          size="icon"
-          className={iconButton}
-          style={noDrag}
-          onClick={onSidebarToggle}
-          title={sidebarCollapsed ? 'Show chats' : 'Hide chats'}
-        >
-          <PanelLeft className="size-3.5" />
-        </Button>
+        {/* The sidebar has its own toggle; this grip drags the window */}
+        <span className="grid h-6 w-4 shrink-0 cursor-grab place-items-center text-foreground/30 hover:text-foreground/60" title="Drag window">
+          <GripVertical className="size-3.5" />
+        </span>
 
         <span className="select-none font-tanker text-[15px] leading-none tracking-wide text-foreground">ALLY</span>
         <span className="h-3 w-px shrink-0 bg-border" />
@@ -121,36 +119,33 @@ export default function ExpandedHeader({
           windowSize={size as 'S' | 'M' | 'L'}
         />
 
-        {/* Click toggles the clipboard chip; right-click turns clipboard watching on/off */}
-        <Button
-          variant="ghost"
-          size="icon"
-          className={cn(iconButton, 'relative', !contextToggleEnabled && 'opacity-40')}
-          onClick={onContextToggle}
-          onContextMenu={e => {
-            e.preventDefault();
-            onContextToggleChange(!contextToggleEnabled);
-          }}
-          title={`Clipboard context: ${showContext ? 'shown' : 'hidden'} · watching ${contextToggleEnabled ? 'on' : 'off'} (right-click)`}
-        >
-          <Clipboard className="size-3.5" />
-          {hasClipboard && <span className="absolute right-1 top-1 size-1 animate-pulse bg-foreground" />}
-        </Button>
-        <Button
-          variant="ghost"
-          size="icon"
-          className={cn(iconButton, showSpeechControls && 'bg-accent text-foreground')}
-          onClick={onSpeechToggle}
-          title={`Voice controls ${showSpeechControls ? 'on' : 'off'}`}
-        >
-          {showSpeechControls ? <Mic className="size-3.5" /> : <MicOff className="size-3.5" />}
-        </Button>
-        <Button variant="ghost" size="icon" className={iconButton} onClick={onSettings} title="Settings">
-          <Settings className="size-3.5" />
-        </Button>
-        <Button variant="ghost" size="icon" className={iconButton} onClick={onSizeChange} disabled={isResizing} title={`Size: ${size}`}>
-          <Maximize2 className="size-3.5" />
-        </Button>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="ghost" size="icon" className={cn(iconButton, 'relative data-[state=open]:bg-accent data-[state=open]:text-foreground')} title="More">
+              <MoreHorizontal className="size-3.5" />
+              {hasClipboard && <span className="absolute right-1 top-1 size-1 animate-pulse rounded-full bg-foreground" />}
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="min-w-52">
+            <DropdownMenuItem onSelect={onContextToggle}>
+              <Clipboard className="size-3.5" /> {showContext ? 'Hide' : 'Show'} clipboard context
+              {hasClipboard && <span className="ml-auto size-1.5 rounded-full bg-foreground" />}
+            </DropdownMenuItem>
+            <DropdownMenuCheckboxItem checked={contextToggleEnabled} onCheckedChange={v => onContextToggleChange(!!v)}>
+              <ClipboardX className="size-3.5" /> Watch clipboard
+            </DropdownMenuCheckboxItem>
+            <DropdownMenuCheckboxItem checked={showSpeechControls} onCheckedChange={onSpeechToggle}>
+              <Mic className="size-3.5" /> Voice controls
+            </DropdownMenuCheckboxItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onSelect={onSizeChange} disabled={isResizing}>
+              <Maximize2 className="size-3.5" /> Window size <span className="ml-auto font-mono text-[11px] text-muted-foreground">{size}</span>
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={onSettings}>
+              <Settings className="size-3.5" /> Settings
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
         <Button variant="ghost" size="icon" className={iconButton} onClick={onCollapseToggle} disabled={isResizing} title="Collapse">
           <Minus className="size-3.5" />
         </Button>

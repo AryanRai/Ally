@@ -161,8 +161,11 @@ export async function createWindow(): Promise<void> {
     maxWidth: 800,
     maxHeight: 1000,
     frame: false,
-    transparent: true,
-    resizable: true,
+    // Windows 11 only rounds the corners of non-transparent windows, and acrylic is
+    // applied to the whole window either way, so stay opaque there: the app then
+    // fills a natively rounded acrylic window edge to edge
+    transparent: process.platform !== 'win32',
+    resizable: true, // keeps WS_THICKFRAME, which Windows also needs for rounding
     movable: true,
     roundedCorners: true,
     hasShadow: true,
@@ -377,13 +380,6 @@ function ensureWindowOnScreen(x: number, y: number, width: number, height: numbe
 }
 
 export function registerWindowIpc(): void {
-  // Avatar mode: drop the acrylic backdrop so only the robot is visible
-  ipcMain.on('window:avatar-mode', (_, on: boolean) => {
-    if (!win) return;
-    if (process.platform === 'win32') win.setBackgroundMaterial(on ? 'none' : 'acrylic');
-    win.setHasShadow(!on);
-  });
-
   // IPC handlers
   ipcMain.on('pip:show', () => {
     if (win) win.show();

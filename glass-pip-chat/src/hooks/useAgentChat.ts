@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Segment, ToolExecution } from '../types/chat';
-import type { AgentConfig, AgentEvent, AgentPermission, AgentProvider } from '../types/agent';
+import type { AgentConfig, AgentEvent, AgentPermission, AgentProvider, AgentUsage } from '../types/agent';
 
 export interface AgentTurnCallbacks {
   onSegments: (segments: Segment[]) => void;
@@ -17,6 +17,7 @@ export interface AgentTurnResult {
   sessionId?: string;
   error?: string;
   stopped?: boolean;
+  usage?: AgentUsage;
 }
 
 const PERMISSION_ORDER: AgentPermission[] = ['readonly', 'edit', 'full'];
@@ -112,10 +113,23 @@ export function useAgentChat() {
           case 'text':
             appendText(ev.text);
             break;
-          case 'thinking':
+          case 'thinking': {
             thinking += ev.text;
+            // Reasoning stays in order between tool calls, like Codex shows it
+            const last = segments[segments.length - 1];
+            if (last?.type === 'thinking') last.content = (last.content ?? '') + ev.text;
+            else segments.push({ type: 'thinking', content: ev.text.replace(/^\s+/, '') });
             cb.onThinking(thinking);
+            emitSegments();
             break;
+          }
+          case 'tool_update': {
+            const exec = tools.get(ev.id);
+            if (!exec) break;
+            exec.parameters = ev.input;
+            emitSegments();
+            break;
+          }
           case 'tool_start': {
             const exec: ToolExecution = {
               id: ev.id, name: ev.name, parameters: ev.input, status: 'executing', startTime: Date.now(),
@@ -132,12 +146,13 @@ export function useAgentChat() {
             exec.endTime = Date.now();
             if (ev.isError) exec.error = (ev.output || 'Tool failed').slice(0, 2000);
             else exec.result = (ev.output ?? '').slice(0, 4000);
+            if (ev.images?.length) exec.images = ev.images;
             emitSegments();
             break;
           }
           case 'done':
             if (ev.sessionId) sessionId = ev.sessionId;
-            finish(ev.isError ? { error: ev.error || 'Agent failed' } : {});
+            finish({ ...(ev.isError ? { error: ev.error || 'Agent failed' } : {}), usage: ev.usage });
             break;
           case 'stderr':
             break;

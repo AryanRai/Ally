@@ -8,6 +8,7 @@ export type {
   AgentModel,
   AgentSessionSummary,
   AgentHistoryMessage,
+  AgentUsage,
 } from '../../electron/agent/types';
 import type { AgentProvider } from '../../electron/agent/types';
 

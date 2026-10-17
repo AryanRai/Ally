@@ -32,9 +32,21 @@ export type AgentEvent =
   | { kind: 'text'; text: string }
   | { kind: 'thinking'; text: string }
   | { kind: 'tool_start'; id: string; name: string; input?: Record<string, unknown> }
-  | { kind: 'tool_end'; id: string; output?: string; isError?: boolean }
-  | { kind: 'done'; sessionId?: string; isError?: boolean; error?: string; costUsd?: number }
+  /** Updated input for a running tool (e.g. Codex todo list progress) */
+  | { kind: 'tool_update'; id: string; input: Record<string, unknown> }
+  /** `images`: data URLs the tool returned (screenshots, image reads) */
+  | { kind: 'tool_end'; id: string; output?: string; isError?: boolean; images?: string[] }
+  | { kind: 'done'; sessionId?: string; isError?: boolean; error?: string; costUsd?: number; usage?: AgentUsage }
   | { kind: 'stderr'; text: string };
+
+/** Per-turn totals the CLIs report. */
+export interface AgentUsage {
+  inputTokens?: number;
+  outputTokens?: number;
+  cachedTokens?: number;
+  costUsd?: number;
+  durationMs?: number;
+}
 
 export interface AgentConfig {
   defaultCwd: string;
@@ -74,6 +86,7 @@ export interface AgentToolExecution {
   status: 'pending' | 'executing' | 'success' | 'error';
   result?: unknown;
   error?: string;
+  images?: string[];
   startTime: number;
   endTime?: number;
 }
@@ -82,5 +95,8 @@ export interface AgentHistoryMessage {
   role: 'user' | 'assistant';
   content: string;
   timestamp: number;
-  segments?: Array<{ type: 'text' | 'tool'; content?: string; toolExecution?: AgentToolExecution }>;
+  /** Images the user attached (data URLs) */
+  images?: string[];
+  usage?: AgentUsage;
+  segments?: Array<{ type: 'text' | 'tool' | 'thinking'; content?: string; toolExecution?: AgentToolExecution }>;
 }

@@ -6,7 +6,8 @@ import { Shimmer } from '@/components/ai-elements/shimmer';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import type { Message as ChatMessageType, Segment } from '@/types/chat';
-import ToolCall from './ToolCall';
+import type { AgentUsage } from '@/types/agent';
+import ToolCall, { ImageStrip } from './ToolCall';
 
 const THINK_BLOCK = /<think>([\s\S]*?)<\/think>\s*/i;
 
@@ -26,9 +27,11 @@ interface AgentReplyProps {
 /** An agent reply: thinking, then text interleaved with tool calls. Used live and for history. */
 export function AgentReply({ text, thinking, segments, streaming = false }: AgentReplyProps) {
   const parts: Segment[] = segments?.length ? segments : text ? [{ type: 'text', content: text }] : [];
+  // Newer replies keep reasoning inline between tool calls; older ones have one block up top
+  const inlineThinking = parts.some(p => p.type === 'thinking');
   return (
     <>
-      {thinking && (
+      {thinking && !inlineThinking && (
         <Reasoning isStreaming={streaming && parts.length === 0} defaultOpen={false} className="mb-1">
           <ReasoningTrigger />
           <ReasoningContent>{thinking}</ReasoningContent>
@@ -37,6 +40,11 @@ export function AgentReply({ text, thinking, segments, streaming = false }: Agen
       {parts.map((part, i) =>
         part.type === 'tool' && part.toolExecution ? (
           <ToolCall key={part.toolExecution.id ?? i} tool={part.toolExecution} />
+        ) : part.type === 'thinking' ? (
+          <Reasoning key={i} isStreaming={streaming && i === parts.length - 1} defaultOpen={false} className="my-0.5">
+            <ReasoningTrigger />
+            <ReasoningContent>{part.content ?? ''}</ReasoningContent>
+          </Reasoning>
         ) : (
           <MessageResponse
             key={i}
@@ -53,6 +61,20 @@ export function AgentReply({ text, thinking, segments, streaming = false }: Agen
       )}
     </>
   );
+}
+
+const compact = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(n >= 10_000 ? 0 : 1)}k` : String(n));
+
+/** "12k in · 820 out · $0.03 · 14s", what the CLIs report at the end of a turn. */
+function UsageLine({ usage }: { usage: AgentUsage }) {
+  const parts = [
+    usage.inputTokens != null && `${compact(usage.inputTokens)} in`,
+    usage.outputTokens != null && `${compact(usage.outputTokens)} out`,
+    usage.costUsd != null && `$${usage.costUsd.toFixed(usage.costUsd < 0.1 ? 3 : 2)}`,
+    usage.durationMs != null && `${Math.round(usage.durationMs / 1000)}s`,
+  ].filter(Boolean);
+  if (!parts.length) return null;
+  return <p className="px-label select-none text-foreground/30">{parts.join(' · ')}</p>;
 }
 
 interface ChatMessageProps {
@@ -112,6 +134,8 @@ export default function ChatMessage({ message, onEdit, onFork, onDelete, onRetry
           <AgentReply text={text} thinking={thinking} segments={message.metadata?.segments as Segment[] | undefined} />
         )}
       </MessageContent>
+      {!!message.metadata?.images?.length && <ImageStrip images={message.metadata.images} className="ml-auto" />}
+      {message.metadata?.usage && <UsageLine usage={message.metadata.usage} />}
       {message.metadata?.context && (
         <p className="px-label ml-auto max-w-full truncate" title={message.metadata.context}>
           + clipboard · {message.metadata.context.slice(0, 60)}

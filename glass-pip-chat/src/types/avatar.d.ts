@@ -10,6 +10,7 @@ declare module 'react' {
         size?: number | string;
         color?: string;
         'auto-sleep'?: number | string;
+        motion?: 'auto' | 'reduce' | 'full';
       };
     }
   }

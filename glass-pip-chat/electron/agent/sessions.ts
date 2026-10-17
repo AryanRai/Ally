@@ -2,8 +2,9 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { stringifyToolOutput } from './parsers.js';
-import type { AgentHistoryMessage, AgentModel, AgentProvider, AgentSessionSummary, AgentToolExecution } from './types.js';
+import { extractImages, stringifyToolOutput } from './parsers.js';
+import { thumbnails } from './thumbs.js';
+import type { AgentHistoryMessage, AgentModel, AgentProvider, AgentSessionSummary, AgentToolExecution, AgentUsage } from './types.js';
 
 // ---------------------------------------------------------------------------
 // Models
@@ -171,15 +172,38 @@ class HistoryBuilder {
   messages: AgentHistoryMessage[] = [];
   private current: AgentHistoryMessage | null = null;
   private tools = new Map<string, AgentToolExecution>();
+  private usageByMessage = new Map<string, AgentUsage>();
+  private turnStartedAt?: number;
 
-  user(text: string, ts: number) {
+  user(text: string, ts: number, images?: string[]) {
     this.flush();
-    this.messages.push({ role: 'user', content: text, timestamp: ts });
+    this.turnStartedAt = ts;
+    const thumbs = thumbnails(images);
+    this.messages.push({ role: 'user', content: text, timestamp: ts, ...(thumbs ? { images: thumbs } : {}) });
+  }
+
+  thinking(text: string, ts: number) {
+    const segs = this.assistant(ts).segments!;
+    const last = segs[segs.length - 1];
+    if (last?.type === 'thinking') last.content += '\n\n' + text;
+    else segs.push({ type: 'thinking', content: text });
   }
 
   private assistant(ts: number) {
     if (!this.current) this.current = { role: 'assistant', content: '', timestamp: ts, segments: [] };
     return this.current;
+  }
+
+  usage(key: string, usage: AgentUsage, ts: number) {
+    this.usageByMessage.set(key, usage);
+    const combined: AgentUsage = {};
+    for (const item of this.usageByMessage.values()) {
+      for (const field of ['inputTokens', 'outputTokens', 'cachedTokens', 'costUsd'] as const) {
+        if (item[field] != null) combined[field] = (combined[field] ?? 0) + item[field]!;
+      }
+    }
+    if (this.turnStartedAt != null) combined.durationMs = Math.max(0, ts - this.turnStartedAt);
+    this.assistant(ts).usage = combined;
   }
 
   text(text: string, ts: number) {
@@ -197,9 +221,11 @@ class HistoryBuilder {
     this.assistant(ts).segments!.push({ type: 'tool', toolExecution: exec });
   }
 
-  toolEnd(id: string, output: string, isError: boolean, ts: number) {
+  toolEnd(id: string, output: string, isError: boolean, ts: number, images?: string[]) {
     const exec = this.tools.get(id);
     if (!exec) return;
+    const thumbs = thumbnails(images);
+    if (thumbs) exec.images = thumbs;
     exec.status = isError ? 'error' : 'success';
     exec.endTime = ts;
     if (isError) exec.error = output.slice(0, 2000);
@@ -208,19 +234,26 @@ class HistoryBuilder {
 
   flush() {
     if (this.current) {
-      if (!this.current.segments!.some(s => s.type === 'tool')) delete this.current.segments;
+      if (!this.current.segments!.some(s => s.type !== 'text')) delete this.current.segments;
       if (this.current.content || this.current.segments) this.messages.push(this.current);
     }
     this.current = null;
+    this.usageByMessage.clear();
+    this.tools.clear();
+    this.turnStartedAt = undefined;
   }
 }
 
 function loadClaudeSession(id: string): { cwd?: string; messages: AgentHistoryMessage[] } {
   const file = claudeSessionFiles().find(f => path.basename(f.file, '.jsonl') === id)?.file;
   if (!file) throw new Error(`Claude Code session ${id} not found`);
+  return rebuildClaudeHistory(readJsonl(file));
+}
+
+export function rebuildClaudeHistory(records: any[]): { cwd?: string; messages: AgentHistoryMessage[] } {
   const b = new HistoryBuilder();
   let cwd: string | undefined;
-  for (const l of readJsonl(file)) {
+  for (const l of records) {
     if (l.isSidechain || (l.type !== 'user' && l.type !== 'assistant')) continue;
     cwd ??= l.cwd;
     const ts = Date.parse(l.timestamp) || Date.now();
@@ -228,17 +261,25 @@ function loadClaudeSession(id: string): { cwd?: string; messages: AgentHistoryMe
     if (l.type === 'user') {
       if (Array.isArray(content) && content.some((c: any) => c.type === 'tool_result')) {
         for (const c of content) {
-          if (c.type === 'tool_result') b.toolEnd(c.tool_use_id, stringifyToolOutput(c.content), !!c.is_error, ts);
+          if (c.type === 'tool_result') b.toolEnd(c.tool_use_id, stringifyToolOutput(c.content), !!c.is_error, ts, extractImages(c.content));
         }
       } else if (!l.isMeta) {
         const text = firstUserText(content);
-        if (text) b.user(text, ts);
+        const images = extractImages(content);
+        if (text || images.length) b.user(text, ts, images);
       }
     } else if (Array.isArray(content)) {
       for (const c of content) {
         if (c.type === 'text' && c.text) b.text(c.text, ts);
+        else if (c.type === 'thinking' && c.thinking) b.thinking(c.thinking, ts);
         else if (c.type === 'tool_use') b.toolStart(c.id, c.name, c.input, ts);
       }
+      const u = l.message.usage;
+      if (u) b.usage(l.message.id ?? l.uuid ?? String(ts), {
+        inputTokens: (u.input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0),
+        outputTokens: u.output_tokens,
+        cachedTokens: u.cache_read_input_tokens,
+      }, ts);
     }
   }
   b.flush();
@@ -248,18 +289,37 @@ function loadClaudeSession(id: string): { cwd?: string; messages: AgentHistoryMe
 function loadCodexSession(id: string): { cwd?: string; messages: AgentHistoryMessage[] } {
   const file = codexRolloutFiles().get(id);
   if (!file) throw new Error(`Codex session ${id} not found`);
+  return rebuildCodexHistory(readJsonl(file));
+}
+
+export function rebuildCodexHistory(records: any[]): { cwd?: string; messages: AgentHistoryMessage[] } {
   const b = new HistoryBuilder();
   let cwd: string | undefined;
-  for (const l of readJsonl(file)) {
+  let total = { input_tokens: 0, output_tokens: 0, cached_input_tokens: 0 };
+  let baseline = { ...total };
+  for (const l of records) {
     const p = l.payload;
     const ts = Date.parse(l.timestamp) || Date.now();
     if (l.type === 'session_meta') { cwd ??= p?.cwd; continue; }
+    if (l.type === 'event_msg' && p?.type === 'token_count' && p.info?.total_token_usage) {
+      total = p.info.total_token_usage;
+      b.usage('turn', {
+        inputTokens: Math.max(0, (total.input_tokens ?? 0) - baseline.input_tokens),
+        outputTokens: Math.max(0, (total.output_tokens ?? 0) - baseline.output_tokens),
+        cachedTokens: Math.max(0, (total.cached_input_tokens ?? 0) - baseline.cached_input_tokens),
+      }, ts);
+      continue;
+    }
     if (l.type !== 'response_item' || !p) continue;
     if (p.type === 'message') {
       const text = (p.content ?? []).map((c: any) => c.text ?? '').join('\n');
       if (p.role === 'user') {
         const cleaned = cleanUserText(text);
-        if (cleaned && !cleaned.startsWith('# AGENTS.md')) b.user(cleaned, ts);
+        const images = extractImages(p.content);
+        if ((cleaned || images.length) && !cleaned.startsWith('# AGENTS.md')) {
+          b.user(cleaned, ts, images);
+          baseline = { input_tokens: total.input_tokens ?? 0, output_tokens: total.output_tokens ?? 0, cached_input_tokens: total.cached_input_tokens ?? 0 };
+        }
       } else if (p.role === 'assistant' && text.trim()) {
         b.text(text.trim(), ts);
       }
@@ -268,8 +328,15 @@ function loadCodexSession(id: string): { cwd?: string; messages: AgentHistoryMes
       if (typeof input === 'string') { try { input = JSON.parse(input); } catch { input = { input } } }
       b.toolStart(p.call_id, p.name, input, ts);
     } else if (p.type === 'function_call_output' || p.type === 'custom_tool_call_output') {
-      const output = typeof p.output === 'string' ? p.output : stringifyToolOutput(p.output?.content ?? p.output);
-      b.toolEnd(p.call_id, output, false, ts);
+      const raw = typeof p.output === 'string' ? p.output : p.output?.content ?? p.output;
+      const output = typeof raw === 'string' ? raw : stringifyToolOutput(raw);
+      b.toolEnd(p.call_id, output, false, ts, extractImages(raw));
+    } else if (p.type === 'reasoning') {
+      const summary = (p.summary ?? []).map((x: any) => x.text ?? '').filter(Boolean).join('\n\n');
+      if (summary) b.thinking(summary, ts);
+    } else if (p.type === 'web_search_call') {
+      const id = p.id ?? `ws-${ts}`;
+      b.toolStart(id, 'web_search', { query: p.action?.query ?? p.action?.queries?.[0] }, ts);
     }
   }
   b.flush();

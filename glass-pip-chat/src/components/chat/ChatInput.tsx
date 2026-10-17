@@ -3,8 +3,10 @@ import { Clipboard, ClipboardCopy, Cpu, FolderOpen, Lasso, Check, ArrowUp, Squar
 import { PromptInput, PromptInputFooter, PromptInputSubmit, PromptInputTextarea } from '@/components/ai-elements/prompt-input';
 import ComposerTools from './ComposerTools';
 import AuroraGlow from '@/components/glow/AuroraGlow';
-import EnergyOrb, { type OrbMood } from '@/components/glow/EnergyOrb';
-import type { GlowPalette } from '@/components/glow/palette';
+import AgentPresence from '@/components/glow/AgentPresence';
+import type { OrbMood } from '@/components/glow/EnergyOrb';
+import type { RobotStatus } from '@/components/glow/RobotAvatar';
+import { useLook } from '@/lib/look';
 import { cn } from '@/lib/utils';
 import type { Message } from '@/types/chat';
 import type { AgentPermission } from '@/types/agent';
@@ -21,8 +23,9 @@ interface ChatInputProps {
   onExplainClipboard: () => void;
   placeholder?: string;
   messages?: Message[];
-  /** Orb / aurora colours (shared with Orbit's Mary) */
-  palette: GlowPalette;
+  /** Ally is seeing or hearing: the orb morphs into the robot */
+  sensing?: boolean;
+  robotStatus?: RobotStatus;
   /** Voice: the orb toggles it, like Mary's live-mode orb */
   voice: {
     enabled: boolean;
@@ -91,13 +94,15 @@ export default function ChatInput({
   onExplainClipboard,
   placeholder = 'Ask the agent…',
   messages = [],
-  palette,
+  sensing = false,
+  robotStatus,
   voice,
   robotMode = false,
   onRobotModeToggle,
   agent,
 }: ChatInputProps) {
   const [copied, setCopied] = useState(false);
+  const { colors } = useLook();
   const glowing = isTyping || voice.listening;
   const mood: OrbMood = isTyping ? 'busy' : voice.listening ? 'listening' : 'idle';
   const canSend = !!input.trim();
@@ -110,7 +115,7 @@ export default function ChatInput({
 
   return (
     <div className="relative border-t border-border">
-      <AuroraGlow active={glowing} colors={palette} />
+      <AuroraGlow active={glowing} colors={colors} />
 
       <div className={cn('relative z-10 flex flex-col gap-2 px-2.5 pb-2.5 pt-2 transition-colors duration-500', glowing ? 'bg-black/45' : 'bg-black/20')}>
         {/* prxptn-style status line */}
@@ -142,7 +147,7 @@ export default function ChatInput({
               title={voice.enabled ? 'Voice on · click to stop listening' : 'Click to talk to the agent'}
               aria-pressed={voice.enabled}
             >
-              <EnergyOrb size={26} colors={palette} mood={mood} />
+              <AgentPresence size={26} mood={mood} sensing={sensing || voice.listening} robotStatus={robotStatus} />
             </button>
             <PromptInputTextarea
               ref={ref}
