@@ -21,3 +21,5 @@ Refresh is every five seconds with a shared four-second read cache. Phone/watch 
 - Desktop component visually checked with two engine fixtures. Live reader detected this Codex chat and the active Claude chat in about 38 ms on this computer.
 - Pixel 7 installed and visually verified against the live authenticated cloud endpoint; both engines appeared above Most recent.
 - Isolated desktop deployment preserves the concurrent latest-Claude-folder fix without committing its owned source changes. Speech and cloud status verified ready after restart.
+- Watch5 APK installed and Running visually verified with both devices connected after the desktop restart.
+- The unrelated Vercel preview check remains failed because its configured service root is missing; this is not a web deployment.
