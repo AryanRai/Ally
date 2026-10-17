@@ -150,15 +150,15 @@ private fun Conversation(state: PhoneState,model: PhoneModel,modifier: Modifier,
     // Pagination prepends must keep the reader's position; only follow new tail messages.
     var previousChat by remember { mutableStateOf<String?>(null) }
     var previousTail by remember { mutableStateOf<String?>(null) }
-    LaunchedEffect(state.selected?.id,state.messages.lastOrNull()?.id,state.busy,state.approval?.optString("id")) {
+    LaunchedEffect(state.selected?.id,state.messages.lastOrNull()?.id,state.busy,state.liveText,state.approval?.optString("id")) {
         val changedChat=previousChat!=state.selected?.id
         val changedTail=previousTail!=state.messages.lastOrNull()?.id
-        val nearBottom=!scroll.canScrollForward || scroll.layoutInfo.visibleItemsInfo.lastOrNull()?.index?.let { it>=scroll.layoutInfo.totalItemsCount-3 }==true
+        val nearBottom=!scroll.canScrollForward || scroll.layoutInfo.visibleItemsInfo.lastOrNull()?.let { it.index==scroll.layoutInfo.totalItemsCount-1 && it.offset+it.size<=scroll.layoutInfo.viewportEndOffset+100 }==true
         if(changedChat || ((changedTail || state.busy || state.approval!=null) && nearBottom)) scroll.animateScrollToItem((scroll.layoutInfo.totalItemsCount-1).coerceAtLeast(0))
         previousChat=state.selected?.id; previousTail=state.messages.lastOrNull()?.id
     }
     Box(modifier.fillMaxWidth()) {
-        if(state.messages.isEmpty() && !state.loading && state.error.isBlank()) {
+        if(state.messages.isEmpty() && !state.loading && state.error.isBlank() && !state.busy && state.liveText.isBlank()) {
             FlowBackdrop(Modifier.matchParentSize())
             Column(Modifier.align(Alignment.Center).padding(horizontal=32.dp).offset(y=(-28).dp),horizontalAlignment=Alignment.CenterHorizontally) {
                 PresenceOrb(Modifier.size(104.dp),state.busy)
@@ -168,7 +168,7 @@ private fun Conversation(state: PhoneState,model: PhoneModel,modifier: Modifier,
                 if(state.selected==null) OutlinedButton(onBrowse,modifier=Modifier.padding(top=28.dp),shape=RoundedCornerShape(8.dp),border=BorderStroke(1.dp,Line)) { Text("Your conversations",fontSize=13.sp); Spacer(Modifier.width(16.dp)); Glyph("chevron",Modifier.size(14.dp)) }
             }
         }
-        if(state.messages.isNotEmpty() || state.loading || state.error.isNotBlank() || state.busy || state.approval!=null) LazyColumn(Modifier.fillMaxSize(),state=scroll,contentPadding=PaddingValues(start=24.dp,end=24.dp,top=12.dp,bottom=24.dp),verticalArrangement=Arrangement.spacedBy(28.dp)) {
+        if(state.messages.isNotEmpty() || state.loading || state.error.isNotBlank() || state.busy || state.liveText.isNotBlank() || state.approval!=null) LazyColumn(Modifier.fillMaxSize(),state=scroll,contentPadding=PaddingValues(start=24.dp,end=24.dp,top=12.dp,bottom=24.dp),verticalArrangement=Arrangement.spacedBy(28.dp)) {
             if(state.before!=null) item(key="older") { TextButton(model::older,enabled=!state.loading,modifier=Modifier.fillMaxWidth()) { Text("Load earlier messages",color=Muted,fontSize=12.sp) } }
             if(state.loading && state.messages.isEmpty()) item { Text("Opening your conversation…",color=Muted,fontSize=13.sp) }
             items(state.messages,key={it.id}) { message ->
@@ -182,9 +182,17 @@ private fun Conversation(state: PhoneState,model: PhoneModel,modifier: Modifier,
                             PresenceOrb(Modifier.size(24.dp)); MicroLabel(state.selected?.provider ?: state.provider)
                         }
                         MessageBody(message.text)
+                        message.cards.forEachIndexed { index, card -> key(message.id, index) {
+                            Spacer(Modifier.height(16.dp))
+                            ReplyCardView(card, !state.busy && !state.loading && !state.recording && !state.transcribing, model::send)
+                        } }
                     }
                 }
             }
+            if(state.liveText.isNotBlank()) item(key="live-reply") { Column {
+                MicroLabel(if(state.busy) "Reply in progress" else "Latest reply",Modifier.padding(bottom=10.dp))
+                MessageBody(state.liveText)
+            } }
             if(state.busy) item(key="activity") { Row(verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(10.dp)) { PresenceOrb(Modifier.size(26.dp),true); Text(state.activity,color=Muted,fontSize=12.sp) } }
             state.approval?.let { approval -> item(key="approval") { ChatApproval(approval,state.loading,model::answer) } }
             if(state.inputStatus.isNotBlank()) item(key="input-status") { Column {

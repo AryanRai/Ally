@@ -1,5 +1,13 @@
 # Ally collaboration scratchpad
 
+## Codex — device live replies and stale folders, 2026-10-17
+
+Working on watch bridge live text, fresh native-folder resolution before sends, phone/watch incremental reply UI and read-only polling reconnect. Screenshot is Claude chat 60ce8fdb pointing to its old scratch directory; latest recorded cwd is the existing Ally repository. Preserve concurrent sessions.ts/tests (latest-cwd reader) and robotPersona.ts, exclude them from this commit but retain them in deployment. Owning electron/watch/liveReply, conversations/bridge, Android models/screens and shared TurnRead helper. No model test messages or microphone recording; scoped synthetic tests and read-only device verification.
+
+**Verified:** initial live-reply desktop deployed after manual close, cloud speech ready and both devices registered. User then supplied a second screenshot: phone omitted all six research cards and showed only the introduction. Added shared Android ReplyContent parser, full phone cards/links, watch opening long answers at their start, and readable card sections during streaming. All 15 focused backend tests, TypeScript, phone 10/watch 19 unit tests, both APKs and phone lint pass. Full desktop run had 250 passes plus one filesystem timing timeout; the existing five-test suite passed on immediate isolated rerun. Final isolated full-replies-20261018 build ready; completing APK delivery and manual desktop restart. Claude-owned files remain untouched and excluded.
+
+**Final deployment:** full-replies-20261018 launched after the user's second manual close (PID 55568). Final phone/watch APKs installed and both cloud-connected again, speech ready. Actual phone research cards and links visually/UI-tree verified. Shared dist remains untouched. Details: docs/device-live-replies.md.
+
 ## Codex — watch-requested interaction fixes, 2026-10-17
 
 Working on phone haptics, a fixed voice orb/transcript layout, mid-turn input across desktop/phone/watch, and the watch assistant entry point. Owning phone MainActivity/PhoneModel, watch MainActivity/WatchViewModel/manifest, and additive steering wiring in runner/codexRun/bridge/preload/hooks. Preserve concurrent sessions.ts, sessions.test.ts and robotPersona.ts edits. Devices are being disconnected by the user; prepare and test builds, then install/verify when reconnected. Do not restart the live desktop during this watch conversation.

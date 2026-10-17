@@ -10,6 +10,7 @@ import kotlinx.coroutines.flow.update
 import org.json.JSONObject
 import java.util.UUID
 import java.net.URLEncoder
+import dev.ally.device.reconnectingTurnRead
 
 class WatchViewModel(application: Application) : AndroidViewModel(application) {
     private val prefs = application.getSharedPreferences("ally-watch", 0)
@@ -324,7 +325,7 @@ class WatchViewModel(application: Application) : AndroidViewModel(application) {
     }
     private fun clearReply() {
         prefs.edit().remove("reply").remove("activity").apply()
-        mutable.update { it.copy(reply = WatchReply("", emptyList()), steps = emptyList(), usage = "", turnId = null, approval = null, approvalError = "") }
+        mutable.update { it.copy(liveText = "", reply = WatchReply("", emptyList()), steps = emptyList(), usage = "", turnId = null, approval = null, approvalError = "") }
     }
     private suspend fun submit(text: String?, audio: ByteArray?) {
         if (mutable.value.chatId == null) createChat(mutable.value.provider)
@@ -343,18 +344,18 @@ class WatchViewModel(application: Application) : AndroidViewModel(application) {
         try {
             var polls = 0
             while (polls < 240) {
-                val result = api.request("/v1/turns/$id")
+                val result = reconnectingTurnRead({ mutable.update { it.copy(detail = "Reconnecting… Your task is still on the desktop", approval = null) } }) { api.request("/v1/turns/$id") }
                 val approval = ApprovalParser.parse(result)
                 if (approval == null) polls++
                 mutable.update { it.copy(approval = approval, approvalError = if (it.approval?.id == approval?.id) it.approvalError else "") }
                 result.optString("transcript").takeIf { it.isNotBlank() }?.let { lastText = it }
-                mutable.update { it.copy(transcript = result.optString("transcript", it.transcript), detail = result.optString("activity", "Thinking…"), steps = ActivityParser.steps(result), usage = ActivityParser.usage(result)) }
+                mutable.update { it.copy(liveText = result.optString("liveText").take(12000), transcript = result.optString("transcript", it.transcript), detail = result.optString("activity", "Thinking…"), steps = ActivityParser.steps(result), usage = ActivityParser.usage(result)) }
                 when (result.optString("status")) {
                     "done" -> {
                         lastText = null; lastAudio = null; requestId = null
                         val json = result.getJSONObject("reply")
                         prefs.edit().remove("turn").putString("reply", json.toString()).putString("activity", JSONObject().put("steps", result.optJSONArray("steps")).put("usage", result.optJSONObject("usage")).put("transcript", result.optString("transcript")).toString()).apply()
-                        mutable.update { it.copy(phase = Phase.READY, approval = null, reply = CardParser.parse(json), detail = "Response ready", readySequence = it.readySequence + 1) }
+                        mutable.update { it.copy(liveText = "", phase = Phase.READY, approval = null, reply = CardParser.parse(json), detail = "Response ready", readySequence = it.readySequence + 1) }
                         val reply = CardParser.parse(json)
                         mutable.update { it.copy(messages = it.messages + listOf(
                             ChatMessage("$id-user", "user", WatchReply(result.optString("transcript"), emptyList()), emptyList(), ""),
@@ -362,6 +363,8 @@ class WatchViewModel(application: Application) : AndroidViewModel(application) {
                         mutable.update { it.copy(loadingHistory = true) }
                         try { loadHistory() } catch (e: Exception) { if (e is CancellationException) throw e }
                         finally { mutable.update { it.copy(loadingHistory = false) } }
+                        // Native history can lag the final event; do not erase the answer we just received.
+                        mutable.update { it.copy(messages = if (it.messages.lastOrNull()?.let { m -> m.role == "assistant" && m.reply.text == reply.text } == true) it.messages else it.messages + ChatMessage("$id-assistant", "assistant", reply, ActivityParser.steps(result), ActivityParser.usage(result))) }
                         WatchNotifications.show(getApplication(), "Ally has your answer", json.optString("text"), id, mutable.value.chatId ?: "")
                         if (foreground && mutable.value.autoRead && !mutable.value.inputRecording && !mutable.value.inputSending) readReply(reply.text)
                         return

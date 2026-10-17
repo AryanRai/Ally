@@ -10,6 +10,24 @@ let root: string;
 beforeEach(() => { root = fs.mkdtempSync(path.join(os.tmpdir(), 'ally-watch-chats-')); });
 afterEach(() => fs.rmSync(root, { recursive: true, force: true }));
 describe('watch conversations', () => {
+  it('refreshes a cached deleted folder before running and preserves the exact session', async () => {
+    const deps = { list: vi.fn(), load: vi.fn().mockResolvedValue({ cwd: root, messages: [], sessionId: 'different-id' }) };
+    const file = path.join(root, 'chats.json');
+    const store = new WatchConversations(file, deps, {}, root);
+    const chat = store.create('claude', path.join(root, 'deleted-scratch'), 'chat');
+    store.link(chat, 'original');
+    expect(await store.prepareRun('chat')).toMatchObject({ sessionId: 'original', cwd: root });
+    expect(deps.load).toHaveBeenCalledWith('claude', 'original');
+    expect((await new WatchConversations(file, deps, {}, root).get('chat')).cwd).toBe(root);
+  });
+  it('does not recreate a deleted project or silently switch to a default folder', async () => {
+    const missing = path.join(root, 'deleted');
+    const deps = { list: vi.fn(), load: vi.fn().mockResolvedValue({ cwd: missing, messages: [] }) };
+    const store = new WatchConversations(path.join(root, 'chats.json'), deps, {}, root);
+    const chat = store.create('claude', root, 'chat'); store.link(chat, 'original');
+    await expect(store.prepareRun('chat')).rejects.toThrow('select its current project folder');
+    expect(fs.existsSync(missing)).toBe(false);
+  });
   it('paginates native chats even when an unsent watch chat has no session yet', async () => {
     const native = Array.from({ length: 65 }, (_, i) => ({ id: `native-${i}`, provider: 'codex' as const, title: `Chat ${i}`, updatedAt: 100 - i }));
     const deps = { list: vi.fn(async (_provider: string, limit: number) => native.slice(0, limit)), load: vi.fn() };

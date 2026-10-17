@@ -1,5 +1,6 @@
 import { recordActivity, settleActivity, type ActivityState } from './activity.js';
 import { FollowupReceipts } from '../agent/followups.js';
+import { liveReplyText } from './liveReply.js';
 import { app } from 'electron';
 import http from 'node:http';
 import fs from 'node:fs';
@@ -23,7 +24,7 @@ import { notifyReply } from '../notifications.js';
 import { attachDeviceSocket } from '../devices/socket.js';
 
 interface BridgeConfig { enabled: boolean; token: string; port: number; sessions: Partial<Record<AgentProvider, string>>; transport?: WatchTransportConfig; cloudTunnel?: CloudTunnelConfig }
-interface Turn extends ActivityState { chatId: string; id: string; requestId: string; provider: AgentProvider; permission: AgentPermission; status: 'thinking' | 'done' | 'error'; activity: string; transcript: string; reply?: WatchReply; error?: string; runId?: string; startedAt: number }
+interface Turn extends ActivityState { chatId: string; id: string; requestId: string; provider: AgentProvider; permission: AgentPermission; status: 'thinking' | 'done' | 'error'; activity: string; transcript: string; liveText?: string; reply?: WatchReply; error?: string; runId?: string; startedAt: number }
 const MAX_AUDIO = 1_920_044; // 60 seconds of 16 kHz mono PCM plus WAV header.
 
 export function authorized(header: string | undefined, token: string): boolean {
@@ -70,17 +71,18 @@ export function startWatchBridge(getConfig: () => AgentConfig): (() => void) | u
     settleActivity(turn);
     turn.activity = error ? 'Try again' : 'Response ready';
     turn.error = error;
-    if (!error) turn.reply = parseWatchReply(raw ?? '');
+    if (!error) turn.reply = raw && raw.length > 64000 ? { text: liveReplyText(raw), components: [] } : parseWatchReply(raw ?? '');
     void conversations.get(turn.chatId).then(chat => notifyReply({ id: turn.id, title: error ? 'Ally needs attention' : 'Watch reply ready', text: error || turn.reply?.text || '', session: chat.sessionId ? { id: chat.sessionId, provider: chat.provider, title: chat.title, cwd: chat.cwd } : undefined })).catch(() => {});
     void conversations.get(turn.chatId).then(chat => conversations.record(chat, turn.transcript, turn.reply ?? { text: error ?? 'Stopped', components: [] }, turn, turn.id)).catch(error => console.error('Watch history:', error.message));
   };
   const run = async (turn: Turn) => {
     if (closed || turn.status !== 'thinking') return;
     const agent = getConfig();
-    const chat = await conversations.get(turn.chatId);
     let output = '';
     turn.activity = 'Thinking…';
     try {
+      const chat = await conversations.prepareRun(turn.chatId);
+      if (closed || turn.status !== 'thinking') return;
       const runId = await startAgentRun({ provider: turn.provider, cwd: chat.cwd || agent.defaultCwd, permission: turn.permission,
         sessionId: chat.sessionId,
         codexDesktop: agent.codexDesktop === true,
@@ -90,8 +92,12 @@ export function startWatchBridge(getConfig: () => AgentConfig): (() => void) | u
         recordActivity(turn, event);
         if (event.kind === 'session') conversations.link(chat, event.sessionId);
         if (event.kind === 'input') turn.transcript += `\n\nAdditional input:\n${event.text}`;
-        if (event.kind === 'continuation') output = '';
-        if (event.kind === 'text') output = (output + event.text).slice(-64000);
+        if (event.kind === 'continuation') { output = ''; turn.liveText = ''; }
+        if (event.kind === 'text') {
+          output = (output + event.text).slice(0, 64001);
+          turn.liveText = liveReplyText(output);
+          if (!approvals.list(turn.id).length) { turn.activity = 'Writing…'; armTimeout(turn); }
+        }
         if (event.kind === 'tool_start') turn.activity = `Using ${event.name.slice(0, 70)}`;
         if (event.kind === 'done') finish(turn, event.isError ? event.error ?? 'Agent failed' : undefined, output);
       }, turn.provider === 'codex' ? agent.codexPath : agent.claudePath,
