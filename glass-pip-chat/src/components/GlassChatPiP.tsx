@@ -467,6 +467,7 @@ export default function GlassChatPiP() {
                 onContextToggle={() => context.setShowContext(!context.showContext)}
                 uiSettings={appSettings.ui}
                 currentResponse={currentResponse || meetingTurn?.text}
+                responseSegments={currentResponse ? streamingSegments : undefined}
                 meetingControls={<><MessageQueueStack chatId={activeChat?.agent?.sessionId ? `${activeChat.agent.provider}:${activeChat.agent.sessionId}` : undefined} /><VisualTutorControls tutor={tutor} disabled={!activeChat || activeIsWorking || externalWorking} /><PerceptionBar perception={perception} chat={activeChat} onOpenSession={openMeetingChat} /></>}
                 currentModel={conversation.model}
                 showModelSelector={showModelSelector}

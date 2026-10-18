@@ -2,10 +2,16 @@ import { useEffect, useRef, useState } from 'react';
 import { ChevronDown, ChevronUp, Copy, ArrowDown } from 'lucide-react';
 import WatchReplyContent from './WatchReplyContent';
 import { readableReply } from '@/lib/watchPresentation';
-import { compactReply } from '@/lib/compactPresentation';
+import { collapsedReply } from '@/lib/collapsedReply';
+import { displayAssistantText } from '@/lib/messageDisplay';
+import type { Segment } from '@/types/chat';
+import { AgentReply } from './ChatMessage';
+import { ImageStrip } from './ToolCall';
 
 interface CollapsedResponsePreviewProps {
   response: string;
+  segments?: Segment[];
+  images?: string[];
   responseId?: string;
   isTyping: boolean;
   workingStatus?: string;
@@ -13,8 +19,8 @@ interface CollapsedResponsePreviewProps {
 }
 
 /** A bounded live reader beneath the pill. Scrolling up pauses following. */
-export default function CollapsedResponsePreview({ response, responseId, isTyping, workingStatus, onCopy }: CollapsedResponsePreviewProps) {
-  const reply = compactReply(response);
+export default function CollapsedResponsePreview({ response, segments, images, responseId, isTyping, workingStatus, onCopy }: CollapsedResponsePreviewProps) {
+  const reply = collapsedReply(response, segments);
   const scrollRef = useRef<HTMLDivElement>(null);
   const following = useRef(true);
   const draggingScrollbar = useRef(false);
@@ -39,9 +45,9 @@ export default function CollapsedResponsePreview({ response, responseId, isTypin
 
   useEffect(() => {
     if (following.current && expanded && scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+      scrollRef.current.scrollTop = isTyping ? scrollRef.current.scrollHeight : 0;
     }
-  }, [response, expanded]);
+  }, [response, expanded, isTyping]);
 
   // Rich markdown and widgets can grow after the text chunk renders.
   useEffect(() => {
@@ -49,25 +55,25 @@ export default function CollapsedResponsePreview({ response, responseId, isTypin
     const content = panel?.firstElementChild;
     if (!panel || !content || typeof ResizeObserver === 'undefined') return;
     const observer = new ResizeObserver(() => {
-      if (following.current) panel.scrollTop = panel.scrollHeight;
+      if (following.current && isTyping) panel.scrollTop = panel.scrollHeight;
     });
     observer.observe(content);
     return () => observer.disconnect();
-  }, [expanded, !!response]);
+  }, [expanded, !!response, isTyping]);
 
   const pauseFollowing = () => { following.current = false; setPaused(true); };
-  if (!response && !isTyping) return null;
-  const status = isTyping ? workingStatus || (reply.text ? 'Writing…' : 'Thinking…') : reply.interrupted ? 'Earlier reply' : 'Latest reply';
+  if (!response && !segments?.length && !images?.length && !isTyping) return null;
+  const status = isTyping ? workingStatus || (reply.text ? 'Writing…' : 'Thinking…') : reply.interrupted ? 'Earlier reply' : reply.commentaryOnly ? 'Latest update' : 'Latest reply';
   return <section className="overflow-hidden rounded-xl border border-white/10 bg-white/[0.03]" aria-label="Current reply" style={{ userSelect: 'text' }}>
-    <div className="flex min-w-0 items-center gap-1 px-2 py-1">
+    <div className="flex min-w-0 select-none items-center gap-1 px-2 py-1">
       <button type="button" onClick={() => setExpanded(value => !value)} aria-expanded={expanded} aria-label={expanded ? 'Collapse reply' : 'Show reply'} className="flex min-w-0 flex-1 items-center gap-2 py-1 text-left text-[11px] text-foreground/65">
         <span className={`size-1.5 shrink-0 rounded-full ${isTyping ? 'animate-pulse bg-emerald-400' : 'bg-foreground/30'}`} />
         <span role={isTyping ? 'status' : undefined} className="truncate">{status}</span>
-        {expanded ? <ChevronUp className="ml-auto size-3 shrink-0" /> : <ChevronDown className="ml-auto size-3 shrink-0" />}
+        {expanded ? <ChevronUp aria-hidden="true" focusable="false" className="ml-auto size-3 shrink-0" /> : <ChevronDown aria-hidden="true" focusable="false" className="ml-auto size-3 shrink-0" />}
       </button>
-      {reply.text && onCopy && <button type="button" onClick={() => onCopy(readableReply(reply.text))} aria-label="Copy reply" title="Copy reply" className="grid size-7 shrink-0 place-items-center rounded-md text-foreground/55 hover:bg-white/10"><Copy className="size-3" /></button>}
+      {reply.text && onCopy && <button type="button" onClick={() => onCopy(displayAssistantText(readableReply(reply.text)))} aria-label="Copy reply" title="Copy reply" className="grid size-7 shrink-0 place-items-center rounded-md text-foreground/55 hover:bg-white/10"><Copy aria-hidden="true" focusable="false" className="size-3" /></button>}
     </div>
-    {expanded && reply.text && <div data-ally-reply-reader ref={scrollRef} role="region" aria-label="Live reply" tabIndex={0}
+    {expanded && reply.text && <div data-ally-reply-reader ref={scrollRef} role="region" aria-label={isTyping || reply.commentaryOnly ? "Live update" : "Latest reply"} tabIndex={0}
       onWheel={event => { if (event.deltaY < 0) pauseFollowing(); }}
       onTouchMove={pauseFollowing}
       onPointerDown={event => { draggingScrollbar.current = event.target === event.currentTarget; }}
@@ -83,14 +89,19 @@ export default function CollapsedResponsePreview({ response, responseId, isTypin
         setPaused(!following.current);
       }}
       className="max-h-48 overflow-y-auto overscroll-contain break-words px-3 pb-3 text-[13px] [overflow-wrap:anywhere] [&_pre]:max-w-full [&_pre]:overflow-x-auto">
-      <WatchReplyContent content={reply.text} streaming={isTyping} />
+      <WatchReplyContent content={reply.text} streaming={isTyping} compact />
     </div>}
+    {expanded && !!images?.length && <ImageStrip images={images} className="px-3 pb-2" />}
+    {!!reply.activity.length && <details className="border-t border-white/10 px-3 py-2 text-[11px] text-foreground/55">
+      <summary className="cursor-pointer select-none">Progress and activity · {reply.activity.length}</summary>
+      <div className="mt-2 max-h-48 space-y-2 overflow-y-auto overscroll-contain"><AgentReply text="" segments={reply.activity} compact /></div>
+    </details>}
     {expanded && reply.interrupted && !isTyping && <p className="px-3 pb-2 text-[10px] text-foreground/45">This earlier reply was interrupted.</p>}
     {expanded && paused && <button type="button" className="flex w-full items-center justify-center gap-1 border-t border-white/10 py-1.5 text-[11px] text-foreground/75 hover:bg-white/5" onClick={() => {
       following.current = true;
       draggingScrollbar.current = false;
       setPaused(false);
       if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }}><ArrowDown className="size-3" />Follow latest</button>}
+    }}><ArrowDown aria-hidden="true" focusable="false" className="size-3" />Follow latest</button>}
   </section>;
 }

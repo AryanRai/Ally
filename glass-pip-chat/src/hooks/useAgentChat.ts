@@ -79,11 +79,13 @@ export function useAgentChat() {
     // Snapshot so React sees a new array and the persisted copy can't be mutated later
     const emitSegments = () => cb.onSegments(segments.map(s => ({ ...s, toolExecution: s.toolExecution && { ...s.toolExecution } })));
 
-    const appendText = (chunk: string) => {
+    const appendText = (chunk: string, metadata: Pick<Segment, 'itemId' | 'phase'> = {}) => {
       text += chunk;
       const last = segments[segments.length - 1];
-      if (last?.type === 'text') last.content = (last.content ?? '') + chunk;
-      else segments.push({ type: 'text', content: chunk.replace(/^\s+/, '') });
+      if (last?.type === 'text' && last.itemId === metadata.itemId) {
+        last.content = (last.content ?? '') + chunk;
+        if (metadata.phase) last.phase = metadata.phase;
+      } else segments.push({ type: 'text', content: chunk.replace(/^\s+/, ''), ...metadata });
       cb.onText(text);
       emitSegments();
     };
@@ -122,7 +124,7 @@ export function useAgentChat() {
             }
             break;
           case 'text':
-            appendText(ev.text);
+            appendText(ev.text, { itemId: ev.itemId, phase: ev.phase });
             break;
           case 'thinking': {
             thinking += ev.text;

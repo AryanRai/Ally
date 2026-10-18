@@ -56,6 +56,7 @@ export function claudeError(e: any): string {
 /** `claude -p --output-format stream-json --verbose --include-partial-messages` */
 export class ClaudeStreamParser implements StreamParser {
   sessionId?: string;
+  private messageId?: string;
   private streamedBlocks = new Set<number>();
   private streamedKinds = new Set<string>();
 
@@ -73,6 +74,7 @@ export class ClaudeStreamParser implements StreamParser {
         const ev = e.event;
         if (e.parent_tool_use_id) break;
         if (ev?.type === 'message_start') {
+          this.messageId = ev.message?.id;
           this.streamedBlocks.clear();
           this.streamedKinds.clear();
         }
@@ -80,7 +82,7 @@ export class ClaudeStreamParser implements StreamParser {
         if (ev.delta?.type === 'text_delta' && ev.delta.text) {
           if (typeof ev.index === 'number') this.streamedBlocks.add(ev.index);
           else this.streamedKinds.add('text');
-          out.push({ kind: 'text', text: ev.delta.text });
+          out.push({ kind: 'text', text: ev.delta.text, itemId: this.messageId });
         } else if (ev.delta?.type === 'thinking_delta' && ev.delta.thinking) {
           if (typeof ev.index === 'number') this.streamedBlocks.add(ev.index);
           else this.streamedKinds.add('thinking');
@@ -97,7 +99,7 @@ export class ClaudeStreamParser implements StreamParser {
           if (block.type === 'tool_use') {
             out.push({ kind: 'tool_start', id: block.id, name: block.name, input: block.input });
           } else if (!streamed && block.type === 'text' && block.text) {
-            out.push({ kind: 'text', text: block.text });
+            out.push({ kind: 'text', text: block.text, itemId: e.message?.id });
           } else if (!streamed && block.type === 'thinking' && block.thinking) {
             out.push({ kind: 'thinking', text: block.thinking });
           }
@@ -206,7 +208,7 @@ export class CodexStreamParser implements StreamParser {
         const completed = e.type === 'item.completed';
         if (!item) break;
         if (item.type === 'agent_message') {
-          if (completed && item.text) out.push({ kind: 'text', text: item.text + '\n\n' });
+          if (completed && item.text) out.push({ kind: 'text', text: item.text + '\n\n', itemId: item.id, phase: item.phase });
         } else if (item.type === 'reasoning') {
           if (completed && item.text) out.push({ kind: 'thinking', text: item.text + '\n' });
         } else if (item.type === 'error') {

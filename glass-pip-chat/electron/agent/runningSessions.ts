@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { claudeTurnPending, isRunning } from './sessionActivity.js';
+import { claudeActivityAt, claudeTurnPending, isRunning } from './sessionActivity.js';
 import type { AgentProvider, AgentSessionSummary } from './types.js';
 import { readCodexActivity } from './codexActivity.js';
 import { chatTitle } from './chatTitle.js';
@@ -76,7 +76,7 @@ export async function scanRunningSessions(home = os.homedir(), now = Date.now())
         const summary = { id, provider, title: chatTitle(title), cwd, updatedAt: native?.running ? now : stat.mtimeMs };
         const key = `${provider}:${id}`;
         // Continuations belong to the original chat. The latest written file wins.
-        if ((result.get(key)?.summary.updatedAt ?? 0) <= summary.updatedAt) result.set(key, { summary, pending: provider === 'codex' ? native?.running === true || activity?.pending === true : claudeTurnPending(tail) });
+        if ((result.get(key)?.summary.updatedAt ?? 0) <= summary.updatedAt) result.set(key, { summary, pending: provider === 'codex' ? native?.running === true || activity?.pending === true : isRunning(claudeTurnPending(tail), claudeActivityAt(tail, stat.mtimeMs), now) });
       } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
     }
   };

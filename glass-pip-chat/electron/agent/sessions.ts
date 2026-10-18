@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { extractImages, stringifyToolOutput } from './parsers.js';
 import { thumbnails } from './thumbs.js';
-import { claudeTurnPending, codexRolloutPending, isRunning } from './sessionActivity.js';
+import { claudeActivityAt, claudeTurnPending, codexRolloutPending, isRunning } from './sessionActivity.js';
 import type { AgentHistoryMessage, AgentModel, AgentProvider, AgentSessionSummary, AgentToolExecution, AgentUsage, AgentSessionSnapshot } from './types.js';
 
 // ---------------------------------------------------------------------------
@@ -235,7 +235,7 @@ export function listAgentSessions(provider: AgentProvider, limit = 40): AgentSes
 }
 
 /** Whether the last parsed revision ended mid-turn, so unchanged polls can still answer. */
-const pendingByRevision = new Map<string, boolean>();
+const pendingByRevision = new Map<string, { pending: boolean; lastActivity: number }>();
 
 /** Rebuild a session's visible conversation (user turns + assistant text and tool pills). */
 export function loadAgentSession(provider: AgentProvider, id: string, previousRevision?: string): AgentSessionSnapshot {
@@ -245,13 +245,15 @@ export function loadAgentSession(provider: AgentProvider, id: string, previousRe
   if (!files.length) throw new Error(`${provider} session ${id} not found`);
   const revision = fileRevision(files);
   const lastWrite = Math.max(...files.map(f => { try { return fs.statSync(f).mtimeMs; } catch { return 0; } }));
-  if (revision === previousRevision) return { revision, unchanged: true, messages: [], running: isRunning(pendingByRevision.get(revision) ?? false, lastWrite) };
+  const cached = pendingByRevision.get(revision);
+  if (revision === previousRevision && cached) return { revision, unchanged: true, messages: [], running: isRunning(cached.pending, cached.lastActivity) };
   const records = provider === 'codex' ? mergeSessionRecords(files.map(readJsonl)) : readJsonl(files[0]);
   if (!records.length) return { revision: previousRevision ?? '', unchanged: true, messages: [] };
   const pending = provider === 'claude' ? claudeTurnPending(records) : codexRolloutPending(records);
+  const lastActivity = provider === 'claude' ? claudeActivityAt(records, lastWrite) : lastWrite;
   if (pendingByRevision.size > 50) pendingByRevision.clear();
-  pendingByRevision.set(revision, pending);
-  return { ...(provider === 'claude' ? rebuildClaudeHistory(records) : rebuildCodexHistory(records)), revision, running: isRunning(pending, lastWrite) };
+  pendingByRevision.set(revision, { pending, lastActivity });
+  return { ...(provider === 'claude' ? rebuildClaudeHistory(records) : rebuildCodexHistory(records)), revision, running: isRunning(pending, lastActivity) };
 }
 
 class HistoryBuilder {
@@ -292,12 +294,12 @@ class HistoryBuilder {
     this.assistant(ts).usage = combined;
   }
 
-  text(text: string, ts: number) {
+  text(text: string, ts: number, metadata: { itemId?: string; phase?: 'commentary' | 'final_answer' } = {}) {
     const a = this.assistant(ts);
     const segs = a.segments!;
     const last = segs[segs.length - 1];
-    if (last?.type === 'text') last.content += '\n\n' + text;
-    else segs.push({ type: 'text', content: text });
+    if (last?.type === 'text' && last.itemId === metadata.itemId && last.phase === metadata.phase) last.content += '\n\n' + text;
+    else segs.push({ type: 'text', content: text, ...metadata });
     a.content += (a.content ? '\n\n' : '') + text;
   }
 
@@ -320,7 +322,7 @@ class HistoryBuilder {
 
   flush() {
     if (this.current) {
-      if (!this.current.segments!.some(s => s.type !== 'text')) delete this.current.segments;
+      if (!this.current.segments!.some(s => s.type !== 'text' || s.itemId || s.phase)) delete this.current.segments;
       if (this.current.content || this.current.segments) this.messages.push(this.current);
     }
     this.current = null;
@@ -350,7 +352,7 @@ export function rebuildClaudeHistory(records: any[]): { cwd?: string; messages: 
       }
     } else if (Array.isArray(content)) {
       for (const c of content) {
-        if (c.type === 'text' && c.text) b.text(c.text, ts);
+        if (c.type === 'text' && c.text) b.text(c.text, ts, { itemId: l.message.id ?? l.uuid });
         else if (c.type === 'thinking' && c.thinking) b.thinking(c.thinking, ts);
         else if (c.type === 'tool_use') b.toolStart(c.id, c.name, c.input, ts);
       }
@@ -395,7 +397,7 @@ export function rebuildCodexHistory(records: any[]): { cwd?: string; messages: A
           baseline = { input_tokens: total.input_tokens ?? 0, output_tokens: total.output_tokens ?? 0, cached_input_tokens: total.cached_input_tokens ?? 0 };
         }
       } else if (p.role === 'assistant' && text.trim()) {
-        b.text(text.trim(), ts);
+        b.text(text.trim(), ts, { itemId: p.id, phase: p.phase ?? (['commentary', 'final'].includes(p.channel) ? (p.channel === 'final' ? 'final_answer' : 'commentary') : undefined) });
       }
     } else if (p.type === 'function_call' || p.type === 'custom_tool_call') {
       let input: any = p.arguments ?? p.input;

@@ -2,6 +2,7 @@ import { act, renderHook } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { useAgentChat, type AgentTurnResult } from './useAgentChat';
 import type { AgentEvent } from '../types/agent';
+import { collapsedReply } from '../lib/collapsedReply';
 
 describe('chat cancellation', () => {
   it('honors Stop during startup, preserves buffered output and releases the next run', async () => {
@@ -42,6 +43,32 @@ describe('chat cancellation', () => {
     });
     expect(bridge.stop).toHaveBeenLastCalledWith('second');
   });
+});
+
+it.each(['codex', 'claude'] as const)('preserves %s live item boundaries through completion', async provider => {
+  let receive!: (data: { runId: string; event: AgentEvent }) => void;
+  window.pip.agent = {
+    getConfig: vi.fn().mockResolvedValue({ permission: 'edit' }),
+    send: vi.fn().mockResolvedValue('run'),
+    onEvent: vi.fn(callback => { receive = callback; return () => {}; }),
+  } as unknown as NonNullable<typeof window.pip.agent>;
+  const { result } = renderHook(() => useAgentChat());
+  const onSegments = vi.fn();
+  let turn!: Promise<AgentTurnResult>;
+  await act(async () => { turn = result.current.runTurn({ provider, prompt: 'fixture', model: 'default' }, { onText: vi.fn(), onThinking: vi.fn(), onSegments }); });
+  await act(async () => {
+    receive({ runId: 'run', event: { kind: 'text', text: 'Checking.', itemId: 'a', phase: provider === 'codex' ? 'commentary' : undefined } });
+    receive({ runId: 'run', event: { kind: 'text', text: 'Done', itemId: 'b' } });
+    receive({ runId: 'run', event: { kind: 'text', text: '.', itemId: 'b' } });
+    // Codex may report phase only on completion. It must update, not duplicate.
+    receive({ runId: 'run', event: { kind: 'text', text: '\n\n', itemId: 'b', phase: provider === 'codex' ? 'final_answer' : undefined } });
+    receive({ runId: 'run', event: { kind: 'done' } });
+    await turn;
+  });
+  const saved = await turn;
+  expect(saved.segments).toHaveLength(2);
+  expect(collapsedReply(saved.text, saved.segments)).toMatchObject({ text: 'Done.', activity: [{ content: 'Checking.' }] });
+  expect(onSegments.mock.calls.at(-1)?.[0]).toEqual(saved.segments);
 });
 
 

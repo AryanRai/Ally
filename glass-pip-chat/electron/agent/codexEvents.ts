@@ -4,6 +4,7 @@ import type { AgentEvent, AgentUsage } from './types.js';
 
 /** Normalizes the documented app-server item stream, without duplicating deltas on completion. */
 export class CodexEventParser {
+  private phases = new Map<string, 'commentary' | 'final_answer'>();
   private streamed = new Set<string>();
   private started = new Set<string>();
   private output = new Map<string, string>();
@@ -20,7 +21,7 @@ export class CodexEventParser {
     }
     if (method === 'item/agentMessage/delta' || method === 'item/reasoning/summaryTextDelta' || method === 'item/reasoning/textDelta') {
       this.streamed.add(p.itemId);
-      return [{ kind: method === 'item/agentMessage/delta' ? 'text' : 'thinking', text: p.delta }];
+      return [{ kind: method === 'item/agentMessage/delta' ? 'text' : 'thinking', text: p.delta, ...(method === 'item/agentMessage/delta' ? { itemId: p.itemId, phase: this.phases.get(p.itemId) } : {}) }];
     }
     if (method === 'item/reasoning/summaryPartAdded') return this.streamed.has(p.itemId) ? [{ kind: 'thinking', text: '\n\n' }] : [];
     if (method === 'item/commandExecution/outputDelta' || method === 'item/fileChange/outputDelta') {
@@ -48,11 +49,13 @@ export class CodexEventParser {
       const complete = method === 'item/completed';
       if (i.type === 'userMessage' || i.type === 'hookPrompt') return [];
       if (i.type === 'agentMessage' || i.type === 'reasoning') {
+        if (i.type === 'agentMessage' && ['commentary', 'final_answer'].includes(i.phase)) this.phases.set(i.id, i.phase);
         if (!complete) return [];
+        const metadata = i.type === 'agentMessage' ? { itemId: i.id, phase: this.phases.get(i.id) } : {};
         const text = i.type === 'agentMessage' ? i.text : (i.summary?.length ? i.summary : i.content ?? []).join('\n\n');
         const out: AgentEvent[] = !this.streamed.has(i.id) && text
-          ? [{ kind: i.type === 'agentMessage' ? 'text' : 'thinking', text }] : [];
-        if (text || this.streamed.has(i.id)) out.push({ kind: i.type === 'agentMessage' ? 'text' : 'thinking', text: '\n\n' });
+          ? [{ kind: i.type === 'agentMessage' ? 'text' : 'thinking', text, ...metadata }] : [];
+        if (text || this.streamed.has(i.id)) out.push({ kind: i.type === 'agentMessage' ? 'text' : 'thinking', text: '\n\n', ...metadata });
         return out;
       }
       const names: Record<string, string> = { commandExecution: 'shell', fileChange: 'edit_files', webSearch: 'web_search', imageView: 'view_image', contextCompaction: 'context_compaction' };

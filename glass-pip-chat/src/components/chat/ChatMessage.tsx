@@ -12,6 +12,7 @@ import { needsClaudeLogin, openClaudeLogin } from '@/lib/claudeLogin';
 import { readableReply, watchUserText } from '@/lib/watchPresentation';
 import WatchReplyContent, { OriginalMessage } from './WatchReplyContent';
 import { browserActivity } from '../../../electron/agent/browserActivity';
+import { displayAssistantText } from '@/lib/messageDisplay';
 import { historyReply } from '@/lib/historyReply';
 
 function ToolActivity({ parts }: { parts: Segment[] }) {
@@ -57,10 +58,11 @@ interface AgentReplyProps {
   thinking?: string;
   segments?: Segment[];
   streaming?: boolean;
+  compact?: boolean;
 }
 
 /** An agent reply: thinking, then text interleaved with tool calls. Used live and for history. */
-export function AgentReply({ text, thinking, segments, streaming = false }: AgentReplyProps) {
+export function AgentReply({ text, thinking, segments, streaming = false, compact = false }: AgentReplyProps) {
   const parts: Segment[] = segments?.length ? segments : text ? [{ type: 'text', content: text }] : [];
   // Newer replies keep reasoning inline between tool calls; older ones have one block up top
   const inlineThinking = parts.some(p => p.type === 'thinking');
@@ -85,6 +87,7 @@ export function AgentReply({ text, thinking, segments, streaming = false }: Agen
         ) : (
           <WatchReplyContent
             key={i}
+            compact={compact}
             streaming={streaming && i === groups.length - 1}
             content={part.content ?? ''}
           />
@@ -133,7 +136,7 @@ export default function ChatMessage({ message, sessionWorking = false, onEdit, o
   const copy = async () => {
     const segments = reply.segments;
     const visible = isUser ? text : segments?.length ? segments.filter(part => part.type === 'text').map(part => readableReply(part.content ?? '')).join('\n\n') : readableReply(reply.text);
-    await navigator.clipboard.writeText(visible);
+    await navigator.clipboard.writeText(isUser ? visible : displayAssistantText(visible));
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
   };

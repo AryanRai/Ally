@@ -125,8 +125,9 @@ export function codexHistoryMessages(turns: any[], createdAt: number): AgentHist
         if (ev.kind === 'text' || ev.kind === 'thinking') {
           const type = ev.kind;
           const last = assistant.segments!.at(-1);
-          if (last?.type === type) last.content = (last.content ?? '') + ev.text;
-          else assistant.segments!.push({ type, content: ev.text });
+          const metadata = ev.kind === 'text' ? { itemId: ev.itemId, phase: ev.phase } : {};
+          if (last?.type === type && (type !== 'text' || last.itemId === metadata.itemId)) last.content = (last.content ?? '') + ev.text;
+          else assistant.segments!.push({ type, content: ev.text, ...metadata });
           if (type === 'text') assistant.content += ev.text;
         } else if (ev.kind === 'tool_start') {
           const tool: AgentToolExecution = { id: ev.id, name: ev.name, parameters: ev.input, status: 'executing', startTime: ts };

@@ -6,11 +6,11 @@ describe('Codex app-server events', () => {
   it('streams text and readable reasoning without replaying completed items or other threads', () => {
     const p = new CodexEventParser('a');
     expect(p.handle('item/agentMessage/delta', { threadId: 'b', itemId: 'm', delta: 'other' })).toEqual([]);
-    expect(p.handle('item/agentMessage/delta', { threadId: 'a', itemId: 'm', delta: 'Hello' })).toEqual([{ kind: 'text', text: 'Hello' }]);
-    expect(p.handle('item/completed', { item: { id: 'm', type: 'agentMessage', text: 'Hello' } })).toEqual([{ kind: 'text', text: '\n\n' }]);
+    expect(p.handle('item/agentMessage/delta', { threadId: 'a', itemId: 'm', delta: 'Hello' })).toEqual([{ kind: 'text', text: 'Hello', itemId: 'm' }]);
+    expect(p.handle('item/completed', { item: { id: 'm', type: 'agentMessage', text: 'Hello' } })).toEqual([{ kind: 'text', text: '\n\n', itemId: 'm' }]);
     expect(p.handle('item/reasoning/summaryTextDelta', { itemId: 'r', delta: 'Checking' })).toEqual([{ kind: 'thinking', text: 'Checking' }]);
     expect(p.handle('item/completed', { item: { id: 'r', type: 'reasoning', summary: ['Checking'] } })).toEqual([{ kind: 'thinking', text: '\n\n' }]);
-    expect(p.handle('item/completed', { item: { id: 'm2', type: 'agentMessage', text: 'Done' } })[0]).toEqual({ kind: 'text', text: 'Done' });
+    expect(p.handle('item/completed', { item: { id: 'm2', type: 'agentMessage', text: 'Done' } })[0]).toEqual({ kind: 'text', text: 'Done', itemId: 'm2' });
   });
   it('retains tool output, images, failures, plans, diffs and per-turn usage', () => {
     const p = new CodexEventParser('a');

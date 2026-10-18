@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { claudeTurnPending, codexRolloutPending, codexTurnsPending, isRunning, STALE_TURN_MS } from './sessionActivity';
+import { claudeActivityAt, claudeTurnPending, codexRolloutPending, codexTurnsPending, isRunning, STALE_TURN_MS } from './sessionActivity';
 
 const assistant = (stop_reason: string, extra = {}) => ({ type: 'assistant', message: { stop_reason, content: [], ...extra } });
 const user = (content: unknown, extra = {}) => ({ type: 'user', message: { content }, ...extra });
@@ -21,6 +21,24 @@ describe('claudeTurnPending', () => {
     expect(claudeTurnPending([assistant('end_turn'), user('<command>', { isMeta: true }), { type: 'queue-operation' }])).toBe(false);
     expect(claudeTurnPending([assistant('end_turn'), { ...assistant('tool_use'), isSidechain: true }])).toBe(false);
   });
+
+  it('ends on an explicit API error even without a synthetic model or stop reason', () => {
+    const error = { ...assistant('', { model: 'claude', content: [{ type: 'text', text: 'Credit balance is too low' }] }), isApiErrorMessage: true };
+    expect(claudeTurnPending([user('hi'), error])).toBe(false);
+    expect(claudeTurnPending([error, user('try again')])).toBe(true);
+  });
+});
+
+it('does not let Claude bookkeeping, metadata or sidechains refresh activity', () => {
+  const timestamp = '2026-10-18T00:36:57.516Z';
+  const recent = '2026-10-18T00:50:08.000Z';
+  expect(claudeActivityAt([
+    { ...user('show me the images'), timestamp },
+    { type: 'cost-state', timestamp: recent },
+    { ...user('metadata', { isMeta: true }), timestamp: recent },
+    { ...assistant('tool_use'), isSidechain: true, timestamp: recent },
+  ], Date.parse(recent))).toBe(Date.parse(timestamp));
+  expect(claudeActivityAt([user('legacy')], 123)).toBe(123);
 });
 
 describe('codex', () => {
