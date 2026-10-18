@@ -26,4 +26,3 @@ Focused tests cover geometry/schema rejection, scene complexity limits, incremen
 The connected agent must have the updated MCP tool list available. Drawing only changes Ally's reversible overlay, but a backend configured to permit only a fixed read-only tool list may require its normal tool approval. If the tools are unavailable the prompt explicitly asks the agent to report that limitation instead of claiming to have drawn anything.
 
 Circle integration validation: 36 focused tests pass, isolated TypeScript/Vite/Electron builds pass, and `node node_modules/electron/cli.js scripts/check-circle-draw.mjs` exercises the real Circle UI and native capture handoff without a model send. It confirms exactly one OS capture, identical selected bitmap pixels, crop-only attachment, screen focus geometry, wrong-chat rejection, one-time consumption and restricted drawing preload. Temporary captured images are deleted by the test.
-
