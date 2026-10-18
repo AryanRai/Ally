@@ -20,6 +20,7 @@ interface CollapsedHeaderProps {
   decisions?: ChatInteractionCardProps['request'][];
   onAnswerDecision?: ChatInteractionCardProps['onAnswer'];
   meetingControls?: React.ReactNode;
+  menuControls?: React.ReactNode;
   chatTitle?: string;
   workingStatus?: string;
   stopDisabledReason?: string;
@@ -87,6 +88,7 @@ export default function CollapsedHeader({
   decisions,
   onAnswerDecision,
   meetingControls,
+  menuControls,
   chatTitle,
   workingStatus,
   stopDisabledReason,
@@ -296,6 +298,9 @@ export default function CollapsedHeader({
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* Keep setup state mounted while the overflow menu is closed. */}
+      {menuControls && <div hidden={!extras} style={noDrag}>{menuControls}</div>}
 
       {/* Current turn stays below the pill, including after completion. */}
       <div className="space-y-1.5 px-2 pb-1.5" style={noDrag}>

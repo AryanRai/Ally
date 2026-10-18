@@ -1,5 +1,10 @@
 # Ally collaboration scratchpad
 
+## Meeting button in collapsed overflow (2026-10-18, chat01a14e77)
+User requests moving Meeting mode into the collapsed pill three-dot menu. Own only CollapsedHeader persistent overflow slot and GlassChatPiP PerceptionBar placement, preserving queue/tutor and all meeting state/behaviour. Prepare a new candidate without modifying frozen Circle/math artifacts. Supersede only this chat's still-waiting idle helper after checking exact identity; do not interrupt live responses/capture. Existing phone blocker/watch deferral remain.
+
+User additionally reports severe resize slowdown in all modes. Extend exact scope to window bounds persistence/resize IPC completion, FlowField backing-store allocation and collapsed layout measurement if confirmed; preserve all animation/style and streaming behaviour. Add meaningful burst/coalescing regressions and verify before replacing the pending updater.
+
 ## Circle drawing, forwarding receipts, desktop patch recovery and math (2026-10-18, chat01a14e77)
 User explicitly requests implementation of quoted Circle-to-Search drawing access for every action/follow-up, simpler selection controls and rich HTML/SVG interactive diagrams; fix forwarded-message false success and Invalid desktop array patch, plus math rendering from supplied screenshots. Claim narrow codexDesktopRun/patch recovery, delivery accepted events and chatsMcp forwarding/tests, Circle/useVisualTutor lifecycle, visualTutor model/types/tool/overlay safe diagram frame/tests, compact/expanded shared math handling and dependencies if needed. Preserve concurrent source, UI outside requested additions, exact chat/approval/receipt identity and frozen candidates. No real model/forwarding test messages, microphone or private capture. Current combined main deployed19848 per deployment.json; previous phone review failure/watch deferral remain. No live restart over responses/capture. New isolated candidate for final validation; no subagents requested.
 

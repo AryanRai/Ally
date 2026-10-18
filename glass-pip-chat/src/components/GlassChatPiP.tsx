@@ -487,7 +487,8 @@ export default function GlassChatPiP() {
                 uiSettings={appSettings.ui}
                 currentResponse={currentResponse || meetingTurn?.text}
                 responseSegments={currentResponse ? streamingSegments : undefined}
-                meetingControls={<><MessageQueueStack chatId={activeChat?.agent?.sessionId ? `${activeChat.agent.provider}:${activeChat.agent.sessionId}` : undefined} /><VisualTutorControls tutor={tutor} disabled={!activeChat || activeIsWorking || externalWorking} /><PerceptionBar perception={perception} chat={activeChat} onOpenSession={openMeetingChat} /></>}
+                meetingControls={<><MessageQueueStack chatId={activeChat?.agent?.sessionId ? `${activeChat.agent.provider}:${activeChat.agent.sessionId}` : undefined} /><VisualTutorControls tutor={tutor} disabled={!activeChat || activeIsWorking || externalWorking} /></>}
+                menuControls={<PerceptionBar perception={perception} chat={activeChat} onOpenSession={openMeetingChat} />}
                 currentModel={conversation.model}
                 showModelSelector={showModelSelector}
                 onModelSelectorToggle={() => setShowModelSelector(s => !s)}

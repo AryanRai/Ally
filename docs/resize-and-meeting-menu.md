@@ -1,0 +1,13 @@
+# Resize work and collapsed Meeting placement
+
+Meeting mode now lives inside the collapsed pill's three-dot More controls menu. Its component remains mounted while hidden, retaining setup toggles, pending requests, errors and the current meeting session. Queue, tutor, Agents and expanded-view meeting controls keep their existing placement and behaviour. Closing the menu never stops capture.
+
+Native window resize and move events previously synchronously rewrote window-bounds.json for every event. Persistence now coalesces the burst until 150 ms after the last event and reads the final geometry then; hide/quit flush pending state. Native resize requests retain their existing size animation, constraints and screen-edge correction, while avoiding redundant repositioning, duplicate delayed completion callbacks and repeat logging. Unchanged sizes acknowledge completion immediately. Destroyed windows are checked before delayed work.
+
+The animated background previously assigned both canvas backing-store dimensions on every resize callback, even when unchanged. It now assigns only dimensions that changed, preserving the drawing loop, stroke formulas, device-pixel ratio, visual styling and animations.
+
+Synthetic regressions verify a burst of 1,000 native events causes zero disk writes during the burst and one final write after settling, rapid IPC requests emit one final completion, unchanged requests acknowledge, no unnecessary reposition occurs, and quit flushes the last geometry once. Canvas tests verify 100 unchanged callbacks cause no backing-store allocation, width-only changes avoid height allocation, the animation still draws and cleanup cancels it. These prove the repeated-work reduction; live Electron drag/frame-time measurements have not been claimed.
+
+Full 537 desktop tests pass (four opt-in profiles skipped), plus a final 19 affected checks. TypeScript, Vite and Electron production builds pass. Validation logs are in the new Exo/.ally-meeting-menu-20261018 candidate. Previous Circle/math, Guardian, performance and combined feature source is retained. The previous waiting updater was stopped by verified helper identity before preparing this candidate; live Ally was not interrupted. Any replacement updater must keep the same idle, exact-owner, artifact and hidden Circle/tutor guards. Phone remains blocked by the earlier connected-device automatic-review usage limit, with no pending approval or bypass. Watch installation remains explicitly deferred.
+
+After activation, manually resize collapsed and expanded windows with a long existing reply, open/close More controls and Meeting setup, and verify the final position persists after hiding/reopening. No model message, microphone or capture session is needed for this check.
