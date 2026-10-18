@@ -6,7 +6,7 @@ import path from 'node:path';
 vi.mock('./thumbs.js', () => ({ thumbnails: (images?: string[]) => images?.length ? images : undefined }));
 vi.mock('./codexMigration.js', () => ({ mappedCodexSession: (id: string) => id, codexMigrationAliases: () => ({}) }));
 import { CodexRpc } from './codexRpc';
-import { closeCodexHistory, codexHistoryMessages, listCodexChats, loadCodexChat, repairCodexDeviceTitle } from './codexHistory';
+import { closeCodexHistory, codexHistoryMessages, cooperativeCodexHistoryMessages, listCodexChats, loadCodexChat, repairCodexDeviceTitle } from './codexHistory';
 vi.mock('./codexDesktop.js', async importOriginal => ({ ...await importOriginal<typeof import('./codexDesktop.js')>(), readDesktopActivity: vi.fn(async () => undefined) }));
 import { readDesktopActivity } from './codexDesktop';
 import { readCodexActivity } from './codexActivity';
@@ -14,6 +14,19 @@ import { resolveCodexDiscovery } from './codexDiscovery';
 vi.mock('./codexActivity.js', () => ({ readCodexActivity: vi.fn(async () => undefined) }));
 afterEach(() => { closeCodexHistory(); vi.restoreAllMocks(); });
 describe('API history', () => {
+  it('yields during expensive conversion while preserving every turn, status and message exactly', async () => {
+    const turns = Array.from({length: 60}, (_, i) => ({ id: `t${i}`, status: i % 3 ? 'completed' : 'interrupted', startedAt: i + 1,
+      items: [{type:'userMessage',content:[{type:'text',text:`Prompt ${i}`}]}, {type:'agentMessage',id:`a${i}`,text:`Answer ${i}`}] }));
+    const expected = codexHistoryMessages(turns, 1);
+    let now = 0;
+    vi.spyOn(performance, 'now').mockImplementation(() => now += 9);
+    let serviced = false;
+    setImmediate(() => { serviced = true; });
+    const pending = cooperativeCodexHistoryMessages(turns, 1);
+    expect(serviced).toBe(false);
+    expect(await pending).toEqual(expected);
+    expect(serviced).toBe(true);
+  });
   it('shares duplicate opens and reuses full native history only until its exact file revision changes', async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ally-native-cache-'));
     const file = path.join(root, 'rollout'); fs.writeFileSync(file, 'header');

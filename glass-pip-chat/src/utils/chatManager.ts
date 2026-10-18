@@ -1,6 +1,8 @@
 import { Chat, Message, ChatState } from '../types/chat';
 
 const CHAT_STORAGE_KEY = 'glass_pip_chats';
+const SELECTION_KEY = 'ally-active-chat';
+type SavedSelection = Pick<Chat, 'id' | 'title' | 'agent' | 'createdAt' | 'updatedAt'>;
 
 /** Keep reported usage and interrupted output omitted by app-server history. */
 function retainUsage(previous: Message[], incoming: Message[]): Message[] {
@@ -39,6 +41,7 @@ function retainUsage(previous: Message[], incoming: Message[]): Message[] {
 export class ChatManager {
   private static instance: ChatManager;
   private state: ChatState;
+  selectionRestored = true;
 
   private constructor() {
     this.state = this.loadState();
@@ -58,18 +61,63 @@ export class ChatManager {
         const parsed = JSON.parse(saved) as ChatState;
         // Ensure we have at least one chat
         if (parsed.chats.length === 0) {
-          return this.createInitialState();
+          return this.restoreSelection(this.createInitialState());
         }
         for (const chat of parsed.chats) {
           const first = chat.messages.find(m => m.timestamp > 0)?.timestamp;
           if (chat.agent?.sessionId && first) chat.createdAt = Math.min(chat.createdAt, first);
         }
-        return parsed;
+        return this.restoreSelection(parsed);
       }
     } catch (error) {
       console.error('Failed to load chat state:', error);
     }
-    return this.createInitialState();
+    return this.restoreSelection(this.createInitialState());
+  }
+
+  /** Small independent record survives transcript quota failures and needs no native IO. */
+  private restoreSelection(state: ChatState): ChatState {
+    try {
+      const selected: SavedSelection | null = JSON.parse(localStorage.getItem(SELECTION_KEY) || 'null');
+      if (!selected || typeof selected.id !== 'string' || typeof selected.title !== 'string') return state;
+      const agent = selected.agent;
+      if (agent && (agent.provider !== 'codex' && agent.provider !== 'claude')) return state;
+      const exact = state.chats.find(chat => chat.id === selected.id);
+      // Only follow a persisted migration alias within the same provider.
+      const linked = agent?.sessionId && state.chats.find(chat => chat.agent?.provider === agent.provider &&
+        (chat.agent.sessionId === agent.sessionId || chat.agent.originalSessionId === agent.sessionId ||
+          (!!agent.originalSessionId && chat.agent.sessionId === agent.originalSessionId)));
+      const target = exact || linked;
+      if (target) {
+        state.activeChat = target.id;
+        if (target.id !== selected.id) {
+          // A canonical local row may have replaced an old migration alias.
+          // Carry its draft forward without overwriting either saved draft.
+          const drafts = JSON.parse(localStorage.getItem('ally-chat-drafts') || '{}');
+          if (typeof drafts[selected.id] === 'string' && !Object.hasOwn(drafts, target.id)) {
+            drafts[target.id] = drafts[selected.id];
+            localStorage.setItem('ally-chat-drafts', JSON.stringify(drafts));
+          }
+        }
+      }
+      else {
+        // History may not have fit in storage. Keep the exact local ID (and draft
+        // key) available; normal read-only sync hydrates the linked session later.
+        state.chats.push({ id: selected.id, title: selected.title, agent,
+          createdAt: Number.isFinite(selected.createdAt) ? selected.createdAt : 0,
+          updatedAt: Number.isFinite(selected.updatedAt) ? selected.updatedAt : 0, messages: [] });
+        state.activeChat = selected.id;
+      }
+    } catch (error) { console.error('Failed to restore selected chat:', error); }
+    return state;
+  }
+
+  private saveSelection(): void {
+    try {
+      const chat = this.getActiveChat();
+      const selected: SavedSelection | null = chat && { id: chat.id, title: chat.title, agent: chat.agent, createdAt: chat.createdAt, updatedAt: chat.updatedAt };
+      localStorage.setItem(SELECTION_KEY, JSON.stringify(selected));
+    } catch (error) { console.error('Failed to save selected chat:', error); }
   }
 
   private createInitialState(): ChatState {
@@ -102,6 +150,7 @@ export class ChatManager {
   }
 
   private saveState(): void {
+    this.saveSelection();
     try {
       localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(this.state));
     } catch (error) {
@@ -110,6 +159,7 @@ export class ChatManager {
   }
 
   createNewChat(title?: string): Chat {
+    this.selectionRestored = false;
     const now = Date.now();
     const chat: Chat = {
       id: `chat_${now}_${Math.random().toString(36).substr(2, 9)}`,
@@ -148,10 +198,11 @@ export class ChatManager {
   switchToChat(chatId: string): boolean {
     const chat = this.state.chats.find(c => c.id === chatId);
     if (!chat) return false;
+    this.selectionRestored = false;
     if (this.state.activeChat === chatId) return true;
 
     this.state.activeChat = chatId;
-    this.saveState();
+    this.saveSelection();
     return true;
   }
 
@@ -300,6 +351,7 @@ export class ChatManager {
    * that session (refreshing its messages) instead of creating a duplicate.
    */
   openAgentSession(agent: NonNullable<Chat['agent']>, title: string, messages?: Message[], createdAt?: number): Chat {
+    this.selectionRestored = false;
     let chat = this.state.chats.find(c => c.agent?.provider === agent.provider && (c.agent?.sessionId === agent.sessionId || (!!agent.originalSessionId && c.agent?.sessionId === agent.originalSessionId)));
     const now = Date.now();
     if (chat) {

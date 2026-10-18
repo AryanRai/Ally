@@ -15,6 +15,7 @@ import CompactUserMessage from './CompactUserMessage';
 import type { ChatInteractionCardProps } from './ChatInteractionCard';
 
 interface CollapsedHeaderProps {
+  readerChatId?: string;
   onOpenAgent?: (row: AssistantActivityRow) => Promise<void>;
   decisionControls?: React.ReactNode;
   decisions?: ChatInteractionCardProps['request'][];
@@ -88,6 +89,7 @@ const iconButton = 'grid size-7 shrink-0 place-items-center rounded-[8px] text-f
  * into a toggled row, like the composer's tool strip.
  */
 export default function CollapsedHeader({
+  readerChatId,
   onOpenAgent,
   decisionControls,
   decisions,
@@ -319,6 +321,7 @@ export default function CollapsedHeader({
         {chatTitle && <button type="button" onClick={onCollapseToggle} title={chatTitle} className="block w-full truncate text-left text-[10px] text-foreground/45 hover:text-foreground/75">{chatTitle}</button>}
         {latestUser && <CompactUserMessage key={latestUser.id} content={latestUser.content} images={latestUser.metadata?.images ?? (latestUser.metadata?.image ? [latestUser.metadata.image] : undefined)} />}
         <CollapsedResponsePreview
+          readerChatId={readerChatId}
           response={currentResponse || ((!isTyping || stopDisabledReason) ? latestReply?.content : '') || ''}
           segments={currentResponse ? responseSegments : ((!isTyping || stopDisabledReason) ? latestReply?.metadata?.segments : undefined)}
           images={!currentResponse && (!isTyping || stopDisabledReason) ? latestReply?.metadata?.images : undefined}

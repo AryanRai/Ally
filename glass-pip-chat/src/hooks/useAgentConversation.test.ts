@@ -96,6 +96,7 @@ it('projects only the selected stream and saves background results in their orig
   const second = manager.openAgentSession({ provider: 'codex', sessionId: 'two', cwd: '/work' }, 'Second', []);
   manager.switchToChat(first.id);
   const pending = new Map<string, { cb: any; finish: (result: any) => void }>();
+  agent.stop.mockReturnValueOnce(true);
   agent.runTurn.mockImplementation((_opts, cb, id) => new Promise(resolve => pending.set(id, { cb, finish: resolve })));
   const { result } = renderHook(() => { const chats = useChats(); return { chats, conversation: useAgentConversation({ chats, robotMode: false }) }; });
   let a!: Promise<unknown>, b!: Promise<unknown>;

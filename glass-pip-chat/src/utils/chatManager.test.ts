@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChatManager } from './chatManager';
 
 // ChatManager is a singleton that loads once; reset its private instance per test
@@ -46,6 +46,56 @@ describe('ChatManager', () => {
   it('starts with a welcome chat', () => {
     expect(manager.getAllChats()).toHaveLength(1);
     expect(manager.getActiveChat()?.messages[0].role).toBe('assistant');
+  });
+
+  it('persists exact selection without serializing or rewriting any transcript', () => {
+    const first = manager.openAgentSession({ provider: 'codex', sessionId: 'same' }, 'First', [message('one')]);
+    manager.openAgentSession({ provider: 'claude', sessionId: 'same' }, 'Other provider', [message('two')]);
+    localStorage.setItem('ally-chat-drafts', JSON.stringify({ [first.id]: 'Unsent draft' }));
+    const transcript = localStorage.getItem('glass_pip_chats');
+    const stringify = vi.spyOn(JSON, 'stringify');
+    manager.switchToChat(first.id);
+    expect(stringify).toHaveBeenCalledTimes(1);
+    expect(stringify.mock.calls[0][0]).not.toHaveProperty('messages');
+    stringify.mockRestore();
+    expect(localStorage.getItem('glass_pip_chats')).toBe(transcript);
+    expect(freshManagerKeepingStorage().getActiveChat()).toEqual(first);
+    expect(JSON.parse(localStorage.getItem('ally-chat-drafts')!)[first.id]).toBe('Unsent draft');
+  });
+
+  it('retains exact local and session identity if a transcript exceeds storage quota', () => {
+    const original = Storage.prototype.setItem;
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const storage = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function(this: Storage, key, value) {
+      if (key === 'glass_pip_chats') throw new DOMException('Full', 'QuotaExceededError');
+      original.call(this, key, value);
+    });
+    const chat = manager.openAgentSession({ provider: 'codex', sessionId: 'unavailable', originalSessionId: 'old', cwd: '/exact' }, 'Exact title', [message('huge')]);
+    storage.mockRestore(); log.mockRestore();
+    const reloaded = freshManagerKeepingStorage();
+    expect(reloaded.getActiveChat()).toMatchObject({ id: chat.id, agent: chat.agent, title: chat.title, messages: [] });
+    expect(reloaded.getAllChats().filter(c => c.agent?.sessionId === 'unavailable')).toHaveLength(1);
+  });
+
+  it('uses a saved migration alias only within its original provider', () => {
+    const codex = manager.openAgentSession({ provider: 'codex', sessionId: 'new', originalSessionId: 'old' }, 'Migrated');
+    manager.openAgentSession({ provider: 'claude', sessionId: 'old' }, 'Different provider');
+    localStorage.setItem('ally-active-chat', JSON.stringify({ id: 'missing-local-id', title: 'Original', agent: { provider: 'codex', sessionId: 'old' } }));
+    localStorage.setItem('ally-chat-drafts', JSON.stringify({'missing-local-id':'Original draft'}));
+    const reloaded = freshManagerKeepingStorage();
+    expect(reloaded.getActiveChat()?.id).toBe(codex.id);
+    expect(JSON.parse(localStorage.getItem('ally-chat-drafts')!)[codex.id]).toBe('Original draft');
+    expect(reloaded.getAllChats()).toHaveLength(manager.getAllChats().length);
+    reloaded.switchToChat(reloaded.getAllChats().find(c => c.agent?.provider === 'claude')!.id);
+    expect(freshManagerKeepingStorage().getActiveChat()?.agent?.provider).toBe('claude');
+  });
+
+  it('keeps legacy selected chats and ignores corrupt selection metadata', () => {
+    const chat = manager.createNewChat('Legacy');
+    localStorage.removeItem('ally-active-chat');
+    expect(freshManagerKeepingStorage().getActiveChat()?.id).toBe(chat.id);
+    localStorage.setItem('ally-active-chat', JSON.stringify({ id: 123, title: 'Invalid' }));
+    expect(freshManagerKeepingStorage().getActiveChat()?.id).toBe(chat.id);
   });
 
   it('creates, switches to and persists chats', () => {

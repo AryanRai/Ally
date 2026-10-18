@@ -7,8 +7,10 @@ import { displayAssistantText } from '@/lib/messageDisplay';
 import type { Message, Segment } from '@/types/chat';
 import { AgentReply } from './ChatMessage';
 import { ImageStrip } from './ToolCall';
+import { loadReplyPosition, saveReplyPosition } from '@/lib/replyPosition';
 
 interface CollapsedResponsePreviewProps {
+  readerChatId?: string;
   response: string;
   segments?: Segment[];
   images?: string[];
@@ -20,8 +22,12 @@ interface CollapsedResponsePreviewProps {
 }
 
 /** A bounded live reader beneath the pill. Scrolling up pauses following. */
-export default function CollapsedResponsePreview({ response: latestResponse, segments: latestSegments, images: latestImages, responseId, isTyping: liveTyping, workingStatus, onCopy, olderReplies = [] }: CollapsedResponsePreviewProps) {
-  const [historyId, setHistoryId] = useState<string | null>(null);
+export default function CollapsedResponsePreview({ readerChatId, response: latestResponse, segments: latestSegments, images: latestImages, responseId, isTyping: liveTyping, workingStatus, onCopy, olderReplies = [] }: CollapsedResponsePreviewProps) {
+  const [bookmark] = useState(() => {
+    const saved = loadReplyPosition(readerChatId);
+    return !responseId || saved?.responseId === responseId ? saved : undefined;
+  });
+  const [historyId, setHistoryId] = useState<string | null>(bookmark?.historyId ?? null);
   const index = olderReplies.findIndex(message => message.id === historyId);
   const historical = index >= 0 ? olderReplies[index] : undefined;
   const response = historical?.content ?? latestResponse, segments = historical?.metadata?.segments ?? (historical ? undefined : latestSegments), images = historical?.metadata?.images ?? (historical ? undefined : latestImages);
@@ -44,11 +50,25 @@ export default function CollapsedResponsePreview({ response: latestResponse, seg
   };
   const reply = useMemo(() => collapsedReply(response, segments), [response, segments]);
   const scrollRef = useRef<HTMLDivElement>(null);
-  const following = useRef(true);
+  const following = useRef(bookmark?.following ?? true);
   const draggingScrollbar = useRef(false);
-  const [paused, setPaused] = useState(false);
-  const [expanded, setExpanded] = useState(true);
+  const [paused, setPaused] = useState(bookmark ? !bookmark.following : false);
+  const [expanded, setExpanded] = useState(bookmark?.expanded ?? true);
   const wasWorking = useRef(false);
+  const previousResponse = useRef(bookmark?.responseId ?? responseId);
+  const restoreTop = useRef(bookmark?.top);
+  const lastTop = useRef(bookmark?.top ?? 0);
+  const persist = (top = restoreTop.current ?? scrollRef.current?.scrollTop ?? lastTop.current) => {
+    lastTop.current = top;
+    saveReplyPosition(readerChatId, { responseId: responseId ?? previousResponse.current, historyId, top, expanded, following: following.current });
+  };
+  useEffect(() => { persist(); }, [historyId, expanded, responseId]);
+
+  useEffect(() => {
+    if (restoreTop.current === undefined || !scrollRef.current || (historyId && !historical)) return;
+    scrollRef.current.scrollTop = restoreTop.current;
+    restoreTop.current = undefined;
+  }, [response, historical, expanded]);
 
   useEffect(() => {
     if (liveTyping && !wasWorking.current) {
@@ -60,6 +80,10 @@ export default function CollapsedResponsePreview({ response: latestResponse, seg
   }, [liveTyping]);
 
   useEffect(() => {
+    if (!responseId) return;
+    if (previousResponse.current === responseId) return;
+    previousResponse.current = responseId;
+    restoreTop.current = undefined;
     setHistoryId(null); overscroll.current = 0;
     setExpanded(true);
     following.current = true;
@@ -109,10 +133,11 @@ export default function CollapsedResponsePreview({ response: latestResponse, seg
       onScroll={event => {
         // Layout and browser scroll anchoring also emit scroll. Only the reader
         // can pause following; arriving text must never pause itself.
-        if (following.current && !draggingScrollbar.current) return;
+        if (following.current && !draggingScrollbar.current) { persist(event.currentTarget.scrollTop); return; }
         const panel = event.currentTarget;
         following.current = panel.scrollHeight - panel.scrollTop - panel.clientHeight < 24;
         setPaused(!following.current);
+        persist(panel.scrollTop);
       }}
       className="max-h-48 overflow-y-auto overscroll-contain break-words px-3 pb-3 text-[13px] [overflow-wrap:anywhere] [&_pre]:max-w-full [&_pre]:overflow-x-auto">
       <WatchReplyContent content={reply.text} streaming={isTyping} compact />
