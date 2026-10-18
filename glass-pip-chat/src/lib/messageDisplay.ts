@@ -3,6 +3,10 @@ const ambientNotice = "This block is automatically supplied ambient UI state, no
 
 export function displayUserText(raw: string): string {
   let text = raw.trim();
+  // Exact standalone runtime trailer: context belongs in the drawing chip,
+  // while stored history and the actual agent prompt remain complete.
+  const tutor = /\n\n\[Ally visual tutor: [\da-f-]{36}\. (?:Drawing is available for every Circle question and follow-up, regardless of action\. |When asked for drawings, )[^\n]*The screen snapshot is from \d{4}-\d\d-\d\dT[\d:.]+Z, not a live feed\.[^\n]*My amber sketches are available in visual_tutor_read\.\]$/i;
+  text = text.replace(tutor, '');
   // Only leading, closed runtime envelopes with a verified signature qualify.
   // Stop at the request: examples, quotes, fences and user-written tags stay intact.
   const browser = /^<in-app-browser-context source="ambient-ui-state">\s*([\s\S]*?)\s*<\/in-app-browser-context>\s*(?:## My request:\s*)?/;

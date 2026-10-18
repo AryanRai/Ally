@@ -25,6 +25,9 @@ export interface TutorBoard {
   sketching: boolean;
   frozen: boolean;
   revision: number;
+  /** Presentation only; reasoning remains in the originating chat. */
+  visible?: boolean;
+  pillBounds?: { x: number; y: number; width: number; height: number };
 }
 export interface TutorCapture { board: TutorBoard; imagePath: string; thumbnail: string }
 export type TutorAction = 'previous' | 'next' | 'latest' | 'sketch' | 'undo' | 'freeze' | 'chat' | 'close';

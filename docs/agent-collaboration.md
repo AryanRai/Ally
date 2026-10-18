@@ -1,5 +1,8 @@
 # Ally collaboration scratchpad
 
+## Pill-led drawing workflow and parity (2026-10-18, chat01a14e77)
+User approved persistent collapsed pill as primary selection/drawing/chat surface and explicitly requests collapsed-pill style parity. Own Circle attach-only handoff (no auto query), useVisualTutor pending exact-chat image lifecycle and text/voice wiring, main drawing chip/controls, tutor IPC layering/docking/minimise state and overlay presentation/tests/synthetic QA. Preserve draft/voice/Stop/approval/model ownership, frozen screenshots and sandbox constraints. No private capture/model/microphone tests or phone/watch installs. Supersede only exact idle updater17736 if still waiting; no live response/capture restart. New combined candidate, frozen builds unchanged.
+
 ## File citations and manual dimensions (2026-10-18, chat01a14e77)
 User requests fixing raw codex-file-citation output in screenshot and manually resizing Ally narrower/wider/taller/shorter. Own display-only citation projection/link handling with restricted local-document IPC, manual native resize event/preload/types and persisted per-mode size state, viewport sizing/overflow and collapsed Meeting visibility if needed. Preserve all other UI, animation, capture/approval/chat state and concurrent files. New candidate only; no frozen-build overwrite, model/private capture tests or device installs. Coordinate any later deployment with exact live39876 and active responses/boards; prior explicit one-time restart is completed, no pending helper.
 

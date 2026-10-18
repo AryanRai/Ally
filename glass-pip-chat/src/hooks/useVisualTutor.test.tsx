@@ -12,6 +12,21 @@ function api() {
 }
 afterEach(cleanup);
 describe('visual tutor chat integration', () => {
+  it('attaches without sending, holds the exact crop while busy and claims it once with a real query', async () => {
+    api(); const send = vi.fn();
+    const { result, rerender } = renderHook(({ chatId }) => useVisualTutor(chatId, send), { initialProps: { chatId: 'chat-a' } });
+    await act(async () => { await result.current.attach('token', 'chat-a'); });
+    expect(send).not.toHaveBeenCalled(); expect(result.current.pendingSelection).toBe(true);
+    act(() => { expect(result.current.claimAttachment(true)).toEqual({ blocked: true }); });
+    expect(result.current.pendingSelection).toBe(true);
+    act(() => { expect(result.current.claimAttachment()).toMatchObject({ image: { path: capture.imagePath } }); });
+    expect(result.current.claimAttachment()).toEqual({ blocked: false });
+    expect(result.current.decorate('follow up')).toContain('session');
+    await act(async () => { await result.current.attach('token-2', 'chat-a'); });
+    rerender({ chatId: 'chat-b' });
+    expect(result.current.claimAttachment()).toEqual({ blocked: false });
+    expect(result.current.pendingSelection).toBe(false);
+  });
   it('does not capture or send on mount; an explicit request attaches exactly one screenshot', async () => {
     const tutor = api(); const send = vi.fn().mockResolvedValue(undefined);
     const { result } = renderHook(() => useVisualTutor('chat-a', send));

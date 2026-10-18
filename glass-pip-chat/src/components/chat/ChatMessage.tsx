@@ -12,7 +12,7 @@ import { needsClaudeLogin, openClaudeLogin } from '@/lib/claudeLogin';
 import { readableReply, watchUserText } from '@/lib/watchPresentation';
 import WatchReplyContent, { OriginalMessage } from './WatchReplyContent';
 import { browserActivity } from '../../../electron/agent/browserActivity';
-import { displayAssistantText } from '@/lib/messageDisplay';
+import { displayAssistantText, displayUserText } from '@/lib/messageDisplay';
 import { historyReply } from '@/lib/historyReply';
 
 function ToolActivity({ parts }: { parts: Segment[] }) {
@@ -130,7 +130,7 @@ export default function ChatMessage({ message, sessionWorking = false, onEdit, o
   const [draft, setDraft] = useState(message.content);
   const [copied, setCopied] = useState(false);
   const isUser = message.role === 'user';
-  const { thinking, text } = isUser ? { thinking: '', text: watchUserText(message.content) } : splitThinking(message.content);
+  const { thinking, text } = isUser ? { thinking: '', text: displayUserText(watchUserText(message.content)) } : splitThinking(message.content);
   const reply = historyReply(text, message.metadata?.segments as Segment[] | undefined);
 
   const copy = async () => {
@@ -172,7 +172,7 @@ export default function ChatMessage({ message, sessionWorking = false, onEdit, o
       <MessageContent>
         {isUser ? (
           <div><p className="whitespace-pre-wrap break-words text-[13px] leading-relaxed">{text}</p>
-            {text !== message.content && <OriginalMessage text={message.content} label="Watch instructions" />}
+            {text !== message.content && <OriginalMessage text={message.content} label="Request details" />}
           </div>
         ) : (
           <>

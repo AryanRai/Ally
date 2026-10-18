@@ -79,7 +79,7 @@ export interface PipAPI {
     onAsk: (callback: (ask: import('../../electron/capture/types').CircleAsk) => void) => () => void;
   };
 
-  tutor: Pick<import('../../electron/visualTutor/types').VisualTutorApi, 'start' | 'displays' | 'state' | 'end' | 'show' | 'onChanged'>;
+  tutor: Pick<import('../../electron/visualTutor/types').VisualTutorApi, 'start' | 'displays' | 'state' | 'end' | 'show' | 'action' | 'onChanged'>;
 
   // Claude Code / Codex agent backends
   agent: {

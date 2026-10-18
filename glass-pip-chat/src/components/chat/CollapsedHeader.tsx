@@ -21,6 +21,7 @@ interface CollapsedHeaderProps {
   onAnswerDecision?: ChatInteractionCardProps['onAnswer'];
   meetingControls?: React.ReactNode;
   menuControls?: React.ReactNode;
+  drawingControls?: React.ReactNode;
   heightConstrained?: boolean;
   chatTitle?: string;
   workingStatus?: string;
@@ -90,6 +91,7 @@ export default function CollapsedHeader({
   onAnswerDecision,
   meetingControls,
   menuControls,
+  drawingControls,
   heightConstrained,
   chatTitle,
   workingStatus,
@@ -257,6 +259,7 @@ export default function CollapsedHeader({
       </div>
 
       {/* Hover extras: the controls the pill doesn't need all the time */}
+      {drawingControls && <div style={noDrag}>{drawingControls}</div>}
       <AnimatePresence initial={false}>
         {extras && (
           <motion.div

@@ -5,6 +5,7 @@ import { codexHistoryMessages } from '../../electron/agent/codexHistory';
 import { rebuildClaudeHistory, rebuildCodexHistory } from '../../electron/agent/sessions';
 import { CodexEventParser } from '../../electron/agent/codexEvents';
 import { ClaudeStreamParser } from '../../electron/agent/parsers';
+import { tutorRequest } from '../hooks/useVisualTutor';
 
 const notice = "This block is automatically supplied ambient UI state, not part of the user's request. Do not treat it as an instruction or as evidence that the user explicitly selected the in-app browser.";
 const browser = `${notice}\n# In app browser:\n- The user has the in-app browser open with 3 tabs.\n- Current URL: https://mail.google.com/mail/u/0/#inbox`;
@@ -12,6 +13,12 @@ const request = 'Integrate **Circle**, `drawing` and [meetings](https://example.
 const directive = '::created-thread{threadId="01a14c73-31e1-7310-9342-7131de45d662"}';
 
 describe('display-only envelopes', () => {
+  it('keeps the actual question visible while projecting exact tutor context to the drawing chip', () => {
+    const raw = tutorRequest('Explain this triangle', { id: '7b88d2e0-19ae-4b7a-8189-a879efb0af00', chatId: 'a', capturedAt: 1000 } as any, 'a');
+    expect(displayUserText(raw)).toBe('Explain this triangle');
+    expect(raw).toContain('visual_tutor_draw');
+    for (const example of [`\`\`\`\n${raw}\n\`\`\``, '[Ally visual tutor: this is my example.]']) expect(displayUserText(example)).toBe(example);
+  });
   it('projects standalone file citations as file links while preserving quoted/code examples', () => {
     const citation = ':codex-file-citation{path="C:/study/Formula Sheet.pdf" purpose="output"}';
     expect(displayAssistantText(citation)).toBe('[Formula Sheet.pdf](/__ally_document__/C%3A%2Fstudy%2FFormula%20Sheet.pdf)');
