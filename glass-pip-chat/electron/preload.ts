@@ -12,6 +12,12 @@ const pipAPI = {
   // Window resizing
   resizeWindow: (width: number, height: number) => ipcRenderer.send('window:resize', { width, height }),
   getWindowSize: () => ipcRenderer.invoke('window:get-size'),
+  onManualResize: (callback: (size: { width: number; height: number }) => void) => {
+    const handler = (_: unknown, size: { width: number; height: number }) => callback(size);
+    ipcRenderer.on('window:manual-resize', handler);
+    return () => ipcRenderer.removeListener('window:manual-resize', handler);
+  },
+  openLocalDocument: (file: string) => ipcRenderer.invoke('document:open', file),
   
   // Listen for resize completion
   onResizeComplete: (callback: (size: { width: number; height: number }) => void) => {

@@ -21,6 +21,7 @@ interface CollapsedHeaderProps {
   onAnswerDecision?: ChatInteractionCardProps['onAnswer'];
   meetingControls?: React.ReactNode;
   menuControls?: React.ReactNode;
+  heightConstrained?: boolean;
   chatTitle?: string;
   workingStatus?: string;
   stopDisabledReason?: string;
@@ -89,6 +90,7 @@ export default function CollapsedHeader({
   onAnswerDecision,
   meetingControls,
   menuControls,
+  heightConstrained,
   chatTitle,
   workingStatus,
   stopDisabledReason,
@@ -172,7 +174,7 @@ export default function CollapsedHeader({
   ];
 
   return (
-    <div ref={rootRef} className="flex max-h-[740px] shrink-0 flex-col overflow-y-auto [&>*]:shrink-0" onMouseEnter={() => setHovering(true)} onMouseLeave={() => setHovering(false)} onKeyDown={event => {
+    <div ref={rootRef} className={cn('flex shrink-0 flex-col overflow-y-auto [&>*]:shrink-0', heightConstrained ? 'max-h-full' : 'max-h-[740px]')} onMouseEnter={() => setHovering(true)} onMouseLeave={() => setHovering(false)} onKeyDown={event => {
       if (event.key === 'Escape' && extras && !showModelSelector) {
         event.stopPropagation();
         showExtras(false);
@@ -300,7 +302,7 @@ export default function CollapsedHeader({
       </AnimatePresence>
 
       {/* Keep setup state mounted while the overflow menu is closed. */}
-      {menuControls && <div hidden={!extras} style={noDrag}>{menuControls}</div>}
+      {menuControls && <div hidden={!extras} style={{ ...noDrag, display: extras ? undefined : 'none' }}>{menuControls}</div>}
 
       {/* Current turn stays below the pill, including after completion. */}
       <div className="space-y-1.5 px-2 pb-1.5" style={noDrag}>

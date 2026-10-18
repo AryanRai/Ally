@@ -1,5 +1,8 @@
 # Ally collaboration scratchpad
 
+## File citations and manual dimensions (2026-10-18, chat01a14e77)
+User requests fixing raw codex-file-citation output in screenshot and manually resizing Ally narrower/wider/taller/shorter. Own display-only citation projection/link handling with restricted local-document IPC, manual native resize event/preload/types and persisted per-mode size state, viewport sizing/overflow and collapsed Meeting visibility if needed. Preserve all other UI, animation, capture/approval/chat state and concurrent files. New candidate only; no frozen-build overwrite, model/private capture tests or device installs. Coordinate any later deployment with exact live39876 and active responses/boards; prior explicit one-time restart is completed, no pending helper.
+
 ## Meeting button in collapsed overflow (2026-10-18, chat01a14e77)
 User requests moving Meeting mode into the collapsed pill three-dot menu. Own only CollapsedHeader persistent overflow slot and GlassChatPiP PerceptionBar placement, preserving queue/tutor and all meeting state/behaviour. Prepare a new candidate without modifying frozen Circle/math artifacts. Supersede only this chat's still-waiting idle helper after checking exact identity; do not interrupt live responses/capture. Existing phone blocker/watch deferral remain.
 

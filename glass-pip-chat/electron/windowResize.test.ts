@@ -7,7 +7,7 @@ vi.mock('electron', () => ({
   screen: { getDisplayNearestPoint: () => ({ workArea: { x: 0, y: 0, width: 2000, height: 2000 } }) },
   BrowserWindow: class {
     webContents = { send: fixture.send };
-    on(name: string, fn: Function) { fixture.events.set(name, fn); }
+    on(name: string, fn: Function) { const old = fixture.events.get(name); fixture.events.set(name, (...args: unknown[]) => { old?.(...args); fn(...args); }); }
     once() {}
     async loadFile() {}
     getBounds() { return { x: 20, y: 20, width: fixture.width, height: fixture.height }; }
@@ -42,4 +42,15 @@ it('keeps native resize bursts off disk and acknowledges the final/no-op request
   fixture.events.get('move')!(); fixture.app.get('before-quit')!();
   expect(fixture.writes).toHaveBeenCalledTimes(2);
   vi.runAllTimers(); expect(fixture.writes).toHaveBeenCalledTimes(2);
+  fixture.events.get('will-resize')!();
+  fixture.width = 310; fixture.height = 900; fixture.events.get('resize')!();
+  resize({}, { width: 480, height: 700 });
+  expect(fixture.width).toBe(310);
+  vi.advanceTimersByTime(150);
+  expect(fixture.send).toHaveBeenLastCalledWith('window:manual-resize', { width: 310, height: 900 });
+  fixture.events.get('will-resize')!(); // constrained edge drag can produce no resize event
+  vi.advanceTimersByTime(150);
+  resize({}, { width: 500, height: 700 });
+  expect(fixture.width).toBe(500);
+  vi.runAllTimers();
 });

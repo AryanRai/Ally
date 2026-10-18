@@ -20,6 +20,19 @@ const props = {
 };
 
 describe('collapsed live reader', () => {
+  it('keeps Meeting inside More controls and retains setup while hidden in a short manual window', () => {
+    const { container } = render(<CollapsedHeader {...props} heightConstrained menuControls={<div><button>Meeting</button><input aria-label="Meeting draft" defaultValue="saved" /></div>} />);
+    expect(screen.queryByRole('button', { name: 'Meeting' })).not.toBeInTheDocument();
+    const more = screen.getByRole('button', { name: 'More controls' });
+    fireEvent.click(more);
+    expect(screen.getByRole('button', { name: 'Meeting' })).toBeVisible();
+    fireEvent.change(screen.getByLabelText('Meeting draft'), { target: { value: 'retained' } });
+    fireEvent.click(more);
+    expect(screen.queryByRole('button', { name: 'Meeting' })).not.toBeInTheDocument();
+    fireEvent.click(more);
+    expect(screen.getByLabelText('Meeting draft')).toHaveValue('retained');
+    expect(container.firstElementChild).toHaveClass('max-h-full', 'overflow-y-auto');
+  });
   it('never labels a working chat Stopped because an older answer had an interrupted footer', () => {
     const messages = [user, { ...reply, content: 'Earlier answer\n\n⏹️ Stopped' }];
     const { rerender } = render(<CollapsedHeader {...props} messages={messages} isTyping stopDisabledReason="Live in Codex · Stop there" workingStatus="Thinking…" />);
