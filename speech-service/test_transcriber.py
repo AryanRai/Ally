@@ -5,8 +5,45 @@ import unittest
 import urllib.error
 import urllib.request
 import wave
+import os
+import sys
+import tempfile
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch, Mock
 
-from transcriber import MAX_AUDIO, create_server, decode_wav
+from transcriber import MAX_AUDIO, SpeechEngine, speech_cache, create_server, decode_wav
+
+
+class ModelCacheTests(unittest.TestCase):
+    def test_uses_owned_local_cache_without_touching_a_broken_shared_cache(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with patch.dict(os.environ, {"LOCALAPPDATA": directory, "HF_HOME": "Z:/unavailable/huggingface"}, clear=True):
+                constructor = Mock(return_value=object())
+                with patch.dict(sys.modules, {"faster_whisper": SimpleNamespace(WhisperModel=constructor)}):
+                    engine = SpeechEngine()
+                    engine.load()
+                expected = Path(directory) / "Ally" / "speech" / "models"
+                self.assertTrue(expected.is_dir())
+                self.assertEqual(constructor.call_args.kwargs["download_root"], str(expected))
+                self.assertEqual(os.environ["HF_XET_CACHE"], str(expected.parent / "xet"))
+                self.assertTrue(engine.health()["ready"])
+                self.assertEqual(os.environ["HF_HOME"], "Z:/unavailable/huggingface")
+
+    def test_honours_explicit_cache_and_redacts_errors(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with patch.dict(os.environ, {"ALLY_STT_CACHE": directory, "HF_XET_CACHE": directory}, clear=True):
+                self.assertEqual(speech_cache(), directory)
+                constructor = Mock(side_effect=FileNotFoundError("private/path?token=secret"))
+                with patch.dict(sys.modules, {"faster_whisper": SimpleNamespace(WhisperModel=constructor)}):
+                    engine = SpeechEngine()
+                    engine.load()
+                    self.assertFalse(engine.health()["ready"])
+                    self.assertNotIn("secret", engine.health()["error"])
+                    constructor.side_effect = None
+                    engine.load()
+                    self.assertTrue(engine.health()["ready"])
+                    self.assertNotIn("error", engine.health())
 
 
 def wav_data(samples=b"\x00\x10" * 6400, rate=16000):
