@@ -1,9 +1,10 @@
+import { displayUserText } from './messageDisplay';
 import type { Chat } from '@/types/chat';
 import type { AgentSessionSummary } from '@/types/agent';
 import { watchUserText } from './watchPresentation';
 
 export function compactUserMessage(raw: string) {
-  const content = watchUserText(raw);
+  const content = displayUserText(watchUserText(raw));
   const envelope = /^\s*<send_user_message_question_reply>\s*([\s\S]*?)\s*<\/send_user_message_question_reply>\s*$/.exec(content);
   if (envelope) {
     try {

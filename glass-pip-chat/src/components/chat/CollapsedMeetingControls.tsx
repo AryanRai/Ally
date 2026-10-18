@@ -63,6 +63,6 @@ export default function CollapsedMeetingControls({ perception, onOpenSetup, onOp
       {sources.map(({ key, label, icon: Icon, state }) => <button key={key} type="button" disabled={pending} aria-pressed={session.capture[key]} aria-label={label} title={`${label}: ${running ? state : 'paused'}`} onClick={() => void run(() => api.setCapture({ [key]: !session.capture[key] } as Partial<CaptureToggles>))} className={cn('flex items-center gap-1 rounded-md px-1.5 py-1 text-[10px] disabled:opacity-40', session.capture[key] ? 'bg-white/8 text-foreground/75' : 'text-foreground/35', state === 'error' && 'text-amber-300')}><Icon className="size-3" />{label}{!session.capture[key] && ' off'}</button>)}
     </div>
     {transcript && (transcript.kind === 'transcript.partial' || transcript.kind === 'transcript.final') && <p className="mt-1 line-clamp-2 break-words text-[11px] text-foreground/55" style={{ userSelect: 'text' }} title={transcript.text}>{transcript.source === 'microphone' ? 'Mic' : 'Computer'} · {transcript.text}</p>}
-    {(error || failed) && <p role="alert" className="mt-1 text-[10px] text-amber-200">{error || 'A capture source failed. Open meeting controls to check it.'}</p>}
+    {(error || failed) && <p role="alert" className="mt-1 text-[10px] text-amber-200">{error || 'A capture source failed. Check Meeting settings & diagnostics in Settings.'}</p>}
   </section>;
 }

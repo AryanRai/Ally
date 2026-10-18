@@ -6,8 +6,8 @@ export default function VisualTutorControls({ tutor, disabled }: { tutor: Return
   if (!tutor.board && !tutor.busy && !tutor.error) return null;
   return <section className="mx-2 my-1 rounded-lg text-[11px] text-foreground/65" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties} aria-label="Drawing explanation">
     {(tutor.board || tutor.busy) && <div className="flex min-h-8 items-center gap-2">
-      <PencilLine className="size-3.5" /><span className="flex-1">{tutor.busy ? 'Preparing drawings…' : 'Drawing explanation'}</span>
-      {tutor.board && <><button type="button" aria-label="Circle another area" title="Circle another area to explain" disabled={disabled || tutor.busy} className="p-1 hover:text-foreground disabled:opacity-40" onClick={() => void window.pip?.circle.start()}><Lasso className="size-3.5" /></button><button type="button" aria-label="End drawing explanation" className="p-1 hover:text-foreground" onClick={tutor.end}><X className="size-3.5" /></button></>}
+      <PencilLine className="size-3.5" /><span className="flex-1">{tutor.busy ? 'Preparing selection…' : tutor.board?.steps?.length ? 'Drawing explanation' : 'Screen selection attached'}</span>
+      {tutor.board && <>{!!tutor.board.steps?.length && <button type="button" onClick={tutor.show} className="rounded-md bg-white/8 px-2 py-1 hover:text-foreground">View drawings</button>}<button type="button" aria-label="Circle another area" title="Circle another area to explain" disabled={disabled || tutor.busy} className="p-1 hover:text-foreground disabled:opacity-40" onClick={() => void window.pip?.circle.start()}><Lasso className="size-3.5" /></button><button type="button" aria-label="End drawing explanation" className="p-1 hover:text-foreground" onClick={tutor.end}><X className="size-3.5" /></button></>}
     </div>}
     {tutor.error && <p role="alert" className="pb-2 text-[11px] text-amber-200">{tutor.error}</p>}
   </section>;

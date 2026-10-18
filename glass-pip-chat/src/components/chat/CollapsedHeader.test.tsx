@@ -24,7 +24,7 @@ describe('collapsed live reader', () => {
     const messages = [user, { ...reply, content: 'Earlier answer\n\n⏹️ Stopped' }];
     const { rerender } = render(<CollapsedHeader {...props} messages={messages} isTyping stopDisabledReason="Live in Codex · Stop there" workingStatus="Thinking…" />);
     expect(screen.getByRole('status')).toHaveTextContent('Thinking…');
-    expect(screen.getByRole('region', { name: 'Live reply' })).toHaveTextContent('Earlier answer');
+    expect(screen.getByRole('region', { name: 'Live update' })).toHaveTextContent('Earlier answer');
     expect(screen.queryByText(/Stopped|was interrupted/)).not.toBeInTheDocument();
     rerender(<CollapsedHeader {...props} messages={messages} />);
     expect(screen.getByText('Earlier reply')).toBeInTheDocument();
@@ -32,7 +32,7 @@ describe('collapsed live reader', () => {
   });
   it('shows one working status even with history open, and keeps Stop separate from guidance', () => {
     const onStop = vi.fn(), onSend = vi.fn();
-    render(<CollapsedHeader {...props} messages={[user]} isTyping quickInput="Also track actions" onStop={onStop} onSend={onSend} />);
+    render(<CollapsedHeader {...props} messages={[{ ...reply, id: 'older' }, user]} isTyping quickInput="Also track actions" onStop={onStop} onSend={onSend} />);
     fireEvent.click(screen.getByRole('button', { name: /Recent messages/ }));
     expect(screen.getAllByRole('status')).toHaveLength(1);
     expect(screen.getAllByText('Thinking…')).toHaveLength(1);
@@ -46,7 +46,7 @@ describe('collapsed live reader', () => {
   it('retains the finished reply and clears it for a new user turn', () => {
     const { rerender } = render(<CollapsedHeader {...props} messages={[user]} isTyping currentResponse="Decisions and next steps" />);
     rerender(<CollapsedHeader {...props} messages={[user, reply]} />);
-    expect(screen.getByRole('region', { name: 'Live reply' })).toHaveTextContent(reply.content);
+    expect(screen.getByRole('region', { name: 'Latest reply' })).toHaveTextContent(reply.content);
     expect(screen.queryByRole('status')).not.toBeInTheDocument();
     rerender(<CollapsedHeader {...props} messages={[user, reply, { ...user, id: 'u2' }]} isTyping />);
     expect(screen.queryByText(reply.content)).not.toBeInTheDocument();
@@ -74,14 +74,14 @@ describe('collapsed live reader', () => {
     const { rerender } = render(<CollapsedResponsePreview response="First words" responseId="u1" isTyping />);
     fireEvent.click(screen.getByRole('button', { name: 'Collapse reply' }));
     rerender(<CollapsedResponsePreview response="First words plus more" responseId="u1" isTyping />);
-    expect(screen.queryByRole('region', { name: 'Live reply' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'Live update' })).not.toBeInTheDocument();
     rerender(<CollapsedResponsePreview response="Next turn" responseId="u2" isTyping />);
-    expect(screen.getByRole('region', { name: 'Live reply' })).toHaveTextContent('Next turn');
+    expect(screen.getByRole('region', { name: 'Live update' })).toHaveTextContent('Next turn');
   });
 
   it('follows chunks, pauses when reading above, and resumes on demand', () => {
     const { rerender } = render(<CollapsedResponsePreview response="First words" isTyping />);
-    const panel = screen.getByRole('region', { name: 'Live reply' });
+    const panel = screen.getByRole('region', { name: 'Live update' });
     Object.defineProperties(panel, { scrollHeight: { value: 600, configurable: true }, clientHeight: { value: 192 } });
     rerender(<CollapsedResponsePreview response="More words" isTyping />);
     expect(panel.scrollTop).toBe(600);
@@ -97,7 +97,7 @@ describe('collapsed live reader', () => {
 
   it('does not mistake layout scroll events for the reader scrolling up', () => {
     const { rerender } = render(<CollapsedResponsePreview response="First words" isTyping />);
-    const panel = screen.getByRole('region', { name: 'Live reply' });
+    const panel = screen.getByRole('region', { name: 'Live update' });
     Object.defineProperties(panel, { scrollHeight: { value: 600 }, clientHeight: { value: 192 } });
     fireEvent.scroll(panel);
     expect(screen.queryByRole('button', { name: 'Follow latest' })).not.toBeInTheDocument();

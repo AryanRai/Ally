@@ -67,16 +67,17 @@ export interface PipAPI {
   // Circle to Ask
   circle: {
     start: () => Promise<void>;
-    setChat: (chatId?: string) => Promise<void>;
+    setChat: (chatId?: string, title?: string) => Promise<void>;
     /** Frozen screenshot for the overlay page (PNG data URL) */
     getShot: () => Promise<string | null>;
+    context: () => Promise<import('../../electron/capture/types').CircleContext | null>;
     /** `rect` in overlay CSS pixels; omit to send the whole screen */
     submit: (payload: import('../../electron/capture/types').CircleSubmit) => Promise<void>;
     cancel: () => Promise<void>;
     onAsk: (callback: (ask: import('../../electron/capture/types').CircleAsk) => void) => () => void;
   };
 
-  tutor: Pick<import('../../electron/visualTutor/types').VisualTutorApi, 'start' | 'displays' | 'state' | 'end' | 'onChanged'>;
+  tutor: Pick<import('../../electron/visualTutor/types').VisualTutorApi, 'start' | 'displays' | 'state' | 'end' | 'show' | 'onChanged'>;
 
   // Claude Code / Codex agent backends
   agent: {

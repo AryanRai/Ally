@@ -73,6 +73,7 @@ export class PerceptionEngine {
   // ---- Session lifecycle ---------------------------------------------------
 
   async start(opts: StartOptions): Promise<PerceptionStatus> {
+    if (this.session && this.session.state !== 'stopped') throw new Error('End the current meeting before starting another.');
     this.stop();
     this.session = {
       provider: opts.provider, sessionId: opts.sessionId, title: opts.title, cwd: opts.cwd,

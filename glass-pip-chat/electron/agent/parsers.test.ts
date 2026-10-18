@@ -99,7 +99,7 @@ describe('CodexStreamParser', () => {
     ]);
     expect(events).toEqual([
       { kind: 'session', sessionId: 'th1' },
-      { kind: 'text', text: 'Listing.\n\n' },
+      { kind: 'text', text: 'Listing.\n\n', itemId: 'i0' },
       { kind: 'tool_start', id: 'i1', name: 'shell', input: { command: 'ls' } },
       { kind: 'tool_end', id: 'i1', output: 'a.txt', isError: true },
       { kind: 'done', sessionId: 'th1', usage: {} },

@@ -1,4 +1,6 @@
 import { MessageResponse } from '@/components/ai-elements/message';
+import CompactMarkdown from './CompactMarkdown';
+import { displayAssistantText } from '@/lib/messageDisplay';
 import { Shimmer } from '@/components/ai-elements/shimmer';
 import { watchReplyView } from '@/lib/watchPresentation';
 
@@ -25,15 +27,15 @@ function WatchWidget({ component: c }: { component: Record<string, unknown> }) {
   </div>;
 }
 
-export default function WatchReplyContent({ content, streaming = false }: { content: string; streaming?: boolean }) {
+export default function WatchReplyContent({ content, streaming = false, compact = false }: { content: string; streaming?: boolean; compact?: boolean }) {
   const reply = watchReplyView(content);
   if (!reply && streaming && /^\s*\{\s*"text"\s*:/.test(content)) {
     return <Shimmer className="text-xs" duration={1.2}>Receiving reply…</Shimmer>;
   }
   return <div className="min-w-0 space-y-2">
-    <MessageResponse isAnimating={streaming} className="text-[13px] font-light leading-[1.75] text-foreground/85">
-      {reply?.text ?? content}
-    </MessageResponse>
+    {compact ? <CompactMarkdown>{displayAssistantText(reply?.text ?? content)}</CompactMarkdown> : <MessageResponse isAnimating={streaming} className="text-[13px] font-light leading-[1.75] text-foreground/85">
+      {displayAssistantText(reply?.text ?? content)}
+    </MessageResponse>}
     {!!reply?.components.length && <div className="grid gap-2">{reply.components.map((component, i) => <WatchWidget key={i} component={component} />)}</div>}
     {reply && !streaming && <OriginalMessage text={content} label="Watch message details" />}
   </div>;

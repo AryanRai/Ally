@@ -29,6 +29,7 @@ export interface TutorBoard {
 export interface TutorCapture { board: TutorBoard; imagePath: string; thumbnail: string }
 export type TutorAction = 'previous' | 'next' | 'latest' | 'sketch' | 'undo' | 'freeze' | 'chat' | 'close';
 export interface VisualTutorApi {
+  show: (id: string) => Promise<void>;
   start: (chatId: string, displayId?: number, circleCaptureId?: string) => Promise<TutorCapture>;
   displays: () => Promise<Array<{ id: number; label: string }>>;
   state: () => Promise<TutorBoard | null>;

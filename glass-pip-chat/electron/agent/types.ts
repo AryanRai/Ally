@@ -51,7 +51,7 @@ export type AgentEvent =
   | { kind: 'input'; text: string; mode: 'steered' | 'queued'; queuedId?: string }
   | { kind: 'continuation' }
   | { kind: 'session'; sessionId: string }
-  | { kind: 'text'; text: string }
+  | { kind: 'text'; text: string; itemId?: string; phase?: 'commentary' | 'final_answer' }
   | { kind: 'thinking'; text: string }
   | { kind: 'tool_start'; id: string; name: string; input?: Record<string, unknown> }
   /** Updated input for a running tool (e.g. Codex todo list progress) */
@@ -125,5 +125,5 @@ export interface AgentHistoryMessage {
   /** Images the user attached (data URLs) */
   images?: string[];
   usage?: AgentUsage;
-  segments?: Array<{ type: 'text' | 'tool' | 'thinking'; content?: string; toolExecution?: AgentToolExecution }>;
+  segments?: Array<{ itemId?: string; phase?: 'commentary' | 'final_answer'; type: 'text' | 'tool' | 'thinking'; content?: string; toolExecution?: AgentToolExecution }>;
 }

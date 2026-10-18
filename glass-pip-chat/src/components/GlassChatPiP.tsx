@@ -34,7 +34,7 @@ import CollapsedHeader from './chat/CollapsedHeader';
 import { selectedSessionRunning } from '@/lib/compactPresentation';
 import { useVisualTutor } from '@/hooks/useVisualTutor';
 import VisualTutorControls from './visualTutor/VisualTutorControls';
-import CollapsedMeetingControls, { meetingReply } from './chat/CollapsedMeetingControls';
+import { meetingReply } from './chat/CollapsedMeetingControls';
 import ExpandedHeader from './chat/ExpandedHeader';
 import ChatInput from './chat/ChatInput';
 import MessageQueueStack from './chat/MessageQueueStack';
@@ -120,7 +120,7 @@ export default function GlassChatPiP() {
     : undefined;
   const externalStatus = externalTool ? `Working · ${externalTool.name}` : 'Thinking…';
   const tutor = useVisualTutor(activeChat?.id, conversation.send);
-  useEffect(() => { void window.pip?.circle?.setChat?.(activeChat?.id).catch(() => {}); }, [activeChat?.id]);
+  useEffect(() => { void window.pip?.circle?.setChat?.(activeChat?.id, activeChat?.title).catch(() => {}); }, [activeChat?.id, activeChat?.title]);
   const greeting = useAgentGreeting(conversation.provider, conversation.modelName);
 
   const headerTitleEdit = useEditState({
@@ -224,29 +224,35 @@ export default function GlassChatPiP() {
 
   useEffect(() => window.pip?.onToggleSpeech(() => setShowSpeechControls(prev => !prev)), []);
 
+  const openMeetingChat = () => {
+    const session = perception.status?.session;
+    if (!session) return;
+    const linked = chats.chats.find(chat => chat.agent?.provider === session.provider && chat.agent.sessionId === session.sessionId);
+    if (linked) selectChat(linked.id);
+    else void conversation.openSession({ id: session.sessionId, provider: session.provider, title: session.title, cwd: session.cwd, updatedAt: Date.now() });
+  };
+
   // Circle to Ask: the overlay hands back a cropped screenshot + prompt
   // (a new circle interrupts a reply in progress, like voice barge-in)
   const conversationRef = useRef(conversation);
   conversationRef.current = conversation;
-  const circleTarget = useRef({ chatId: activeChat?.id, tutor });
-  circleTarget.current = { chatId: activeChat?.id, tutor };
+  const circleTarget = useRef({ chatId: activeChat?.id, agent: activeChat?.agent, tutor });
+  circleTarget.current = { chatId: activeChat?.id, agent: activeChat?.agent, tutor };
   useEffect(() => window.pip?.circle.onAsk(async ({ imagePath, thumbnail, prompt, chatId, tutorCaptureId }) => {
     if (chatId && circleTarget.current.chatId !== chatId) return;
-    if (tutorCaptureId) {
-      const draw = () => circleTarget.current.tutor.start(prompt, undefined, tutorCaptureId, chatId);
-      if (conversationRef.current.isTyping) { conversationRef.current.stop(); setTimeout(draw, 300); }
-      else void draw();
-      return;
-    }
-    const live = perceptionRef.current.status?.session?.state === 'running' ? await perceptionRef.current.api?.context(30_000).catch(() => '') : '';
-    const withContext = live ? `${prompt}\n\n[Recent audio and screen, last 30 s]\n${live}` : prompt;
-    const ask = () => conversationRef.current.send(withContext, 'circle', { image: { path: imagePath, thumbnail } });
-    if (conversationRef.current.isTyping) {
-      conversationRef.current.stop();
-      setTimeout(ask, 300);
-    } else {
-      ask();
-    }
+    const meeting = perceptionRef.current.status?.session;
+    const agent = circleTarget.current.agent;
+    const sameMeeting = meeting?.state === 'running' && meeting.provider === agent?.provider && meeting.sessionId === agent?.sessionId;
+    const live = sameMeeting ? await perceptionRef.current.api?.context(30_000).catch(() => '') : '';
+    if (!chatId || circleTarget.current.chatId !== chatId) return;
+    const question = live ? `${prompt}\n\n[Recent context from this chat's meeting]\n${live}` : prompt;
+    const ask = () => {
+      if (circleTarget.current.chatId !== chatId) return;
+      if (tutorCaptureId) return circleTarget.current.tutor.start(question, undefined, tutorCaptureId, chatId);
+      return conversationRef.current.send(question, 'circle', { image: { path: imagePath, thumbnail } });
+    };
+    if (conversationRef.current.isTyping) { conversationRef.current.stop(); setTimeout(() => void ask(), 300); }
+    else void ask();
   }), []);
 
 
@@ -461,13 +467,8 @@ export default function GlassChatPiP() {
                 onContextToggle={() => context.setShowContext(!context.showContext)}
                 uiSettings={appSettings.ui}
                 currentResponse={currentResponse || meetingTurn?.text}
-                meetingControls={<><MessageQueueStack chatId={activeChat?.agent?.sessionId ? `${activeChat.agent.provider}:${activeChat.agent.sessionId}` : undefined} /><VisualTutorControls tutor={tutor} disabled={!activeChat || activeIsWorking || externalWorking} /><CollapsedMeetingControls perception={perception} onOpenSetup={toggleCollapse} onOpenSession={() => {
-                  const session = perception.status?.session;
-                  if (!session) return;
-                  const linked = chats.chats.find(chat => chat.agent?.provider === session.provider && chat.agent.sessionId === session.sessionId);
-                  if (linked) selectChat(linked.id);
-                  else void conversation.openSession({ id: session.sessionId, provider: session.provider, title: session.title, cwd: session.cwd, updatedAt: Date.now() });
-                }} /></>}
+                responseSegments={currentResponse ? streamingSegments : undefined}
+                meetingControls={<><MessageQueueStack chatId={activeChat?.agent?.sessionId ? `${activeChat.agent.provider}:${activeChat.agent.sessionId}` : undefined} /><VisualTutorControls tutor={tutor} disabled={!activeChat || activeIsWorking || externalWorking} /><PerceptionBar perception={perception} chat={activeChat} onOpenSession={openMeetingChat} /></>}
                 currentModel={conversation.model}
                 showModelSelector={showModelSelector}
                 onModelSelectorToggle={() => setShowModelSelector(s => !s)}
@@ -524,7 +525,7 @@ export default function GlassChatPiP() {
               >
                 {/* Transcript (AI Elements): sticks to the bottom while the agent streams */}
                 <div className="relative flex min-h-0 flex-1 flex-col">
-                <ContextCards perception={perception} />
+                <ContextCards perception={perception} chat={activeChat} />
                 <Conversation className="flex-1 select-text">
                   <ConversationContent className={cn('px-3 py-3', { compact: 'gap-3', normal: 'gap-5', comfortable: 'gap-7' }[appSettings.ui.messageSpacing])}>
                     {messages.length === 0 && !activeIsWorking ? (
@@ -565,7 +566,7 @@ export default function GlassChatPiP() {
                   </div>
                 </div>}
                 <VisualTutorControls tutor={tutor} disabled={!activeChat || activeIsWorking || externalWorking} />
-                <PerceptionBar perception={perception} sessions={external.sessions} onOpenDebug={() => setPerceptionDebug(true)} />
+                <PerceptionBar perception={perception} chat={activeChat} onOpenSession={openMeetingChat} />
                 <MessageQueueStack chatId={activeChat?.agent?.sessionId ? `${activeChat.agent.provider}:${activeChat.agent.sessionId}` : undefined} />
                 <ChatInput
                   ref={inputRef}
@@ -624,6 +625,7 @@ export default function GlassChatPiP() {
       <PerceptionDebug open={perceptionDebug} onOpenChange={setPerceptionDebug} perception={perception} />
 
       <SettingsModal
+        onMeetingSettings={() => { setShowSettings(false); setPerceptionDebug(true); }}
         isOpen={showSettings}
         onClose={() => setShowSettings(false)}
         platform={platform}

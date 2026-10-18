@@ -9,6 +9,7 @@ import AgentSettingsSection from './settings/AgentSettingsSection';
 import LookSettingsSection from './settings/LookSettingsSection';
 
 interface SettingsModalProps {
+  onMeetingSettings?: () => void;
   isOpen: boolean;
   onClose: () => void;
   platform: string;
@@ -20,6 +21,7 @@ interface SettingsModalProps {
 }
 
 export default function SettingsModal({
+  onMeetingSettings,
   isOpen,
   onClose,
   platform,
@@ -135,6 +137,7 @@ export default function SettingsModal({
 
             {/* Content */}
             <div className="p-4 space-y-6">
+              {onMeetingSettings && <button type="button" onClick={onMeetingSettings} className="text-sm text-foreground/75 hover:text-foreground">Meeting settings & diagnostics</button>}
               {/* Theme Section */}
               <div className="space-y-3">
                 <h3 className={cn(

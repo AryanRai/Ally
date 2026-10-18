@@ -109,8 +109,9 @@ const pipAPI = {
   // Circle to Ask (overlay page + the chat window that receives the result)
   circle: {
     start: () => ipcRenderer.invoke('circle:start'),
-    setChat: (chatId?: string) => ipcRenderer.invoke('circle:chat', chatId),
+    setChat: (chatId?: string, title?: string) => ipcRenderer.invoke('circle:chat', chatId, title),
     getShot: () => ipcRenderer.invoke('circle:getShot'),
+    context: () => ipcRenderer.invoke('circle:context'),
     submit: (payload: import('./capture/types').CircleSubmit) =>
       ipcRenderer.invoke('circle:submit', payload),
     cancel: () => ipcRenderer.invoke('circle:cancel'),
@@ -122,6 +123,7 @@ const pipAPI = {
   },
 
   tutor: {
+    show: (id: string) => ipcRenderer.invoke('tutor:show', id),
     start: (chatId: string, displayId?: number, circleCaptureId?: string) => ipcRenderer.invoke('tutor:start', chatId, displayId, circleCaptureId),
     displays: () => ipcRenderer.invoke('tutor:displays'),
     state: () => ipcRenderer.invoke('tutor:state'),

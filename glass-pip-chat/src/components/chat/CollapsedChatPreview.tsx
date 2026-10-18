@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { ChevronDown, ChevronUp } from 'lucide-react';
 import type { Message } from '@/types/chat';
-import WatchReplyContent from './WatchReplyContent';
+import CollapsedResponsePreview from './CollapsedResponsePreview';
 import CompactUserMessage from './CompactUserMessage';
 
 interface CollapsedChatPreviewProps {
@@ -19,11 +19,11 @@ export default function CollapsedChatPreview({ messages, onPreviewToggle }: Coll
       onPreviewToggle?.(!expanded);
     }} className="flex w-full items-center justify-between px-2 py-2 text-[11px] text-foreground/50 hover:text-foreground/80">
       <span>Recent messages · {messages.length}</span>
-      {expanded ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" />}
+      {expanded ? <ChevronUp aria-hidden="true" focusable="false" className="size-3" /> : <ChevronDown aria-hidden="true" focusable="false" className="size-3" />}
     </button>
     {expanded && <div role="region" aria-label="Recent messages" tabIndex={0} className="max-h-48 space-y-3 overflow-y-auto overscroll-contain break-words px-3 pb-3 [overflow-wrap:anywhere]">
       {messages.slice(-10).map(message => <div key={message.id}>
-        {message.role === 'assistant' ? <><p className="mb-1 text-[10px] font-medium text-foreground/45">Ally</p><WatchReplyContent content={message.content} /></> : <CompactUserMessage content={message.content} />}
+        {message.role === 'assistant' ? <><p className="mb-1 text-[10px] font-medium text-foreground/45">Ally</p><CollapsedResponsePreview response={message.content} segments={message.metadata?.segments} images={message.metadata?.images} isTyping={false} /></> : <CompactUserMessage content={message.content} images={message.metadata?.images ?? (message.metadata?.image ? [message.metadata.image] : undefined)} />}
       </div>)}
     </div>}
   </div>;

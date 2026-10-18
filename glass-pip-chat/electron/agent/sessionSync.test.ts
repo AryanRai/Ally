@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 vi.mock('./thumbs.js', () => ({ thumbnails: (images?: string[]) => images?.length ? images : undefined }));
 import { loadAgentSession, listAgentSessions, mergeSessionRecords, rebuildCodexHistory } from './sessions';
+import { STALE_TURN_MS } from './sessionActivity';
 
 const id = '11111111-1111-1111-1111-111111111111';
 const continuation = '22222222-2222-2222-2222-222222222222';
@@ -74,5 +75,26 @@ describe('live on-disk sessions', () => {
     const done = loadAgentSession('claude', id, running.revision);
     expect(done.messages).toHaveLength(2);
     expect(done.messages[1].segments?.[0].toolExecution).toMatchObject({ status: 'success', result: 'file contents' });
+  });
+
+  it('expires Claude Thinking on unchanged polls and never revives it with bookkeeping', () => {
+    const now = Date.now();
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(now);
+    const project = path.join(root, '.claude', 'projects', 'project');
+    fs.mkdirSync(project, { recursive: true });
+    const file = path.join(project, `${id}.jsonl`);
+    fs.writeFileSync(file, jsonl([{ type: 'user', timestamp: new Date(now).toISOString(), message: { content: 'show me the images' } }]));
+    const fresh = loadAgentSession('claude', id);
+    expect(fresh.running).toBe(true);
+    clock.mockReturnValue(now + STALE_TURN_MS + 1000);
+    expect(loadAgentSession('claude', id, fresh.revision)).toMatchObject({ unchanged: true, running: false });
+    fs.appendFileSync(file, jsonl([{ type: 'cost-state', timestamp: new Date(Date.now()).toISOString() }]));
+    fs.utimesSync(file, Date.now() / 1000, Date.now() / 1000);
+    const refreshed = loadAgentSession('claude', id);
+    expect(refreshed.running).toBe(false);
+    expect(refreshed.messages.map(m => m.content)).toEqual(['show me the images']);
+    expect(loadAgentSession('claude', id, refreshed.revision)).toMatchObject({ unchanged: true, running: false });
+    fs.appendFileSync(file, jsonl([{ type: 'user', timestamp: new Date(Date.now()).toISOString(), message: { content: 'new request' } }]));
+    expect(loadAgentSession('claude', id).running).toBe(true);
   });
 });

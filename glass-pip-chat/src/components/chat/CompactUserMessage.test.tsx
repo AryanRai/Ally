@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, render, screen } from '@testing-library/react';
 import { afterEach, expect, it } from 'vitest';
 import CompactUserMessage from './CompactUserMessage';
 
@@ -10,8 +10,8 @@ it('renders the human answer and keeps protocol IDs out of visible content', () 
   expect(screen.getByText('Question details')).toBeInTheDocument();
   expect(screen.queryByText(/call_private|questionItemId|send_user_message/)).not.toBeInTheDocument();
 });
-it('renders markdown instead of exposing formatting syntax in the top preview', async () => {
+it('renders markdown instead of exposing formatting syntax in the top preview', () => {
   const { container } = render(<CompactUserMessage content="Please use **meeting notes**." />);
-  await waitFor(() => expect(container.querySelector('[data-streamdown="strong"]')).toHaveTextContent('meeting notes'));
+  expect(container.querySelector('strong')).toHaveTextContent('meeting notes');
   expect(container.textContent).not.toContain('**');
 });

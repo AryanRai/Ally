@@ -18,7 +18,7 @@ export function claudeTurnPending(records: any[]): boolean {
     const l = records[i];
     if (l?.isSidechain || (l?.type !== 'user' && l?.type !== 'assistant')) continue;
     if (l.type === 'assistant') {
-      if (l.message?.model === '<synthetic>') return false; // CLI error stand-in
+      if (l.isApiErrorMessage || l.message?.model === '<synthetic>') return false; // CLI error stand-in
       return !FINISHED.has(l.message?.stop_reason);
     }
     if (l.isMeta) continue;
@@ -26,6 +26,18 @@ export function claudeTurnPending(records: any[]): boolean {
     return !/^\[Request interrupted/.test(userText(l.message?.content).trim());
   }
   return false;
+}
+
+/** Bookkeeping writes (titles, costs, bridge state) must not revive an old turn. */
+export function claudeActivityAt(records: any[], fallback: number): number {
+  for (let i = records.length - 1; i >= 0; i--) {
+    const record = records[i];
+    if (record?.isSidechain || record?.isMeta || (record?.type !== 'user' && record?.type !== 'assistant')) continue;
+    const timestamp = typeof record.timestamp === 'string' ? Date.parse(record.timestamp) : NaN;
+    // Older transcripts without timestamps retain the existing file-time fallback.
+    return Number.isFinite(timestamp) ? timestamp : fallback;
+  }
+  return fallback;
 }
 
 /** Codex rollout files: `task_started` until `task_complete` / `turn_aborted`. */

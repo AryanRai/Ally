@@ -74,6 +74,8 @@ export interface ToolExecution {
 
 /** Assistant reply content in order: text and reasoning interleaved with tool calls. */
 export interface Segment {
+  itemId?: string;
+  phase?: 'commentary' | 'final_answer';
   type: 'text' | 'tool' | 'thinking';
   content?: string;
   toolExecution?: ToolExecution;

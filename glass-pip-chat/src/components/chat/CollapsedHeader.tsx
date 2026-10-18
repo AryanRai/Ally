@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ArrowUp, ChevronDown, Clipboard, GripVertical, Lasso, Maximize2, MoreHorizontal, Square, Volume2, VolumeX, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import type { Message } from '@/types/chat';
+import type { Message, Segment } from '@/types/chat';
 import AgentPresence from '@/components/glow/AgentPresence';
 import type { OrbMood } from '@/components/glow/EnergyOrb';
 import type { RobotPulse, RobotStatus } from '@/components/glow/RobotAvatar';
@@ -45,6 +45,7 @@ interface CollapsedHeaderProps {
   onContextToggle?: () => void;
   uiSettings?: any;
   currentResponse?: string;
+  responseSegments?: Segment[];
   currentModel: string;
   showModelSelector: boolean;
   onModelSelectorToggle: () => void;
@@ -100,6 +101,7 @@ export default function CollapsedHeader({
   showContext,
   onContextToggle,
   currentResponse,
+  responseSegments,
   currentModel,
   showModelSelector,
   onModelSelectorToggle,
@@ -284,9 +286,11 @@ export default function CollapsedHeader({
       {/* Current turn stays below the pill, including after completion. */}
       <div className="space-y-1.5 px-2 pb-1.5" style={noDrag}>
         {chatTitle && <button type="button" onClick={onCollapseToggle} title={chatTitle} className="block w-full truncate text-left text-[10px] text-foreground/45 hover:text-foreground/75">{chatTitle}</button>}
-        {latestUser && <CompactUserMessage content={latestUser.content} />}
+        {latestUser && <CompactUserMessage key={latestUser.id} content={latestUser.content} images={latestUser.metadata?.images ?? (latestUser.metadata?.image ? [latestUser.metadata.image] : undefined)} />}
         <CollapsedResponsePreview
           response={currentResponse || ((!isTyping || stopDisabledReason) ? latestReply?.content : '') || ''}
+          segments={currentResponse ? responseSegments : ((!isTyping || stopDisabledReason) ? latestReply?.metadata?.segments : undefined)}
+          images={!currentResponse && (!isTyping || stopDisabledReason) ? latestReply?.metadata?.images : undefined}
           responseId={latestUser?.id}
           isTyping={isTyping}
           workingStatus={workingStatus}
@@ -321,7 +325,7 @@ export default function CollapsedHeader({
       )}
 
       <div style={noDrag}>
-        <CollapsedChatPreview messages={messages} onPreviewToggle={onPreviewToggle} />
+        <CollapsedChatPreview messages={messages.filter(message => message.id !== latestUser?.id && message.id !== latestReply?.id)} onPreviewToggle={onPreviewToggle} />
       </div>
     </div>
   );

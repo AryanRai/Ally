@@ -12,3 +12,5 @@ export interface CircleAsk {
   chatId?: string;
   tutorCaptureId?: string;
 }
+
+export interface CircleContext { title: string; hasChat: boolean; display: { width: number; height: number }; anchor?: CircleRect }

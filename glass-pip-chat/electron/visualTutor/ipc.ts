@@ -18,6 +18,7 @@ let overlay: BrowserWindow | null = null;
 let screenshot = '';
 let starting = false;
 let toolbarInteractive = false;
+let revealOnDraw = true;
 
 /** The drawing surface has its own preload: it cannot invoke agent, device or file APIs. */
 export function registerVisualTutorIpc(getMain: () => BrowserWindow | null): void {
@@ -37,6 +38,7 @@ export function registerVisualTutorIpc(getMain: () => BrowserWindow | null): voi
     const board = model.get();
     if (board) model.end(board.id);
     screenshot = '';
+    revealOnDraw = true;
     toolbarInteractive = false;
     const closing = overlay; overlay = null;
     closing?.close();
@@ -79,7 +81,7 @@ export function registerVisualTutorIpc(getMain: () => BrowserWindow | null): voi
       // Freeze uses the local full display; the agent receives only the selected crop.
       screenshot = (image.getSize().width > 1920 ? image.resize({ width: 1920 }) : image).toDataURL();
       const focus = circle?.rect && { x: circle.rect.x / display.bounds.width * 1000, y: circle.rect.y / display.bounds.height * 1000, width: circle.rect.width / display.bounds.width * 1000, height: circle.rect.height / display.bounds.height * 1000 };
-      const board: TutorBoard = { id, chatId, displayId: display.id, bounds: { ...display.bounds }, capturedAt: circle?.capturedAt ?? Date.now(), ...(focus ? { focus } : {}), steps: [], sketches: [], selected: 0, following: true, sketching: false, frozen: false, revision: 0 };
+      const board: TutorBoard = { id, chatId, displayId: display.id, bounds: { ...display.bounds }, capturedAt: circle?.capturedAt ?? Date.now(), ...(focus ? { focus } : {}), steps: [], sketches: [], selected: 0, following: true, sketching: false, frozen: !!circle, revision: 0 };
       model.start(board);
       overlay = new BrowserWindow({ ...display.bounds, frame: false, thickFrame: false, transparent: true, backgroundColor: '#00000000', hasShadow: false, resizable: false, movable: false, skipTaskbar: true, alwaysOnTop: true, show: false,
         webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true, backgroundThrottling: false } });
@@ -92,7 +94,7 @@ export function registerVisualTutorIpc(getMain: () => BrowserWindow | null): voi
       created.on('closed', () => { if (overlay === created) { overlay = null; model.end(board.id); screenshot = ''; publish(); } });
       if (process.env.VITE_DEV_SERVER_URL) await created.loadURL(new URL('tutor.html', process.env.VITE_DEV_SERVER_URL).toString());
       else await created.loadFile(path.join(__dirname, '../../renderer/tutor.html'));
-      created.showInactive();
+      if (!circle) created.showInactive();
       if (wasVisible) main?.showInactive();
       publish();
       return { board, imagePath, thumbnail: `data:image/jpeg;base64,${small.resize({ width: 360 }).toJPEG(70).toString('base64')}` };
@@ -102,6 +104,7 @@ export function registerVisualTutorIpc(getMain: () => BrowserWindow | null): voi
       throw error;
     } finally { starting = false; }
   });
+  ipcMain.handle('tutor:show', (event, id: string) => { fromMain(event); model.require(id); revealOnDraw = true; overlay?.showInactive(); });
   ipcMain.handle('tutor:state', event => { fromMain(event); return model.get(); });
   ipcMain.handle('tutor:overlay', event => { fromOverlay(event); return { board: model.get(), screenshot }; });
   ipcMain.handle('tutor:end', (event, id: string) => { fromMain(event); if (model.get()?.id === id) close(); });
@@ -109,7 +112,7 @@ export function registerVisualTutorIpc(getMain: () => BrowserWindow | null): voi
     fromOverlay(event); model.require(id);
     switch (action) {
       case 'close': close(); return;
-      case 'chat': getMain()?.show(); getMain()?.focus(); getMain()?.webContents.send('focus-main-input'); return;
+      case 'chat': revealOnDraw = false; overlay?.hide(); getMain()?.show(); getMain()?.focus(); getMain()?.webContents.send('focus-main-input'); return;
       case 'previous': case 'next': case 'latest': model.select(id, action); break;
       case 'sketch': model.toggle(id, 'sketching'); break;
       case 'freeze': model.toggle(id, 'frozen'); break;
@@ -134,7 +137,7 @@ export function registerVisualTutorIpc(getMain: () => BrowserWindow | null): voi
       id: { type: 'string', maxLength: 80 }, title: { type: 'string', maxLength: 120 }, explanation: { type: 'string', maxLength: 1800 },
       marks: { type: 'array', maxItems: 80, items: { type: 'object', properties: { id: { type: 'string', maxLength: 80 }, kind: { enum: ['arrow', 'line', 'rect', 'ellipse', 'polyline', 'text'] }, color: { enum: ['mint', 'blue', 'amber', 'pink', 'white'] }, points: { type: 'array', minItems: 1, maxItems: 256, items: { type: 'object', properties: { x: { type: 'number', minimum: 0, maximum: 1000 }, y: { type: 'number', minimum: 0, maximum: 1000 } }, required: ['x', 'y'], additionalProperties: false } }, text: { type: 'string', maxLength: 240 } }, required: ['id', 'kind', 'color', 'points'], additionalProperties: false } },
     }, required: ['id', 'title', 'explanation', 'marks'], additionalProperties: false } }, required: ['boardId', 'step'], additionalProperties: false },
-    handler: async args => { const board = model.draw(args.boardId, args.step); publish(); return text(`Displayed teaching step ${board.steps.findIndex(s => s.id === (args.step as { id: string }).id) + 1}.`, { boardId: board.id, revision: board.revision, steps: board.steps.length }); } });
+    handler: async args => { const board = model.draw(args.boardId, args.step); publish(); if (revealOnDraw) overlay?.showInactive(); return text(`Displayed teaching step ${board.steps.findIndex(s => s.id === (args.step as { id: string }).id) + 1}.`, { boardId: board.id, revision: board.revision, steps: board.steps.length }); } });
   screenReady();
   function screenReady() {
     void app.whenReady().then(() => {

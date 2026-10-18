@@ -26,6 +26,9 @@ tsc('electron/preload.ts', 'commonjs');
 mkdirSync(join(outDir, 'electron/visualTutor'), { recursive: true });
 cpSync(join(rootDir, 'electron/visualTutor/preload.cjs'), join(outDir, 'electron/visualTutor/preload.cjs'));
 
+mkdirSync(join(outDir, 'electron/capture'), { recursive: true });
+cpSync(join(rootDir, 'electron/capture/preload.cjs'), join(outDir, 'electron/capture/preload.cjs'));
+
 // Copy assets next to the build
 const assetsSource = join(rootDir, 'assets');
 if (existsSync(assetsSource)) {

@@ -48,6 +48,16 @@ it('does not confuse recent edits or partial JSON with running work', async () =
   await write(`.claude/projects/project/${id}.jsonl`, [{ type: 'assistant', message: { stop_reason: 'end_turn' } }, { type: 'queue-operation' }]);
   expect(await scanRunningSessions(home, now)).toEqual([]);
 });
+it('does not revive an abandoned Claude prompt when bookkeeping rewrites the file', async () => {
+  const file = `.claude/projects/project/${id}.jsonl`;
+  const prompt = { type: 'user', timestamp: new Date(now - STALE_TURN_MS - 1000).toISOString(), message: { content: 'show me the images' } };
+  await write(file, [prompt, { type: 'cost-state', timestamp: new Date(now).toISOString() }]);
+  expect(await scanRunningSessions(home, now)).toEqual([]);
+  await write(file, [prompt, { ...prompt, timestamp: new Date(now).toISOString() }]);
+  expect(await scanRunningSessions(home, now)).toEqual([expect.objectContaining({ provider: 'claude', id })]);
+  await write(file, [prompt, { type: 'assistant', isApiErrorMessage: true, timestamp: new Date(now).toISOString(), message: { content: 'Usage limit reached' } }]);
+  expect(await scanRunningSessions(home, now)).toEqual([]);
+});
 it('finds active sessions beyond the recent-chat page', async () => {
   for (let i = 0; i < 85; i++) await write(`.codex/sessions/rollout-${String(i).padStart(8, '0')}-1111-1111-1111-111111111111.jsonl`, [ev('task_complete')]);
   await write(`.codex/sessions/rollout-${id}.jsonl`, [ev('task_started')], now - 1000);
