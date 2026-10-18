@@ -172,7 +172,13 @@ export function registerVisualTutorIpc(getMain: () => BrowserWindow | null): voi
     const main = getMain();
     const moved = () => {
       if (!overlay || geometryTimer) return;
-      geometryTimer = setTimeout(() => { geometryTimer = undefined; publish(); }, 50);
+      geometryTimer = setTimeout(() => {
+        geometryTimer = undefined;
+        // Moving the pill needs four numbers, not a clone/IPC of every diagram,
+        // mark and sketch on the board.
+        const bounds = main?.getBounds();
+        if (bounds) overlay?.webContents.send('tutor:pill-bounds', bounds);
+      }, 50);
     };
     main?.on('move', moved); main?.on('resize', moved);
     main?.on('hide', () => { if (model.get()) { revealOnDraw = false; overlay?.hide(); publish(); } });

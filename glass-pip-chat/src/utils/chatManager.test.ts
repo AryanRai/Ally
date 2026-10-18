@@ -15,6 +15,16 @@ describe('ChatManager', () => {
   beforeEach(() => {
     manager = freshManager();
   });
+  it('retains repeated-question stopped output in order across a long native refresh', () => {
+    const history = Array.from({ length: 1000 }, (_, i) => [
+      { id: `u${i}`, role: 'user' as const, content: 'Same question', timestamp: i * 2 },
+      { id: `a${i}`, role: 'assistant' as const, content: `Partial ${i}\n\n⏹️ Stopped`, timestamp: i * 2 + 1 },
+    ]).flat();
+    const chat = manager.openAgentSession({ provider: 'codex', sessionId: 'long' }, 'Long', history);
+    const incoming = history.map(message => message.role === 'assistant' ? { ...message, content: '⏹️ Stopped' } : { ...message });
+    manager.syncAgentSession(chat.id, 'codex', 'long', incoming);
+    expect(chat.messages.filter(message => message.role === 'assistant').map(message => message.content)).toEqual(history.filter(message => message.role === 'assistant').map(message => message.content));
+  });
 
   it('keeps creation order through browsing, streaming, renaming, sending and restart', () => {
     const old = manager.openAgentSession({provider:'codex',sessionId:'old'}, 'Old', [{...message('u'),timestamp:10}], 5);

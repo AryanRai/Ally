@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ArrowUp, ChevronDown, Clipboard, GripVertical, Lasso, Maximize2, MoreHorizontal, Play, Square, Volume2, VolumeX, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -23,6 +23,9 @@ interface CollapsedHeaderProps {
   menuControls?: React.ReactNode;
   drawingControls?: React.ReactNode;
   heightConstrained?: boolean;
+  screenAutoAttach?: boolean;
+  onScreenAutoAttachToggle?: () => void;
+  onClipboardAutoAttachToggle?: () => void;
   chatTitle?: string;
   workingStatus?: string;
   stopDisabledReason?: string;
@@ -93,6 +96,9 @@ export default function CollapsedHeader({
   menuControls,
   drawingControls,
   heightConstrained,
+  screenAutoAttach,
+  onScreenAutoAttachToggle,
+  onClipboardAutoAttachToggle,
   chatTitle,
   workingStatus,
   stopDisabledReason,
@@ -144,6 +150,7 @@ export default function CollapsedHeader({
   const latestUser = [...messages].reverse().find(message => message.role === 'user');
   const contextExpanded = isContextExpanded ?? false;
   const hasClipboard = hasNewContext && !!(contextData.clipboard || contextData.selectedText);
+  const olderReplies = useMemo(() => messages.filter(message => message.role === 'assistant' && message.id !== latestReply?.id), [messages, latestReply?.id]);
 
   useEffect(() => {
     const root = rootRef.current;
@@ -259,7 +266,6 @@ export default function CollapsedHeader({
       </div>
 
       {/* Hover extras: the controls the pill doesn't need all the time */}
-      {drawingControls && <div style={noDrag}>{drawingControls}</div>}
       <AnimatePresence initial={false}>
         {extras && (
           <motion.div
@@ -306,6 +312,7 @@ export default function CollapsedHeader({
 
       {/* Keep setup state mounted while the overflow menu is closed. */}
       {menuControls && <div hidden={!extras} style={{ ...noDrag, display: extras ? undefined : 'none' }}>{menuControls}</div>}
+      {extras && <div style={noDrag}><CollapsedChatPreview messages={messages.filter(message => message.id !== latestUser?.id && message.id !== latestReply?.id)} decisions={decisions} onAnswer={onAnswerDecision} onPreviewToggle={onPreviewToggle} /></div>}
 
       {/* Current turn stays below the pill, including after completion. */}
       <div className="space-y-1.5 px-2 pb-1.5" style={noDrag}>
@@ -319,17 +326,24 @@ export default function CollapsedHeader({
           isTyping={isTyping}
           workingStatus={workingStatus}
           onCopy={onCopyMessage}
+          olderReplies={olderReplies}
         />
         {isTyping && stopDisabledReason && <p className="text-[10px] text-foreground/45">{stopDisabledReason}</p>}
         {sendFailure && <p role="alert" className="text-xs text-amber-200">{sendFailure}</p>}
       </div>
 
-      <PillAgentMonitor onOpen={onOpenAgent} />
+      <div className="flex flex-wrap items-center gap-1 px-2 pb-1" style={noDrag}>
+        {drawingControls}
+        <button type="button" aria-pressed={!!screenAutoAttach} title="Attach a fresh screen to each question · no continuous recording" onClick={onScreenAutoAttachToggle} className="h-6 rounded-md px-1.5 text-[10px] text-foreground/55 hover:bg-white/5">Screen{screenAutoAttach ? ' · auto' : ''}</button>
+        <button type="button" aria-pressed={contextToggleEnabled} onClick={onClipboardAutoAttachToggle} title="Toggle clipboard auto-attach" className="flex h-6 items-center gap-1 rounded-md px-1.5 text-[10px] text-foreground/55 hover:bg-white/5"><Clipboard className="size-3" />Clipboard{contextToggleEnabled ? ' · auto' : ''}</button>
+        {hasClipboard && showContext && <button type="button" aria-label="Preview clipboard" aria-expanded={contextExpanded} onClick={() => onContextExpandedChange?.(!contextExpanded)} className="h-6 px-1 text-foreground/45"><ChevronDown className="size-3" /></button>}
+        <PillAgentMonitor compact onOpen={onOpenAgent} />
+      </div>
 
       {meetingControls && <div style={noDrag}>{meetingControls}</div>}
 
       {/* Clipboard context, when shown */}
-      {hasClipboard && showContext && (
+      {hasClipboard && showContext && contextExpanded && (
         <div className="px-2 pb-1.5" style={noDrag}>
           <div className="overflow-hidden rounded-lg border border-white/10">
             <button
@@ -351,9 +365,6 @@ export default function CollapsedHeader({
       )}
 
       {decisionControls && <div className="px-2 pb-2 select-text" style={noDrag}>{decisionControls}</div>}
-      <div style={noDrag}>
-        <CollapsedChatPreview messages={messages.filter(message => message.id !== latestUser?.id && message.id !== latestReply?.id)} decisions={decisions} onAnswer={onAnswerDecision} onPreviewToggle={onPreviewToggle} />
-      </div>
     </div>
   );
 }

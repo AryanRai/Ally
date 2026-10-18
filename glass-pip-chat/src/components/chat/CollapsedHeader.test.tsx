@@ -20,6 +20,17 @@ const props = {
 };
 
 describe('collapsed live reader', () => {
+  it('keeps context and agent toggles in one small row while history is inside More', () => {
+    const screenToggle = vi.fn(), clipboardToggle = vi.fn();
+    render(<CollapsedHeader {...props} messages={[user, reply]} screenAutoAttach onScreenAutoAttachToggle={screenToggle} onClipboardAutoAttachToggle={clipboardToggle} />);
+    const screenButton = screen.getByRole('button', { name: 'Screen · auto' });
+    const clipboardButton = screen.getByRole('button', { name: 'Clipboard' });
+    expect(screenButton.parentElement).toBe(clipboardButton.parentElement);
+    expect(screenButton.parentElement).toContainElement(screen.getByRole('button', { name: 'Agent status' }));
+    expect(screen.queryByRole('button', { name: /Recent messages/ })).not.toBeInTheDocument();
+    fireEvent.click(screenButton); fireEvent.click(clipboardButton);
+    expect(screenToggle).toHaveBeenCalledOnce(); expect(clipboardToggle).toHaveBeenCalledOnce();
+  });
   it('keeps Meeting inside More controls and retains setup while hidden in a short manual window', () => {
     const { container } = render(<CollapsedHeader {...props} heightConstrained menuControls={<div><button>Meeting</button><input aria-label="Meeting draft" defaultValue="saved" /></div>} />);
     expect(screen.queryByRole('button', { name: 'Meeting' })).not.toBeInTheDocument();
@@ -46,6 +57,7 @@ describe('collapsed live reader', () => {
   it('shows one working status even with history open, and keeps Stop separate from guidance', () => {
     const onStop = vi.fn(), onSend = vi.fn();
     render(<CollapsedHeader {...props} messages={[{ ...reply, id: 'older' }, user]} isTyping quickInput="Also track actions" onStop={onStop} onSend={onSend} />);
+    fireEvent.click(screen.getByRole('button', { name: 'More controls' }));
     fireEvent.click(screen.getByRole('button', { name: /Recent messages/ }));
     expect(screen.getAllByRole('status')).toHaveLength(1);
     expect(screen.getAllByText('Thinking…')).toHaveLength(1);

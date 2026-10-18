@@ -12,6 +12,7 @@ const pipAPI = {
   // Window resizing
   resizeWindow: (width: number, height: number) => ipcRenderer.send('window:resize', { width, height }),
   getWindowSize: () => ipcRenderer.invoke('window:get-size'),
+  captureQueryScreen: () => ipcRenderer.invoke('context:query-screen'),
   onManualResize: (callback: (size: { width: number; height: number }) => void) => {
     const handler = (_: unknown, size: { width: number; height: number }) => callback(size);
     ipcRenderer.on('window:manual-resize', handler);

@@ -1,0 +1,20 @@
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { afterEach, expect, it, vi } from 'vitest';
+import CollapsedResponsePreview from './CollapsedResponsePreview';
+vi.mock('./WatchReplyContent', () => ({ default: ({ content }: { content: string }) => <p>{content}</p> }));
+afterEach(() => { cleanup(); vi.restoreAllMocks(); });
+it('requires deliberate overscroll at the edge, browses every older reply in the same height and returns to live', () => {
+  const olderReplies = Array.from({ length: 1000 }, (_, i) => ({ id: `a${i}`, role: 'assistant' as const, content: `Reply ${i}`, timestamp: i }));
+  render(<CollapsedResponsePreview response="Live answer" responseId="query" isTyping olderReplies={olderReplies} />);
+  let reader = screen.getByRole('region', { name: 'Live update' });
+  Object.defineProperties(reader, { scrollHeight: { configurable: true, value: 500 }, clientHeight: { configurable: true, value: 192 }, scrollTop: { configurable: true, writable: true, value: 100 } });
+  fireEvent.wheel(reader, { deltaY: -150 }); expect(screen.queryByText('Reply 999')).not.toBeInTheDocument();
+  reader.scrollTop = 0;
+  fireEvent.wheel(reader, { deltaY: -60 }); expect(screen.queryByText('Reply 999')).not.toBeInTheDocument();
+  fireEvent.wheel(reader, { deltaY: -60 }); expect(screen.getByText('Reply 999')).toBeInTheDocument();
+  expect(screen.getByRole('status')).toBeInTheDocument();
+  expect(screen.getByRole('region', { name: 'Latest reply' })).toHaveClass('max-h-48');
+  fireEvent.click(screen.getByRole('button', { name: 'Older reply' })); expect(screen.getByText('Reply 998')).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Follow latest' })); expect(screen.getByText('Live answer')).toBeInTheDocument();
+  expect(screen.queryByText('Reply 998')).not.toBeInTheDocument();
+});

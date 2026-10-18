@@ -10,6 +10,7 @@ export interface PipAPI {
   // Window resizing
   resizeWindow: (width: number, height: number) => void;
   getWindowSize: () => Promise<{ width: number; height: number }>;
+  captureQueryScreen?: () => Promise<{ path: string; thumbnail: string }>;
   onManualResize?: (callback: (size: { width: number; height: number }) => void) => () => void;
   openLocalDocument?: (file: string) => Promise<void>;
   

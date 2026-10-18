@@ -2,8 +2,9 @@ import { ArrowLeft, ArrowRight, Check, Eye, Lasso, Layers, Pencil, PencilLine, U
 import type { useVisualTutor } from '@/hooks/useVisualTutor';
 
 /** Drawings start in Circle; these controls exist only during an active lesson. */
-export default function VisualTutorControls({ tutor, disabled }: { tutor: ReturnType<typeof useVisualTutor>; disabled: boolean }) {
+export default function VisualTutorControls({ tutor, disabled, compact = false }: { tutor: ReturnType<typeof useVisualTutor>; disabled: boolean; compact?: boolean }) {
   if (!tutor.board && !tutor.busy && !tutor.error) return null;
+  if (compact) return <details className="relative min-w-0 text-[10px] text-foreground/55"><summary className="flex h-6 cursor-pointer list-none items-center gap-1 rounded-md px-1.5 hover:bg-white/5"><PencilLine className="size-3" />{tutor.busy ? 'Selecting…' : tutor.board?.steps?.length ? `Drawing · ${tutor.board.steps.length}` : 'Selection'}</summary><div className="mt-1 w-64 max-w-full rounded-xl border border-white/10 bg-white/[0.03] p-1"><VisualTutorControls tutor={tutor} disabled={disabled} /></div></details>;
   const board = tutor.board, step = board?.steps?.[board.selected];
   const tool = 'grid size-7 shrink-0 place-items-center rounded-[8px] text-foreground/55 transition-colors hover:bg-white/8 hover:text-foreground disabled:opacity-40';
   return <section className="mx-2 my-1 rounded-lg text-[11px] text-foreground/65" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties} aria-label="Drawing explanation">

@@ -1,5 +1,8 @@
 # Ally collaboration scratchpad
 
+## Compact pill controls, reply browsing and responsiveness (2026-10-18, chat01a14e77)
+User requests intermittent hang investigation, threshold scroll to older replies inside current bounded card, less vertical chrome with Screen/Clipboard/Agents side by side and no separate Recent messages row, explicit screen auto-attach on submitted queries. Own stable chat snapshots/memoized timeline if evidence supports, collapsed reader history/navigation and compact control layout, finite screen capture IPC and exact-query text/voice routing/tests. Preserve UI style/card height, all history reachability/decisions, drafts/status, explicit capture opt-in and OS restrictions. No real/private capture/model/mic tests or device installs. Supersede exact waiting9236 only; new candidate and guarded activation, no live restart over responses/boards.
+
 ## Pill-led drawing workflow and parity (2026-10-18, chat01a14e77)
 User approved persistent collapsed pill as primary selection/drawing/chat surface and explicitly requests collapsed-pill style parity. Own Circle attach-only handoff (no auto query), useVisualTutor pending exact-chat image lifecycle and text/voice wiring, main drawing chip/controls, tutor IPC layering/docking/minimise state and overlay presentation/tests/synthetic QA. Preserve draft/voice/Stop/approval/model ownership, frozen screenshots and sandbox constraints. No private capture/model/microphone tests or phone/watch installs. Supersede only exact idle updater17736 if still waiting; no live response/capture restart. New combined candidate, frozen builds unchanged.
 
