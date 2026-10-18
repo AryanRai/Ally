@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { CodexDesktopClient, CodexChatUnownedError, CodexDesktopUnavailableError, desktopTurns, assertDesktopIdle, steerDesktopTurn } from './codexDesktop.js';
+import { CodexDesktopClient, CodexChatUnownedError, CodexDesktopUnavailableError, desktopTurns, assertDesktopCanStart, steerDesktopTurn } from './codexDesktop.js';
 import { CodexEventParser } from './codexEvents.js';
 import type { AgentEvent, AgentRunOptions, AgentInteractionHandler } from './types.js';
 
@@ -158,7 +158,7 @@ export function runCodexDesktopTurn(opts: AgentRunOptions, emit: (event: AgentEv
         } catch (error) { fail(error); }
       });
       state = await client.snapshot(id, owner);
-      assertDesktopIdle(state, id);
+      assertDesktopCanStart(state, id);
       if (stopped || finished) { finish({ kind: 'done' }); return; }
       emit({ kind: 'session', sessionId: id });
       emit({ kind: 'tool_start', id: 'ally-desktop-connection', name: 'Codex desktop', input: { detail: 'Continuing the same chat through its desktop connection' } });

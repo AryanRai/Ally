@@ -44,11 +44,12 @@ async function run() { try {
   const rpc = async (name, args) => (await (await fetch(`http://127.0.0.1:${config.port}/mcp/${token}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } }) })).json()).result;
   for (const shape of ['Freehand', 'Rectangle']) {
     const before = captures;
+    const actualBounds = main.getBounds(); // Windows can round requested bounds at fractional display scales.
     await js(main, "window.check.chat('exact-chat','Design review').then(()=>window.check.circle())");
     const selection = BrowserWindow.getAllWindows().find(win => win.id !== main.id);
     await wait(() => js(selection, "!!document.querySelector('[aria-label=\"Ally screen selection\"]') && !!document.querySelector('img')"));
     assert.deepEqual(await js(selection, 'Object.keys(window.pip)'), ['circle']);
-    const context = await js(selection, 'window.pip.circle.context()'); assert.equal(context.title, 'Design review'); assert.equal(context.anchor.x, 30);
+    const context = await js(selection, 'window.pip.circle.context()'); assert.equal(context.title, 'Design review'); assert.equal(context.anchor.x, actualBounds.x - display.bounds.x);
     assert.equal(await js(selection, "document.body.textContent.includes('Draw to explain')"), false);
     const original = nativeImage.createFromDataURL(await js(selection, 'window.pip.circle.getShot()'));
     await js(selection, `[...document.querySelectorAll('button')].find(b=>b.textContent==='${shape}').click()`);

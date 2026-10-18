@@ -172,6 +172,27 @@ export function assertDesktopIdle(state: any, conversationId: string) {
   }
 }
 
+/** A failed provider request is terminal, not an active response. Keep strict
+ * idle separate: background queues must not retry a provider failure. */
+export function desktopFailureMessage(state: any): string | undefined {
+  const last = desktopTurns(state).at(-1);
+  if (state.threadRuntimeStatus?.type !== 'systemError' || last?.status !== 'failed') return;
+  const detail = typeof last.error?.message === 'string' ? last.error.message : '';
+  if (/API key budget exceeded/i.test(detail)) return 'The previous response failed because the API provider budget was exceeded. After fixing the budget, send your message again.';
+  return detail ? `The previous response failed: ${detail.slice(0, 600)}` : 'The previous response failed in Codex. Check the error there, then send your message again.';
+}
+
+/** Only an explicit new send can recover a terminal systemError. Every other
+ * guard (identity, resume, active turns, approvals, goals and uncertain sends)
+ * still applies. Never change the native state or replay the failed prompt. */
+export function assertDesktopCanStart(state: any, conversationId: string) {
+  if (desktopFailureMessage(state)) {
+    assertDesktopIdle({ ...state, threadRuntimeStatus: { type: 'idle' } }, conversationId);
+    return;
+  }
+  assertDesktopIdle(state, conversationId);
+}
+
 /** Codex may decorate its display turn ID after reconnect; the underlying
  * app-server turn identity remains the prefix, as in the native client. */
 export const canonicalTurnId = (id?: string): string | undefined => id?.replace(/-berry-display-\d+$/, '');
@@ -184,9 +205,10 @@ export async function readDesktopActivity(conversationId: string) {
     const state = await client.snapshot(conversationId, owner);
     if (state.id !== conversationId) return undefined;
     const turn = desktopTurns(state).at(-1);
-    let idle = false;
+    let idle = false, canStart = false;
     try { assertDesktopIdle(state, conversationId); idle = true; } catch {}
-    return { turnId: canonicalTurnId(turn?.turnId), running: turn?.status === 'inProgress', idle };
+    try { assertDesktopCanStart(state, conversationId); canStart = true; } catch {}
+    return { turnId: canonicalTurnId(turn?.turnId), running: turn?.status === 'inProgress', idle, canStart, error: desktopFailureMessage(state) };
   } catch { return undefined; }
   finally { client?.close(); }
 }

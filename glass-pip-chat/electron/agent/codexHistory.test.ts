@@ -52,9 +52,9 @@ describe('API history', () => {
     vi.mocked(readCodexActivity).mockResolvedValue({ turnId: 'live', pending: true, recent: true, updatedAt: Date.now() });
     expect(await loadCodexChat('thread')).toMatchObject({ running: true, messages: [] });
     vi.mocked(readCodexActivity).mockResolvedValue({ turnId: 'live', pending: true, recent: false, updatedAt: 0 });
-    vi.mocked(readDesktopActivity).mockResolvedValue({ turnId: 'live', running: true, idle: false });
+    vi.mocked(readDesktopActivity).mockResolvedValue({ turnId: 'live', running: true, idle: false, canStart: false, error: undefined });
     expect(await loadCodexChat('thread')).toMatchObject({ running: true, messages: [] });
-    vi.mocked(readDesktopActivity).mockResolvedValue({ turnId: 'live', running: false, idle: true });
+    vi.mocked(readDesktopActivity).mockResolvedValue({ turnId: 'live', running: false, idle: true, canStart: true, error: undefined });
     expect((await loadCodexChat('thread')).messages.at(-1)?.content).toBe('⏹️ Stopped');
   });
   it('repairs protocol-derived device titles through metadata only, preserving user renames', async () => {

@@ -9,6 +9,10 @@ vi.mock('./userQuestions.js', () => ({ startUserQuestions: vi.fn(async () => ({ 
 afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers(); });
 const opts = { provider: 'codex' as const, cwd: '/work', prompt: 'hello' };
 const flush = async () => { for (let i = 0; i < 12; i++) await Promise.resolve(); };
+const lastError = (events: AgentEvent[]) => {
+  const event = events.at(-1);
+  return event?.kind === 'done' ? event.error : undefined;
+};
 
 function server() {
   const rpc = {
@@ -64,20 +68,42 @@ describe('Codex turn lifecycle', () => {
     rpc.request.mockRejectedValueOnce(new Error('thread old already has an active writer'));
     runCodexTurn({ ...opts, sessionId: 'old' }, event => events.push(event)); await flush();
     expect(events.at(-1)).toMatchObject({ kind: 'done', isError: true, error: expect.stringContaining('Your message was not sent') });
+    expect(lastError(events)).toContain('Enable Codex desktop connection in Ally Settings');
     expect(rpc.request.mock.calls.some(([method]) => method === 'turn/start')).toBe(false);
     expect(rpc.request.mock.calls.map(([method]) => method)).toEqual(['thread/resume']);
     expect(events.some(event => event.kind === 'tool_start')).toBe(false);
     expect(rpc.close).toHaveBeenCalledOnce();
   });
   it('never replays when turn/start fails after resume', async () => {
-    const rpc = server();
+    const rpc = server(); const events: AgentEvent[] = [];
     rpc.request.mockImplementation(async method => {
       if (method === 'turn/start') throw new Error('already has an active writer');
       return { thread: { id: 'old' } } as any;
     });
-    runCodexTurn({ ...opts, sessionId: 'old' }, () => {}); await flush();
+    runCodexTurn({ ...opts, sessionId: 'old' }, event => events.push(event)); await flush();
     expect(rpc.request.mock.calls.map(([method]) => method)).toEqual(['thread/resume', 'turn/start']);
     expect(rpc.request.mock.calls.filter(([m]) => m === 'turn/start')).toHaveLength(1);
+    expect(lastError(events)).toContain('may already have been accepted');
+    expect(lastError(events)).not.toContain('Your message was not sent');
+  });
+  it('explains an unavailable desktop owner without asking to enable an enabled setting', async () => {
+    const rpc = server(); const events: AgentEvent[] = [];
+    rpc.request.mockRejectedValueOnce(new Error('Already has an ACTIVE WRITER'));
+    runCodexTurn({ ...opts, sessionId: 'old', codexDesktop: true }, event => events.push(event)); await flush();
+    expect(lastError(events)).toContain('Open the same chat in Codex');
+    expect(lastError(events)).toContain('Your message was not sent');
+    expect(lastError(events)).not.toContain('Enable');
+    expect(rpc.request.mock.calls.map(([method]) => method)).toEqual(['thread/resume']);
+  });
+  it('never submits if the connection closes while resume is pending', async () => {
+    const rpc = server(); const events: AgentEvent[] = [];
+    let resumed!: (value: any) => void;
+    rpc.request.mockReturnValueOnce(new Promise(resolve => { resumed = resolve; }));
+    runCodexTurn({ ...opts, sessionId: 'old' }, event => events.push(event)); await flush();
+    rpc.onClose?.(new Error('connection lost'));
+    resumed({ thread: { id: 'old' } }); await flush();
+    expect(rpc.request.mock.calls.map(([method]) => method)).toEqual(['thread/resume']);
+    expect(events.filter(event => event.kind === 'done')).toHaveLength(1);
   });
   it('routes watch approvals to the user while preserving the selected sandbox', async () => {
     const rpc = server(); const interact = vi.fn(async () => ({ decision: 'decline' }));

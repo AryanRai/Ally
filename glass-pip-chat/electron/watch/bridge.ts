@@ -1,7 +1,7 @@
 import { allReadStates, unreadState, acknowledgeUnread } from '../agent/unread.js';
 import { acknowledgeNativeUnread, reconcileNativeUnread } from '../agent/codexUnread.js';
 import { readDesktopActivity, steerExternalDesktopChat } from '../agent/codexDesktop.js';
-import { recordActivity, settleActivity, type ActivityState } from './activity.js';
+import { liveActivity, recordActivity, settleActivity, type ActivityState } from './activity.js';
 import { FollowupReceipts } from '../agent/followups.js';
 import { messageQueue, queuedPrompt, queueUnavailable, type QueuedMessage, type QueueChange } from '../agent/messageQueue.js';
 import { liveReplyText } from './liveReply.js';
@@ -106,6 +106,7 @@ export function startWatchBridge(getConfig: () => AgentConfig): (() => void) | u
         while (!closed && turn.status === 'thinking') {
           const activity = await readDesktopActivity(selected.sessionId);
           if (activity?.idle) break;
+          if (activity?.error) throw new Error(activity.error + ' Queued input was not sent.');
           turn.activity = activity ? 'Queued · current task continues' : 'Queued · reconnecting to Codex desktop';
           await new Promise(resolve => setTimeout(resolve, 3000));
         }
@@ -133,7 +134,8 @@ export function startWatchBridge(getConfig: () => AgentConfig): (() => void) | u
           turn.liveText = liveReplyText(output);
           if (!approvals.list(turn.id).length && !interactions.list(interactionChatKeys.get(turn.id) || '__no_chat__').length) { turn.activity = 'Writing…'; armTimeout(turn); }
         }
-        if (event.kind === 'tool_start') turn.activity = `Using ${event.name.slice(0, 70)}`;
+        if (['tool_start', 'tool_update', 'tool_end'].includes(event.kind)
+          && !approvals.list(turn.id).length && !interactions.list(interactionChatKeys.get(turn.id) || '__no_chat__').length) turn.activity = liveActivity(turn.steps);
         if (event.kind === 'done') finish(turn, event.isError ? event.error ?? 'Agent failed' : undefined, output);
       }, turn.provider === 'codex' ? agent.codexPath : agent.claudePath,
       turn.provider === 'codex' ? (method, params, signal) => approvals.request(turn.id, method, params, signal,
@@ -165,8 +167,9 @@ export function startWatchBridge(getConfig: () => AgentConfig): (() => void) | u
     if ([...turns.values()].some(t => t.chatId === chat.id && t.status === 'thinking')) throw queueUnavailable('This chat is starting work. Try again shortly.');
     if (chat.provider === 'codex' && chat.sessionId && getConfig().codexDesktop) {
       const activity = await readDesktopActivity(chat.sessionId);
-      if (!activity?.idle) {
+      if (!activity?.idle && !(manual && activity?.canStart)) {
         if (!manual || !activity) throw queueUnavailable('Waiting for the current response or desktop reconnection.');
+        if (!activity.running) throw queueUnavailable(activity.error || 'Codex is awaiting input or cannot confirm it is ready. Check the same chat in Codex.');
         await steerExternalDesktopChat(chat.sessionId, queuedPrompt(item), item.id, item.images);
         return;
       }
@@ -190,7 +193,12 @@ export function startWatchBridge(getConfig: () => AgentConfig): (() => void) | u
         if (closed || messageQueue.managed(key)) continue;
         const chat = await conversations.get(key).catch(() => undefined);
         if (!chat || [...turns.values()].some(t => t.chatId === chat.id && t.status === 'thinking')) continue;
-        if (chat.provider !== 'codex' || !chat.sessionId || !getConfig().codexDesktop || !(await readDesktopActivity(chat.sessionId))?.idle) continue;
+        if (chat.provider !== 'codex' || !chat.sessionId || !getConfig().codexDesktop) continue;
+        const activity = await readDesktopActivity(chat.sessionId);
+        if (!activity?.idle) {
+          if (activity?.error) messageQueue.pause(key, activity.error + ' Queued messages are saved; use Send now when ready.');
+          continue;
+        }
         if (messageQueue.managed(key)) continue;
         const item = messageQueue.claim(key); if (!item) continue;
         try { await dispatchQueued(key, item); messageQueue.sent(key, item.id); }

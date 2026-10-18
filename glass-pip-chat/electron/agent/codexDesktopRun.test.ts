@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { CodexChatUnownedError, CodexDesktopUnavailableError, CodexDesktopClient, assertDesktopIdle, desktopTurns, steerDesktopTurn } from './codexDesktop';
+import { CodexChatUnownedError, CodexDesktopUnavailableError, CodexDesktopClient, assertDesktopIdle, assertDesktopCanStart, desktopFailureMessage, readDesktopActivity, desktopTurns, steerDesktopTurn } from './codexDesktop';
 import { runCodexDesktopTurn, applyDesktopPatches, desktopTurnRequest } from './codexDesktopRun';
 import type { AgentEvent } from './types';
 
@@ -26,6 +26,40 @@ function desktop() {
 const active = (text: string, status = 'inProgress', requests: any[] = []) => ({ ...idle(), requests,
   threadRuntimeStatus: { type: status === 'inProgress' ? 'active' : 'idle' },
   turns: [{ turnId: 'our-turn', status, params: {}, items: [{ id: 'reply', type: 'agentMessage', text }], completedItemIds: {} }],
+});
+
+const failed = () => ({ ...idle(), threadRuntimeStatus: { type: 'systemError' }, turns: [{ turnId: 'previous', status: 'failed', error: { message: 'unexpected status 402 Payment Required: API key budget exceeded.' } }] });
+
+describe('terminal native error recovery', () => {
+  it('allows one explicit fresh send after failure without marking the chat idle or replaying', async () => {
+    const { client, setState, broadcast } = desktop();
+    const state = failed(); setState(state);
+    expect(() => assertDesktopIdle(state, 'same-chat')).toThrow();
+    expect(() => assertDesktopCanStart(state, 'same-chat')).not.toThrow();
+    expect(state.threadRuntimeStatus.type).toBe('systemError');
+    expect(await readDesktopActivity('same-chat')).toMatchObject({ idle: false, canStart: true, running: false, error: expect.stringContaining('budget') });
+    client.request.mockClear();
+    const events: AgentEvent[] = [];
+    runCodexDesktopTurn({ ...opts, prompt: 'new user request' }, event => events.push(event)); await flush();
+    expect(client.request).toHaveBeenCalledExactlyOnceWith('thread-follower-start-turn', expect.objectContaining({ conversationId: 'same-chat', turnStart: expect.objectContaining({ request: expect.objectContaining({ input: [{ type: 'text', text: 'new user request', text_elements: [] }] }) }) }), 'desktop-owner', 20000);
+    broadcast(active('Recovered', 'completed'));
+    expect(events.filter(event => event.kind === 'done')).toHaveLength(1);
+  });
+  it.each([
+    { id: 'another-chat' }, { resumeState: 'needs_resume' }, { requests: [{ id: 'approval' }] },
+    { externalRequests: [{ completedAtMs: null }] }, { unconfirmedTurnSubmissions: [{}] },
+    { threadGoal: { status: 'active' } }, { turns: [{ status: 'inProgress' }, { status: 'failed' }] },
+    { turns: [] }, { turns: [{ status: 'completed' }] }, { threadRuntimeStatus: { type: 'unknown' } },
+  ])('keeps uncertainty and active-work guards after failure: %j', async patch => {
+    const { client, setState } = desktop(); setState({ ...failed(), ...patch });
+    runCodexDesktopTurn(opts, () => {}); await flush();
+    expect(client.request).not.toHaveBeenCalled();
+  });
+  it('explains provider failures and leaves ordinary active state alone', () => {
+    expect(desktopFailureMessage(failed())).toContain('After fixing the budget');
+    expect(desktopFailureMessage(active('working'))).toBeUndefined();
+    expect(desktopFailureMessage({ ...failed(), turns: [{ status: 'failed', error: { message: 'Connection lost' } }] })).toBe('The previous response failed: Connection lost');
+  });
 });
 
 describe('Codex desktop coordination', () => {

@@ -32,6 +32,7 @@ export function runCodexTurn(opts: AgentRunOptions, emit: (event: AgentEvent) =>
   let turnId: string | undefined;
   let stopped = false;
   let finished = false;
+  let dispatched = false;
   let stopTimer: ReturnType<typeof setTimeout> | undefined;
   let userQuestions: Awaited<ReturnType<typeof startUserQuestions>> | undefined;
   const startedAt = Date.now();
@@ -82,7 +83,7 @@ export function runCodexTurn(opts: AgentRunOptions, emit: (event: AgentEvent) =>
         if (!opts.ephemeral) await rpc.request('thread/name/set', { threadId: sessionId, name: chatTitle(opts.prompt) }).catch(() => { /* Naming must never prevent an authorized send. */ });
       }
       if (!opts.ephemeral && !finished) emit({ kind: 'session', sessionId: sessionId! });
-      if (stopped) { finish({ kind: 'done' }); return; }
+      if (finished || stopped) { finish({ kind: 'done' }); return; }
       const parser = new CodexEventParser(sessionId!);
       rpc.onNotification = (method, p) => {
         if (p.threadId !== sessionId) return;
@@ -92,6 +93,7 @@ export function runCodexTurn(opts: AgentRunOptions, emit: (event: AgentEvent) =>
         if (method === 'turn/started') turnId = p.turn.id;
         for (const ev of parser.handle(method, p)) finish(ev);
       };
+      dispatched = true;
       const result = await rpc.request('turn/start', {
         threadId: sessionId,
         input: [{ type: 'text', text: opts.prompt }, ...(opts.images ?? []).map(file => ({ type: 'localImage', path: file }))],
@@ -100,8 +102,12 @@ export function runCodexTurn(opts: AgentRunOptions, emit: (event: AgentEvent) =>
       if (stopped && !finished) await rpc.request('turn/interrupt', { threadId: sessionId, turnId });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      finish({ kind: 'done', isError: !stopped, error: stopped ? undefined : /active writer/.test(message)
-        ? 'Codex desktop still owns this chat, even if it is idle. Your message was not sent. Release the chat from Codex desktop before retrying. No copy was created.' : message });
+      const writerError = dispatched
+        ? 'Codex reported a chat ownership conflict after submission. Check the same chat in Codex before retrying; your message may already have been accepted. Ally did not resend it or create a copy.'
+        : opts.codexDesktop
+          ? 'Ally could not connect to this chat through its Codex desktop owner. Open the same chat in Codex and retry. Your message was not sent. No copy was created.'
+          : 'This chat is open in Codex. Enable Codex desktop connection in Ally Settings to continue it here. Your message was not sent. No copy was created.';
+      finish({ kind: 'done', isError: !stopped, error: stopped ? undefined : /active writer/i.test(message) ? writerError : message });
     }
   })();
   return { steer: async (text, images) => {
