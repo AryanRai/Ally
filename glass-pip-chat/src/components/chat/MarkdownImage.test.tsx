@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import CompactMarkdown from './CompactMarkdown';
 import { MessageResponse } from '../ai-elements/message';
@@ -11,6 +11,12 @@ describe('local Markdown previews', () => {
       render(<Component>{`![Portfolio preview](${source})`}</Component>);
       await waitFor(() => expect(load).toHaveBeenCalledWith(source));
       expect(await screen.findByAltText('Portfolio preview')).toHaveAttribute('src', 'data:image/jpeg;base64,aGVsbG8=');
+      const image = screen.getByAltText('Portfolio preview');
+      expect(image).toHaveClass('max-h-40');
+      fireEvent.click(screen.getByRole('button', { name: 'Expand image' }));
+      expect(image).toHaveClass('max-h-[32rem]');
+      fireEvent.click(screen.getByRole('button', { name: 'Shrink image' }));
+      expect(image).toHaveClass('max-h-40');
     });
   }
   it('shows a useful unavailable state for missing previews', async () => {

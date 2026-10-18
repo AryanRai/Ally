@@ -9,7 +9,7 @@ export interface TutorMark {
   points: TutorPoint[];
   text?: string;
 }
-export interface TutorStep { id: string; title: string; explanation: string; marks: TutorMark[]; diagram?: { html: string; height: number } }
+export interface TutorStep { id: string; title: string; explanation: string; marks: TutorMark[]; diagram?: { html: string; height: number }; panel?: { x: number; y: number; width: number; transparent?: boolean } }
 export interface TutorBoard {
   id: string;
   chatId: string;
@@ -28,12 +28,13 @@ export interface TutorBoard {
   /** Presentation only; reasoning remains in the originating chat. */
   visible?: boolean;
   pillBounds?: { x: number; y: number; width: number; height: number };
+  panelAnchor?: { x: number; y: number; sequence: number };
 }
 export interface TutorCapture { board: TutorBoard; imagePath: string; thumbnail: string }
 export type TutorAction = 'previous' | 'next' | 'latest' | 'sketch' | 'undo' | 'freeze' | 'chat' | 'close';
 export interface VisualTutorApi {
   onPillBounds?: (callback: (bounds: { x: number; y: number; width: number; height: number }) => void) => () => void;
-  show: (id: string) => Promise<void>;
+  show: (id: string, point?: TutorPoint) => Promise<void>;
   start: (chatId: string, displayId?: number, circleCaptureId?: string) => Promise<TutorCapture>;
   displays: () => Promise<Array<{ id: number; label: string }>>;
   state: () => Promise<TutorBoard | null>;

@@ -19,7 +19,7 @@ import { createMathPlugin } from "@streamdown/math";
 const math = createMathPlugin({ singleDollarTextMath: true });
 import { mathMarkdown } from '@/lib/mathMarkdown';
 import 'katex/dist/katex.min.css';
-import ChatLink, { documentPrefix } from '@/components/chat/ChatLink';
+import ChatLink, { documentPrefix, visualizationPrefix } from '@/components/chat/ChatLink';
 import type { UIMessage } from "ai";
 import { ChevronLeftIcon, ChevronRightIcon } from "lucide-react";
 import type { ComponentProps, HTMLAttributes, ReactElement } from "react";
@@ -339,7 +339,7 @@ export const MessageResponse = memo(
       plugins={streamdownPlugins}
       remarkPlugins={chatRemarkPlugins}
       urlTransform={chatUrlTransform}
-      components={{ a: props => props.href?.startsWith(documentPrefix) ? <ChatLink {...props} /> : <defaultComponents.a {...props} />, img: (props: Record<string, unknown> | { src?: string; alt?: string; title?: string }) => <MarkdownImage src={typeof props.src === 'string' ? props.src : undefined} alt={typeof props.alt === 'string' ? props.alt : undefined} title={typeof props.title === 'string' ? props.title : undefined} /> }}
+      components={{ a: props => (props.href?.startsWith(documentPrefix) || props.href?.startsWith(visualizationPrefix)) ? <ChatLink {...props} /> : <defaultComponents.a {...props} />, img: (props: Record<string, unknown> | { src?: string; alt?: string; title?: string }) => <MarkdownImage src={typeof props.src === 'string' ? props.src : undefined} alt={typeof props.alt === 'string' ? props.alt : undefined} title={typeof props.title === 'string' ? props.title : undefined} /> }}
       {...props}
     >{typeof children === 'string' ? mathMarkdown(children) : children}</Streamdown>
   ),

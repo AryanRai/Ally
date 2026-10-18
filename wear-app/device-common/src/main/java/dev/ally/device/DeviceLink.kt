@@ -228,13 +228,19 @@ object DeviceLink {
         if (Build.VERSION.SDK_INT >= 33 && c.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) return
         val manager = c.getSystemService(NotificationManager::class.java)
         manager.createNotificationChannel(NotificationChannel("ally-device", "Ally cards and requests", NotificationManager.IMPORTANCE_DEFAULT).apply { enableVibration(true) })
+        // Routine cards use the existing quiet channel. Decisions need a visible
+        // heads-up category, while still respecting app/OS and legacy channel denial.
+        val approval = kind(c) == "phone" && DeviceAlerts.blocking(item)
+        if (manager.getNotificationChannel("ally-device")?.importance == NotificationManager.IMPORTANCE_NONE) return
+        val channel = if (approval) "ally-approvals" else "ally-device"
+        if (approval) manager.createNotificationChannel(NotificationChannel(channel, "Ally approval requests", NotificationManager.IMPORTANCE_HIGH).apply { enableVibration(true) })
         val id = item.optString("id")
         val chatId = DeviceAlerts.chat(item).orEmpty()
         val openIntent = alertIntent(c,item)
         val open = PendingIntent.getActivity(c, id.hashCode(), openIntent.putExtra("id", id), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         val dismiss = PendingIntent.getBroadcast(c, id.hashCode(), Intent(c, DeviceDismissReceiver::class.java).putExtra("id", id), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         val title = if(item.optBoolean("authorized")) "Continue approved action" else if (item.optBoolean("command")) "Approve: ${item.optString("action").replace('_', ' ')}" else "${DeviceAlerts.kind(item)} · ${item.optString("title")}"
-        manager.notify(id.hashCode(), Notification.Builder(c, "ally-device").setSmallIcon(android.R.drawable.ic_dialog_info)
+        manager.notify(id.hashCode(), Notification.Builder(c, channel).setSmallIcon(android.R.drawable.ic_dialog_info)
             .setContentTitle(title.take(80)).setContentText(item.optString("body").take(160)).setStyle(Notification.BigTextStyle().bigText(item.optString("body")))
             .setCategory(if(item.optBoolean("interaction")) Notification.CATEGORY_MESSAGE else Notification.CATEGORY_STATUS).setGroup(if(chatId.isNotBlank()) "ally-chat:$chatId" else "ally-device").setVisibility(Notification.VISIBILITY_PRIVATE).setOnlyAlertOnce(true)
             .setContentIntent(open).setDeleteIntent(dismiss).setAutoCancel(true).build())

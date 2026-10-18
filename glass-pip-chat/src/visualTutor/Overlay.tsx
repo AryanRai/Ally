@@ -3,7 +3,7 @@ import { ArrowLeft, ArrowRight, ArrowUpRight, Check, Eye, GripVertical, Layers, 
 import type { TutorAction, TutorBoard, TutorPoint, VisualTutorApi } from '../../electron/visualTutor/types';
 import Marks from './Marks';
 import DiagramFrame from './DiagramFrame';
-import { dockCanvas } from './dock';
+import { dockCanvas, placeCanvas } from './dock';
 import './tutor.css';
 
 declare global { interface Window { tutor: Pick<VisualTutorApi, 'overlay' | 'action' | 'sketch' | 'interactive' | 'onChanged' | 'onPillBounds'> } }
@@ -19,6 +19,9 @@ export default function Overlay() {
   const [position, setPosition] = useState<{ left: number; top: number } | null>(null);
   const [panelSize, setPanelSize] = useState({ width: 420, height: 180 });
   useEffect(() => { setPosition(null); }, [board?.pillBounds?.x, board?.pillBounds?.y, board?.pillBounds?.width, board?.pillBounds?.height]);
+  const requestedPanel = board?.steps[board.selected]?.panel;
+  useEffect(() => { setPosition(null); }, [board?.panelAnchor?.sequence]);
+  useEffect(() => { setPosition(null); }, [board?.steps[board.selected]?.id, requestedPanel?.x, requestedPanel?.y, requestedPanel?.width]);
   const clampPanel = (left: number, top: number) => {
     const panel = panelRef.current;
     return {
@@ -61,6 +64,13 @@ export default function Overlay() {
   }, [board?.id]);
   if (!board) return error ? <div role="alert" className="tutor-error">{error}</div> : null;
   const step = board.steps[board.selected];
+  const preferredRequest = board.panelAnchor ? { ...board.panelAnchor, width: step?.panel?.width ?? panelSize.width / board.bounds.width * 1000 } : step?.panel;
+  const preferred = preferredRequest ? placeCanvas({ width: window.innerWidth, height: window.innerHeight }, board.pillBounds, panelSize, preferredRequest) : undefined;
+  const panelStyle = {
+    ...(preferred ?? (board.pillBounds ? dockCanvas({ width: window.innerWidth, height: window.innerHeight }, board.pillBounds, panelSize) : {})),
+    ...(position ? { ...position, bottom: 'auto', transform: 'none' } : {}),
+    ...(step?.panel?.transparent ? { background: 'transparent', backdropFilter: 'none', borderColor: 'transparent', boxShadow: 'none' } : {}),
+  };
   const action = (label: string, name: TutorAction, icon: React.ReactNode, disabled = false, pressed?: boolean) => <button type="button" title={label} aria-label={label} aria-pressed={pressed} disabled={disabled} onClick={() => act(name)}>{icon}</button>;
   // Windows can round the native window up by 1–2 DIP on mixed-DPI monitors.
   // Map the capture and pen to the display's coordinates, never the rounded viewport.
@@ -88,7 +98,7 @@ export default function Overlay() {
       else strokeRef.current = [...strokeRef.current.slice(0, -1), next];
       setStroke(strokeRef.current);
     }} onPointerUp={endStroke} onPointerCancel={event => { if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId); strokeRef.current = []; setStroke([]); }} />}
-    <section ref={panelRef} className="tutor-panel" style={position ? { ...position, bottom: 'auto', transform: 'none' } : board.pillBounds ? dockCanvas({ width: window.innerWidth, height: window.innerHeight }, board.pillBounds, panelSize) : undefined} aria-label="Visual tutor controls" onPointerEnter={() => window.tutor.interactive(true)} onPointerLeave={() => { if (!dragRef.current) window.tutor.interactive(false); }}>
+    <section ref={panelRef} className="tutor-panel" style={panelStyle} aria-label="Visual tutor controls" onPointerEnter={() => window.tutor.interactive(true)} onPointerLeave={() => { if (!dragRef.current) window.tutor.interactive(false); }}>
       <div className="tutor-heading"><button type="button" className="tutor-move-handle" aria-label="Move explanation panel" title="Drag to move · arrow keys to reposition" onPointerDown={event => {
         if (event.button !== 0 || !panelRef.current) return;
         const rect = panelRef.current.getBoundingClientRect();

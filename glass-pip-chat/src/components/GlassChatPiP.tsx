@@ -37,6 +37,7 @@ import CollapsedHeader from './chat/CollapsedHeader';
 import { selectedSessionRunning } from '@/lib/compactPresentation';
 import { useVisualTutor } from '@/hooks/useVisualTutor';
 import VisualTutorControls from './visualTutor/VisualTutorControls';
+import CircleSelectionControls from './visualTutor/CircleSelectionControls';
 import { meetingReply } from './chat/CollapsedMeetingControls';
 import ExpandedHeader from './chat/ExpandedHeader';
 import ChatInput from './chat/ChatInput';
@@ -523,7 +524,7 @@ export default function GlassChatPiP() {
                 currentResponse={currentResponse || meetingTurn?.text}
                 responseSegments={currentResponse ? streamingSegments : undefined}
                 meetingControls={<MessageQueueStack chatId={activeChat?.agent?.sessionId ? `${activeChat.agent.provider}:${activeChat.agent.sessionId}` : undefined} />}
-                drawingControls={<VisualTutorControls compact tutor={tutor} disabled={!activeChat || activeIsWorking || externalWorking} />}
+                drawingControls={<><CircleSelectionControls /><VisualTutorControls compact tutor={tutor} disabled={!activeChat || activeIsWorking || externalWorking} /></>}
                 screenAutoAttach={screenAutoAttach}
                 onScreenAutoAttachToggle={() => setScreenAutoAttach(value => !value)}
                 onClipboardAutoAttachToggle={() => context.setContextToggleEnabled(!context.contextToggleEnabled)}
@@ -629,6 +630,7 @@ export default function GlassChatPiP() {
                     <button type="button" className="underline" onClick={() => chats.setSendFailure(activeChat.id)}>Dismiss</button>
                   </div>
                 </div>}
+                <CircleSelectionControls />
                 <VisualTutorControls tutor={tutor} disabled={!activeChat || activeIsWorking || externalWorking} />
                 <PerceptionBar perception={perception} chat={activeChat} onOpenSession={openMeetingChat} />
                 <MessageQueueStack chatId={activeChat?.agent?.sessionId ? `${activeChat.agent.provider}:${activeChat.agent.sessionId}` : undefined} />

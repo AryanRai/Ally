@@ -44,6 +44,13 @@ describe('visual tutor scene boundary', () => {
   });
 });
 describe('visual tutor ownership and teaching flow', () => {
+  it('validates finite screen placement and optional transparency before changing a board', () => {
+    const model = started();
+    expect(model.draw('session-1', { ...step(), panel: { x: 20, y: 100, width: 350, transparent: true } }).steps[0].panel).toEqual({ x: 20, y: 100, width: 350, transparent: true });
+    const before = model.get();
+    for (const panel of [{ x: -1, y: 0, width: 200 }, { x: 1, y: NaN, width: 200 }, { x: 1, y: 1, width: 90000 }, { x: 1, y: 1, width: 200, transparent: 'yes' }]) expect(() => model.draw('session-1', { ...step(), panel })).toThrow();
+    expect(model.get()).toEqual(before);
+  });
   it('requires an explicitly opened session and revokes stale tools after closing or refreshing', () => {
     const model = new TutorModel(); expect(() => model.draw('session-1', step())).toThrow('ended');
     model.start(board()); expect(() => model.draw('another-session', step())).toThrow('ended');

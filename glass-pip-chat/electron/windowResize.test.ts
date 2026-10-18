@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest';
-const fixture = vi.hoisted(() => ({ options: {} as any, events: new Map<string, Function>(), ipc: new Map<string, Function>(), app: new Map<string, Function>(), writes: vi.fn(), send: vi.fn(), position: vi.fn(), width: 400, height: 560 }));
+const fixture = vi.hoisted(() => ({ options: {} as any, webEvents: new Map<string, Function>(), events: new Map<string, Function>(), ipc: new Map<string, Function>(), app: new Map<string, Function>(), writes: vi.fn(), send: vi.fn(), position: vi.fn(), width: 400, height: 560 }));
 vi.mock('node:fs', () => ({ default: { readFileSync: () => { throw Error('isolated fixture'); }, writeFileSync: fixture.writes } }));
 vi.mock('electron', () => ({
   app: { getPath: () => 'synthetic-userdata', once: (name: string, fn: Function) => fixture.app.set(name, fn) },
@@ -7,7 +7,7 @@ vi.mock('electron', () => ({
   screen: { getDisplayNearestPoint: () => ({ workArea: { x: 0, y: 0, width: 2000, height: 2000 } }) },
   BrowserWindow: class {
     constructor(options: unknown) { fixture.options = options; }
-    webContents = { send: fixture.send };
+    webContents = { send: fixture.send, on: (name: string, fn: Function) => fixture.webEvents.set(name, fn) };
     on(name: string, fn: Function) { const old = fixture.events.get(name); fixture.events.set(name, (...args: unknown[]) => { old?.(...args); fn(...args); }); }
     once() {}
     async loadFile() {}
@@ -25,6 +25,12 @@ it('keeps native resize bursts off disk and acknowledges the final/no-op request
   vi.useFakeTimers();
   const { createWindow, registerWindowIpc } = await import('./window');
   await createWindow(); registerWindowIpc();
+  const preventDefault = vi.fn(), navigate = fixture.webEvents.get('will-frame-navigate')!;
+  navigate({ isMainFrame: false, url: 'https://example.invalid/leak', preventDefault });
+  expect(preventDefault).toHaveBeenCalledOnce();
+  navigate({ isMainFrame: false, url: 'about:srcdoc', preventDefault });
+  navigate({ isMainFrame: true, url: 'https://example.invalid/', preventDefault });
+  expect(preventDefault).toHaveBeenCalledOnce();
   expect(fixture.options.resizable).toBe(true);
   if (process.platform === 'win32') expect(fixture.options.maximizable).toBe(false);
   for (let i = 0; i < 1000; i++) fixture.events.get('resize')!();

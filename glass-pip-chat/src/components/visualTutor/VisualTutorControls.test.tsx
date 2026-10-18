@@ -2,10 +2,10 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import VisualTutorControls from './VisualTutorControls';
 import type { useVisualTutor } from '@/hooks/useVisualTutor';
-afterEach(cleanup);
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 function setup(active=false,disabled=false) {
   const circle=vi.fn(); Object.defineProperty(window,'pip',{configurable:true,value:{circle:{start:circle}}});
-  const tutor: ReturnType<typeof useVisualTutor>={board:active ? {id:'board'} as any : null,busy:false,error:'',start:vi.fn(),decorate:text=>text,show:vi.fn(),end:vi.fn(),pendingSelection:false,attach:vi.fn(),claimAttachment:()=>({blocked:false}),action:vi.fn(),hide:vi.fn()};
+  const tutor: ReturnType<typeof useVisualTutor>={board:active ? {id:'board'} as any : null,busy:false,error:'',start:vi.fn(),decorate:text=>text,show:vi.fn(),showAt:vi.fn(),end:vi.fn(),pendingSelection:false,attach:vi.fn(),claimAttachment:()=>({blocked:false}),action:vi.fn(),hide:vi.fn()};
   const view = render(<VisualTutorControls tutor={tutor} disabled={disabled}/>); return {tutor,circle,...view};
 }
 it('offers no separate drawing launcher when no lesson is active',()=>{
@@ -29,4 +29,26 @@ it('minimises and reopens the canvas through the pill without ending the board, 
   rerender(<VisualTutorControls tutor={tutor} disabled={false} />);
   fireEvent.click(screen.getByTitle('View drawings')); expect(tutor.show).toHaveBeenCalledOnce();
   expect(screen.getByText('Area explained here')).toBeInTheDocument();
+});
+it('keeps compact controls out of the layout and reopens a hidden drawing only after dragging outside the window', () => {
+  vi.stubGlobal('PointerEvent', MouseEvent);
+  const { tutor, rerender } = setup(true);
+  Object.assign(tutor.board!, { visible: false, steps: [{ id: 'one', title: 'Lens', marks: [], explanation: '' }], sketches: [], selected: 0, capturedAt: 1000 });
+  rerender(<VisualTutorControls compact tutor={tutor} disabled={false} />);
+  const chip = screen.getByRole('button', { name: 'Drawing controls' });
+  expect(screen.queryByRole('dialog')).toBeNull();
+  fireEvent.click(chip);
+  expect(screen.getByRole('dialog', { name: 'Drawing tools' })).toHaveClass('fixed');
+  fireEvent.keyDown(chip, { key: 'Escape' }); expect(screen.queryByRole('dialog')).toBeNull();
+  Object.assign(chip, { setPointerCapture: vi.fn(), hasPointerCapture: () => true, releasePointerCapture: vi.fn() });
+  fireEvent.pointerDown(chip, { button: 0, pointerId: 1, screenX: 100, screenY: 100 });
+  fireEvent.pointerMove(chip, { pointerId: 1, screenX: 800, screenY: 400 });
+  fireEvent.pointerUp(chip, { pointerId: 1, clientX: -200, clientY: 100, screenX: 800, screenY: 400 });
+  expect(tutor.showAt).toHaveBeenCalledWith({ x: 800, y: 400 });
+  expect(tutor.start).not.toHaveBeenCalled(); expect(tutor.end).not.toHaveBeenCalled();
+  fireEvent.pointerDown(chip, { button: 0, pointerId: 2, screenX: 100, screenY: 100 });
+  fireEvent.pointerMove(chip, { pointerId: 2, screenX: 800, screenY: 400 });
+  fireEvent.pointerCancel(chip, { pointerId: 2 });
+  fireEvent.pointerUp(chip, { pointerId: 2, clientX: -100, screenX: 800, screenY: 400 });
+  expect(tutor.showAt).toHaveBeenCalledOnce();
 });

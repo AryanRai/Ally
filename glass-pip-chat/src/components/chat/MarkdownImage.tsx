@@ -22,6 +22,8 @@ export function chatUrlTransform(url: string, key: string) {
 export default function MarkdownImage({ src, alt, title }: { src?: string; alt?: string; title?: string }) {
   if (src?.startsWith(previewPrefix)) { try { src = decodeURIComponent(src.slice(previewPrefix.length)); } catch { src = undefined; } }
   const [result, setResult] = useState<{ source: string; url?: string; failed?: boolean }>();
+  const [expanded, setExpanded] = useState(false);
+  useEffect(() => setExpanded(false), [src]);
   const local = !!src && isLocalImage(src);
   useEffect(() => {
     if (!local || !src) return;
@@ -33,5 +35,5 @@ export default function MarkdownImage({ src, alt, title }: { src?: string; alt?:
   const current = result?.source === src ? result : undefined;
   const url = local ? current?.url : src;
   if (!url || current?.failed) return <span role="status" className="my-2 block rounded-xl border border-border p-3 text-xs text-muted-foreground">{alt || 'Image preview'} · {current?.failed ? 'Preview unavailable' : 'Loading preview…'}</span>;
-  return <img src={url} alt={alt || 'Image preview'} title={title} loading="lazy" className="my-2 max-h-[32rem] max-w-full rounded-xl object-contain" onError={() => setResult({ source: src!, failed: true })} />;
+  return <button type="button" aria-label={expanded ? 'Shrink image' : 'Expand image'} aria-expanded={expanded} className="my-2 block max-w-full cursor-zoom-in rounded-lg" onClick={event => { event.preventDefault(); event.stopPropagation(); setExpanded(value => !value); }}><img src={url} alt={alt || 'Image preview'} title={title || 'Click to expand or shrink'} loading="lazy" className={`${expanded ? 'max-h-[32rem]' : 'max-h-40'} max-w-full rounded-lg object-contain`} onError={() => setResult({ source: src!, failed: true })} /></button>;
 }

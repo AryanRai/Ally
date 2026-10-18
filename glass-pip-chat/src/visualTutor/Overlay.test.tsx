@@ -75,6 +75,14 @@ describe('visual teaching overlay', () => {
     fireEvent.keyDown(window, { key: 'Escape' }); expect(api.action).toHaveBeenLastCalledWith('test-session', 'chat');
     expect(screen.queryByText(board.steps[0].explanation)).not.toBeInTheDocument();
   });
+  it('applies optional transparent agent placement without discarding manual drag controls', async () => {
+    const { changed } = await mount();
+    act(() => changed({ ...board, steps: [{ ...board.steps[0], panel: { x: 50, y: 100, width: 300, transparent: true } }] }));
+    const panel = screen.getByRole('region', { name: 'Visual tutor controls' });
+    expect(panel).toHaveStyle({ background: 'transparent' });
+    expect(panel.style.backdropFilter).toBe('none');
+    expect(screen.getByRole('button', { name: 'Move explanation panel' })).toBeEnabled();
+  });
   it('shows snapshot mode and reader-controlled navigation as state changes', async () => {
     const { changed, api } = await mount();
     act(() => changed({ ...board, frozen: true, following: false, steps: [...board.steps, { ...board.steps[0], id: 'two' }] }));

@@ -19,6 +19,8 @@ let screenshot = '';
 let starting = false;
 let toolbarInteractive = false;
 let revealOnDraw = true;
+let panelAnchor: TutorBoard['panelAnchor'];
+let anchorSequence = 0;
 let geometryTimer: ReturnType<typeof setTimeout> | undefined;
 
 /** The drawing surface has its own preload: it cannot invoke agent, device or file APIs. */
@@ -33,6 +35,7 @@ export function registerVisualTutorIpc(getMain: () => BrowserWindow | null): voi
     const board = model.get(), main = getMain();
     if (board) {
       board.visible = !!overlay?.isVisible();
+      if (panelAnchor) board.panelAnchor = { ...panelAnchor };
       const bounds = main?.getBounds();
       if (bounds) board.pillBounds = { ...bounds, x: bounds.x - board.bounds.x, y: bounds.y - board.bounds.y };
     }
@@ -53,6 +56,7 @@ export function registerVisualTutorIpc(getMain: () => BrowserWindow | null): voi
     const board = model.get();
     if (board) model.end(board.id);
     screenshot = '';
+    panelAnchor = undefined;
     revealOnDraw = true;
     toolbarInteractive = false;
     const closing = overlay; overlay = null;
@@ -123,7 +127,14 @@ export function registerVisualTutorIpc(getMain: () => BrowserWindow | null): voi
       throw error;
     } finally { starting = false; }
   });
-  ipcMain.handle('tutor:show', (event, id: string) => { fromMain(event); model.require(id); revealOnDraw = true; overlay?.showInactive(); keepPillAbove(); publish(); });
+  ipcMain.handle('tutor:show', (event, id: string, point?: { x: number; y: number }) => {
+    fromMain(event); const board = model.require(id);
+    if (point !== undefined) {
+      if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y) || Math.abs(point.x) > 100000 || Math.abs(point.y) > 100000) throw Error('Invalid drawing position');
+      panelAnchor = { x: Math.max(0, Math.min(1000, (point.x - board.bounds.x) / board.bounds.width * 1000)), y: Math.max(0, Math.min(1000, (point.y - board.bounds.y) / board.bounds.height * 1000)), sequence: ++anchorSequence };
+    }
+    revealOnDraw = true; overlay?.showInactive(); keepPillAbove(); publish();
+  });
   ipcMain.handle('tutor:state', event => { fromMain(event); return presentation(); });
   ipcMain.handle('tutor:overlay', event => { fromOverlay(event); return { board: presentation(), screenshot }; });
   ipcMain.handle('tutor:end', (event, id: string) => { fromMain(event); if (model.get()?.id === id) close(); });
@@ -152,9 +163,10 @@ export function registerVisualTutorIpc(getMain: () => BrowserWindow | null): voi
   registerDeviceTool({ name: 'visual_tutor_read', description: 'Read an explicitly opened Ally visual tutor board, including teaching steps, screenshot time and user sketches. Requires boardId from the user’s visual tutor prompt. No new capture.',
     inputSchema: { type: 'object', properties: { boardId: { type: 'string' } }, required: ['boardId'], additionalProperties: false },
     handler: async args => { model.require(args.boardId); const board = model.get()!; return text(JSON.stringify({ ...board, instructions: tutorPrompt(board) })); } });
-  registerDeviceTool({ name: 'visual_tutor_draw', description: 'Draw or update a teaching step on the user-enabled Ally overlay. Optional step.diagram={html,height} displays complex self-contained HTML/SVG with isolated local scripts and interactive controls; no network, files, parent/tool access or desktop control. No screen capture. Use 0–1000 screen-relative coordinates; same step ID replaces that step. Call visual_tutor_read to inspect user sketches.',
+  registerDeviceTool({ name: 'visual_tutor_draw', description: 'Draw or update a teaching step on the user-enabled Ally overlay. Optional step.panel={x,y,width,transparent} places the compact panel in full-screen 0–1000 coordinates, clamped away from the Ally pill; transparency is optional and manual dragging remains available. Optional step.diagram={html,height} displays complex self-contained HTML/SVG with isolated local scripts and interactive controls; no network, files, parent/tool access or desktop control. No screen capture. Use 0–1000 screen-relative coordinates; same step ID replaces that step. Call visual_tutor_read to inspect user sketches.',
     inputSchema: { type: 'object', properties: { boardId: { type: 'string' }, step: { type: 'object', properties: {
       diagram: { type: 'object', properties: { html: { type: 'string', maxLength: 160000 }, height: { type: 'integer', minimum: 120, maximum: 600 } }, required: ['html'], additionalProperties: false },
+      panel: { type: 'object', properties: { x: { type: 'number', minimum: 0, maximum: 1000 }, y: { type: 'number', minimum: 0, maximum: 1000 }, width: { type: 'number', minimum: 100, maximum: 1000 }, transparent: { type: 'boolean' } }, required: ['x', 'y', 'width'], additionalProperties: false },
       id: { type: 'string', maxLength: 80 }, title: { type: 'string', maxLength: 120 }, explanation: { type: 'string', maxLength: 1800 },
       marks: { type: 'array', maxItems: 80, items: { type: 'object', properties: { id: { type: 'string', maxLength: 80 }, kind: { enum: ['arrow', 'line', 'rect', 'ellipse', 'polyline', 'text'] }, color: { enum: ['mint', 'blue', 'amber', 'pink', 'white'] }, points: { type: 'array', minItems: 1, maxItems: 256, items: { type: 'object', properties: { x: { type: 'number', minimum: 0, maximum: 1000 }, y: { type: 'number', minimum: 0, maximum: 1000 } }, required: ['x', 'y'], additionalProperties: false } }, text: { type: 'string', maxLength: 240 } }, required: ['id', 'kind', 'color', 'points'], additionalProperties: false } },
     }, required: ['id', 'title', 'explanation', 'marks'], additionalProperties: false } }, required: ['boardId', 'step'], additionalProperties: false },

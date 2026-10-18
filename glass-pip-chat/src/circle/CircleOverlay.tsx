@@ -1,7 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { motion } from 'framer-motion';
-import { Lasso, RectangleHorizontal, X } from 'lucide-react';
-import { selectionBounds, selectionPanel, type Point, type SelectionTool } from './selection';
+import { selectionBounds, type Point, type SelectionTool } from './selection';
 import type { CircleContext, CircleRect } from '../../electron/capture/types';
 
 /** Ally's pill becomes the selection toolbar; the same frozen area reaches the chat. */
@@ -74,26 +72,18 @@ export default function CircleOverlay() {
   };
   useEffect(() => { const canvas = canvasRef.current; if (canvas) { canvas.width = view.width; canvas.height = view.height; } }, [view, shot]);
 
-  const anchor = context?.anchor;
-  const dock = selectionPanel(view, anchor && { ...anchor, x: anchor.x > 420 ? anchor.x - 412 : anchor.x + anchor.width + 12 });
-  const button = 'flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-[11px] text-white/65 hover:bg-white/10 hover:text-white disabled:opacity-40';
+  useEffect(() => {
+    void window.pip.circle.updateSelection({ active: true, tool, ready: !!shot && !!context?.hasChat, sending, error });
+  }, [tool, shot, context, sending, error]);
+  useEffect(() => window.pip.circle.onSelectionAction(action => {
+    if (action === 'cancel') cancel();
+    else if (action === 'whole') void submit();
+    else if (!sending) { reset(); setTool(action); }
+  }));
   return <div className="fixed inset-0 cursor-crosshair select-none overflow-hidden text-white" style={{ fontFamily: 'Geist Variable, sans-serif' }}>
     {shot && <img src={shot} alt="Frozen screen selection" className="pointer-events-none absolute left-0 top-0" style={view} draggable={false} />}
     <div className="pointer-events-none absolute inset-0" style={{ background: 'rgba(0,0,0,.4)', clipPath: selection ? `polygon(evenodd, 0 0, 100% 0, 100% 100%, 0 100%, 0 0, ${selection.x}px ${selection.y}px, ${selection.x + selection.width}px ${selection.y}px, ${selection.x + selection.width}px ${selection.y + selection.height}px, ${selection.x}px ${selection.y + selection.height}px, ${selection.x}px ${selection.y}px)` : undefined }} />
     <canvas ref={canvasRef} className="absolute inset-0 touch-none" aria-label="Select an area on screen" onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={reset} />
-    <motion.section aria-label="Ally screen selection" initial={{ opacity: 0, scale: .96 }} animate={{ opacity: 1, scale: 1 }} className="absolute cursor-default rounded-[18px] border border-white/10 bg-black/60 p-2 shadow-2xl backdrop-blur-2xl" style={dock}>
-      <div className="flex min-w-0 items-center gap-2 px-1">
-        <span className="text-[11px] text-white/65">Select area</span>
-        <span className="min-w-0 flex-1 truncate text-[11px] text-white/45" title={context?.title}>{context?.title || 'Screen selection'}</span>
-        <button type="button" className={button} aria-label="Cancel selection" title="Return to chat (Esc)" onClick={cancel}><X className="size-3.5" /></button>
-      </div>
-      <div className="mt-1 flex flex-wrap items-center gap-1">
-        <button type="button" disabled={sending} aria-pressed={tool === 'freehand'} className={`${button} ${tool === 'freehand' ? 'bg-white/10' : ''}`} onClick={() => { reset(); setTool('freehand'); }}><Lasso className="size-3.5" />Freehand</button>
-        <button type="button" disabled={sending} aria-pressed={tool === 'rectangle'} className={`${button} ${tool === 'rectangle' ? 'bg-white/10' : ''}`} onClick={() => { reset(); setTool('rectangle'); }}><RectangleHorizontal className="size-3.5" />Rectangle</button>
-        <button type="button" disabled={sending || !shot || !context?.hasChat} className={`${button} ml-auto`} onClick={() => void submit()}>Whole screen</button>
-      </div>
-      <p className="px-1 pt-1 text-[10px] text-white/40">{!shot ? 'Preparing screen…' : !context?.hasChat ? 'Choose a chat in Ally first.' : sending ? 'Attaching to your pill…' : 'Release to attach · ask in Ally · Esc cancels'}</p>
-      {error && <p role="alert" className="px-1 pt-1 text-xs text-amber-200">{error}</p>}
-    </motion.section>
+
   </div>;
 }

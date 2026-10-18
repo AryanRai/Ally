@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { exec } from 'node:child_process';
 import { boundsPersistence } from './boundsPersistence.js';
-import { openLocalDocument } from './localDocument.js';
+import { openLocalDocument, readVisualization } from './localDocument.js';
 import { queryScreen } from './capture/queryScreen.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -205,6 +205,11 @@ export async function createWindow(): Promise<void> {
   });
 
   win = w;
+  // Local diagram frames have no navigation capability, including self-navigation
+  // through script. Keep ordinary main-window link handling unchanged.
+  w.webContents.on('will-frame-navigate', event => {
+    if (!event.isMainFrame && !['about:blank', 'about:srcdoc'].includes(event.url)) event.preventDefault();
+  });
 
   // macOS specific settings for always-on-top and visibility
   if (process.platform === 'darwin') {
@@ -403,6 +408,10 @@ function ensureWindowOnScreen(x: number, y: number, width: number, height: numbe
 }
 
 export function registerWindowIpc(): void {
+  ipcMain.handle('document:visualization', async (event, file: unknown) => {
+    if (!win || event.sender !== win.webContents || event.senderFrame !== event.sender.mainFrame) throw Error('Open diagrams in Ally');
+    return readVisualization(file);
+  });
   ipcMain.handle('context:query-screen', async event => {
     if (!win || event.sender !== win.webContents || event.senderFrame !== event.sender.mainFrame) throw Error('Capture must originate from Ally');
     return queryScreen(win);
