@@ -4,12 +4,29 @@ import hmac
 import io
 import json
 import os
+from pathlib import Path
 import threading
 import time
 import wave
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 MAX_AUDIO = 1_920_044  # Exactly 60 seconds, 16 kHz signed 16-bit mono + WAV header.
+
+
+def speech_cache():
+    """Keep Ally models independent of shared cache junctions/removable drives.
+
+    An explicit override is honoured (and fails honestly if unavailable).
+    Existing downloaded models can still be selected with ALLY_STT_MODEL.
+    """
+    override = os.environ.get("ALLY_STT_CACHE")
+    if override:
+        cache = Path(override)
+    else:
+        base = Path(os.environ.get("LOCALAPPDATA") or (Path.home() / ".local" / "share"))
+        cache = base / "Ally" / "speech" / "models"
+    cache.mkdir(parents=True, exist_ok=True)
+    return str(cache)
 
 
 def decode_wav(data):
@@ -48,10 +65,15 @@ class SpeechEngine:
         try:
             # Public models need no account token; avoid sending unrelated cached HF credentials.
             os.environ.setdefault("HF_HUB_DISABLE_IMPLICIT_TOKEN", "1")
+            cache = speech_cache()
+            # The Hub's transfer cache is independent of download_root and can
+            # otherwise follow the same unavailable shared-cache junction.
+            os.environ.setdefault("HF_XET_CACHE", str(Path(cache).parent / "xet"))
             from faster_whisper import WhisperModel
-            self.model = WhisperModel(self.model_name, device=self.device, compute_type=self.compute_type,
+            self.model = WhisperModel(self.model_name, device=self.device, compute_type=self.compute_type, download_root=cache,
                                       cpu_threads=min(6, os.cpu_count() or 2), num_workers=1)
             self.state = "ready"
+            self.error = None
         except Exception as error:
             # Report the category without leaking credentials, cache paths or signed download URLs.
             self.error = f"Speech model could not load ({type(error).__name__}). Check model files and the speech environment."

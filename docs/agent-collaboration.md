@@ -1,5 +1,8 @@
 # Ally collaboration scratchpad
 
+## Phone speech model repair (2026-10-18, forwarded user request)
+Inspected supplied phone screenshot. Live worker42680/launcher27556 owned by Ally52740 reports faster-whisper small FileNotFoundError. Reproduced model constructor: shared HF cache C:/Users/buzza/.cache/huggingface is a junction to unavailable D:/huggingface. Own speech-service/transcriber.py scoped owned-cache fallback/tests/docs and exact failed worker recovery; preserve existing model selection, credentials, no shared cache/settings removal, no desktop response/capture restart. Phone USB2C181FDH2000W3/device2c657c4c-bf98-4bf4-b0a0-cb11fb62d595 verified by native device discovery, no current review blocker. No real mic/private capture/model-agent test send. Watch installation still deferred.
+
 ## Disable OS snapping (2026-10-18, chat01a14e77)
 User requests no Windows snap resizing; retain explicitly requested manual resizing/presets. Own only main BrowserWindow maximizable:false on Windows and existing window-configuration regression. No global OS settings, thick-frame removal or manual-resize removal. Supersede exact waiting18472 only if still waiting, new candidate preserving previous features; no response/board restart.
 

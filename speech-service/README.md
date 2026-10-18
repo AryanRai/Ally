@@ -22,6 +22,8 @@ Then launch Ally and select **Voice → Connect**. Ally starts the worker and wa
 
 Ally reads or creates a bearer token in `%APPDATA%\glass-pip-chat\watch-bridge.json`. This file is local and must not be committed. The worker binds only `127.0.0.1:18766`. No Google Cloud account or API key is needed for the current local backend.
 
+Ally stores downloaded transcription models under `%LOCALAPPDATA%\Ally\speech\models` and transfer files under the neighbouring `xet` folder. This avoids shared Hugging Face cache junctions pointing at disconnected drives. Set `ALLY_STT_CACHE` to choose another model cache, or `HF_XET_CACHE` for an explicit transfer cache. Neither setting changes global Hugging Face configuration or removes existing models. A model name/path supplied through `ALLY_STT_MODEL` is retained. On other systems the default is `~/.local/share/Ally/speech/models`.
+
 For manual diagnosis, after closing Ally's managed worker:
 
 ```powershell
