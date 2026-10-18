@@ -1,51 +1,104 @@
-import {app,BrowserWindow,nativeImage,desktopCapturer} from 'electron';
-let captureCalls=0; const getSources=desktopCapturer.getSources.bind(desktopCapturer); desktopCapturer.getSources=async (...args)=>{captureCalls++;return getSources(...args);};
+// Isolated Electron QA. Synthetic pixels + real IPC/MCP; no model, mic or production connections.
+import { app, BrowserWindow, desktopCapturer, nativeImage, screen } from 'electron';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import {fileURLToPath,pathToFileURL} from 'node:url';
+import { randomBytes } from 'node:crypto';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import assert from 'node:assert/strict';
-const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
-const temp=fs.mkdtempSync(path.join(os.tmpdir(),'ally-circle-draw-check-'));
-app.setPath('userData',temp);
-let main,capture; app.on("web-contents-created",(_,contents)=>{contents.on("preload-error",(_,file,error)=>console.error("PRELOAD",file,error.message));contents.on("console-message",(_,level,message)=>console.log("RENDERER",level,message.slice(0,200)));contents.on("render-process-gone",(_,details)=>console.log("GONE",details.reason));});
-const preload=path.join(temp,'test.cjs');
-fs.writeFileSync(preload,`const {contextBridge,ipcRenderer}=require('electron');let last=null;ipcRenderer.on('circle:ask',(_,ask)=>last=ask);contextBridge.exposeInMainWorld('check',{chat:id=>ipcRenderer.invoke('circle:chat',id),circle:()=>ipcRenderer.invoke('circle:start'),last:()=>last,start:(chat,id)=>ipcRenderer.invoke('tutor:start',chat,undefined,id),end:id=>ipcRenderer.invoke('tutor:end',id)});`);
-const deadline=setTimeout(()=>{console.error('FAIL timed out');if(capture)fs.rmSync(capture.imagePath,{force:true});app.exit(1);},45000);
-async function wait(read){const until=Date.now()+6000;while(Date.now()<until){const value=await read();if(value)return value;await new Promise(resolve=>setTimeout(resolve,40));}throw Error('UI state timed out');}
-async function run(){ try {
- console.log("CHECK importing circle"); const circleModule=await import(pathToFileURL(path.join(root,'dist/electron/capture/circle.js')));
- console.log("CHECK importing tutor"); const tutorModule=await import(pathToFileURL(path.join(root,'dist/electron/visualTutor/ipc.js')));
- circleModule.registerCircleIpc(()=>main??null);tutorModule.registerVisualTutorIpc(()=>main??null);
- console.log("CHECK handlers registered"); await app.whenReady(); console.log("CHECK ready");
- main=new BrowserWindow({show:false,width:400,height:250,webPreferences:{preload,contextIsolation:true,nodeIntegration:false,sandbox:true}});
- await main.loadURL('data:text/html,<html><body>Isolated Circle integration check</body></html>'); console.log('CHECK main loaded');
- await main.webContents.executeJavaScript("window.check.chat('circle-test-chat').then(()=>window.check.circle())");
- console.log("CHECK circle opened"); const circle=BrowserWindow.getAllWindows().find(win=>win.id!==main.id);assert.ok(circle);
- console.log("CHECK circle document",circle.webContents.getURL(),circle.isVisible(),circle.webContents.isLoading()); console.log("CHECK circle globals",await circle.webContents.executeJavaScript("({ready:document.readyState,pip:typeof window.pip,canvas:!!document.querySelector('canvas')})")); const original=nativeImage.createFromDataURL(await circle.webContents.executeJavaScript('window.pip.circle.getShot()'));
- console.log('CHECK pixels loaded'); await circle.webContents.executeJavaScript(`(()=>{const canvas=document.querySelector('canvas');canvas.setPointerCapture=()=>{};for(const [type,x,y] of [['pointerdown',100,100],['pointermove',200,150],['pointermove',400,300],['pointerup',400,300]])canvas.dispatchEvent(new PointerEvent(type,{bubbles:true,clientX:x,clientY:y,pointerId:1}));return true;})()`);
- console.log("CHECK pointer sent"); await wait(()=>circle.webContents.executeJavaScript("[...document.querySelectorAll('button')].some(button=>button.textContent==='Draw to explain')"));
- void circle.webContents.executeJavaScript("[...document.querySelectorAll('button')].find(button=>button.textContent==='Draw to explain').click()").catch(()=>{});
- console.log("CHECK clicked draw"); const ask=await wait(()=>main.webContents.executeJavaScript('window.check.last()'));
- assert.equal(ask.chatId,'circle-test-chat');assert.ok(ask.tutorCaptureId);assert.equal(ask.imagePath,'');
- await assert.rejects(main.webContents.executeJavaScript(`window.check.start('another-chat',${JSON.stringify(ask.tutorCaptureId)})`),/another chat/);
- console.log("CHECK handoff"); capture=await main.webContents.executeJavaScript(`window.check.start('circle-test-chat',${JSON.stringify(ask.tutorCaptureId)})`);
- assert.equal(capture.board.chatId,'circle-test-chat');assert.ok(capture.board.focus);
- const size=original.getSize(),bounds=capture.board.bounds;
- const expected={x:Math.round(90*size.width/bounds.width),y:Math.round(90*size.height/bounds.height),width:Math.round(320*size.width/bounds.width),height:Math.round(220*size.height/bounds.height)};
- assert.deepEqual(nativeImage.createFromPath(capture.imagePath).getSize(),{width:expected.width,height:expected.height});
- assert.equal(captureCalls,1,'drawing reuses the original screenshot without a second capture'); assert.deepEqual(nativeImage.createFromPath(capture.imagePath).toBitmap(),original.crop(expected).toBitmap(),'the original selected pixels are reused');
- assert.equal(capture.board.focus.x,90/bounds.width*1000);
- await assert.rejects(main.webContents.executeJavaScript(`window.check.start('circle-test-chat',${JSON.stringify(ask.tutorCaptureId)})`),/expired/);
- const overlay=BrowserWindow.getAllWindows().find(win=>win.id!==main.id);
- assert.equal(await overlay.webContents.executeJavaScript('typeof window.pip'),'undefined');
- const local=await overlay.webContents.executeJavaScript('window.tutor.overlay()');
- assert.ok(nativeImage.createFromDataURL(local.screenshot).getSize().width>expected.width,'freeze retains the full display locally');
- await main.webContents.executeJavaScript(`window.check.end(${JSON.stringify(capture.board.id)})`);
- console.log(JSON.stringify({status:'PASS',circleAction:true,originalPixels:true,selectedCropOnly:true,displayFocus:true,sameChat:true,oneTimeHandoff:true,restrictedOverlay:true}));
- fs.rmSync(capture.imagePath,{force:true});clearTimeout(deadline);app.exit(0);
-} catch(error){console.error('FAIL',error.stack??error);if(capture)fs.rmSync(capture.imagePath,{force:true});clearTimeout(deadline);app.exit(1);}
-
-
-}
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'ally-unified-selection-'));
+app.setPath('userData', temp);
+const token = randomBytes(24).toString('hex');
+fs.writeFileSync(path.join(temp, 'ally-chats-mcp.json'), JSON.stringify({ token, port: 31369 }));
+let captures = 0;
+desktopCapturer.getSources = async () => {
+  captures++;
+  return screen.getAllDisplays().map(display => {
+    const width = Math.round(display.bounds.width * display.scaleFactor), height = Math.round(display.bounds.height * display.scaleFactor);
+    const pixels = Buffer.alloc(width * height * 4);
+    for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
+      const i = (y * width + x) * 4, grid = x % 100 < 2 || y % 100 < 2;
+      pixels[i] = grid ? 95 : 40; pixels[i + 1] = grid ? 85 : 35; pixels[i + 2] = grid ? 70 : 28; pixels[i + 3] = 255;
+    }
+    return { display_id: String(display.id), thumbnail: nativeImage.createFromBitmap(pixels, { width, height }) };
+  });
+};
+let main, capture;
+const preload = path.join(temp, 'main.cjs');
+fs.writeFileSync(preload, `const {contextBridge,ipcRenderer}=require('electron');let last=null;ipcRenderer.on('circle:ask',(_,value)=>last=value);contextBridge.exposeInMainWorld('check',{chat:(id,title)=>ipcRenderer.invoke('circle:chat',id,title),circle:()=>ipcRenderer.invoke('circle:start'),last:()=>last,start:(id,capture)=>ipcRenderer.invoke('tutor:start',id,undefined,capture),end:id=>ipcRenderer.invoke('tutor:end',id),show:id=>ipcRenderer.invoke('tutor:show',id),state:()=>ipcRenderer.invoke('tutor:state')});`);
+const deadline = setTimeout(() => { console.error('FAIL timeout'); app.exit(1); }, 60000);
+const wait = async read => { for (let i = 0; i < 120; i++) { const value = await read(); if (value) return value; await new Promise(resolve => setTimeout(resolve, 40)); } throw Error('UI state timed out'); };
+const js = (win, text) => win.webContents.executeJavaScript(text);
+async function run() { try {
+  const circleModule = await import(pathToFileURL(path.join(root, 'dist/electron/capture/circle.js')));
+  const tutorModule = await import(pathToFileURL(path.join(root, 'dist/electron/visualTutor/ipc.js')));
+  const { registerChatsMcp } = await import(pathToFileURL(path.join(root, 'dist/electron/chatsMcp/index.js')));
+  circleModule.registerCircleIpc(() => main ?? null); tutorModule.registerVisualTutorIpc(() => main ?? null); registerChatsMcp(() => main ?? null);
+  await app.whenReady();
+  main = new BrowserWindow({ show: false, width: 360, height: 240, webPreferences: { preload, contextIsolation: true, nodeIntegration: false, sandbox: true } });
+  await main.loadURL('data:text/html,<html><body>Isolated Ally selection QA</body></html>');
+  const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
+  const originalBounds = { x: display.bounds.x + 30, y: display.bounds.y + 30, width: 360, height: 240 }; main.setBounds(originalBounds);
+  const config = JSON.parse(fs.readFileSync(path.join(temp, 'ally-chats-mcp.json')));
+  const rpc = async (name, args) => (await (await fetch(`http://127.0.0.1:${config.port}/mcp/${token}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } }) })).json()).result;
+  for (const shape of ['Freehand', 'Rectangle']) {
+    const before = captures;
+    await js(main, "window.check.chat('exact-chat','Design review').then(()=>window.check.circle())");
+    const selection = BrowserWindow.getAllWindows().find(win => win.id !== main.id);
+    await wait(() => js(selection, "!!document.querySelector('[aria-label=\"Ally screen selection\"]') && !!document.querySelector('img')"));
+    assert.deepEqual(await js(selection, 'Object.keys(window.pip)'), ['circle']);
+    const context = await js(selection, 'window.pip.circle.context()'); assert.equal(context.title, 'Design review'); assert.equal(context.anchor.x, 30);
+    assert.equal(await js(selection, "document.body.textContent.includes('Draw to explain')"), false);
+    const original = nativeImage.createFromDataURL(await js(selection, 'window.pip.circle.getShot()'));
+    await js(selection, `[...document.querySelectorAll('button')].find(b=>b.textContent==='${shape}').click()`);
+    await js(selection, `(()=>{const canvas=document.querySelector('canvas');canvas.setPointerCapture=()=>{};for(const [type,x,y] of [['pointerdown',450,200],['pointermove',650,250],['pointermove',800,400],['pointerup',800,400]])canvas.dispatchEvent(new PointerEvent(type,{bubbles:true,clientX:x,clientY:y,pointerId:1}));})()`);
+    await wait(() => js(selection, "!!document.querySelector('[aria-label=\"Question about selection\"]')"));
+    assert.equal(await js(selection, "document.activeElement.getAttribute('aria-label')"), 'Question about selection');
+    await js(selection, 'Promise.all(document.getAnimations().map(a=>a.finished.catch(()=>{})))');
+    fs.writeFileSync(path.join(temp, `${shape.toLowerCase()}.png`), (await selection.webContents.capturePage()).toPNG());
+    void js(selection, "[...document.querySelectorAll('button')].find(b=>b.textContent==='Explain').click()").catch(() => {});
+    const ask = await wait(async () => { const value = await js(main, 'window.check.last()'); return value?.tutorCaptureId && value.tutorCaptureId !== capture?.token ? value : null; });
+    assert.equal(ask.chatId, 'exact-chat'); assert.equal(ask.imagePath, '');
+    await assert.rejects(js(main, `window.check.start('other-chat',${JSON.stringify(ask.tutorCaptureId)})`), /another chat/);
+    capture = await js(main, `window.check.start('exact-chat',${JSON.stringify(ask.tutorCaptureId)})`); capture.token = ask.tutorCaptureId;
+    const overlay = BrowserWindow.getAllWindows().find(win => win.id !== main.id);
+    assert.equal(overlay.isVisible(), false, 'selection alone does not launch drawing UI'); assert.equal(capture.board.frozen, true);
+    assert.equal(captures - before, 1, 'selection uses one capture');
+    const padding = shape === 'Freehand' ? 10 : 0, scale = original.getSize().width / display.bounds.width;
+    const rect = { x: Math.round((450-padding)*scale), y: Math.round((200-padding)*scale), width: Math.round((350+padding*2)*scale), height: Math.round((200+padding*2)*scale) };
+    assert.deepEqual(nativeImage.createFromPath(capture.imagePath).toBitmap(), original.crop(rect).toBitmap());
+    await assert.rejects(js(main, `window.check.start('exact-chat',${JSON.stringify(ask.tutorCaptureId)})`), /expired/);
+    const step = { id: 'explanation', title: 'A drawing in your chat', explanation: 'The arrow stays aligned with the original selected pixels.', marks: [{ id: 'arrow', kind: 'arrow', color: 'mint', points: [{ x: capture.board.focus.x, y: capture.board.focus.y }, { x: capture.board.focus.x + capture.board.focus.width, y: capture.board.focus.y + capture.board.focus.height }] }] };
+    const draw = await rpc('visual_tutor_draw', { boardId: capture.board.id, step }); assert.ok(!draw.isError, JSON.stringify(draw));
+    await wait(() => overlay.isVisible()); await wait(() => js(overlay, "document.querySelector('h1')?.textContent === 'A drawing in your chat'"));
+    await wait(() => js(overlay, "document.querySelector('.tutor-frozen')?.naturalWidth > 0 && document.querySelectorAll('svg.tutor-marks > g').length === 1"));
+    await js(overlay, 'Promise.all(document.getAnimations().map(a=>a.finished.catch(()=>{}))).then(()=>new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r))))');
+    const painted = await overlay.webContents.capturePage();
+    const pixels = painted.toBitmap(); let mint = 0;
+    for (let i = 0; i < pixels.length; i += 4) if (pixels[i+3] > 100 && pixels[i+1] > 130 && pixels[i+1] > pixels[i]*1.1 && pixels[i+1] > pixels[i+2]*1.1) mint++;
+    assert.ok(mint > 30, `Drawing must paint visible pixels (${mint})`);
+    fs.writeFileSync(path.join(temp, `drawing-${shape.toLowerCase()}.png`), painted.toPNG());
+    await js(overlay, `window.tutor.action(${JSON.stringify(capture.board.id)},'chat')`); assert.equal(overlay.isVisible(), false); assert.equal(main.isVisible(), true);
+    await rpc('visual_tutor_draw', { boardId: capture.board.id, step }); assert.equal(overlay.isVisible(), false, 'late drawing updates respect return to chat');
+    await js(main, `window.check.show(${JSON.stringify(capture.board.id)})`); assert.equal(overlay.isVisible(), true);
+    await js(main, `window.check.end(${JSON.stringify(capture.board.id)})`);
+    assert.ok((await rpc('visual_tutor_draw', { boardId: capture.board.id, step })).isError, 'ending revokes late tool calls');
+    fs.rmSync(capture.imagePath, { force: true });
+  }
+  const beforeCancel = await js(main, 'window.check.last()');
+  const boundsBeforeCancel = main.getBounds();
+  await js(main, 'window.check.circle()');
+  const cancel = BrowserWindow.getAllWindows().find(win => win.id !== main.id);
+  await wait(() => js(cancel, "!!document.querySelector('[aria-label=\"Cancel selection\"]')"));
+  void js(cancel, "window.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape'}))").catch(() => {});
+  await wait(() => BrowserWindow.getAllWindows().length === 1);
+  assert.deepEqual(main.getBounds(), boundsBeforeCancel); assert.equal(main.isVisible(), true); assert.deepEqual(await js(main, 'window.check.last()'), beforeCancel);
+  // Inspect the actual engine method without constructing capture/transcription services.
+  const { PerceptionEngine } = await import(pathToFileURL(path.join(root, 'dist/electron/perception/engine.js')));
+  const engine = Object.create(PerceptionEngine.prototype); engine.session = { state: 'running', sessionId: 'original' };
+  await assert.rejects(engine.start({ sessionId: 'other' }), /End the current meeting/); assert.equal(engine.session.sessionId, 'original');
+  console.log(JSON.stringify({ status: 'PASS', freehand: true, rectangle: true, exactCrop: true, deferredDrawing: true, sameChat: true, returnToChat: true, escape: true, protectedMeeting: true, previews: temp }));
+  clearTimeout(deadline); app.exit(0);
+} catch (error) { console.error(error.stack ?? error); if (capture?.imagePath) fs.rmSync(capture.imagePath, { force: true }); clearTimeout(deadline); app.exit(1); } }
 void run();

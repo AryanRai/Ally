@@ -31,7 +31,7 @@ function ObservationRow({ o }: { o: Observation }) {
 /** Everything the realtime pipeline is doing, for tuning and debugging. */
 export default function PerceptionDebug({ open, onOpenChange, perception }: { open: boolean; onOpenChange: (o: boolean) => void; perception: PerceptionState }) {
   const { status, observations, decisions, turns, api } = perception;
-  const [tab, setTab] = useState<Tab>('pipeline');
+  const [tab, setTab] = useState<Tab>('settings');
   const [settings, setSettings] = useState<PublicPerceptionSettings | null>(null);
   const [key, setKey] = useState('');
   const [saveError, setSaveError] = useState('');
@@ -58,7 +58,7 @@ export default function PerceptionDebug({ open, onOpenChange, perception }: { op
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="flex max-h-[85vh] max-w-2xl flex-col gap-2">
-        <DialogHeader><DialogTitle>Realtime diagnostics</DialogTitle></DialogHeader>
+        <DialogHeader><DialogTitle>Meeting settings & diagnostics</DialogTitle></DialogHeader>
         <div className="flex gap-1 border-b border-border pb-1.5">
           {(['pipeline', 'timeline', 'decisions', 'turns', 'settings'] as Tab[]).map(t => (
             <button key={t} type="button" onClick={() => setTab(t)} className={cn('rounded px-2 py-0.5 text-xs capitalize', tab === t ? 'bg-white/12 text-foreground' : 'text-muted-foreground hover:bg-white/5')}>{t}</button>
@@ -105,6 +105,7 @@ export default function PerceptionDebug({ open, onOpenChange, perception }: { op
           )) : <p className="text-xs text-muted-foreground">No agent turns yet.</p>)}
           {tab === 'settings' && settings && (
             <div className="space-y-3">
+              <label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={!!status?.quiet} onChange={e => { void api?.setQuiet(e.target.checked).catch(() => setSaveError('Could not change quiet mode.')); }} />Quiet meeting notes</label>
               {saveError && <p role="alert" className="text-xs text-destructive">{saveError}</p>}
               <div className="space-y-1.5">
                 <p className="px-label">Relevance provider</p>

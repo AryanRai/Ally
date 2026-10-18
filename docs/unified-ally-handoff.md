@@ -38,3 +38,7 @@ No live model test prompts, recording or real approval clicks were used to verif
 - Keep shared source `dist` separate from installed production runtime. Validate new UI using an isolated build before any coordinated deployment.
 
 The local `.ally/settings/mcp.json.bak` and nested third-party `open-ptc-agent/` checkout are not part of Ally's source publication. Preserve them locally.
+
+## Implementation result
+
+The unified UI is implemented and tested on `feat/unified-ally-ui`. See [unified-ally-ui.md](unified-ally-ui.md) for behavior, verification and runtime status. The validation build is not deployed; coordinate activation with active chats and the separate message-readability work.

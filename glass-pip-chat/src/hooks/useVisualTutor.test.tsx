@@ -56,7 +56,7 @@ describe('visual tutor chat integration', () => {
     const send=vi.fn().mockResolvedValue(undefined); const {result}=renderHook(()=>useVisualTutor('chat-a',send));
     await act(async()=>{await result.current.start('Draw the selection',undefined,'capture-token','chat-a');});
     expect(tutor.start).toHaveBeenCalledWith('chat-a',undefined,'capture-token');
-    expect(send.mock.calls[0][0]).toContain('only the circled crop');
+    expect(send.mock.calls[0][0]).toContain('only the selected crop');
     expect(send.mock.calls[0][0]).toContain('"x":100');
   });
   it('refuses a Circle result when its originating chat is no longer selected', async () => {

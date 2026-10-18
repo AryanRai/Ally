@@ -4,6 +4,7 @@ import { MessageResponse } from '@/components/ai-elements/message';
 import { cn } from '@/lib/utils';
 import type { PerceptionState } from '@/hooks/usePerception';
 import CardUi from './CardUi';
+import type { Chat } from '@/types/chat';
 
 const VISIBLE = new Set(['desktop', 'phone', 'watch']);
 const MAX_SHOWN = 3;
@@ -12,12 +13,15 @@ const MAX_SHOWN = 3;
  * Proactive notes from the realtime session, stacked over the transcript.
  * Passive notes stay in the "earlier" list instead of popping up.
  */
-export default function ContextCards({ perception }: { perception: PerceptionState }) {
+export default function ContextCards({ perception, chat }: { perception: PerceptionState; chat?: Chat | null }) {
   const { cards, dismiss, api } = perception;
   const [expanded, setExpanded] = useState<string | null>(null);
   const [showEarlier, setShowEarlier] = useState(false);
-  const live = cards.filter(c => !c.dismissed && VISIBLE.has(c.priority)).slice(-MAX_SHOWN).reverse();
-  const earlier = cards.filter(c => c.dismissed || !VISIBLE.has(c.priority)).reverse();
+  const session = perception.status?.session;
+  const owned = session && chat?.agent?.provider === session.provider && chat.agent.sessionId === session.sessionId
+    ? cards.filter(card => card.sessionId === session.sessionId && Date.parse(card.at) >= Date.parse(session.startedAt)) : [];
+  const live = owned.filter(c => !c.dismissed && VISIBLE.has(c.priority)).slice(-MAX_SHOWN).reverse();
+  const earlier = owned.filter(c => c.dismissed || !VISIBLE.has(c.priority)).reverse();
   if (!live.length && !earlier.length) return null;
 
   return (
