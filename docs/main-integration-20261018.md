@@ -15,3 +15,13 @@ Validation and frozen artifacts are recorded in the new `Exo/.ally-main-integrat
 Deployment targets desktop plus the existing USB phone `2C181FDH2000W3`, with data/pairing and assistant settings preserved. Watch source/APK is included in main, but watch installation remains deferred by the user's earlier explicit choice. Activation checks the exact predecessor, frozen hashes, other native/device responses, capture, pending decisions and phone identity before changing the runtime. Native Codex/Claude and speech workers must not be killed as descendants. No private screen capture, microphone recording, real model test send or approval decision is used as verification.
 
 The candidate's `deployment.json` records actual activation state; a merged commit alone does not mean desktop or phone is live. Physical power-gesture/screen callback validation remains a manual check using a harmless synthetic page.
+
+## Verified integration result
+
+PR #33 merged as `a6e4a168d3895241929acbba2cce8133749d880a`. All 475 source files in the isolated candidate match merged main; 447 build/APK/updater artifacts have frozen hashes. Full514 desktop tests pass (four opt-in profiles skipped), TypeScript/Vite/Electron builds pass, phone56/watch29 JVM tests pass, both APKs and phone lint pass. A separate25-test affected run includes the tiny monitor and metadata-lane isolation regressions.
+
+Vercel's preview check fails because its configured `ally-remote-service` root is absent from both the previous and current Git trees. Its log fails before the application build starts. No hosting settings were changed; the locally tested desktop/Android app integration was merged as requested.
+
+Desktop-only helper12936 was armed against exact predecessor34808 after hash/source checks. It waits for every response and pending decision and for capture to stop, then verifies local/cloud health after activation. It expires after30 minutes and stops if predecessor/port ownership changes. No APK installation is included in that helper. Final status is `Exo/.ally-main-integration-20261018/deployment.json`.
+
+Connected `device_list` and `phone_control_devices` checks did not execute: automatic approval review reported its usage limit, explicitly not a safety determination. There is no pending approval. Phone deployment is blocked until that review capability is restored; no alternate phone access was used to bypass the failed checks. Watch installation remains explicitly deferred.
