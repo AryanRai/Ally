@@ -35,8 +35,12 @@ export default function FlowField({ state }: { state: FlowFieldState }) {
 
     const resize = () => {
       const { width, height } = canvas.getBoundingClientRect();
-      canvas.width = Math.round(width * devicePixelRatio);
-      canvas.height = Math.round(height * devicePixelRatio);
+      const nextWidth = Math.round(width * devicePixelRatio), nextHeight = Math.round(height * devicePixelRatio);
+      // Assigning even an unchanged dimension clears and reallocates the canvas.
+      if (canvas.width !== nextWidth || canvas.height !== nextHeight) {
+        if (canvas.width !== nextWidth) canvas.width = nextWidth;
+        if (canvas.height !== nextHeight) canvas.height = nextHeight;
+      }
       ctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
     };
     const observer = new ResizeObserver(resize);

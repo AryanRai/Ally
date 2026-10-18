@@ -4,6 +4,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { exec } from 'node:child_process';
+import { boundsPersistence } from './boundsPersistence.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -12,6 +13,7 @@ let isQuitting = false;
 
 let win: BrowserWindow | null = null;
 let tray: Tray | null = null;
+let resizeCompletion: ReturnType<typeof setTimeout> | undefined;
 const BOUNDS_FILE = path.join(app.getPath('userData'), 'window-bounds.json');
 
 let currentTheme: 'light' | 'dark' = 'dark';
@@ -80,6 +82,7 @@ function saveBounds(): void {
   const bounds = win.getBounds();
   fs.writeFileSync(BOUNDS_FILE, JSON.stringify(bounds));
 }
+const pendingBounds = boundsPersistence(saveBounds);
 
 function loadTheme(): 'light' | 'dark' {
   try {
@@ -243,15 +246,16 @@ export async function createWindow(): Promise<void> {
   }
 
   // Save window bounds on move and resize
-  w.on('resize', saveBounds);
-  w.on('move', saveBounds);
+  w.on('resize', pendingBounds.schedule);
+  w.on('move', pendingBounds.schedule);
+  app.once('before-quit', pendingBounds.flush);
   
   // Prevent actual window close, minimize to tray instead
   w.on('close', (event) => {
     if (!isQuitting) {
       event.preventDefault();
       w?.hide();
-      saveBounds();
+      if (!pendingBounds.flush()) saveBounds();
     }
   });
 
@@ -386,12 +390,14 @@ export function registerWindowIpc(): void {
   });
 
   ipcMain.on('pip:hide', () => {
+    pendingBounds.flush();
     if (win) win.hide();
   });
 
   ipcMain.on('pip:toggle', () => {
     if (!win) return;
     if (win.isVisible()) {
+      pendingBounds.flush();
       win.hide();
     } else {
       win.show();
@@ -408,14 +414,14 @@ export function registerWindowIpc(): void {
 
   // Window resizing handlers
   ipcMain.on('window:resize', (_, { width, height }) => {
-    console.log('Received resize request:', width, 'x', height);
     if (!win) return;
+    if (!Number.isFinite(width) || !Number.isFinite(height)) return;
+    if (resizeCompletion) clearTimeout(resizeCompletion);
 
     // Get current position and size
     const [x, y] = win.getPosition();
     const [currentWidth, currentHeight] = win.getSize();
 
-    console.log('Current window size:', currentWidth, 'x', currentHeight);
 
     // Ensure dimensions are within bounds
     const constrainedWidth = Math.max(120, Math.min(800, width));
@@ -430,21 +436,21 @@ export function registerWindowIpc(): void {
       win.setSize(constrainedWidth, constrainedHeight, true);
 
       // Set position (may be adjusted to keep window on screen)
-      win.setPosition(newX, newY);
-
-      console.log('Window resized to:', constrainedWidth, 'x', constrainedHeight, 'at position:', newX, 'x', newY);
+      if (newX !== x || newY !== y) win.setPosition(newX, newY);
 
       // Verify the resize worked and save bounds
-      setTimeout(() => {
-        const [newWidth, newHeight] = win!.getSize();
-        console.log('Actual window size after resize:', newWidth, 'x', newHeight);
-        saveBounds();
+      const owner = win;
+      resizeCompletion = setTimeout(() => {
+        resizeCompletion = undefined;
+        if (owner.isDestroyed() || owner !== win) return;
+        const [newWidth, newHeight] = owner.getSize();
+        pendingBounds.schedule();
 
         // Notify renderer that resize is complete
-        win!.webContents.send('window:resize-complete', { width: newWidth, height: newHeight });
+        owner.webContents.send('window:resize-complete', { width: newWidth, height: newHeight });
       }, 100);
     } else {
-      console.log('No resize needed - dimensions unchanged');
+      win.webContents.send('window:resize-complete', { width: currentWidth, height: currentHeight });
     }
   });
 

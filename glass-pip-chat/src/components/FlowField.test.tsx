@@ -1,0 +1,26 @@
+import { act, cleanup, render } from '@testing-library/react';
+import { afterEach, expect, it, vi } from 'vitest';
+import FlowField from './FlowField';
+afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+it('keeps the animated field but avoids unchanged backing-store reallocations during resize', () => {
+  let resize = () => {};
+  let width = 400;
+  const disconnect = vi.fn();
+  vi.stubGlobal('devicePixelRatio', 2);
+  vi.stubGlobal('ResizeObserver', class { constructor(callback: () => void) { resize = callback; } observe() {} disconnect = disconnect; });
+  vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1));
+  vi.stubGlobal('cancelAnimationFrame', vi.fn());
+  const context = { setTransform: vi.fn(), clearRect: vi.fn(), beginPath: vi.fn(), moveTo: vi.fn(), lineTo: vi.fn(), stroke: vi.fn() };
+  vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(context as any);
+  vi.spyOn(HTMLCanvasElement.prototype, 'getBoundingClientRect').mockImplementation(() => ({ width, height: 200 } as DOMRect));
+  const widthSet = vi.spyOn(HTMLCanvasElement.prototype, 'width', 'set');
+  const heightSet = vi.spyOn(HTMLCanvasElement.prototype, 'height', 'set');
+  const { unmount } = render(<FlowField state="idle" />);
+  expect(context.stroke).toHaveBeenCalled();
+  widthSet.mockClear(); heightSet.mockClear();
+  act(() => { for (let i = 0; i < 100; i++) resize(); });
+  expect(widthSet).not.toHaveBeenCalled(); expect(heightSet).not.toHaveBeenCalled();
+  width = 480; act(() => resize());
+  expect(widthSet).toHaveBeenCalledWith(960); expect(heightSet).not.toHaveBeenCalled();
+  unmount(); expect(disconnect).toHaveBeenCalled(); expect(cancelAnimationFrame).toHaveBeenCalledWith(1);
+});
