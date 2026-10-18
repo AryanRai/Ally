@@ -1,5 +1,8 @@
 # Ally collaboration scratchpad
 
+## Disable OS snapping (2026-10-18, chat01a14e77)
+User requests no Windows snap resizing; retain explicitly requested manual resizing/presets. Own only main BrowserWindow maximizable:false on Windows and existing window-configuration regression. No global OS settings, thick-frame removal or manual-resize removal. Supersede exact waiting18472 only if still waiting, new candidate preserving previous features; no response/board restart.
+
 ## Compact pill controls, reply browsing and responsiveness (2026-10-18, chat01a14e77)
 User requests intermittent hang investigation, threshold scroll to older replies inside current bounded card, less vertical chrome with Screen/Clipboard/Agents side by side and no separate Recent messages row, explicit screen auto-attach on submitted queries. Own stable chat snapshots/memoized timeline if evidence supports, collapsed reader history/navigation and compact control layout, finite screen capture IPC and exact-query text/voice routing/tests. Preserve UI style/card height, all history reachability/decisions, drafts/status, explicit capture opt-in and OS restrictions. No real/private capture/model/mic tests or device installs. Supersede exact waiting9236 only; new candidate and guarded activation, no live restart over responses/boards.
 

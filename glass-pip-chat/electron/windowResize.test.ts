@@ -1,11 +1,12 @@
 import { afterEach, expect, it, vi } from 'vitest';
-const fixture = vi.hoisted(() => ({ events: new Map<string, Function>(), ipc: new Map<string, Function>(), app: new Map<string, Function>(), writes: vi.fn(), send: vi.fn(), position: vi.fn(), width: 400, height: 560 }));
+const fixture = vi.hoisted(() => ({ options: {} as any, events: new Map<string, Function>(), ipc: new Map<string, Function>(), app: new Map<string, Function>(), writes: vi.fn(), send: vi.fn(), position: vi.fn(), width: 400, height: 560 }));
 vi.mock('node:fs', () => ({ default: { readFileSync: () => { throw Error('isolated fixture'); }, writeFileSync: fixture.writes } }));
 vi.mock('electron', () => ({
   app: { getPath: () => 'synthetic-userdata', once: (name: string, fn: Function) => fixture.app.set(name, fn) },
   ipcMain: { on: (name: string, fn: Function) => fixture.ipc.set(name, fn), handle: vi.fn() },
   screen: { getDisplayNearestPoint: () => ({ workArea: { x: 0, y: 0, width: 2000, height: 2000 } }) },
   BrowserWindow: class {
+    constructor(options: unknown) { fixture.options = options; }
     webContents = { send: fixture.send };
     on(name: string, fn: Function) { const old = fixture.events.get(name); fixture.events.set(name, (...args: unknown[]) => { old?.(...args); fn(...args); }); }
     once() {}
@@ -24,6 +25,8 @@ it('keeps native resize bursts off disk and acknowledges the final/no-op request
   vi.useFakeTimers();
   const { createWindow, registerWindowIpc } = await import('./window');
   await createWindow(); registerWindowIpc();
+  expect(fixture.options.resizable).toBe(true);
+  if (process.platform === 'win32') expect(fixture.options.maximizable).toBe(false);
   for (let i = 0; i < 1000; i++) fixture.events.get('resize')!();
   expect(fixture.writes).not.toHaveBeenCalled();
   vi.advanceTimersByTime(150);
