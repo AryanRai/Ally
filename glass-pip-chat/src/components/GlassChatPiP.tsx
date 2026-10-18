@@ -31,8 +31,13 @@ import PerceptionDebug from './perception/PerceptionDebug';
 import { usePerception } from '../hooks/usePerception';
 import { SpeechControls } from './SpeechControls';
 import CollapsedHeader from './chat/CollapsedHeader';
+import { selectedSessionRunning } from '@/lib/compactPresentation';
+import { useVisualTutor } from '@/hooks/useVisualTutor';
+import VisualTutorControls from './visualTutor/VisualTutorControls';
+import CollapsedMeetingControls, { meetingReply } from './chat/CollapsedMeetingControls';
 import ExpandedHeader from './chat/ExpandedHeader';
 import ChatInput from './chat/ChatInput';
+import MessageQueueStack from './chat/MessageQueueStack';
 import ChatMessage, { AgentReply } from './chat/ChatMessage';
 import { Conversation, ConversationContent, ConversationEmptyState, ConversationScrollButton } from '@/components/ai-elements/conversation';
 import { Message, MessageContent } from '@/components/ai-elements/message';
@@ -42,10 +47,6 @@ const MAX_CONTENT = { width: 850, height: 800 }; // larger windows overflow the 
 const COLLAPSED = {
   widthBySize: { S: 320, M: 360, L: 420 } as Record<string, number>,
   baseHeight: 96,
-  extrasHeight: 40,
-  previewHeight: 340,
-  contextHeight: 96,
-  responseHeight: 140,
 };
 
 /** The glass PiP overlay: chat sidebar, agent conversation, voice and clipboard context. */
@@ -75,23 +76,34 @@ export default function GlassChatPiP() {
       : undefined,
   });
 
-  const [input, setInput] = useState('');
-  const [quickInput, setQuickInput] = useState('');
+  const [drafts, setDrafts] = useState<Record<string, string>>(() => {
+    try { return JSON.parse(localStorage.getItem('ally-chat-drafts') || '{}'); } catch { return {}; }
+  });
+  const draftId = chats.activeChat?.id ?? '';
+  const input = drafts[draftId] ?? '';
+  const setInput = (value: string | ((previous: string) => string)) => setDrafts(all => {
+    const next = { ...all, [draftId]: typeof value === 'function' ? value(all[draftId] ?? '') : value };
+    localStorage.setItem('ally-chat-drafts', JSON.stringify(next));
+    return next;
+  });
+  // Both sizes edit the same draft, including a send restored after failure.
+  const quickInput = input;
+  const setQuickInput = setInput;
   const [inputHistory, setInputHistory] = useState<string[]>([]);
   const [showSettings, setShowSettings] = useState(false);
   const [showModelSelector, setShowModelSelector] = useState(false);
   const [showSpeechControls, setShowSpeechControls] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
-  const [isPreviewExpanded, setIsPreviewExpanded] = useState(false);
+  const [collapsedBodyHeight, setCollapsedBodyHeight] = useState(76);
   const [isContextExpanded, setIsContextExpanded] = useState(false);
 
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const activeChat = chats.activeChat;
   const messages = activeChat?.messages ?? [];
+  const meetingTurn = meetingReply(perception, activeChat);
+  const meetingWorking = meetingTurn?.state === 'running' || meetingTurn?.state === 'queued';
   const { isTyping, runningChatId } = conversation;
   const activeIsWorking = isTyping && activeChat?.id === runningChatId;
-  const selectedChatId = useRef(activeChat?.id);
-  selectedChatId.current = activeChat?.id;
   const currentResponse = activeIsWorking ? conversation.currentResponse : '';
   const streamingSegments = activeIsWorking ? conversation.streamingSegments : [];
   const thinkingText = activeIsWorking ? conversation.thinkingText : '';
@@ -101,12 +113,14 @@ export default function GlassChatPiP() {
   const runningChatTitle = chats.chats.find(chat => chat.id === runningChatId)?.title || 'another chat';
   // The active chat is mid-turn in the Claude Code / Codex app: show it working, but
   // Stop belongs to that app (Ally only reads its transcript)
-  const externalWorking = !activeIsWorking && conversation.externalRunning;
+  const externalWorking = !activeIsWorking && (conversation.externalRunning || selectedSessionRunning(activeChat, external.running));
   const externalApp = activeChat?.agent?.provider === 'codex' ? 'Codex' : 'Claude Code';
   const externalTool = externalWorking
     ? [...((messages.at(-1)?.metadata?.segments ?? []) as Segment[])].reverse().find(s => s.type === 'tool' && s.toolExecution?.status === 'executing')?.toolExecution
     : undefined;
   const externalStatus = externalTool ? `Working · ${externalTool.name}` : 'Thinking…';
+  const tutor = useVisualTutor(activeChat?.id, conversation.send);
+  useEffect(() => { void window.pip?.circle?.setChat?.(activeChat?.id).catch(() => {}); }, [activeChat?.id]);
   const greeting = useAgentGreeting(conversation.provider, conversation.modelName);
 
   const headerTitleEdit = useEditState({
@@ -116,7 +130,7 @@ export default function GlassChatPiP() {
 
   // ---- Sending -------------------------------------------------------------
 
-  const handleSend = async (messageInput?: string, fromQuickInput = false) => {
+  const handleSend = async (messageInput?: string, fromQuickInput = false, mode: 'auto' | 'steer' | 'queue' = 'queue') => {
     const text = (messageInput ?? (fromQuickInput ? quickInput : input)).trim();
     if (!text) return;
     if (fromQuickInput) setQuickInput('');
@@ -125,9 +139,8 @@ export default function GlassChatPiP() {
 
     const includeClipboard = context.shouldIncludeContext(fromQuickInput, state.collapsed);
     if (includeClipboard) context.clearNewContextFlag();
-    const sentFrom = activeChat?.id;
-    const result = await conversation.send(text, 'text', { context: includeClipboard ? context.contextData.clipboard : undefined });
-    if (result?.error && selectedChatId.current === sentFrom) {
+    const result = await conversation.send(tutor.decorate(text), 'text', { mode, context: includeClipboard ? context.contextData.clipboard : undefined });
+    if (result?.error) {
       // Preserve anything typed meanwhile; a failure also keeps a saved copy per chat.
       if (fromQuickInput) setQuickInput(current => current || text);
       else setInput(current => current || text);
@@ -142,9 +155,9 @@ export default function GlassChatPiP() {
     lastSpeechRef.current = speech.recognitionId;
     if (isTyping) {
       speech.stopCurrentSpeech();
-      conversation.send(text, 'speech');
+      conversation.send(tutor.decorate(text), 'speech');
     } else {
-      conversation.send(text, 'speech');
+      conversation.send(tutor.decorate(text), 'speech');
     }
   }, [speech.recognitionId, speech.voiceModeEnabled]);
 
@@ -180,11 +193,7 @@ export default function GlassChatPiP() {
   }), [chats, conversation]);
 
   const toggleCollapse = () => {
-    setExtrasOpen(false);
     setShowModelSelector(false);
-    if (!state.collapsed) {
-      setIsPreviewExpanded(false);
-    }
     win.handleCollapseToggle();
   };
 
@@ -219,7 +228,16 @@ export default function GlassChatPiP() {
   // (a new circle interrupts a reply in progress, like voice barge-in)
   const conversationRef = useRef(conversation);
   conversationRef.current = conversation;
-  useEffect(() => window.pip?.circle.onAsk(async ({ imagePath, thumbnail, prompt }) => {
+  const circleTarget = useRef({ chatId: activeChat?.id, tutor });
+  circleTarget.current = { chatId: activeChat?.id, tutor };
+  useEffect(() => window.pip?.circle.onAsk(async ({ imagePath, thumbnail, prompt, chatId, tutorCaptureId }) => {
+    if (chatId && circleTarget.current.chatId !== chatId) return;
+    if (tutorCaptureId) {
+      const draw = () => circleTarget.current.tutor.start(prompt, undefined, tutorCaptureId, chatId);
+      if (conversationRef.current.isTyping) { conversationRef.current.stop(); setTimeout(draw, 300); }
+      else void draw();
+      return;
+    }
     const live = perceptionRef.current.status?.session?.state === 'running' ? await perceptionRef.current.api?.context(30_000).catch(() => '') : '';
     const withContext = live ? `${prompt}\n\n[Recent audio and screen, last 30 s]\n${live}` : prompt;
     const ask = () => conversationRef.current.send(withContext, 'circle', { image: { path: imagePath, thumbnail } });
@@ -232,20 +250,10 @@ export default function GlassChatPiP() {
   }), []);
 
 
-  // An agent asked Ally to open a chat (ally_open_chat / forward with open_in_ally).
-  // If a reply is streaming here, switch once it finishes.
-  const pendingOpen = useRef<Parameters<typeof conversation.openSession>[0] | null>(null);
+  // Switching the selected chat leaves each originating run intact.
   useEffect(() => window.pip?.chatsMcp?.onOpenChat(req => {
-    const session = { provider: req.provider, id: req.sessionId, title: req.title, cwd: req.cwd, updatedAt: Date.now() };
-    if (conversationRef.current.isTyping) pendingOpen.current = session;
-    else void conversationRef.current.openSession(session);
+    void conversationRef.current.openSession({ provider: req.provider, id: req.sessionId, title: req.title, cwd: req.cwd, updatedAt: Date.now() });
   }), []);
-  useEffect(() => {
-    if (conversation.isTyping || !pendingOpen.current) return;
-    const session = pendingOpen.current;
-    pendingOpen.current = null;
-    void conversation.openSession(session);
-  }, [conversation.isTyping]);
 
   // ---- Visual state ----------------------------------------------------------
 
@@ -270,7 +278,6 @@ export default function GlassChatPiP() {
   const sensing = listening || (isTyping && (perceiving || !!lastUser?.metadata?.image));
   const mood: OrbMood = isTyping ? 'busy' : listening ? 'listening' : 'idle';
   const robotStatus: RobotStatus = listening ? 'listening' : isTyping ? (sensing ? 'seeing' : toolRunning ? 'tool' : 'thinking') : 'idle';
-  const [extrasOpen, setExtrasOpen] = useState(false);
 
   // When a turn ends, react to how it went
   const [robotPulse, setRobotPulse] = useState<RobotPulse | null>(null);
@@ -290,11 +297,8 @@ export default function GlassChatPiP() {
   // elsewhere the app draws its own rounded glass inside a transparent window
   const nativeFrame = platform === 'win32';
   const padding = nativeFrame ? 0 : appSettings.ui.windowPadding;
-  const hasContext = context.hasNewContext && !!context.contextData.clipboard;
-  let collapsedHeight = isPreviewExpanded ? COLLAPSED.previewHeight : COLLAPSED.baseHeight;
-  if (extrasOpen) collapsedHeight += COLLAPSED.extrasHeight + (state.size === 'S' ? 32 : 0);
-  if (isContextExpanded && hasContext && context.showContext) collapsedHeight += COLLAPSED.contextHeight;
-  if (currentResponse || isTyping) collapsedHeight += COLLAPSED.responseHeight;
+  // Header padding is 8px above and 12px below. Content grows down from the pill.
+  let collapsedHeight = Math.max(COLLAPSED.baseHeight, collapsedBodyHeight + 20);
   // Portals still live inside the native window; make room for the agent picker.
   if (showModelSelector) collapsedHeight = Math.max(collapsedHeight, 440);
   if (showSettings) collapsedHeight = Math.max(collapsedHeight, 600);
@@ -427,17 +431,22 @@ export default function GlassChatPiP() {
               <CollapsedHeader
                 platform={platform}
                 theme={theme}
-                isTyping={isTyping}
+                key={activeChat?.id ?? 'empty'}
+                chatTitle={activeChat?.title}
+                workingStatus={conversation.inputStatus || (activeIsWorking ? workingStatus : meetingWorking ? (meetingTurn?.text ? 'Writing meeting notes…' : 'Working on meeting notes…') : externalWorking ? externalStatus : workingStatus)}
+                stopDisabledReason={externalWorking && !meetingWorking ? `Live in ${externalApp} · Stop there` : undefined}
+                sendFailure={activeChat?.sendFailure?.message}
+                onHeightChange={setCollapsedBodyHeight}
+                isTyping={activeIsWorking || externalWorking || meetingWorking}
                 messages={messages}
                 quickInput={quickInput}
                 setQuickInput={setQuickInput}
-                onSend={(text) => handleSend(text, true)}
-                onStop={conversation.stop}
+                onSend={(text, _quick, mode) => handleSend(text, true, mode)}
+                onStop={activeIsWorking || !meetingWorking ? conversation.stop : () => void perception.api?.stopTurn()}
                 onCollapseToggle={toggleCollapse}
                 onSizeChange={win.handleSizeChange}
                 onHide={win.handleHide}
                 onCopyMessage={messageHandlers.onCopy}
-                onPreviewToggle={setIsPreviewExpanded}
                 onMessageEdit={messageHandlers.onEdit}
                 onMessageFork={messageHandlers.onFork}
                 onMessageDelete={messageHandlers.onDelete}
@@ -451,7 +460,14 @@ export default function GlassChatPiP() {
                 showContext={context.showContext}
                 onContextToggle={() => context.setShowContext(!context.showContext)}
                 uiSettings={appSettings.ui}
-                currentResponse={currentResponse}
+                currentResponse={currentResponse || meetingTurn?.text}
+                meetingControls={<><MessageQueueStack chatId={activeChat?.agent?.sessionId ? `${activeChat.agent.provider}:${activeChat.agent.sessionId}` : undefined} /><VisualTutorControls tutor={tutor} disabled={!activeChat || activeIsWorking || externalWorking} /><CollapsedMeetingControls perception={perception} onOpenSetup={toggleCollapse} onOpenSession={() => {
+                  const session = perception.status?.session;
+                  if (!session) return;
+                  const linked = chats.chats.find(chat => chat.agent?.provider === session.provider && chat.agent.sessionId === session.sessionId);
+                  if (linked) selectChat(linked.id);
+                  else void conversation.openSession({ id: session.sessionId, provider: session.provider, title: session.title, cwd: session.cwd, updatedAt: Date.now() });
+                }} /></>}
                 currentModel={conversation.model}
                 showModelSelector={showModelSelector}
                 onModelSelectorToggle={() => setShowModelSelector(s => !s)}
@@ -466,7 +482,6 @@ export default function GlassChatPiP() {
                 sensing={sensing}
                 robotStatus={robotStatus}
                 pulse={robotPulse}
-                onExtrasChange={setExtrasOpen}
               />
             ) : (
               <ExpandedHeader
@@ -520,14 +535,14 @@ export default function GlassChatPiP() {
                       />
                     ) : (
                       messages.map(message => (
-                        <ChatMessage
-                          key={message.id}
+                        <div key={message.id} data-ally-reply-reader={message.role === 'assistant' && message.id === messages.at(-1)?.id ? 'true' : undefined}><ChatMessage
                           message={message}
+                          sessionWorking={externalWorking && message.id === messages.at(-1)?.id}
                           onEdit={messageHandlers.onEdit}
                           onFork={messageHandlers.onFork}
                           onDelete={messageHandlers.onDelete}
                           onRetry={messageHandlers.onRecompute}
-                        />
+                        /></div>
                       ))
                     )}
                     {activeIsWorking && (
@@ -549,12 +564,14 @@ export default function GlassChatPiP() {
                     <button type="button" className="underline" onClick={() => chats.setSendFailure(activeChat.id)}>Dismiss</button>
                   </div>
                 </div>}
+                <VisualTutorControls tutor={tutor} disabled={!activeChat || activeIsWorking || externalWorking} />
                 <PerceptionBar perception={perception} sessions={external.sessions} onOpenDebug={() => setPerceptionDebug(true)} />
+                <MessageQueueStack chatId={activeChat?.agent?.sessionId ? `${activeChat.agent.provider}:${activeChat.agent.sessionId}` : undefined} />
                 <ChatInput
                   ref={inputRef}
                   input={input}
                   setInput={setInput}
-                  onSend={() => handleSend()}
+                  onSend={(mode) => handleSend(undefined, false, mode)}
                   isTyping={isTyping || externalWorking}
                   workingStatus={conversation.inputStatus || (externalWorking ? externalStatus : activeIsWorking ? workingStatus : `${workingStatus} · ${runningChatTitle}`)}
                   stopDisabledReason={externalWorking ? `Running in the ${externalApp} app. Stop it there.` : undefined}

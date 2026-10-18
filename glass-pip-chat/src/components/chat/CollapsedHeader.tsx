@@ -9,15 +9,22 @@ import type { RobotPulse, RobotStatus } from '@/components/glow/RobotAvatar';
 import CollapsedChatPreview from './CollapsedChatPreview';
 import CollapsedResponsePreview from './CollapsedResponsePreview';
 import { UnifiedModelSelector } from '../UnifiedModelSelector';
+import CompactUserMessage from './CompactUserMessage';
 
 interface CollapsedHeaderProps {
+  meetingControls?: React.ReactNode;
+  chatTitle?: string;
+  workingStatus?: string;
+  stopDisabledReason?: string;
+  sendFailure?: string;
+  onHeightChange?: (height: number) => void;
   platform: string;
   theme: 'light' | 'dark';
   isTyping: boolean;
   messages: Message[];
   quickInput: string;
   setQuickInput: (value: string) => void;
-  onSend: (message?: string, fromQuickInput?: boolean) => void;
+  onSend: (message?: string, fromQuickInput?: boolean, mode?: 'steer' | 'queue') => void;
   onStop: () => void;
   onCollapseToggle: () => void;
   onSizeChange: () => void;
@@ -53,7 +60,7 @@ interface CollapsedHeaderProps {
   sensing: boolean;
   robotStatus: RobotStatus;
   pulse: RobotPulse | null;
-  /** The hover extras row grows the window, so tell the shell when it shows */
+  /** Extra controls grow the window. */
   onExtrasChange?: (open: boolean) => void;
 }
 
@@ -63,9 +70,15 @@ const iconButton = 'grid size-7 shrink-0 place-items-center rounded-[8px] text-f
 /**
  * Collapsed Ally: one pill holding the agent's face (the robot whose eyes follow
  * your cursor, or Mary's orb), a quick input, and the rarely used controls tucked
- * into a hover row, like the composer's tool strip.
+ * into a toggled row, like the composer's tool strip.
  */
 export default function CollapsedHeader({
+  meetingControls,
+  chatTitle,
+  workingStatus,
+  stopDisabledReason,
+  sendFailure,
+  onHeightChange,
   platform,
   theme,
   isTyping,
@@ -79,11 +92,6 @@ export default function CollapsedHeader({
   onHide,
   onCopyMessage,
   onPreviewToggle,
-  onMessageEdit,
-  onMessageFork,
-  onMessageDelete,
-  onCopyCode,
-  onRecompute,
   isResizing,
   size,
   hasNewContext,
@@ -91,7 +99,6 @@ export default function CollapsedHeader({
   contextToggleEnabled,
   showContext,
   onContextToggle,
-  uiSettings,
   currentResponse,
   currentModel,
   showModelSelector,
@@ -101,7 +108,7 @@ export default function CollapsedHeader({
   onVoiceModeToggle,
   isContextExpanded,
   onContextExpandedChange,
-  placeholder = 'Balalalala',
+  placeholder = 'Ask Ally…',
   mood,
   sensing,
   robotStatus,
@@ -110,24 +117,28 @@ export default function CollapsedHeader({
 }: CollapsedHeaderProps) {
   const [extras, setExtras] = useState(false);
   const [hovering, setHovering] = useState(false);
-  const closeTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const lastMessage = messages.at(-1);
+  const latestReply = lastMessage?.role === 'assistant' ? lastMessage : undefined;
+  const latestUser = [...messages].reverse().find(message => message.role === 'user');
   const contextExpanded = isContextExpanded ?? false;
   const hasClipboard = hasNewContext && !!(contextData.clipboard || contextData.selectedText);
 
-  useEffect(() => () => clearTimeout(closeTimer.current), []);
+  useEffect(() => {
+    const root = rootRef.current;
+    if (!root || !onHeightChange) return;
+    const measure = () => onHeightChange(Math.ceil(root.getBoundingClientRect().height));
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(root);
+    return () => observer.disconnect();
+  }, [onHeightChange]);
 
   const showExtras = (open: boolean) => {
-    clearTimeout(closeTimer.current);
-    if (open) {
-      setExtras(true);
-      onExtrasChange?.(true);
-    } else if (!showModelSelector) {
-      // Small grace period so moving between rows doesn't flicker
-      closeTimer.current = setTimeout(() => {
-        setExtras(false);
-        onExtrasChange?.(false);
-      }, 350);
-    }
+    setExtras(open);
+    onExtrasChange?.(open);
+    if (!open && showModelSelector) onModelSelectorToggle();
   };
 
   const extraItems = [
@@ -144,7 +155,13 @@ export default function CollapsedHeader({
   ];
 
   return (
-    <div className="flex flex-col" onMouseEnter={() => setHovering(true)} onMouseLeave={() => { setHovering(false); showExtras(false); }} onFocusCapture={() => clearTimeout(closeTimer.current)}>
+    <div ref={rootRef} className="flex max-h-[740px] shrink-0 flex-col overflow-y-auto [&>*]:shrink-0" onMouseEnter={() => setHovering(true)} onMouseLeave={() => setHovering(false)} onKeyDown={event => {
+      if (event.key === 'Escape' && extras && !showModelSelector) {
+        event.stopPropagation();
+        showExtras(false);
+        document.getElementById('quick-input')?.focus();
+      }
+    }}>
       {/* The pill */}
       <div className="flex items-center gap-1.5 px-1.5 py-1.5">
         <span
@@ -162,20 +179,28 @@ export default function CollapsedHeader({
         <form
           onSubmit={e => {
             e.preventDefault();
-            if (quickInput.trim()) onSend(quickInput, true);
+            if (quickInput.trim()) onSend(quickInput, true, 'queue');
           }}
           className="flex min-w-0 flex-1 items-center rounded-[18px] border border-white/10 bg-white/[0.06] pl-3 pr-1 transition-colors focus-within:border-white/30"
           style={noDrag}
         >
           <input
+            aria-label="Message Ally"
             id="quick-input"
             type="text"
             value={quickInput}
             onChange={e => setQuickInput(e.target.value)}
+            onKeyDown={event => {
+              if (isTyping && event.key === 'Enter' && event.shiftKey && !event.nativeEvent.isComposing) {
+                event.preventDefault();
+                if (quickInput.trim()) onSend(quickInput, true, 'steer');
+              }
+            }}
             placeholder={placeholder}
             className="min-w-0 flex-1 bg-transparent py-1.5 text-[13px] font-light outline-none placeholder:text-foreground/35"
           />
-          {isTyping && <button type="button" onClick={onStop} className={iconButton} title="Stop response" aria-label="Stop response"><Square className="size-3" /></button>}
+          {isTyping && <button type="button" disabled={!quickInput.trim()} onClick={() => onSend(quickInput, true, 'steer')} title="Shift+Enter · steer current work" className="px-1 text-[10px] disabled:opacity-30">Steer now</button>}
+          {isTyping && !stopDisabledReason && <button type="button" onClick={onStop} className={iconButton} title="Stop response" aria-label="Stop response"><Square className="size-3" /></button>}
           <button
             type="submit"
             disabled={!quickInput.trim()}
@@ -183,7 +208,8 @@ export default function CollapsedHeader({
               'grid size-6 shrink-0 place-items-center rounded-full transition-colors disabled:opacity-30',
               'bg-foreground text-background'
             )}
-            title={isTyping ? 'Add input without stopping' : 'Send'}
+            aria-label={isTyping ? 'Queue message' : 'Send'}
+            title={isTyping ? 'Queue message' : 'Send'}
           >
             <ArrowUp className="size-3.5" />
           </button>
@@ -193,9 +219,8 @@ export default function CollapsedHeader({
           <button
             type="button"
             className={cn(iconButton, 'relative', extras && 'bg-white/8 text-foreground')}
-            onMouseEnter={() => showExtras(true)}
-            onFocus={() => showExtras(true)}
-            onClick={() => showExtras(true)}
+            onClick={() => showExtras(!extras)}
+            aria-label="More controls"
             aria-expanded={extras}
             title="More"
           >
@@ -205,7 +230,7 @@ export default function CollapsedHeader({
           <button type="button" className={iconButton} onClick={onCollapseToggle} disabled={isResizing} title="Expand chat">
             <Maximize2 />
           </button>
-          <button type="button" className={cn(iconButton, 'hover:bg-destructive/20')} onClick={onHide} title="Close">
+          <button type="button" className={cn(iconButton, 'hover:bg-destructive/20')} onClick={onHide} title="Hide Ally">
             <X />
           </button>
         </div>
@@ -221,7 +246,6 @@ export default function CollapsedHeader({
             transition={{ duration: 0.18, ease: 'easeOut' }}
             className="overflow-hidden"
             style={noDrag}
-            onMouseEnter={() => showExtras(true)}
           >
             <div className="flex flex-wrap items-center gap-1 px-2 pb-1.5">
               {extraItems.map(item => (
@@ -247,7 +271,7 @@ export default function CollapsedHeader({
                   currentModel={currentModel}
                   onModelSelect={onModelSelect}
                   showSelector={showModelSelector}
-                  onToggleSelector={() => { clearTimeout(closeTimer.current); onModelSelectorToggle(); }}
+                  onToggleSelector={onModelSelectorToggle}
                   compact
                   windowSize="S"
                 />
@@ -257,17 +281,22 @@ export default function CollapsedHeader({
         )}
       </AnimatePresence>
 
-      {/* Live reply while the agent works */}
-      <div style={noDrag}>
+      {/* Current turn stays below the pill, including after completion. */}
+      <div className="space-y-1.5 px-2 pb-1.5" style={noDrag}>
+        {chatTitle && <button type="button" onClick={onCollapseToggle} title={chatTitle} className="block w-full truncate text-left text-[10px] text-foreground/45 hover:text-foreground/75">{chatTitle}</button>}
+        {latestUser && <CompactUserMessage content={latestUser.content} />}
         <CollapsedResponsePreview
-          platform={platform}
-          theme={theme}
-          response={currentResponse || ''}
+          response={currentResponse || ((!isTyping || stopDisabledReason) ? latestReply?.content : '') || ''}
+          responseId={latestUser?.id}
           isTyping={isTyping}
-          onStop={onStop}
-          onExpand={onCollapseToggle}
+          workingStatus={workingStatus}
+          onCopy={onCopyMessage}
         />
+        {isTyping && stopDisabledReason && <p className="text-[10px] text-foreground/45">{stopDisabledReason}</p>}
+        {sendFailure && <p role="alert" className="text-xs text-amber-200">{sendFailure}</p>}
       </div>
+
+      {meetingControls && <div style={noDrag}>{meetingControls}</div>}
 
       {/* Clipboard context, when shown */}
       {hasClipboard && showContext && (
@@ -292,21 +321,7 @@ export default function CollapsedHeader({
       )}
 
       <div style={noDrag}>
-        <CollapsedChatPreview
-          platform={platform}
-          theme={theme}
-          messages={messages}
-          isTyping={isTyping}
-          currentResponse={currentResponse}
-          onCopyMessage={onCopyMessage}
-          onPreviewToggle={onPreviewToggle}
-          onMessageEdit={onMessageEdit}
-          onMessageFork={onMessageFork}
-          onMessageDelete={onMessageDelete}
-          onCopyCode={onCopyCode}
-          onRecompute={onRecompute}
-          uiSettings={uiSettings}
-        />
+        <CollapsedChatPreview messages={messages} onPreviewToggle={onPreviewToggle} />
       </div>
     </div>
   );

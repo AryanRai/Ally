@@ -4,6 +4,7 @@
 // Classifier output never authorizes actions; it only decides whether
 // unsolicited context deserves the agent's attention.
 import { askJev, type JevConfig } from './jev.js';
+import { askVertex, type VertexConfig } from './vertex.js';
 import { describeWindow } from './timeline.js';
 import type {
   ContextWindow, Observation, PerceptionMode, RelevanceCategory, RelevanceDecision, RelevanceOutcome, RelevanceScores, RelevanceThresholds,
@@ -130,6 +131,9 @@ export interface GateDeps {
   /** Context before the batch, for continuity */
   context: (ms: number) => ContextWindow;
   jev: () => JevConfig & { enabled: boolean };
+  provider?: () => 'jev' | 'vertex' | 'heuristic';
+  vertex?: () => VertexConfig;
+  askVertex?: typeof askVertex;
   thresholds: () => RelevanceThresholds;
   onDecision: (d: RelevanceDecision) => void;
   ask?: typeof askJev;
@@ -145,8 +149,9 @@ export class RelevanceGate {
   private evaluating = false;
   private state: PolicyState = { topics: new Map(), triggers: [] };
   private seq = 0;
+  private generation = 0;
   degradedReason?: string;
-  engine: 'jev' | 'fallback' = 'fallback';
+  engine: 'jev' | 'vertex' | 'fallback' = 'fallback';
 
   constructor(private deps: GateDeps, private settleMs = 1500) {}
 
@@ -166,6 +171,7 @@ export class RelevanceGate {
   }
 
   reset(): void {
+    this.generation++;
     if (this.timer) clearTimeout(this.timer);
     this.timer = null;
     this.batch = [];
@@ -183,6 +189,7 @@ export class RelevanceGate {
     const batch = this.batch.splice(0);
     if (!batch.length) return null;
     this.evaluating = true;
+    const generation = this.generation;
     const started = performance.now();
     try {
       const fresh = describeWindow({
@@ -202,7 +209,20 @@ export class RelevanceGate {
 
       let scores: RelevanceScores;
       const jev = this.deps.jev();
-      if (jev.enabled) {
+      const provider = this.deps.provider?.() ?? 'jev';
+      if (provider === 'vertex') {
+        try {
+          const config = this.deps.vertex?.();
+          if (!config) throw new Error('Google Cloud project not configured');
+          scores = await (this.deps.askVertex ?? askVertex)(state, config);
+          this.engine = 'vertex';
+          this.degradedReason = undefined;
+        } catch (e) {
+          scores = fallbackScores(excerpt, this.deps.scope(), screenChanged);
+          this.engine = 'fallback';
+          this.degradedReason = `Gemini unavailable: ${e instanceof Error ? e.message : String(e)}`;
+        }
+      } else if (provider === 'jev' && jev.enabled) {
         try {
           scores = await (this.deps.ask ?? askJev)(state, jev);
           this.engine = 'jev';
@@ -215,9 +235,12 @@ export class RelevanceGate {
       } else {
         scores = fallbackScores(excerpt, this.deps.scope(), screenChanged);
         this.engine = 'fallback';
-        this.degradedReason = 'Jev not configured (add a TypeSafe API key in Settings → Realtime)';
+        this.degradedReason = provider === 'heuristic' ? 'Basic relevance selected (no remote classifier)' : 'Jev not configured (add a TypeSafe API key in Settings → Realtime)';
       }
 
+      // A slow classifier must never deliver the previous session's observation
+      // into a different chat after stop/start or a session switch.
+      if (generation !== this.generation) return null;
       const t = batch.at(-1)!.t;
       const topic = topicOf(excerpt);
       const { outcome, reasons } = decide(scores, { mode: this.deps.mode(), text: spoken || excerpt, topic, t, thresholds: this.deps.thresholds(), state: this.state });

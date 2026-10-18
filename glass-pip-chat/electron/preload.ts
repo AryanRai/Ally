@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron';
+import type { AgentProvider } from './agent/types';
 
 // Define the API that will be exposed to the renderer
 const pipAPI = {
@@ -108,30 +109,48 @@ const pipAPI = {
   // Circle to Ask (overlay page + the chat window that receives the result)
   circle: {
     start: () => ipcRenderer.invoke('circle:start'),
+    setChat: (chatId?: string) => ipcRenderer.invoke('circle:chat', chatId),
     getShot: () => ipcRenderer.invoke('circle:getShot'),
-    submit: (payload: { rect?: { x: number; y: number; width: number; height: number }; prompt: string }) =>
+    submit: (payload: import('./capture/types').CircleSubmit) =>
       ipcRenderer.invoke('circle:submit', payload),
     cancel: () => ipcRenderer.invoke('circle:cancel'),
-    onAsk: (callback: (ask: { imagePath: string; thumbnail: string; prompt: string }) => void) => {
-      const handler = (_: any, ask: { imagePath: string; thumbnail: string; prompt: string }) => callback(ask);
+    onAsk: (callback: (ask: import('./capture/types').CircleAsk) => void) => {
+      const handler = (_: any, ask: import('./capture/types').CircleAsk) => callback(ask);
       ipcRenderer.on('circle:ask', handler);
       return () => ipcRenderer.removeListener('circle:ask', handler);
     },
   },
 
+  tutor: {
+    start: (chatId: string, displayId?: number, circleCaptureId?: string) => ipcRenderer.invoke('tutor:start', chatId, displayId, circleCaptureId),
+    displays: () => ipcRenderer.invoke('tutor:displays'),
+    state: () => ipcRenderer.invoke('tutor:state'),
+    end: (id: string) => ipcRenderer.invoke('tutor:end', id),
+    onChanged: (callback: (board: unknown) => void) => {
+      const handler = (_: unknown, board: unknown) => callback(board);
+      ipcRenderer.on('tutor:changed', handler);
+      return () => ipcRenderer.removeListener('tutor:changed', handler);
+    },
+  },
+
   // Claude Code / Codex agent backends
   agent: {
+    queue: (key: string) => ipcRenderer.invoke('agent:queue', key),
+    queueChange: (key: string, change: import('./agent/messageQueueTypes.js').QueueChange) => ipcRenderer.invoke('agent:queueChange', key, change),
     status: () => ipcRenderer.invoke('agent:status'),
     getConfig: () => ipcRenderer.invoke('agent:getConfig'),
     updateConfig: (patch: Record<string, unknown>) => ipcRenderer.invoke('agent:updateConfig', patch),
     listModels: (provider: 'claude' | 'codex') => ipcRenderer.invoke('agent:listModels', provider),
     greeting: (provider: 'claude' | 'codex', model: string) => ipcRenderer.invoke('agent:greeting', provider, model),
     send: (opts: Record<string, unknown>) => ipcRenderer.invoke('agent:send', opts),
-    steer: (runId: string, text: string, requestId: string) => ipcRenderer.invoke('agent:steer', runId, text, requestId),
+    sessionInput: (provider: AgentProvider, sessionId: string, text: string, requestId: string, mode: 'steer' | 'queue') => ipcRenderer.invoke('agent:sessionInput', provider, sessionId, text, requestId, mode),
+    steer: (runId: string, text: string, requestId: string, mode?: 'auto' | 'steer' | 'queue') => ipcRenderer.invoke('agent:steer', runId, text, requestId, mode),
     stop: (runId: string) => ipcRenderer.invoke('agent:stop', runId),
     runningSessions: () => ipcRenderer.invoke('agent:runningSessions'),
     listSessions: (provider: 'claude' | 'codex', limit?: number) => ipcRenderer.invoke('agent:listSessions', provider, limit),
     loadSession: (provider: 'claude' | 'codex', id: string, revision?: string) => ipcRenderer.invoke('agent:loadSession', provider, id, revision),
+    readStates: () => ipcRenderer.invoke('agent:readStates'),
+    markRead: (provider: 'claude' | 'codex', id: string, revision: string) => ipcRenderer.invoke('agent:markRead', provider, id, revision),
     onSessionsChanged: (callback: (provider: 'claude' | 'codex') => void) => {
       const handler = (_: any, provider: 'claude' | 'codex') => callback(provider);
       ipcRenderer.on('agent:sessionsChanged', handler);

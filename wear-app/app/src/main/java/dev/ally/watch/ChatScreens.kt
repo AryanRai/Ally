@@ -53,7 +53,7 @@ internal fun ChatPicker(model: WatchViewModel, state: WatchState, back: () -> Un
                     fontSize = 12.sp, modifier = Modifier.clip(RoundedCornerShape(12.dp)).background(Panel).clickable { model.listChats(provider) }.padding(10.dp))
             }
         } }
-        if (!model.canSwitchChat) item { Text("Finish this turn or resolve your draft to switch chats", color = Muted, fontSize = 10.sp) }
+        if (!model.canSwitchChat) item { Text("Finish recording to switch chats", color = Muted, fontSize = 10.sp) }
         item { Text(if (state.chatProvider == "codex") "Codex chats" else "Claude chats", fontFamily = Tanker, fontSize = 20.sp) }
         item { Field(query, { query = it }, "Find chat or folder") }
         item { Text("RUNNING · ${state.running.size}", fontFamily = Mono, color = Amber, fontSize = 10.sp, modifier = Modifier.fillMaxWidth()) }
@@ -89,20 +89,42 @@ internal fun ChatPicker(model: WatchViewModel, state: WatchState, back: () -> Un
 internal fun ChatChoice(chat: WatchChat, selected: String?, enabled: Boolean, choose: () -> Unit) {
     Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(if (chat.id == selected) White.copy(alpha = .12f) else Panel)
         .clickable(enabled = enabled, onClick = choose).heightIn(min = 48.dp).padding(10.dp)) {
-        Text((if (chat.id == selected) "✓ " else "") + chat.title, color = White, fontSize = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+        Text((if (chat.id == selected) "✓ " else "") + chat.title, color = White, fontSize = 12.sp, modifier = Modifier.weight(1f), maxLines = 2, overflow = TextOverflow.Ellipsis)
+            if (chat.unread) Box(Modifier.padding(start = 6.dp).size(5.dp).background(androidx.compose.ui.graphics.Color(0xFF60A5FA), androidx.compose.foundation.shape.CircleShape).semantics { contentDescription = "Unread reply" })
+        }
         Text("${if (chat.provider == "codex") "Codex" else "Claude"} · " + chat.cwd.replace('\\', '/').substringAfterLast('/').ifBlank { "Other chats" }, color = Muted, fontSize = 9.sp, maxLines = 1)
     }
 }
 
 @Composable
-internal fun HistoryScreen(state: WatchState, send: (String) -> Unit, back: () -> Unit, pulse: (Boolean) -> Unit, chats: () -> Unit, older: () -> Unit, read: (String) -> Unit, stopAudio: () -> Unit) {
+internal fun HistoryScreen(state: WatchState, send: (String) -> Unit, back: () -> Unit, pulse: (Boolean) -> Unit, chats: () -> Unit, older: () -> Unit, read: (String) -> Unit, stopAudio: () -> Unit, readerVisible: Boolean, viewed: suspend (dev.ally.device.ChatReadReceipt) -> Unit, openQueue: () -> Unit = {}) {
+    val deviceInbox by dev.ally.device.DeviceLink.inbox.collectAsState()
+    val sessionKey = (state.chats + state.quickChats + state.running).firstOrNull { it.id == state.chatId }?.sessionKey
+    val requests = dev.ally.device.DeviceInteractions.forChat(deviceInbox,state.chatId,state.chatSessionKey,sessionKey,state.readReceipt?.key)
+    val timeline = dev.ally.device.DeviceInteractions.timeline(requests,state.messages,{it.id},{it.timestamp})
     val working = state.externalRunning || state.phase in setOf(Phase.THINKING, Phase.UPLOADING)
     val scroll = rememberLazyListState()
+    LaunchedEffect(requests.filter { dev.ally.device.DeviceInteractions.awaiting(it) }.map { it.optString("id") }) { if(requests.any { dev.ally.device.DeviceInteractions.awaiting(it) }) { withFrameNanos { }; scroll.animateScrollToItem((scroll.layoutInfo.totalItemsCount-1).coerceAtLeast(0)) } }
+    val readerLifecycle = LocalLifecycleOwner.current.lifecycle
+    val receipt = state.readReceipt
+    val latestReplyId = state.messages.lastOrNull { it.role == "assistant" }?.id
+    LaunchedEffect(receipt, latestReplyId, readerVisible, working) {
+        if (receipt?.unread == true && readerVisible && !working && latestReplyId != null) {
+            readerLifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+                while (isActive) {
+                    delay(500)
+                    if (scroll.layoutInfo.visibleItemsInfo.any { it.key == latestReplyId }) viewed(receipt)
+                    delay(2000)
+                }
+            }
+        }
+    }
     LaunchedEffect(state.chatId, state.readySequence, state.messages.isEmpty()) {
         if (state.messages.isNotEmpty()) {
             withFrameNanos { }
-            val headerItems = 1 + (if (state.historyBefore != null) 1 else 0) + (if (state.loadingHistory) 1 else 0) + (if (state.speaking) 1 else 0) + (if (state.speechError.isNotBlank()) 1 else 0)
-            val answer = state.messages.indexOfLast { it.role == "assistant" }.takeIf { it >= 0 } ?: state.messages.lastIndex
+            val headerItems = 1 + (if (state.queue.items.isNotEmpty()) 1 else 0) + (if (state.historyBefore != null) 1 else 0) + (if (state.loadingHistory) 1 else 0) + (if (state.speaking) 1 else 0) + (if (state.speechError.isNotBlank()) 1 else 0)
+            val answer = timeline.indexOfLast { it.message?.role == "assistant" }.takeIf { it >= 0 } ?: timeline.lastIndex
             scroll.scrollToItem(headerItems + answer)
         }
     }
@@ -117,10 +139,13 @@ internal fun HistoryScreen(state: WatchState, send: (String) -> Unit, back: () -
         item { Text("${state.context.uppercase()} ▾", fontFamily = Mono, color = Muted, fontSize = 9.sp, maxLines = 2,
             modifier = Modifier.fillMaxWidth().clickable(onClick = chats).padding(vertical = 6.dp), textAlign = TextAlign.Center) }
         if (state.historyBefore != null) item { Button(onClick = older, enabled = !state.loadingHistory && !working) { Text("Earlier messages") } }
+        if (state.queue.items.isNotEmpty()) item(key="queue") { Button(onClick=openQueue,modifier=Modifier.fillMaxWidth()) { Text("Queued · ${state.queue.items.size}",fontSize=11.sp) } }
         if (state.loadingHistory) item { Text("Loading conversation…", color = Muted, fontSize = 11.sp) }
         if (state.speaking) item { Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) { ReplyAudioControl(true, true, stopAudio) } }
         if (state.speechError.isNotBlank()) item { Text(state.speechError, color = Amber, fontSize = 10.sp) }
-        items(state.messages, key = { it.id }) { message ->
+        items(timeline, key = { it.id }) { entry ->
+            entry.request?.let { DeviceInteractionCard(it) }
+            entry.message?.let { message ->
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (message.role == "user") Text(message.reply.text, color = White, fontSize = 12.sp, lineHeight = 16.sp,
                     modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(6.dp)).background(Panel).border(1.dp, Hairline, RoundedCornerShape(6.dp)).padding(10.dp))
@@ -138,6 +163,7 @@ internal fun HistoryScreen(state: WatchState, send: (String) -> Unit, back: () -
                     if (message.usage.isNotBlank()) Text(message.usage, fontFamily = Mono, color = Muted, fontSize = 8.sp)
                 }
                 if (message.role == "user") AttachmentView(message.attachments, compact = true)
+            }
             }
         }
         if (state.liveText.isNotBlank() || state.liveAttachments.isNotEmpty()) item(key = "live-reply") {
@@ -158,7 +184,7 @@ internal fun HistoryScreen(state: WatchState, send: (String) -> Unit, back: () -
             }
         }
         if (state.phase in setOf(Phase.ERROR, Phase.OFFLINE)) item { Text(state.detail, color = Amber, fontSize = 11.sp) }
-        if (state.messages.isEmpty() && !working && !state.loadingHistory) item {
+        if (requests.isEmpty() && state.messages.isEmpty() && !working && !state.loadingHistory) item {
             Text("What’s on your mind?", fontSize = 19.sp, textAlign = TextAlign.Center)
             Text("Your conversation will stay here.", color = Muted, fontSize = 12.sp)
             Button(onClick = back) { Text("Talk to Ally") }

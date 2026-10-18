@@ -10,7 +10,6 @@ import androidx.activity.compose.LocalActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.setContent
-import androidx.activity.viewModels
 import androidx.compose.foundation.*
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.input.pointer.pointerInput
@@ -52,7 +51,7 @@ import kotlinx.coroutines.launch
 import org.json.JSONObject
 
 class MainActivity : ComponentActivity() {
-    private val model: PhoneModel by viewModels()
+    private val model get() = (application as AllyPhoneApplication).model
     private var destination by mutableStateOf<Pair<String, Int>?>(null)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -71,16 +70,23 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
-    override fun onPause() { if(model.state.value.recording) model.cancelRecording(); super.onPause() }
+    override fun onPause() { if(!dev.ally.device.AssistantVisibility.visible && model.state.value.recording) model.cancelRecording(); super.onPause() }
     override fun onResume() { super.onResume(); DeviceLink.resume(this) }
     override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); setIntent(intent); acceptDestination(intent) }
     private fun acceptDestination(intent: Intent) {
+        intent.getStringExtra("openChat")?.takeIf { it.matches(Regex("(codex|claude):[\\w-]{8,100}")) }?.let {
+            model.select(it); destination = "Chat" to ((destination?.second ?: 0)+1); intent.removeExtra("openChat")
+        }
+        if (intent.action == Intent.ACTION_ASSIST || intent.getBooleanExtra("allyAssistant", false)) {
+            destination = "Chat" to ((destination?.second ?: 0)+1)
+            intent.removeExtra("allyAssistant")
+        }
         if (intent.action == Intent.ACTION_SEND || intent.action == Intent.ACTION_SEND_MULTIPLE) {
             model.receiveShare(intent)
             destination = "Chat" to ((destination?.second ?: 0) + 1)
             intent.action = Intent.ACTION_MAIN; intent.removeExtra(Intent.EXTRA_STREAM); intent.removeExtra(Intent.EXTRA_TEXT); intent.clipData = null
         }
-        intent.getStringExtra("allyPage")?.takeIf { it=="Inbox" || it=="Settings" }?.let {
+        intent.getStringExtra("allyPage")?.takeIf { it=="Inbox" || it=="Settings" || it=="Chat" }?.let {
             destination=it to ((destination?.second ?: 0)+1)
         }
     }
@@ -91,13 +97,16 @@ private fun PhoneApp(model: PhoneModel,destination: Pair<String,Int>?, changeLoo
     val state by model.state.collectAsStateWithLifecycle()
     val link by DeviceLink.status.collectAsStateWithLifecycle()
     val inbox by DeviceLink.inbox.collectAsStateWithLifecycle()
+    val pendingRequests = dev.ally.device.DeviceInteractions.pending(inbox)
     var page by rememberSaveable { mutableStateOf("Chat") }
-    var draft by rememberSaveable(state.selected?.id) { mutableStateOf("") }
-    var submittedDraft by remember { mutableStateOf<Pair<String, String>?>(null) }
-    LaunchedEffect(state.sentSequence) {
+    val draftPrefs = DeviceLink.prefs(LocalContext.current)
+    var draft by remember(state.selected?.id) { mutableStateOf(draftPrefs.getString("composer:${state.selected?.id}", "")!!) }
+    LaunchedEffect(draft, state.selected?.id) { draftPrefs.edit().putString("composer:${state.selected?.id}", draft).apply() }
+    val submittedDrafts = remember { mutableMapOf<String?, Pair<String, String>>() }
+    LaunchedEffect(state.selected?.id, state.sentSequence) {
         if (state.sentSequence > 0) {
-            submittedDraft?.let { (original, message) -> if (draft == original && state.sentText == message) draft = "" }
-            submittedDraft = null
+            submittedDrafts[state.selected?.id]?.let { (original, message) -> if (draft == original && state.sentText == message) draft = "" }
+            submittedDrafts.remove(state.selected?.id)
         }
     }
     val drawer = rememberDrawerState(DrawerValue.Closed)
@@ -107,7 +116,7 @@ private fun PhoneApp(model: PhoneModel,destination: Pair<String,Int>?, changeLoo
     LaunchedEffect(state.voiceDraft) { if(state.voiceDraft.isNotBlank()) { draft=listOf(draft,state.voiceDraft).filter { it.isNotBlank() }.joinToString(" "); model.voiceDraftRead() } }
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     LaunchedEffect(lifecycle) { lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
-        while (isActive) { model.refreshSelected(); delay(2500) }
+        while (isActive) { model.refreshSelected(); model.refreshUnread(); delay(2500) }
     } }
     LaunchedEffect(destination) { destination?.let { navigate(it.first) } }
     BackHandler(drawer.isOpen || page!="Chat") { if(drawer.isOpen) scope.launch { drawer.close() } else page="Chat" }
@@ -117,7 +126,7 @@ private fun PhoneApp(model: PhoneModel,destination: Pair<String,Int>?, changeLoo
                 Text("ALLY",fontFamily=Tanker,fontSize=30.sp,modifier=Modifier.weight(1f))
                 IconControl("close","Close navigation") { scope.launch { drawer.close() } }
             }
-            listOf(Triple("chat","Chat","Current conversation"),Triple("folder","Chats","Your conversations"),Triple("inbox","Inbox",if(inbox.isEmpty()) "All caught up" else "${inbox.size} waiting"),Triple("styles","Styles","Orb, colours & glow"),Triple("settings","Settings","Voice, connection & alerts")).forEach { (icon,target,detail) ->
+            listOf(Triple("chat","Chat","Current conversation"),Triple("folder","Chats","Your conversations"),Triple("inbox","Inbox",if(inbox.isEmpty()) "All caught up" else "${dev.ally.device.DeviceAlerts.ordered(inbox).count { dev.ally.device.DeviceAlerts.blocking(it) }} need you · ${inbox.size} alerts"),Triple("styles","Styles","Orb, colours & glow"),Triple("settings","Settings","Voice, connection & alerts")).forEach { (icon,target,detail) ->
                 Row(Modifier.padding(horizontal=12.dp,vertical=3.dp).fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(if(page==target) Panel else Color.Transparent).clickable { navigate(target) }.padding(16.dp),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(16.dp)) {
                     Glyph(icon,color=if(page==target) White else Muted)
                     Column { Text(target,fontSize=15.sp); Text(detail,color=Muted,fontSize=11.sp) }
@@ -138,9 +147,14 @@ private fun PhoneApp(model: PhoneModel,destination: Pair<String,Int>?, changeLoo
                 Spacer(Modifier.weight(1f))
                 Box(Modifier.size(5.dp).background(if(link=="Connected") Color(0xff95b6a1) else Muted,CircleShape))
                 MicroLabel(when { link=="Connected" -> "Connected"; link.contains("connecting",true) -> "Connecting"; link=="Not connected" -> "Alerts off"; else -> "Offline" },Modifier.padding(start=7.dp,end=8.dp))
-                IconControl("new","New chat",!state.busy && !state.loading && !state.recording && !state.transcribing) { model.newChat(); page="Chat" }
+                IconControl("new","New chat",!state.recording && !state.transcribing) { model.newChat(); page="Chat" }
             }
             HorizontalDivider(color=Line,thickness=.5.dp)
+            pendingRequests.firstOrNull()?.let { request ->
+                TextButton({ model.select(request.optString("chatId")); navigate("Chat") },enabled=!state.recording && !state.transcribing,modifier=Modifier.fillMaxWidth().heightIn(min=48.dp)) {
+                    Text("${pendingRequests.size} ${if(pendingRequests.size == 1) "request needs" else "requests need"} your answer · Open chat",color=Warm,fontSize=12.sp)
+                }
+            }
             when(page) {
                 "Chat" -> {
                     if(state.selected!=null) Row(Modifier.fillMaxWidth().clickable { navigate("Chats") }.padding(horizontal=24.dp,vertical=16.dp),verticalAlignment=Alignment.CenterVertically) {
@@ -154,11 +168,12 @@ private fun PhoneApp(model: PhoneModel,destination: Pair<String,Int>?, changeLoo
                         }
                         Glyph("down",Modifier.padding(start=12.dp).size(16.dp),Muted)
                     }
-                    Conversation(state,model,Modifier.weight(1f),onBrowse={ navigate("Chats") })
-                    Composer(state,draft,{draft=it},model) { submittedDraft = draft to listOf(state.share.text, draft).filter { it.isNotBlank() }.joinToString("\n\n"); model.send(draft); keyboard?.hide() }
+                    Conversation(state,model,Modifier.weight(1f),readerVisible=drawer.isClosed,onBrowse={ navigate("Chats") })
+                    dev.ally.device.MessageQueueStack(state.queue,state.queueChanging,state.queueError,model::queueChange,Modifier.padding(horizontal=12.dp,vertical=4.dp))
+                    Composer(state,draft,{draft=it},model) { submittedDrafts[state.selected?.id] = draft to listOf(state.share.text, draft).filter { it.isNotBlank() }.joinToString("\n\n"); model.send(draft); keyboard?.hide() }
                 }
                 "Chats" -> ChatLibrary(state,model,Modifier.weight(1f)) { page="Chat" }
-                "Inbox" -> PhoneInbox(inbox,Modifier.weight(1f))
+                "Inbox" -> AlertInbox(inbox,(state.chats+state.running+listOfNotNull(state.selected)).distinctBy { it.id },Modifier.weight(1f)) { id -> navigate("Chat"); model.select(id) }
                 "Styles" -> PhoneAppearance(Modifier.weight(1f),changeLook)
                 "Settings" -> PhoneSettings(link,Modifier.weight(1f)) { navigate("Styles") }
             }
@@ -167,11 +182,29 @@ private fun PhoneApp(model: PhoneModel,destination: Pair<String,Int>?, changeLoo
 }
 
 @Composable
-private fun Conversation(state: PhoneState,model: PhoneModel,modifier: Modifier,onBrowse: ()->Unit) {
+private fun Conversation(state: PhoneState,model: PhoneModel,modifier: Modifier,readerVisible: Boolean,onBrowse: ()->Unit) {
+    val deviceInbox by DeviceLink.inbox.collectAsStateWithLifecycle()
+    val requests = dev.ally.device.DeviceInteractions.forChat(deviceInbox,state.selected?.id,state.selected?.sessionKey,state.readReceipt?.key)
+    val timeline = dev.ally.device.DeviceInteractions.timeline(requests,state.messages,{it.id},{it.timestamp})
     val scroll=rememberLazyListState()
+    val readerLifecycle = LocalLifecycleOwner.current.lifecycle
+    val receipt = state.readReceipt
+    val latestReplyId = state.messages.lastOrNull { it.role == "assistant" }?.id
+    LaunchedEffect(receipt, latestReplyId, readerVisible, state.busy, state.externalRunning) {
+        if (receipt?.unread == true && readerVisible && !state.busy && !state.externalRunning && latestReplyId != null) {
+            readerLifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+                while (isActive) {
+                    delay(500)
+                    if (scroll.layoutInfo.visibleItemsInfo.any { it.key == latestReplyId }) model.viewed(receipt)
+                    delay(2000)
+                }
+            }
+        }
+    }
     // Pagination prepends must keep the reader's position; only follow new tail messages.
     var previousChat by remember { mutableStateOf<String?>(null) }
     var previousTail by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(requests.filter { dev.ally.device.DeviceInteractions.awaiting(it) }.map { it.optString("id") }) { if(requests.any { dev.ally.device.DeviceInteractions.awaiting(it) }) { withFrameNanos { }; scroll.animateScrollToItem((scroll.layoutInfo.totalItemsCount-1).coerceAtLeast(0)) } }
     LaunchedEffect(state.selected?.id,state.messages.lastOrNull()?.id,state.busy,state.liveText,state.approval?.optString("id")) {
         val changedChat=previousChat!=state.selected?.id
         val changedTail=previousTail!=state.messages.lastOrNull()?.id
@@ -180,7 +213,7 @@ private fun Conversation(state: PhoneState,model: PhoneModel,modifier: Modifier,
         previousChat=state.selected?.id; previousTail=state.messages.lastOrNull()?.id
     }
     Box(modifier.fillMaxWidth()) {
-        if(state.messages.isEmpty() && !state.loading && state.error.isBlank() && !state.busy && state.liveText.isBlank()) {
+        if(requests.isEmpty() && state.messages.isEmpty() && !state.loading && state.error.isBlank() && !state.busy && state.liveText.isBlank()) {
             FlowBackdrop(Modifier.matchParentSize())
             Column(Modifier.align(Alignment.Center).padding(horizontal=32.dp).offset(y=(-28).dp),horizontalAlignment=Alignment.CenterHorizontally) {
                 PresenceOrb(Modifier.size(104.dp),state.busy)
@@ -190,10 +223,12 @@ private fun Conversation(state: PhoneState,model: PhoneModel,modifier: Modifier,
                 if(state.selected==null) OutlinedButton(onBrowse,modifier=Modifier.padding(top=28.dp),shape=RoundedCornerShape(8.dp),border=BorderStroke(1.dp,Line)) { Text("Your conversations",fontSize=13.sp); Spacer(Modifier.width(16.dp)); Glyph("chevron",Modifier.size(14.dp)) }
             }
         }
-        if(state.messages.isNotEmpty() || state.loading || state.error.isNotBlank() || state.busy || state.liveText.isNotBlank() || state.approval!=null) LazyColumn(Modifier.fillMaxSize(),state=scroll,contentPadding=PaddingValues(start=24.dp,end=24.dp,top=12.dp,bottom=24.dp),verticalArrangement=Arrangement.spacedBy(28.dp)) {
+        if(requests.isNotEmpty() || state.messages.isNotEmpty() || state.loading || state.error.isNotBlank() || state.busy || state.liveText.isNotBlank() || state.approval!=null) LazyColumn(Modifier.fillMaxSize(),state=scroll,contentPadding=PaddingValues(start=24.dp,end=24.dp,top=12.dp,bottom=24.dp),verticalArrangement=Arrangement.spacedBy(28.dp)) {
             if(state.before!=null) item(key="older") { TextButton(model::older,enabled=!state.loading,modifier=Modifier.fillMaxWidth()) { Text("Load earlier messages",color=Muted,fontSize=12.sp) } }
             if(state.loading && state.messages.isEmpty()) item { Text("Opening your conversation…",color=Muted,fontSize=13.sp) }
-            items(state.messages,key={it.id}) { message ->
+            items(timeline,key={it.id}) { entry ->
+                entry.request?.let { DeviceInteractionCard(it) }
+                entry.message?.let { message ->
                 Column(Modifier.fillMaxWidth(),horizontalAlignment=if(message.role=="user") Alignment.End else Alignment.Start) {
                     if(message.role=="user") {
                         androidx.compose.foundation.text.selection.SelectionContainer {
@@ -211,6 +246,7 @@ private fun Conversation(state: PhoneState,model: PhoneModel,modifier: Modifier,
                     }
                     AttachmentView(message.attachments)
                 }
+                }
             }
             if(state.liveText.isNotBlank() || state.liveAttachments.isNotEmpty()) item(key="live-reply") { Column {
                 MicroLabel(if(state.busy) "Reply in progress" else "Latest reply",Modifier.padding(bottom=10.dp))
@@ -219,7 +255,7 @@ private fun Conversation(state: PhoneState,model: PhoneModel,modifier: Modifier,
             } }
             if(state.busy || state.externalRunning) item(key="activity") { Row(verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(10.dp)) { CircularProgressIndicator(Modifier.size(18.dp),color=Muted,strokeWidth=2.dp); Text(if(state.busy) state.activity else "Thinking · working in another app…",color=Muted,fontSize=12.sp) } }
             if(state.syncStatus.isNotBlank()) item(key="sync-status") { Text(state.syncStatus,color=Muted,fontSize=12.sp) }
-            state.approval?.let { approval -> item(key="approval") { ChatApproval(approval,state.loading,model::answer) } }
+            state.approval?.takeIf { approval -> requests.none { it.optString("id") == approval.optString("id") } }?.let { approval -> item(key="approval") { ChatApproval(approval,state.loading,model::answer) } }
             if(state.inputStatus.isNotBlank()) item(key="input-status") { Column {
                 Text(state.inputStatus,color=Muted,fontSize=12.sp)
                 if(state.inputStatus.contains("unconfirmed")) Row {
@@ -274,9 +310,15 @@ private fun Composer(state: PhoneState,draft: String,onDraft: (String)->Unit,mod
             BasicTextField(draft,{onDraft(it.take(12000))},enabled=editable,modifier=Modifier.weight(1f).padding(horizontal=6.dp,vertical=9.dp).heightIn(min=24.dp,max=128.dp).semantics { contentDescription="Message Ally" },textStyle=TextStyle(color=White,fontFamily=Geist,fontSize=14.sp,lineHeight=22.sp),cursorBrush=SolidColor(White),maxLines=5,decorationBox={ inner -> if(draft.isEmpty()) Text("Hey, what’s on your mind?",color=Muted,fontSize=13.sp); inner() })
             val enabled=(state.selected!=null && (draft.isNotBlank() || state.share.text.isNotBlank() || state.share.files.isNotEmpty()) && editable)
             if(state.busy) IconButton(onClick=model::stop,modifier=Modifier.size(48.dp).semantics { contentDescription="Stop response" }) { Glyph("stop",Modifier.size(18.dp),Muted) }
-            IconButton(onClick=send,enabled=enabled,modifier=Modifier.size(48.dp).semantics { contentDescription=if(state.busy) "Add input without stopping" else "Send message" }) {
+            IconButton(onClick=send,enabled=enabled,modifier=Modifier.size(48.dp).semantics { contentDescription=if(state.busy || state.externalRunning) (if(state.inputMode=="queue") "Queue message" else "Steer now") else "Send message" }) {
                 Box(Modifier.size(34.dp).background(if(enabled) White else Color.White.copy(alpha=.06f),CircleShape),contentAlignment=Alignment.Center) { Glyph("send",Modifier.size(18.dp),if(enabled) Ink else Muted) }
             }
+        }
+        if (state.busy || state.externalRunning) Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+            listOf("queue" to "Queue", "steer" to "Steer now").forEach { (mode, label) ->
+                TextButton({model.inputMode(mode)}, enabled=editable) { Text((if(state.inputMode==mode) "✓ " else "")+label, fontSize=12.sp) }
+            }
+            Text(if(state.inputMode=="queue") "After this response" else "Guide current work",color=Muted,fontSize=10.sp,modifier=Modifier.align(Alignment.CenterVertically))
         }
         Spacer(Modifier.height(5.dp))
     }
@@ -337,22 +379,23 @@ private fun ChatLibrary(state: PhoneState,model: PhoneModel,modifier: Modifier,o
             val selected=state.provider==provider
             TextButton({model.catalog(provider)},enabled=!state.loading,shape=RoundedCornerShape(8.dp),colors=ButtonDefaults.textButtonColors(containerColor=if(selected) Panel else Color.Transparent),contentPadding=PaddingValues(horizontal=18.dp)) { Text(provider.replaceFirstChar { it.uppercase() },color=if(selected) White else Muted,fontSize=13.sp) }
         } } }
-        if(state.busy) item { Text("Finish the current response before switching chats.",color=Warm,fontSize=12.sp) }
+        item { Text("Switch freely · each chat keeps working",color=Muted,fontSize=12.sp) }
         item { MicroLabel("Running · ${state.running.size}",color=Warm) }
         items(state.running.filter { it.title.contains(search,true) || it.cwd.contains(search,true) },key={"running:${it.id}"}) { chat ->
-            LibraryChoice(chat,state.selected?.id,!state.busy && !state.loading) { model.select(chat.id); onSelect() }
+            LibraryChoice(chat,state.selected?.id,!state.recording && !state.transcribing) { model.select(chat.id); onSelect() }
         }
         if(state.runningStatus.isNotBlank()) item { Text(state.runningStatus,color=Muted,fontSize=12.sp,modifier=Modifier.padding(vertical=8.dp)) }
         if(search.isBlank() && state.chats.isNotEmpty()) {
             item { MicroLabel("Most recent") }
-            items(state.chats.take(3),key={"recent:${it.id}"}) { chat -> LibraryChoice(chat,state.selected?.id,!state.busy && !state.loading) { model.select(chat.id); onSelect() } }
+            items(state.chats.take(3),key={"recent:${it.id}"}) { chat -> LibraryChoice(chat,state.selected?.id,!state.recording && !state.transcribing) { model.select(chat.id); onSelect() } }
         }
         visible.groupBy { it.cwd }.forEach { (folder,chats) ->
             item(key="folder:$folder") { Row(Modifier.padding(top=14.dp,bottom=8.dp),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(8.dp)) { Glyph("folder",Modifier.size(14.dp),Muted); MicroLabel(folderName(folder)); Text("${chats.size}",fontFamily=Mono,color=Muted,fontSize=9.sp) } }
             items(chats,key={it.id}) { chat ->
                 val selected=state.selected?.id==chat.id
-                Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(if(selected) Panel else Color.Transparent).clickable(enabled=!state.busy && !state.loading) { model.select(chat.id); onSelect() }.padding(horizontal=12.dp,vertical=15.dp),verticalAlignment=Alignment.CenterVertically) {
+                Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(if(selected) Panel else Color.Transparent).clickable(enabled=!state.recording && !state.transcribing) { model.select(chat.id); onSelect() }.padding(horizontal=12.dp,vertical=15.dp),verticalAlignment=Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) { Text(chat.title.replace(Regex("\\s+")," "),fontFamily=Geist,fontSize=14.sp,lineHeight=21.sp,maxLines=2,overflow=TextOverflow.Ellipsis); if(selected) Text("Current conversation",color=Muted,fontSize=10.sp,modifier=Modifier.padding(top=4.dp)) }
+                    if(chat.unread) PhoneUnreadDot()
                     if(selected) Glyph("check",Modifier.padding(start=12.dp).size(14.dp),Muted)
                 }
             }
@@ -371,31 +414,8 @@ private fun LibraryChoice(chat: PhoneChat,selectedId: String?,enabled: Boolean,c
             Text(chat.title.replace(Regex("\\s+")," "),fontSize=14.sp,maxLines=2,overflow=TextOverflow.Ellipsis)
             Text("${if(chat.provider=="codex") "Codex" else "Claude"} · ${folderName(chat.cwd)}",fontSize=10.sp,color=Muted,maxLines=1,overflow=TextOverflow.Ellipsis)
         }
+        if(chat.unread) PhoneUnreadDot()
         if(chat.id==selectedId) Glyph("check",Modifier.padding(start=12.dp).size(14.dp),Muted)
-    }
-}
-
-@Composable
-private fun PhoneInbox(inbox: List<JSONObject>,modifier: Modifier) {
-    val activity=LocalActivity.current ?: return
-    LazyColumn(modifier.fillMaxWidth(),contentPadding=PaddingValues(24.dp),verticalArrangement=Arrangement.spacedBy(24.dp)) {
-        item { MicroLabel("From your desktop"); Text("For you",fontFamily=Geist,fontSize=29.sp,modifier=Modifier.padding(top=8.dp)) }
-        if(inbox.isEmpty()) item { Column(Modifier.fillMaxWidth().padding(vertical=70.dp),horizontalAlignment=Alignment.CenterHorizontally) { Glyph("inbox",Modifier.size(32.dp),Muted); Text("All caught up",fontSize=19.sp,modifier=Modifier.padding(top=20.dp)); Text("Notes and requests will appear here.",color=Muted,fontSize=12.sp,modifier=Modifier.padding(top=8.dp)) } }
-        items(inbox,key={it.optString("id")}) { card ->
-            Column(Modifier.fillMaxWidth().border(1.dp,Line,RoundedCornerShape(8.dp)).padding(18.dp),verticalArrangement=Arrangement.spacedBy(12.dp)) {
-                MicroLabel(if(card.optBoolean("command")) "Your approval needed" else "Desktop note",color=if(card.optBoolean("command")) Warm else Muted)
-                Text(card.optString("title"),fontSize=17.sp); MessageBody(card.optString("body"))
-                if(card.optBoolean("command")) {
-                    Text(card.optString("action").replace('_',' '),fontFamily=Mono,fontSize=11.sp,color=Muted)
-                    if(card.has("url")) Text(card.optString("url"),fontSize=12.sp)
-                    if(card.has("seconds")) Text("${card.optInt("seconds")} seconds · opens your timer app",fontSize=12.sp)
-                    Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
-                        OutlinedButton({DeviceLink.decide(activity,card,false)},shape=RoundedCornerShape(8.dp)) { Text("Decline") }
-                        Button({DeviceLink.decide(activity,card,true)},shape=RoundedCornerShape(8.dp)) { Text("Allow once") }
-                    }
-                } else TextButton({DeviceLink.dismiss(activity,card.optString("id"))}) { Text("Dismiss",color=Muted) }
-            }
-        }
     }
 }
 
@@ -417,6 +437,7 @@ private fun PhoneSettings(link: String,modifier: Modifier, appearance: ()->Unit)
         Row(Modifier.fillMaxWidth().border(1.dp,Line,RoundedCornerShape(8.dp)).padding(18.dp),verticalAlignment=Alignment.CenterVertically) {
             PresenceOrb(Modifier.size(42.dp)); Column(Modifier.padding(start=12.dp).weight(1f)) { Text("Your desktop",fontSize=15.sp); Text(link,color=Muted,fontSize=12.sp) }
         }
+        PhoneAssistantSetting()
         SettingRow("styles","Styles","Orb, colours, glow & motion",appearance)
         HorizontalDivider(color=Line)
         ToggleRow("Touch feedback","Gentle pulses for voice, sends and decisions",haptics) { haptics=it; prefs.edit().putBoolean("phone.haptics",it).apply(); if(it) PhoneHaptics.pulse(context) }
@@ -472,7 +493,7 @@ internal fun ToggleRow(title: String,subtitle: String,value: Boolean,change: (Bo
     Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically) { Column(Modifier.weight(1f)) { Text(title,fontSize=14.sp); Text(subtitle,color=Muted,fontSize=11.sp) }; Switch(value,change,colors=SwitchDefaults.colors(checkedThumbColor=Ink,checkedTrackColor=White,uncheckedTrackColor=Panel,uncheckedBorderColor=Line)) }
 }
 @Composable
-private fun ChatApproval(request: JSONObject, sending: Boolean, answer: (String, Map<String, String>) -> Unit) {
+internal fun ChatApproval(request: JSONObject, sending: Boolean, answer: (String, Map<String, String>) -> Unit) {
     var values by remember(request.optString("id")) { mutableStateOf<Map<String, String>>(emptyMap()) }
     val fields = request.optJSONArray("fields"); val actions = request.optJSONArray("actions")
     Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Panel).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -481,9 +502,13 @@ private fun ChatApproval(request: JSONObject, sending: Boolean, answer: (String,
         for (i in 0 until (fields?.length() ?: 0)) { val field = fields!!.getJSONObject(i); val id = field.getString("id"); val options = field.optJSONArray("options")
             Text(field.optString("label"), fontSize = 12.sp)
             for (j in 0 until (options?.length() ?: 0)) { val option = options!!.getJSONObject(j); FilterChip(selected = values[id] == option.optString("value"), onClick = { values = values + (id to option.optString("value")) }, label = { Text(option.optString("label")) }, enabled = !sending) }
-            if (field.optBoolean("freeText")) OutlinedTextField(values[id] ?: "", { values = values + (id to it.take(4000)) }, visualTransformation = if (field.optBoolean("secret")) PasswordVisualTransformation() else androidx.compose.ui.text.input.VisualTransformation.None)
+            if (field.optBoolean("freeText")) OutlinedTextField(values[id] ?: "", { values = values + (id to it.take(4000)) }, enabled = !sending, label = {Text("Your answer")}, visualTransformation = if (field.optBoolean("secret")) PasswordVisualTransformation() else androidx.compose.ui.text.input.VisualTransformation.None)
         }
         val complete = (0 until (fields?.length() ?: 0)).all { val f = fields!!.getJSONObject(it); !f.optBoolean("required") || !values[f.getString("id")].isNullOrBlank() }
-        for (i in 0 until (actions?.length() ?: 0)) { val action = actions!!.getJSONObject(i); Button(onClick = { answer(action.getString("value"), values) }, enabled = !sending && (complete || action.optString("value") in setOf("decline", "cancel", "reject"))) { Text(action.optString("label")) } }
+        if(sending) Text("Sending your decision…",color=Muted,fontSize=12.sp)
+        for (i in 0 until (actions?.length() ?: 0)) { val action = actions!!.getJSONObject(i); Button(onClick = { answer(action.getString("value"), values) }, modifier = Modifier.heightIn(min=48.dp), enabled = !sending && (complete || action.optString("value") in setOf("decline", "cancel", "reject"))) { Text(action.optString("label")) } }
     }
 }
+
+@Composable
+private fun PhoneUnreadDot() { Box(Modifier.padding(horizontal=8.dp).size(6.dp).background(Color(0xFF60A5FA), CircleShape).semantics { contentDescription = "Unread reply" }) }

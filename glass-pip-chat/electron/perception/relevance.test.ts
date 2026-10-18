@@ -100,4 +100,51 @@ describe('RelevanceGate', () => {
     expect(decisions[1].engine).toBe('fallback');
     expect(decisions[1].reasons.join(' ')).toMatch(/Jev unavailable: Jev returned 503/);
   });
+
+  it('routes Orbit classification through Gemini with the same cooldown and visible failure fallback', async () => {
+    const scores = { relevant: 0.9, question: 0.9, newTopic: 0.2, canHelp: 0.9, proactiveUseful: 0.8, interrupt: 0.8, urgency: 0.9, category: 'technical_question' as const, categoryConfidence: 0.9 };
+    const askVertex = vi.fn().mockResolvedValueOnce(scores).mockResolvedValueOnce(scores).mockRejectedValueOnce(new Error('Vertex AI returned 429'));
+    const ask = vi.fn();
+    const timeline = new Timeline();
+    const decisions: RelevanceDecision[] = [];
+    const g = new RelevanceGate({ mode: () => 'meeting', scope: () => SCOPE, recentNotes: () => [], context: ms => timeline.window(ms), jev: () => ({ enabled: true }), provider: () => 'vertex', vertex: () => ({ project: 'orbit-494815', location: 'global', model: 'gemini-2.5-flash-lite' }), askVertex, ask, thresholds: () => DEFAULT_THRESHOLDS, onDecision: d => decisions.push(d) }, 0);
+    g.observe(said(1000, 'Why did we switch the GNSS UART away from DMA?'));
+    await g.evaluate();
+    g.observe(said(2000, 'Why did we switch the GNSS UART away from DMA?'));
+    await g.evaluate();
+    g.observe(said(400_000, 'What about the IMU sampling rate?'));
+    await g.evaluate();
+    expect(ask).not.toHaveBeenCalled();
+    expect(askVertex.mock.calls[0][1]).toMatchObject({ project: 'orbit-494815' });
+    expect(decisions[0]).toMatchObject({ engine: 'vertex', outcome: 'HIGH_PRIORITY_TRIGGER' });
+    expect(decisions[1]).toMatchObject({ engine: 'vertex', outcome: 'BUFFER_ONLY' });
+    expect(decisions[2]).toMatchObject({ engine: 'fallback' });
+    expect(decisions[2].reasons.join(' ')).toContain('Gemini unavailable: Vertex AI returned 429');
+    g.reset();
+  });
+
+  it('keeps explicitly selected basic mode local even when remote credentials exist', async () => {
+    const ask = vi.fn(), askVertex = vi.fn();
+    const g = new RelevanceGate({ mode: () => 'meeting', scope: () => SCOPE, recentNotes: () => [], context: () => new Timeline().window(0), jev: () => ({ enabled: true }), provider: () => 'heuristic', ask, askVertex, thresholds: () => DEFAULT_THRESHOLDS, onDecision: () => {} }, 0);
+    g.observe(said(1000, 'Why did we switch away from DMA?'));
+    const result = await g.evaluate();
+    expect(result?.engine).toBe('fallback');
+    expect(g.degradedReason).toContain('no remote classifier');
+    expect(ask).not.toHaveBeenCalled();
+    expect(askVertex).not.toHaveBeenCalled();
+    g.reset();
+  });
+
+  it('discards an in-flight classifier result when its original session ends', async () => {
+    let resolve!: (scores: ReturnType<typeof fallbackScores>) => void;
+    const askVertex = vi.fn(() => new Promise<ReturnType<typeof fallbackScores>>(r => { resolve = r; }));
+    const onDecision = vi.fn();
+    const g = new RelevanceGate({ mode: () => 'meeting', scope: () => SCOPE, recentNotes: () => [], context: () => new Timeline().window(0), jev: () => ({ enabled: false }), provider: () => 'vertex', vertex: () => ({ project: 'orbit-494815', location: 'global', model: 'gemini-2.5-flash-lite' }), askVertex, thresholds: () => DEFAULT_THRESHOLDS, onDecision }, 0);
+    g.observe(said(1000, 'Why did we switch the GNSS UART away from DMA?'));
+    const pending = g.evaluate();
+    g.reset();
+    resolve(fallbackScores('Why did we switch the GNSS UART away from DMA?', SCOPE, false));
+    expect(await pending).toBeNull();
+    expect(onDecision).not.toHaveBeenCalled();
+  });
 });

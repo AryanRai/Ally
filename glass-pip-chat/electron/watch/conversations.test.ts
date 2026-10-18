@@ -10,6 +10,53 @@ let root: string;
 beforeEach(() => { root = fs.mkdtempSync(path.join(os.tmpdir(), 'ally-watch-chats-')); });
 afterEach(() => fs.rmSync(root, { recursive: true, force: true }));
 describe('watch conversations', () => {
+  it('recovers the exact original Claude transcript when a replacement session was never created', async () => {
+    const original = 'original-session', missing = 'missing-session';
+    const load = vi.fn(async (_provider: string, id: string) => {
+      if (id === missing) throw new Error(`claude session ${missing} not found`);
+      return { revision: 'original', cwd: root, messages: [{ role: 'user' as const, content: 'hi bro', timestamp: 1 }, { role: 'assistant' as const, content: 'Existing answer', timestamp: 2 }] };
+    });
+    const file = path.join(root, 'chats.json');
+    const deps = { load, list: vi.fn(async () => [{ id: original, provider: 'claude' as const, title: 'hi bro', updatedAt: 1 }]) };
+    const store = new WatchConversations(file, deps, {}, root);
+    const chat = store.create('claude', root, `claude:${original}`); store.link(chat, missing);
+    expect((await store.list('claude')).chats.map(c => c.id)).toEqual([chat.id]);
+    expect((await store.history(chat)).map(m => m.text)).toEqual(['hi bro', 'Existing answer']);
+    expect(chat.sessionId).toBe(original);
+    expect((await new WatchConversations(file, deps, {}, root).get(chat.id)).sessionId).toBe(original);
+    expect((await store.prepareRun(chat.id)).sessionId).toBe(original);
+  });
+  it('repairs a missing Claude replacement before submission without creating a session', async () => {
+    const deps = { list: vi.fn(), load: vi.fn(async (_provider: string, id: string) => {
+      if (id === 'missing') throw new Error('claude session missing not found');
+      return { revision: 'original', cwd: root, messages: [] };
+    }) };
+    const store = new WatchConversations(path.join(root, 'chats.json'), deps, {}, root);
+    const chat = store.create('claude', root, 'claude:original'); store.link(chat, 'missing');
+    expect(await store.prepareRun(chat.id)).toMatchObject({ id: 'claude:original', sessionId: 'original' });
+    expect(deps.load.mock.calls.map(c => c[1])).toEqual(['missing', 'original']);
+  });
+  it('does not redirect a valid replacement or fall back on a transient load failure', async () => {
+    const load = vi.fn().mockResolvedValue({ messages: [{ role: 'assistant', content: 'Resumed answer', timestamp: 1 }] });
+    const store = new WatchConversations(path.join(root, 'chats.json'), { list: vi.fn(), load }, {}, root);
+    const chat = store.create('claude', root, 'claude:original'); store.link(chat, 'replacement');
+    expect((await store.history(chat))[0].text).toBe('Resumed answer');
+    expect(chat.sessionId).toBe('replacement');
+    load.mockRejectedValue(new Error('History temporarily unavailable'));
+    await expect(store.history(chat)).rejects.toThrow('temporarily unavailable');
+    expect(chat.sessionId).toBe('replacement');
+    expect(chat.messages[0].text).toBe('Resumed answer');
+    expect(load.mock.calls.every(c => c[1] === 'replacement')).toBe(true);
+  });
+  it('preserves the cached chat if both the replacement and original are missing', async () => {
+    const deps = { list: vi.fn(), load: vi.fn(async (_provider: string, id: string) => { throw new Error(`claude session ${id} not found`); }) };
+    const store = new WatchConversations(path.join(root, 'chats.json'), deps, {}, root);
+    const chat = store.create('claude', root, 'claude:original'); store.link(chat, 'missing');
+    store.record(chat, 'Saved message', { text: 'Saved answer', components: [] }, { steps: [] }, 'saved');
+    await expect(store.history(chat)).rejects.toThrow('claude session original not found');
+    expect(chat.sessionId).toBe('missing');
+    expect(chat.messages.map(m => m.text)).toEqual(['Saved message', 'Saved answer']);
+  });
   it('refreshes a cached deleted folder before running and preserves the exact session', async () => {
     const deps = { list: vi.fn(), load: vi.fn().mockResolvedValue({ cwd: root, messages: [], sessionId: 'different-id' }) };
     const file = path.join(root, 'chats.json');

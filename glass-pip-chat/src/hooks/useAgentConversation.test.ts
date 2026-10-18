@@ -39,7 +39,7 @@ describe('failed desktop sends', () => {
     let turn!: ReturnType<typeof result.current.send>;
     await act(async () => { turn = result.current.send('original'); });
     await act(async () => { await result.current.send('also test reconnects'); });
-    expect(agent.steer).toHaveBeenCalledWith('also test reconnects');
+    expect(agent.steer).toHaveBeenCalledWith('also test reconnects', undefined, chat.id);
     expect(agent.runTurn).toHaveBeenCalledOnce();
     expect(agent.stop).not.toHaveBeenCalled();
     expect(result.current.isTyping).toBe(true);
@@ -65,4 +65,30 @@ describe('failed desktop sends', () => {
     await act(async () => { finish({ text: 'Done', thinking: '', segments: [] }); await turn; });
   });
 
+});
+
+
+it('projects only the selected stream and saves background results in their original chats', async () => {
+  localStorage.clear();
+  (ChatManager as unknown as { instance?: ChatManager }).instance = undefined;
+  const manager = ChatManager.getInstance();
+  const first = manager.openAgentSession({ provider: 'codex', sessionId: 'one', cwd: '/work' }, 'First', []);
+  const second = manager.openAgentSession({ provider: 'codex', sessionId: 'two', cwd: '/work' }, 'Second', []);
+  manager.switchToChat(first.id);
+  const pending = new Map<string, { cb: any; finish: (result: any) => void }>();
+  agent.runTurn.mockImplementation((_opts, cb, id) => new Promise(resolve => pending.set(id, { cb, finish: resolve })));
+  const { result } = renderHook(() => { const chats = useChats(); return { chats, conversation: useAgentConversation({ chats, robotMode: false }) }; });
+  let a!: Promise<unknown>, b!: Promise<unknown>;
+  await act(async () => { a = result.current.conversation.send('A'); });
+  act(() => { pending.get(first.id)!.cb.onText('first live'); result.current.chats.select(second.id); });
+  expect(result.current.conversation.isTyping).toBe(false); expect(result.current.conversation.currentResponse).toBe('');
+  await act(async () => { b = result.current.conversation.send('B'); });
+  act(() => { pending.get(first.id)!.cb.onText('first newer'); pending.get(second.id)!.cb.onText('second live'); });
+  expect(result.current.conversation.currentResponse).toBe('second live');
+  act(() => result.current.conversation.stop()); expect(agent.stop).toHaveBeenCalledWith(second.id);
+  await act(async () => { pending.get(first.id)!.finish({ text: 'first done', thinking: '', segments: [] }); await a; });
+  expect(result.current.conversation.isTyping).toBe(true); expect(result.current.conversation.currentResponse).toBe('second live');
+  expect(manager.getChatById(first.id)!.messages.at(-1)!.content).toBe('first done');
+  await act(async () => { pending.get(second.id)!.finish({ text: 'second done', thinking: '', segments: [] }); await b; });
+  expect(manager.getChatById(second.id)!.messages.at(-1)!.content).toBe('second done');
 });

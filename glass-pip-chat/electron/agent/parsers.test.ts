@@ -9,6 +9,21 @@ it('preserves Codex desktop text blocks in tool output', () => {
 });
 
 describe('ClaudeStreamParser', () => {
+  it('does not relink a resumed chat to the temporary ID from a failed startup', () => {
+    const parser = new ClaudeStreamParser();
+    const events = parser.handle({ type: 'result', session_id: 'temporary-failed-id', is_error: true, errors: ['No conversation found with session ID: original'] });
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ kind: 'done', isError: true, sessionId: undefined });
+    expect(parser.sessionId).toBeUndefined();
+  });
+  it('keeps the initialized identity when an error result carries another ID', () => {
+    const parser = new ClaudeStreamParser();
+    parser.handle({ type: 'system', subtype: 'init', session_id: 'original' });
+    expect(parser.handle({ type: 'result', session_id: 'temporary', is_error: true })).toEqual([
+      expect.objectContaining({ kind: 'done', sessionId: 'original', isError: true }),
+    ]);
+    expect(parser.sessionId).toBe('original');
+  });
   it('keeps unstreamed blocks and subsequent messages after a streamed block', () => {
     const events = feed(new ClaudeStreamParser(), [
       { type: 'stream_event', event: { type: 'content_block_delta', index: 0, delta: { type: 'thinking_delta', thinking: 'Plan' } } },

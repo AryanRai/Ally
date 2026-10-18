@@ -13,7 +13,6 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.activity.viewModels
 import androidx.compose.foundation.*
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
@@ -55,7 +54,8 @@ import kotlinx.coroutines.launch
 
 
 class MainActivity : ComponentActivity() {
-    private val model: WatchViewModel by viewModels()
+    private val model get() = (application as AllyWatchApplication).model
+    private var notificationSequence by mutableIntStateOf(0)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         // Development provisioning through ADB; release builds ignore launch extras.
@@ -71,12 +71,13 @@ class MainActivity : ComponentActivity() {
             }
         }
         setContent { MaterialTheme(colorScheme = MaterialTheme.colorScheme.copy(primary = White, onPrimary = Ink)) {
-            WatchApp(model, ::pulse, { checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED })
+            WatchApp(model, ::pulse, { checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED }, notificationSequence)
         } }
     }
-    override fun onResume() { super.onResume(); dev.ally.device.DeviceLink.resume(this); model.foreground = true; WatchNotifications.foreground = true; model.refresh(); intent.getStringExtra("openChat")?.let { model.openNotification(it); intent.removeExtra("openChat") } }
-    override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); setIntent(intent); intent.getStringExtra("openChat")?.let { model.openNotification(it); intent.removeExtra("openChat") } }
-    override fun onStop() { model.foreground = false; WatchNotifications.foreground = false; model.cancelRecording(); model.stopSpeaking(); super.onStop() }
+    override fun onResume() { super.onResume(); dev.ally.device.DeviceLink.resume(this); model.foreground = true; WatchNotifications.foreground = true; model.refresh(); openRequestChat(intent) }
+    override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); setIntent(intent); openRequestChat(intent) }
+    private fun openRequestChat(intent: Intent) { intent.getStringExtra("openChat")?.let { model.openNotification(it); notificationSequence++; intent.removeExtra("openChat") } }
+    override fun onStop() { model.foreground = false; WatchNotifications.foreground = false; if (!dev.ally.device.AssistantVisibility.visible) model.cancelRecording(); model.stopSpeaking(); super.onStop() }
     private fun pulse(long: Boolean) {
         if (!model.state.value.muted) getSystemService(Vibrator::class.java)?.vibrate(
             VibrationEffect.createOneShot(if (long) 80 else 28, VibrationEffect.DEFAULT_AMPLITUDE))
@@ -84,8 +85,10 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-private fun WatchApp(model: WatchViewModel, pulse: (Boolean) -> Unit, hasMic: () -> Boolean) {
+private fun WatchApp(model: WatchViewModel, pulse: (Boolean) -> Unit, hasMic: () -> Boolean, notificationSequence: Int) {
     val state by model.state.collectAsStateWithLifecycle()
+    val deviceInbox by dev.ally.device.DeviceLink.inbox.collectAsStateWithLifecycle()
+    val pendingRequests = dev.ally.device.DeviceInteractions.pending(deviceInbox)
     val pager = rememberPagerState { 2 }
     val scope = rememberCoroutineScope()
     val lifecycle = LocalLifecycleOwner.current.lifecycle
@@ -95,9 +98,12 @@ private fun WatchApp(model: WatchViewModel, pulse: (Boolean) -> Unit, hasMic: ()
     val openQuickChats = { quickChats = true }
     var settings by rememberSaveable { mutableStateOf(false) }
     var appearance by rememberSaveable { mutableStateOf(false) }
+    var queueOpen by rememberSaveable { mutableStateOf(false) }
     var textInput by rememberSaveable { mutableStateOf(false) }
-    BackHandler(chats || quickChats || settings || textInput || appearance) {
-        if (appearance) appearance = false
+    LaunchedEffect(notificationSequence) { if(notificationSequence > 0) { chats=false; quickChats=false; settings=false; appearance=false; textInput=false; queueOpen=false; pager.scrollToPage(1) } }
+    BackHandler(chats || quickChats || settings || textInput || appearance || queueOpen) {
+        if (queueOpen) queueOpen = false
+        else if (appearance) appearance = false
         else if (chats) chats = false
         else if (quickChats) quickChats = false
         else { chats = false; settings = false; textInput = false }
@@ -119,24 +125,33 @@ private fun WatchApp(model: WatchViewModel, pulse: (Boolean) -> Unit, hasMic: ()
     LaunchedEffect(state.turnId, state.liveText.isNotBlank()) {
         if (state.phase == Phase.THINKING && state.liveText.isNotBlank() && !state.inputRecording && !state.inputSending) pager.animateScrollToPage(1)
     }
+    LaunchedEffect(state.chatId,pendingRequests.map { it.optString("id") }) {
+        if(pendingRequests.any { it.optString("chatId") in setOf(state.chatId,state.chatSessionKey,state.readReceipt?.key) } && state.phase != Phase.RECORDING && !state.inputRecording) pager.animateScrollToPage(1)
+    }
     LaunchedEffect(lifecycle) { lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
         var ticks = 0
         while (true) {
             delay(2500)
+            model.refreshUnread()
             if (!quickChats && !chats && !settings && !appearance && !textInput) {
                 model.refreshSelected()
                 if (++ticks % 6 == 0) model.refresh()
             }
         }
     } }
-    val pendingApproval = state.approval
+    val pendingApproval = state.approval?.takeIf { approval -> deviceInbox.none { it.optString("id") == approval.id && it.optBoolean("interaction") } }
     CompositionLocalProvider(LocalBezelHaptics provides !state.muted) { when {
+        queueOpen -> Column(Modifier.fillMaxSize().background(Ink).padding(horizontal=22.dp,vertical=22.dp),horizontalAlignment=Alignment.CenterHorizontally) {
+            Button(onClick={queueOpen=false},modifier=Modifier.height(40.dp)) { Text("Back to chat",fontSize=11.sp) }
+            dev.ally.device.MessageQueueStack(state.queue,state.queueChanging,state.queueError,model::queueChange,Modifier.weight(1f),compact=true)
+            if(state.queue.items.isEmpty()) Text("Queue is empty",color=Muted,fontSize=12.sp)
+        }
         pendingApproval != null -> ApprovalScreen(pendingApproval, state.answeringApproval, state.approvalError, model::answerApproval)
         chats -> ChatPicker(model, state, { chats = false }, { chats = false; quickChats = false; scope.launch { pager.scrollToPage(0) } })
         quickChats -> QuickChats(model, state, { quickChats = false }, openChats, { quickChats = false; scope.launch { pager.scrollToPage(0) } })
         appearance -> AppearanceScreen(state.look, model::appearance, { appearance = false })
         settings -> SettingsScreen(model, state, { settings = false }, { settings = false; openChats() }, { appearance = true })
-        textInput -> TextEntry(if(state.turnId != null) "Add input" else "Ask Ally", "What’s on your mind?", { text -> model.send(text); textInput = false }, { textInput = false })
+        textInput -> TextEntry(if(state.turnId != null) "Add input" else "Ask Ally", "What’s on your mind?", { text -> model.send(text); textInput = false }, { textInput = false }, state.turnId != null || state.externalRunning, state.inputMode, model::inputMode, state.chatId)
         else -> Box(Modifier.fillMaxSize().background(Ink)) {
             PresenceGlow(state.inputRecording || state.inputSending || state.phase in setOf(Phase.RECORDING, Phase.UPLOADING, Phase.THINKING), state.look)
             HorizontalPager(pager, userScrollEnabled = state.phase != Phase.RECORDING && !state.inputRecording) { page ->
@@ -145,8 +160,14 @@ private fun WatchApp(model: WatchViewModel, pulse: (Boolean) -> Unit, hasMic: ()
                     { textInput = true }, { settings = true }, { if (state.speaking) model.stopSpeaking() else model.mute() }, model::retry, openQuickChats,
                     pager.currentPage == 0 && !pager.isScrollInProgress,
                     { scope.launch { pager.animateScrollToPage(1) } })
-                else HistoryScreen(state, model::send, { scope.launch { pager.animateScrollToPage(0) } }, pulse, openQuickChats, model::olderMessages, model::readReply, model::stopSpeaking)
+                else HistoryScreen(state, model::send, { scope.launch { pager.animateScrollToPage(0) } }, pulse, openQuickChats, model::olderMessages, model::readReply, model::stopSpeaking, pager.currentPage == 1 && !pager.isScrollInProgress, model::viewed, { queueOpen=true })
                 }
+            }
+            if(pager.currentPage == 0 && state.queue.items.isNotEmpty() && state.phase != Phase.RECORDING && !state.inputRecording) {
+                Button(onClick={queueOpen=true},modifier=Modifier.align(Alignment.TopCenter).padding(top=if(pendingRequests.isNotEmpty()) 64.dp else 12.dp).heightIn(min=48.dp)) { Text("Queued · ${state.queue.items.size}",fontSize=11.sp) }
+            }
+            if(pager.currentPage == 0 && state.phase != Phase.RECORDING && !state.inputRecording) pendingRequests.firstOrNull()?.let { request ->
+                Button(onClick={ model.openNotification(request.optString("chatId")); scope.launch { pager.animateScrollToPage(1) } },modifier=Modifier.align(Alignment.TopCenter).padding(top=18.dp).heightIn(min=48.dp)) { Text("Answer request",fontSize=11.sp) }
             }
             if (pager.currentPage == 0 && state.phase != Phase.RECORDING && !state.inputRecording) {
                 val threshold = with(androidx.compose.ui.platform.LocalDensity.current) { 18.dp.toPx() }
@@ -287,13 +308,16 @@ internal fun GeneratedCard(card: WatchCard, send: (String) -> Unit, pulse: (Bool
 }
 
 @Composable
-private fun TextEntry(title: String, hint: String, submit: (String) -> Unit, back: () -> Unit) {
-    var text by rememberSaveable { mutableStateOf("") }
+private fun TextEntry(title: String, hint: String, submit: (String) -> Unit, back: () -> Unit, working: Boolean = false, mode: String = "queue", onMode: (String) -> Unit = {}, chatId: String? = null) {
+    val prefs = dev.ally.device.DeviceLink.prefs(LocalContext.current)
+    var text by remember(chatId) { mutableStateOf(prefs.getString("composer:$chatId", "")!!) }
+    LaunchedEffect(text, chatId) { prefs.edit().putString("composer:$chatId", text).apply() }
     val scroll = rememberScrollState()
     Column(Modifier.fillMaxSize().background(Ink).bezelScroll(scroll).verticalScroll(scroll).padding(horizontal = 27.dp, vertical = 32.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text(title, color = White, fontSize = 15.sp)
         Field(text, { text = it.take(4000) }, hint)
-        Button(onClick = { submit(text) }, enabled = text.isNotBlank()) { Text("Send") }
+        if (working) Button(onClick = { onMode(if(mode=="queue") "steer" else "queue") }) { Text(if(mode=="queue") "Mode: Queue" else "Mode: Steer now",fontSize=12.sp) }
+        Button(onClick = { submit(text) }, enabled = text.isNotBlank()) { Text(if(working) { if(mode=="queue") "Queue" else "Steer now" } else "Send") }
         Button(onClick = back) { Text("Back") }
     }
 }

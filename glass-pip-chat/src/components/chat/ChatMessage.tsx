@@ -12,6 +12,7 @@ import { needsClaudeLogin, openClaudeLogin } from '@/lib/claudeLogin';
 import { readableReply, watchUserText } from '@/lib/watchPresentation';
 import WatchReplyContent, { OriginalMessage } from './WatchReplyContent';
 import { browserActivity } from '../../../electron/agent/browserActivity';
+import { historyReply } from '@/lib/historyReply';
 
 function ToolActivity({ parts }: { parts: Segment[] }) {
   const tools = parts.flatMap(part => part.toolExecution ? [part.toolExecution] : []);
@@ -19,14 +20,18 @@ function ToolActivity({ parts }: { parts: Segment[] }) {
   const running = tools.some(tool => tool.status === 'executing' || tool.status === 'pending');
   const browsers = tools.every(tool => browserActivity(tool.name, tool.parameters));
   const context = tools.length ? describeTool(tools[tools.length - 1]).target : undefined;
-  return <details className="my-2 rounded-lg border border-border/60 px-3 py-2 text-xs text-foreground/55">
-    <summary className="cursor-pointer select-none hover:text-foreground/80">
-      {running ? 'Working' : browsers ? 'Used browser' : 'Activity'} · {tools.length} actions
-      {failures > 0 && <span className="ml-2 text-destructive">{failures} failed</span>}
-      {context && <span className="mt-1 block truncate pl-3.5 text-[11px] text-foreground/40">{context}</span>}
-    </summary>
-    <div className="mt-2 space-y-1">{tools.map(tool => <ToolCall key={tool.id} tool={tool} />)}</div>
-  </details>;
+  const allImages = tools.flatMap(t => t.images ?? []);
+  return <>
+    <details className="my-2 rounded-lg border border-border/60 px-3 py-2 text-xs text-foreground/55">
+      <summary className="cursor-pointer select-none hover:text-foreground/80">
+        {running ? 'Working' : browsers ? 'Used browser' : 'Activity'} · {tools.length} actions
+        {failures > 0 && <span className="ml-2 text-destructive">{failures} failed</span>}
+        {context && <span className="mt-1 block truncate pl-3.5 text-[11px] text-foreground/40">{context}</span>}
+      </summary>
+      <div className="mt-2 space-y-1">{tools.map(tool => <ToolCall key={tool.id} tool={tool} />)}</div>
+    </details>
+    {!!allImages.length && <ImageStrip images={allImages} className="mb-1 ml-3.5 mt-1" />}
+  </>;
 }
 
 function groupToolRuns(parts: Segment[]): Segment[][] {
@@ -108,6 +113,8 @@ function UsageLine({ usage }: { usage: AgentUsage }) {
 
 interface ChatMessageProps {
   message: ChatMessageType;
+  /** Positive live evidence for this exact reply, supplied by the selected chat. */
+  sessionWorking?: boolean;
   onEdit: (id: string, content: string) => void;
   onFork: (id: string, content: string) => void;
   onDelete: (id: string) => void;
@@ -115,16 +122,17 @@ interface ChatMessageProps {
 }
 
 /** A saved chat message with hover actions (copy, retry, edit/fork, delete). */
-export default function ChatMessage({ message, onEdit, onFork, onDelete, onRetry }: ChatMessageProps) {
+export default function ChatMessage({ message, sessionWorking = false, onEdit, onFork, onDelete, onRetry }: ChatMessageProps) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(message.content);
   const [copied, setCopied] = useState(false);
   const isUser = message.role === 'user';
   const { thinking, text } = isUser ? { thinking: '', text: watchUserText(message.content) } : splitThinking(message.content);
+  const reply = historyReply(text, message.metadata?.segments as Segment[] | undefined);
 
   const copy = async () => {
-    const segments = message.metadata?.segments as Segment[] | undefined;
-    const visible = isUser ? text : segments?.length ? segments.filter(part => part.type === 'text').map(part => readableReply(part.content ?? '')).join('\n\n') : readableReply(text);
+    const segments = reply.segments;
+    const visible = isUser ? text : segments?.length ? segments.filter(part => part.type === 'text').map(part => readableReply(part.content ?? '')).join('\n\n') : readableReply(reply.text);
     await navigator.clipboard.writeText(visible);
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
@@ -164,7 +172,10 @@ export default function ChatMessage({ message, onEdit, onFork, onDelete, onRetry
             {text !== message.content && <OriginalMessage text={message.content} label="Watch instructions" />}
           </div>
         ) : (
-          <AgentReply text={text} thinking={thinking} segments={message.metadata?.segments as Segment[] | undefined} />
+          <>
+            <AgentReply text={reply.text} thinking={thinking} segments={reply.segments} streaming={sessionWorking} />
+            {reply.interrupted && !sessionWorking && <p className="mt-1 text-[11px] text-foreground/45">This earlier reply was interrupted.</p>}
+          </>
         )}
       </MessageContent>
       {!isUser && needsClaudeLogin(message.content) && (

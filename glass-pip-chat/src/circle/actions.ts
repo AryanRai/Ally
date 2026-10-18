@@ -13,6 +13,7 @@ export const CIRCLE_ACTIONS: CircleAction[] = [
     prompt: 'Identify what is in this image, then search the web for it and give me the most useful results with links.',
   },
   { id: 'explain', label: 'Explain', prompt: 'Explain what this shows. If it is technical, go step by step.' },
+  { id: 'draw', label: 'Draw to explain', prompt: 'Explain what I circled, step by step, with drawings on my screen.' },
   {
     id: 'fix',
     label: 'Fix this',

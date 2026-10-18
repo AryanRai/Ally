@@ -7,6 +7,8 @@ vi.mock('./thumbs.js', () => ({ thumbnails: (images?: string[]) => images?.lengt
 vi.mock('./codexMigration.js', () => ({ mappedCodexSession: (id: string) => id, codexMigrationAliases: () => ({}) }));
 import { CodexRpc } from './codexRpc';
 import { closeCodexHistory, codexHistoryMessages, loadCodexChat, repairCodexDeviceTitle } from './codexHistory';
+vi.mock('./codexDesktop.js', async importOriginal => ({ ...await importOriginal<typeof import('./codexDesktop.js')>(), readDesktopActivity: vi.fn(async () => undefined) }));
+import { readDesktopActivity } from './codexDesktop';
 import { readCodexActivity } from './codexActivity';
 vi.mock('./codexActivity.js', () => ({ readCodexActivity: vi.fn(async () => undefined) }));
 afterEach(() => { closeCodexHistory(); vi.restoreAllMocks(); });
@@ -41,6 +43,19 @@ describe('API history', () => {
     vi.mocked(readCodexActivity).mockResolvedValue({ turnId: 'live', pending: true, recent: false, updatedAt: 0 });
     expect((await loadCodexChat('thread')).running).toBe(false);
     expect(request.mock.calls.every(([method]) => ['thread/read', 'thread/turns/list'].includes(method))).toBe(true);
+  });
+  it('reconciles reconnect display IDs and a long running native task without erasing a real Stop', async () => {
+    const request = vi.fn(async (method: string) => method === 'thread/read'
+      ? { thread: { historyMode: 'paginated', cwd: '/work', createdAt: 1, path: '/rollout' } }
+      : { data: [{ id: 'live-berry-display-2', status: 'interrupted', itemsView: 'full', items: [] }] });
+    vi.spyOn(CodexRpc, 'connect').mockResolvedValue({ request, close: vi.fn() } as unknown as CodexRpc);
+    vi.mocked(readCodexActivity).mockResolvedValue({ turnId: 'live', pending: true, recent: true, updatedAt: Date.now() });
+    expect(await loadCodexChat('thread')).toMatchObject({ running: true, messages: [] });
+    vi.mocked(readCodexActivity).mockResolvedValue({ turnId: 'live', pending: true, recent: false, updatedAt: 0 });
+    vi.mocked(readDesktopActivity).mockResolvedValue({ turnId: 'live', running: true, idle: false });
+    expect(await loadCodexChat('thread')).toMatchObject({ running: true, messages: [] });
+    vi.mocked(readDesktopActivity).mockResolvedValue({ turnId: 'live', running: false, idle: true });
+    expect((await loadCodexChat('thread')).messages.at(-1)?.content).toBe('⏹️ Stopped');
   });
   it('repairs protocol-derived device titles through metadata only, preserving user renames', async () => {
     let name: string | null = null;

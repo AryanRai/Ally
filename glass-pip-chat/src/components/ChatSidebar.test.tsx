@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, within, waitFor } from '@testing-library/react';
 import ChatSidebar, { groupByProject, runningEntries } from './ChatSidebar';
 import type { Chat } from '@/types/chat';
 
@@ -57,4 +57,17 @@ it('deduplicates a linked running session and keeps exact cross-provider destina
   fireEvent.click(within(running).getByText('Review'));
   expect(open).toHaveBeenCalledWith(sessions[1]);
   expect(running.compareDocumentPosition(screen.getByRole('region', { name: 'Recent chats' })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+});
+
+
+it('shows blue unread dots for linked and native chats without clearing them from the picker', async () => {
+  const original = window.pip;
+  const readStates = vi.fn().mockResolvedValue([{ key: 'codex:x', revision: 'one', unread: true }, { key: 'claude:c', revision: 'two', unread: false }]);
+  const markRead = vi.fn();
+  window.pip = { agent: { readStates, markRead } } as unknown as typeof window.pip;
+  try {
+    render(<ChatSidebar chats={[chat('codex', 'x'), chat('claude', 'c')]} activeChat="claude" onChatSelect={() => {}} onChatCreate={() => {}} onChatDelete={() => {}} onChatRename={() => {}} isCollapsed={false} onToggleCollapse={() => {}} theme="dark" platform="win32" />);
+    await waitFor(() => expect(screen.getAllByLabelText('Unread reply')).toHaveLength(2));
+    expect(markRead).not.toHaveBeenCalled();
+  } finally { window.pip = original; }
 });

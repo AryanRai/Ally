@@ -18,6 +18,9 @@ import java.util.concurrent.TimeUnit
 object DeviceLink {
     val status = MutableStateFlow("Not connected")
     val inbox = MutableStateFlow<List<JSONObject>>(emptyList())
+    val interactionSending = MutableStateFlow<Set<String>>(emptySet())
+    val interactionErrors = MutableStateFlow<Map<String, String>>(emptyMap())
+    private var foregroundActivity = java.lang.ref.WeakReference<Activity>(null)
     internal var service: DeviceLinkService? = null
     fun prefs(c: Context) = c.getSharedPreferences("ally-watch", Context.MODE_PRIVATE)
     fun kind(c: Context) = if (c.packageName.endsWith(".watch")) "watch" else "phone"
@@ -29,10 +32,28 @@ object DeviceLink {
         return Intent(c, DeviceInboxActivity::class.java)
     }
     fun load(c: Context) { val a = runCatching { JSONArray(prefs(c).getString("deviceInbox", "[]")) }.getOrDefault(JSONArray()); inbox.value = (0 until a.length()).mapNotNull { a.optJSONObject(it) } }
-    @Synchronized fun save(c: Context, item: JSONObject) { load(c); inbox.value = (listOf(item) + inbox.value.filter { it.optString("id") != item.optString("id") }).take(30); persist(c) }
+    @Synchronized fun save(c: Context, item: JSONObject) {
+        load(c); val all = listOf(item) + inbox.value.filter { it.optString("id") != item.optString("id") }
+        val live = all.filter { (it.optBoolean("interaction") && it.optString("interactionState") == "pending" || it.optBoolean("command")) && it.optLong("expiresAt") > System.currentTimeMillis() }
+        inbox.value = live.take(72) + all.filter { entry -> live.none { it.optString("id") == entry.optString("id") } }.take(30)
+        persist(c)
+    }
+    @Synchronized fun markAlertViewed(c: Context, id: String) {
+        load(c)
+        inbox.value.firstOrNull { it.optString("id") == id }?.let { save(c, JSONObject(it.toString()).put("_viewedAt",System.currentTimeMillis())) }
+    }
+    fun alertIntent(c: Context, item: JSONObject): Intent {
+        val chat = DeviceAlerts.chat(item)
+        return (if(chat != null) c.packageManager.getLaunchIntentForPackage(c.packageName)!!
+            .putExtra("openChat",chat).putExtra("allyPage","Chat")
+            .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP) else inboxIntent(c)).putExtra("id",item.optString("id"))
+    }
     private fun persist(c: Context) { prefs(c).edit().putString("deviceInbox", JSONArray(inbox.value).toString()).commit() }
     @Synchronized fun dismiss(c: Context, id: String) {
-        load(c); inbox.value = inbox.value.filter { it.optString("id") != id }; persist(c)
+        load(c)
+        // Swiping a notification never answers or loses a server-held question.
+        if(inbox.value.any { it.optString("id") == id && DeviceAlerts.blocking(it) }) { c.getSystemService(NotificationManager::class.java).cancel(id.hashCode()); return }
+        inbox.value = inbox.value.filter { it.optString("id") != id }; persist(c)
         receipt(c, id, "dismissed")
         c.getSystemService(NotificationManager::class.java).cancel(id.hashCode())
     }
@@ -62,29 +83,136 @@ object DeviceLink {
         c.startForegroundService(Intent(c, DeviceLinkService::class.java)); true
     }.getOrElse { status.value = it.message ?: "Cannot connect"; false }
     fun stop(c: Context) { prefs(c).edit().putBoolean("deviceConnected", false).apply(); c.stopService(Intent(c, DeviceLinkService::class.java)); status.value = "Not connected" }
-    fun resume(c: Context) { load(c); if (prefs(c).getBoolean("deviceConnected", false) && service == null) start(c) }
+    fun resume(c: Context) { if(c is Activity) foregroundActivity = java.lang.ref.WeakReference(c); load(c); if (prefs(c).getBoolean("deviceConnected", false) && service == null) start(c) }
+    fun answerInteraction(activity: Activity, item: JSONObject, action: String, values: Map<String, String>) {
+        val id = item.optString("id")
+        if (id in interactionSending.value) return
+        if (!DeviceInteractions.canAnswer(item, status.value == "Connected", service?.connectionId)) { interactionErrors.value += id to "Request expired or disconnected"; return }
+        val data = JSONObject().put("type", "interaction_answer").put("id", id).put("action", action).put("values", JSONObject(values))
+        val connection = service?.connectionId
+        interactionSending.value += id; interactionErrors.value -= id
+        fun send() {
+            if(service?.connectionId != connection || !DeviceInteractions.canAnswer(item, status.value == "Connected", connection) || service?.send(data) != true) {
+                interactionSending.value -= id; interactionErrors.value += id to "Decision not confirmed. Reconnect and try again."
+            }
+        }
+        if(action == "accept" && item.optString("deviceAction") == "phone_control_approve" && item.optString("targetDeviceId") == prefs(activity).getString("deviceId", null)) {
+            activity.moveTaskToBack(true); Handler(Looper.getMainLooper()).postDelayed({send()},700)
+        } else send()
+    }
+    internal fun interactionEvent(c: Context, message: JSONObject, connection: String) {
+        val id = message.optString("id")
+        when(message.optString("type")) {
+            "interaction_sync" -> {
+                val ids = message.optJSONArray("ids"); val pendingIds = (0 until (ids?.length() ?: 0)).map { ids!!.optString(it) }.toSet()
+                load(c)
+                val outdated = inbox.value.filter { it.optBoolean("interaction") && it.optString("interactionState") == "pending" && it.optString("id") !in pendingIds }
+                outdated.forEach { interactionEvent(c,JSONObject().put("type","interaction_closed").put("id",it.optString("id")).put("state","cancelled"),connection) }
+                interactionSending.value = emptySet()
+            }
+            "interaction" -> {
+                val item = message.getJSONObject("request"); val requestId = item.optString("id")
+                if(requestId.isBlank() || requestId.length > 160) return
+                load(c); val existing = inbox.value.firstOrNull { it.optString("id") == requestId }
+                item.put("_receivedAt", existing?.optLong("_receivedAt")?.takeIf { it > 0 } ?: System.currentTimeMillis()).put("interaction",true).put("interactionState","pending").put("_connection",connection).put("body",item.optString("detail"))
+                save(c,item); if(existing == null) notify(c,item)
+            }
+            "interaction_closed" -> {
+                load(c); inbox.value.firstOrNull { it.optString("id") == id }?.let {
+                    if(message.optString("decision") == "accept" && it.optString("deviceAction") == "phone_control_approve" && it.optString("targetDeviceId") == prefs(c).getString("deviceId",null)) foregroundActivity.get()?.takeIf { activity -> activity.hasWindowFocus() }?.moveTaskToBack(true)
+                    val updated = JSONObject(it.toString()).put("interactionState",message.optString("state")).put("answeredOn",message.optString("answeredOn","another device"))
+                    updated.put("decision",message.optString("decision")).put("answerValues",message.optJSONObject("values") ?: JSONObject())
+                    save(c,updated)
+                }
+                interactionSending.value -= id; interactionErrors.value -= id
+                c.getSystemService(NotificationManager::class.java).cancel(id.hashCode())
+            }
+            "interaction_ack" -> {
+                interactionSending.value -= id
+                if(!message.optBoolean("accepted")) interactionErrors.value += id to message.optString("error","Decision not confirmed")
+            }
+        }
+    }
+    internal fun executeAuthorized(c: Context, item: JSONObject, connection: String) {
+        if(service?.connectionId != connection || item.optLong("expiresAt") <= System.currentTimeMillis()) return
+        val activity = foregroundActivity.get()?.takeIf { !it.isFinishing && it.hasWindowFocus() }
+        if(activity == null && item.optString("action") !in setOf("watch_haptic", "watch_show_card", "phone_notify")) {
+            val waiting = JSONObject(item.toString()).put("authorized",true).put("_connection",connection).put("interaction",true).put("interactionState","continue").put("detail",item.optString("body"))
+            save(c,waiting); notify(c,waiting); return
+        }
+        runCommand(activity ?: c, item)
+    }
+    fun continueAuthorized(activity: Activity, item: JSONObject) {
+        if(!item.optBoolean("authorized") || service?.connectionId != item.optString("_connection") || item.optLong("expiresAt") <= System.currentTimeMillis()) return
+        runCommand(activity,item)
+    }
     fun decide(activity: Activity, item: JSONObject, approved: Boolean) {
         val id = item.optString("id")
         fun feedback(message: String) { android.widget.Toast.makeText(activity, message, android.widget.Toast.LENGTH_LONG).show() }
         if (service == null || status.value != "Connected" || item.optString("_connection") != service?.connectionId || item.optLong("expiresAt") < System.currentTimeMillis()) { feedback("Request expired or disconnected"); return }
-        if (!approved) { receipt(activity, id, "rejected"); dismiss(activity, id); return }
+        if (!approved) {
+            receipt(activity, id, "rejected")
+            inbox.value = inbox.value.filter { it.optString("id") != id }; persist(activity)
+            activity.getSystemService(NotificationManager::class.java).cancel(id.hashCode())
+            return
+        }
+        if (inbox.value.none { it.optString("id") == id }) return
         if (service?.send(JSONObject().put("type", "receipt").put("id", id).put("status", "approved")) != true) { feedback("Reconnect before approving"); return }
         // Remove before execution: a second tap cannot run the command again.
         if (inbox.value.none { it.optString("id") == id }) return
         inbox.value = inbox.value.filter { it.optString("id") != id }; persist(activity)
         activity.getSystemService(NotificationManager::class.java).cancel(id.hashCode())
+        runCommand(activity,item)
+    }
+    private fun runCommand(activity: Context, item: JSONObject) {
+        val id = item.optString("id")
+        val executed = prefs(activity).getStringSet("authorizedExecuted",emptySet())!!
+        if(id in executed) return
+        prefs(activity).edit().putStringSet("authorizedExecuted",(executed.toList().takeLast(99)+id).toSet()).commit()
+        val interaction = inbox.value.firstOrNull { it.optString("id") == id && it.optBoolean("interaction") }
+        if(interaction != null) save(activity,JSONObject(interaction.toString()).put("interactionState","answered").put("authorized",false))
+        else { inbox.value = inbox.value.filter { it.optString("id") != id }; persist(activity) }
+        activity.getSystemService(NotificationManager::class.java).cancel(id.hashCode())
         try {
             if (quiet(activity) && item.optString("action") in setOf("watch_haptic", "phone_notify")) { receipt(activity, id, "suppressed"); return }
             var handedOff = false
             when (item.optString("action")) {
+                "phone_control_approve" -> {
+                    require(kind(activity) == "phone")
+                    // Consent only: the desktop executes the exact displayed finite plan.
+                    // Hide the consent inbox before inspection, restoring the previous app.
+                    (activity as? Activity)?.moveTaskToBack(true)
+                    val approvedConnection = service?.connectionId
+                    Handler(Looper.getMainLooper()).postDelayed({
+                        if (service?.connectionId == approvedConnection && item.optLong("expiresAt") >= System.currentTimeMillis()) receipt(activity, id, "done")
+                    }, 700)
+                    return
+                }
                 "watch_haptic" -> if (!quiet(activity)) activity.getSystemService(Vibrator::class.java).vibrate(VibrationEffect.createOneShot(70, VibrationEffect.DEFAULT_AMPLITUDE))
                 "watch_show_card", "phone_notify" -> {
                     val card = JSONObject(item.toString()).put("command", false)
-                    save(activity, card); notify(activity, card)
+                    if(interaction == null) save(activity, card)
+                    else card.put("interaction",true)
+                    notify(activity, card)
                 }
                 "phone_open_url" -> {
                     require(kind(activity) == "phone"); val uri = Uri.parse(item.getString("url")); require(uri.scheme == "https" && uri.userInfo == null)
                     activity.startActivity(Intent(Intent.ACTION_VIEW, uri)); handedOff = true
+                }
+                "phone_open_app" -> {
+                    require(kind(activity) == "phone")
+                    val appPackage = item.getString("packageName")
+                    require(appPackage.matches(Regex("[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+")))
+                    val launch = activity.packageManager.getLaunchIntentForPackage(appPackage) ?: error("App is not installed or cannot be opened")
+                    activity.startActivity(launch); handedOff = true
+                }
+                "phone_set_alarm" -> {
+                    require(kind(activity) == "phone")
+                    val hour = item.getInt("hour"); val minute = item.getInt("minute")
+                    require(hour in 0..23 && minute in 0..59)
+                    activity.startActivity(Intent(AlarmClock.ACTION_SET_ALARM).putExtra(AlarmClock.EXTRA_HOUR, hour)
+                        .putExtra(AlarmClock.EXTRA_MINUTES, minute).putExtra(AlarmClock.EXTRA_MESSAGE, item.optString("title"))
+                        .putExtra(AlarmClock.EXTRA_SKIP_UI, false)); handedOff = true
                 }
                 "phone_set_timer" -> {
                     require(kind(activity) == "phone"); val seconds = item.getInt("seconds"); require(seconds in 1..86400)
@@ -93,7 +221,7 @@ object DeviceLink {
                 else -> throw IllegalArgumentException("Unknown action")
             }
             receipt(activity, id, if (handedOff) "handed_off" else "done")
-        } catch (_: Exception) { receipt(activity, id, "failed"); feedback("No compatible app could complete this request") }
+        } catch (_: Exception) { receipt(activity, id, "failed"); android.widget.Toast.makeText(activity,"No compatible app could complete this request",android.widget.Toast.LENGTH_LONG).show() }
     }
     fun notify(c: Context, item: JSONObject) {
         if (quiet(c)) return
@@ -101,11 +229,14 @@ object DeviceLink {
         val manager = c.getSystemService(NotificationManager::class.java)
         manager.createNotificationChannel(NotificationChannel("ally-device", "Ally cards and requests", NotificationManager.IMPORTANCE_DEFAULT).apply { enableVibration(true) })
         val id = item.optString("id")
-        val open = PendingIntent.getActivity(c, id.hashCode(), inboxIntent(c).putExtra("id", id), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+        val chatId = DeviceAlerts.chat(item).orEmpty()
+        val openIntent = alertIntent(c,item)
+        val open = PendingIntent.getActivity(c, id.hashCode(), openIntent.putExtra("id", id), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         val dismiss = PendingIntent.getBroadcast(c, id.hashCode(), Intent(c, DeviceDismissReceiver::class.java).putExtra("id", id), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-        val title = if (item.optBoolean("command")) "Approve: ${item.optString("action").replace('_', ' ')}" else item.optString("title")
+        val title = if(item.optBoolean("authorized")) "Continue approved action" else if (item.optBoolean("command")) "Approve: ${item.optString("action").replace('_', ' ')}" else "${DeviceAlerts.kind(item)} · ${item.optString("title")}"
         manager.notify(id.hashCode(), Notification.Builder(c, "ally-device").setSmallIcon(android.R.drawable.ic_dialog_info)
             .setContentTitle(title.take(80)).setContentText(item.optString("body").take(160)).setStyle(Notification.BigTextStyle().bigText(item.optString("body")))
+            .setCategory(if(item.optBoolean("interaction")) Notification.CATEGORY_MESSAGE else Notification.CATEGORY_STATUS).setGroup(if(chatId.isNotBlank()) "ally-chat:$chatId" else "ally-device").setVisibility(Notification.VISIBILITY_PRIVATE).setOnlyAlertOnce(true)
             .setContentIntent(open).setDeleteIntent(dismiss).setAutoCancel(true).build())
     }
 }
@@ -140,6 +271,8 @@ class DeviceLinkService : Service() {
         val endpoint = p.getString("endpoint", "")!!.trimEnd('/')
         if (!endpoint.startsWith("https://") || p.getString("token", "").isNullOrBlank()) { DeviceLink.status.value = "Configure HTTPS connection first"; stopSelf(); return }
         val id = p.getString("deviceId", null) ?: UUID.randomUUID().toString().also { p.edit().putString("deviceId", it).commit() }
+        // Non-secret identity for the explicitly authorized ADB development adapter.
+        if (DeviceLink.kind(this) == "phone") java.io.File(filesDir, "phone-control-id").writeText(id)
         connectionId = UUID.randomUUID().toString()
         DeviceLink.status.value = "Connecting…"
         val request = Request.Builder().url(endpoint.replaceFirst("https://", "wss://") + "/v1/devices/live").header("Authorization", "Bearer ${p.getString("token", "")}").build()
@@ -152,6 +285,8 @@ class DeviceLinkService : Service() {
                 if (text.length > 16000) return@launch
                 val msg = runCatching { JSONObject(text) }.getOrNull() ?: return@launch
                 when (msg.optString("type")) {
+                    "interaction", "interaction_closed", "interaction_ack", "interaction_sync" -> DeviceLink.interactionEvent(this@DeviceLinkService,msg,connectionId)
+                    "authorized_command" -> DeviceLink.executeAuthorized(this@DeviceLinkService,msg.getJSONObject("command"),connectionId)
                     "ready" -> {
                         backoff = 1000L; DeviceLink.status.value = "Connected"
                         val queued = JSONArray(p.getString("deviceReceipts", "[]")); for (i in 0 until queued.length()) webSocket.send(queued.getJSONObject(i).toString())
@@ -163,7 +298,7 @@ class DeviceLinkService : Service() {
                         val itemId = item.optString("id"); if (itemId.isBlank() || itemId.length > 160) return@launch
                         DeviceLink.load(this@DeviceLinkService)
                         val duplicate = DeviceLink.inbox.value.any { it.optString("id") == itemId }
-                        if (!duplicate) { item.put("command", command).put("_connection", connectionId); DeviceLink.save(this@DeviceLinkService, item); DeviceLink.notify(this@DeviceLinkService, item) }
+                        if (!duplicate) { item.put("_receivedAt",System.currentTimeMillis()).put("command", command).put("_connection", connectionId); DeviceLink.save(this@DeviceLinkService, item); DeviceLink.notify(this@DeviceLinkService, item) }
                         if (!command) DeviceLink.receipt(this@DeviceLinkService, itemId, if (DeviceLink.quiet(this@DeviceLinkService)) "suppressed" else "received")
                     }
                 }

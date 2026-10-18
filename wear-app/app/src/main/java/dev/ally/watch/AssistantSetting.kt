@@ -42,6 +42,14 @@ internal fun AssistantSetting() {
         try { launcher.launch(Intent(Settings.ACTION_VOICE_INPUT_SETTINGS)) }
         catch (_: Exception) { detail = "Open watch Settings → Apps → Default apps → Digital assistant. If Ally is unavailable, assign Ally to a side-button shortcut instead." }
     }, enabled = !held) { Text(if(held) "Ally is your assistant" else "Use Ally as assistant",fontSize=11.sp) }
+    Button(onClick = {
+        try { launcher.launch(Intent("android.settings.BUTTONS_GESTURES_SETTINGS")) }
+        catch (_: Exception) {
+            try { launcher.launch(Intent("android.settings.ADVANCED_SETTINGS")) }
+            catch (_: Exception) { detail = "Watch Settings → Advanced features → Customise buttons → Long press → Digital assistant." }
+        }
+    }) { Text("Hold-button shortcut",fontSize=11.sp) }
+    Text("Choose Digital assistant for the Home-button hold. Samsung keeps this separate from your default assistant. If your firmware hides that option, use its button settings or a desktop-assisted setup.",color=Muted,fontSize=10.sp)
     if(!available) Text("This watch does not expose assistant selection to apps. Check system Default apps, or assign Ally to a side-button shortcut.",color=Muted,fontSize=10.sp)
     if(detail.isNotBlank()) Text(detail,color=Muted,fontSize=10.sp)
 }

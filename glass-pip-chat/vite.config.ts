@@ -16,6 +16,7 @@ export default defineConfig({
       input: {
         main: path.resolve(__dirname, 'index.html'),
         circle: path.resolve(__dirname, 'circle.html'),
+        tutor: path.resolve(__dirname, 'tutor.html'),
       },
     },
   },

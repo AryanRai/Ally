@@ -4,32 +4,26 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { getWindow, sendToRenderer } from '../window.js';
+import { getWindow } from '../window.js';
+import { CircleHandoff, circlePixels, circleRegion, type CircleCapture } from './circleHandoff.js';
+import type { CircleAsk, CircleSubmit } from './types.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CAPTURE_DIR = path.join(os.tmpdir(), 'ally-captures');
 const MAX_CAPTURE_AGE_MS = 24 * 60 * 60 * 1000;
 
-export interface CircleRect { x: number; y: number; width: number; height: number }
-
-export interface CircleSubmit {
-  /** Selection in overlay CSS pixels; omitted = whole screen */
-  rect?: CircleRect;
-  prompt: string;
-}
-
-/** What the chat window receives once something has been circled. */
-export interface CircleAsk {
-  imagePath: string;
-  thumbnail: string;
-  prompt: string;
-}
-
 let overlay: BrowserWindow | null = null;
-let shot: { image: NativeImage; scaleFactor: number } | null = null;
+let shot: CircleCapture & { chatId?: string } | null = null;
 let mainWasVisible = false;
+let getMain = getWindow;
+const sendToRenderer = (channel: string, ask: CircleAsk) => getMain()?.webContents.send(channel, ask);
+let selectedChatId: string | undefined;
+const tutorHandoff = new CircleHandoff();
+export const takeCircleTutorCapture = (id: string, chatId: string) => tutorHandoff.take(id, chatId);
+let beforeCapture = () => {};
+export const setCircleCaptureCleanup = (callback: () => void) => { beforeCapture = callback; };
 
-async function captureDisplay(display: Electron.Display): Promise<NativeImage> {
+export async function captureDisplay(display: Electron.Display): Promise<NativeImage> {
   const { width, height } = display.size;
   const sources = await desktopCapturer.getSources({
     types: ['screen'],
@@ -41,7 +35,7 @@ async function captureDisplay(display: Electron.Display): Promise<NativeImage> {
 }
 
 function restoreMain(focus: boolean) {
-  const main = getWindow();
+  const main = getMain();
   if (!main) return;
   if (focus || mainWasVisible) {
     main.show();
@@ -68,10 +62,13 @@ function pruneOldCaptures() {
 /** Open the circle overlay on the display under the cursor. */
 export async function startCircle(): Promise<void> {
   if (overlay) return;
+  beforeCapture();
+  tutorHandoff.clear();
+  const chatId = selectedChatId;
   const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
 
   // Keep Ally itself out of the screenshot
-  const main = getWindow();
+  const main = getMain();
   mainWasVisible = !!main?.isVisible();
   if (mainWasVisible) {
     main!.hide();
@@ -79,7 +76,7 @@ export async function startCircle(): Promise<void> {
   }
 
   try {
-    shot = { image: await captureDisplay(display), scaleFactor: display.scaleFactor };
+    shot = { image: await captureDisplay(display), display, capturedAt: Date.now(), chatId };
   } catch (error) {
     console.error('Circle capture failed:', error);
     restoreMain(false);
@@ -128,10 +125,16 @@ export async function startCircle(): Promise<void> {
   }
 }
 
-export function registerCircleIpc(): void {
+export function registerCircleIpc(mainWindow = getWindow): void {
+  getMain = mainWindow;
   pruneOldCaptures();
 
   ipcMain.handle('circle:start', () => startCircle());
+  ipcMain.handle('circle:chat', (event, id?: string) => {
+    if (event.sender !== getMain()?.webContents || event.senderFrame !== event.sender.mainFrame) throw Error('Choose the Circle chat in Ally.');
+    if (id != null && (typeof id !== 'string' || !id || id.length > 240)) throw Error('Invalid chat.');
+    selectedChatId = id;
+  });
 
   ipcMain.handle('circle:getShot', () => (shot ? shot.image.toDataURL() : null));
 
@@ -140,17 +143,22 @@ export function registerCircleIpc(): void {
     restoreMain(false);
   });
 
-  ipcMain.handle('circle:submit', async (_, payload: CircleSubmit) => {
+  ipcMain.handle('circle:submit', async (event, payload: CircleSubmit) => {
+    if (event.sender !== overlay?.webContents || event.senderFrame !== event.sender.mainFrame) throw Error('Submit the selection from Circle.');
     if (!shot) return;
-    const { image, scaleFactor } = shot;
+    if (!payload || typeof payload.prompt !== 'string' || payload.prompt.length > 8000 || (payload.mode != null && payload.mode !== 'draw')) throw Error('Invalid Circle request.');
+    const { image, display, chatId } = shot;
+    const rect = payload.rect ? circleRegion(payload.rect, display.bounds) : undefined;
+    if (payload.mode === 'draw') {
+      if (!chatId || chatId !== selectedChatId) throw Error('Choose a chat in Ally, then circle the area again.');
+      const tutorCaptureId = tutorHandoff.issue(chatId, { ...shot, rect });
+      closeOverlay(); restoreMain(true);
+      sendToRenderer('circle:ask', { imagePath: '', thumbnail: '', prompt: payload.prompt, chatId, tutorCaptureId } satisfies CircleAsk);
+      return;
+    }
     const full = image.getSize();
-    const crop = payload.rect
-      ? image.crop({
-          x: Math.max(0, Math.round(payload.rect.x * scaleFactor)),
-          y: Math.max(0, Math.round(payload.rect.y * scaleFactor)),
-          width: Math.min(full.width, Math.round(payload.rect.width * scaleFactor)),
-          height: Math.min(full.height, Math.round(payload.rect.height * scaleFactor)),
-        })
+    const crop = rect
+      ? image.crop(circlePixels(rect, display.bounds, full))
       : image;
 
     fs.mkdirSync(CAPTURE_DIR, { recursive: true });
@@ -162,9 +170,9 @@ export function registerCircleIpc(): void {
 
     closeOverlay();
     restoreMain(true);
-    const ask: CircleAsk = { imagePath, thumbnail, prompt: payload.prompt };
+    const ask: CircleAsk = { imagePath, thumbnail, prompt: payload.prompt, chatId };
     sendToRenderer('circle:ask', ask);
   });
 
-  app.on('will-quit', closeOverlay);
+  app.on('will-quit', () => { closeOverlay(); tutorHandoff.clear(); });
 }

@@ -1,11 +1,11 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { useSessionSync } from './useSessionSync';
+import { useSessionSync, replyReaderVisible } from './useSessionSync';
 import type { ChatsApi } from './useChats';
 import type { AgentSessionSnapshot } from '../../electron/agent/types';
 
 const original = window.pip;
-afterEach(() => { window.pip = original; });
+afterEach(() => { window.pip = original; vi.restoreAllMocks(); document.querySelector('[data-ally-reply-reader]')?.parentElement?.remove(); });
 const snapshot = (text: string, revision: string): AgentSessionSnapshot => ({ revision, messages: [{ role: 'assistant', content: text, timestamp: 1 }] });
 
 describe('selected session synchronization', () => {
@@ -42,4 +42,31 @@ describe('selected session synchronization', () => {
     await waitFor(() => expect(chats.syncAgentSession).toHaveBeenCalledTimes(1));
     unmount();
   });
+});
+
+
+it('acknowledges only the exact rendered reply while its reader is visible and focused', async () => {
+  let notify: (provider: 'codex') => void = () => {};
+  const markRead = vi.fn().mockResolvedValue(true);
+  const value = { ...snapshot('Ready', 'history'), readState: { key: 'codex:s', revision: 'reply-1', unread: true } };
+  const loadSession = vi.fn().mockResolvedValue(value);
+  const focus = vi.spyOn(document, 'hasFocus').mockReturnValue(false);
+  window.pip = { agent: { loadSession, markRead, onSessionsChanged: (fn: typeof notify) => { notify = fn; return () => {}; } } } as unknown as typeof window.pip;
+  const clip = document.createElement('div'); clip.style.overflowY = 'auto';
+  const reader = document.createElement('div'); reader.dataset.allyReplyReader = 'true'; clip.append(reader); document.body.append(clip);
+  const rect = (top: number, bottom: number) => ({ top, bottom, left: 0, right: 100, width: 100, height: bottom - top } as DOMRect);
+  vi.spyOn(clip, 'getBoundingClientRect').mockReturnValue(rect(0, 100));
+  const bounds = vi.spyOn(reader, 'getBoundingClientRect').mockReturnValue(rect(200, 240));
+  const chats = { activeChat: { id: 'c', agent: { provider: 'codex', sessionId: 's' } }, syncAgentSession: vi.fn() } as unknown as ChatsApi;
+  const { unmount } = renderHook(() => useSessionSync(chats, false));
+  await waitFor(() => expect(chats.syncAgentSession).toHaveBeenCalled());
+  expect(markRead).not.toHaveBeenCalled();
+  focus.mockReturnValue(true);
+  act(() => notify('codex'));
+  await waitFor(() => expect(loadSession).toHaveBeenCalledTimes(2));
+  expect(replyReaderVisible()).toBe(false); expect(markRead).not.toHaveBeenCalled();
+  bounds.mockReturnValue(rect(20, 80));
+  act(() => notify('codex'));
+  await waitFor(() => expect(markRead).toHaveBeenCalledWith('codex', 's', 'reply-1'));
+  unmount();
 });

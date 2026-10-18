@@ -6,7 +6,7 @@ export const SUPPORTED_VERSIONS = ['2025-06-18', '2025-03-26', '2024-11-05'];
 export const SERVER_INFO = { name: 'ally-chats', version: '1.0.0' };
 
 export interface ToolResult {
-  content: Array<{ type: 'text'; text: string }>;
+  content: Array<{ type: 'text'; text: string } | { type: 'image'; data: string; mimeType: 'image/png'; text?: never }>;
   structuredContent?: Record<string, unknown>;
   isError?: boolean;
 }
@@ -22,6 +22,7 @@ export interface ToolDef {
 export interface CallContext {
   /** "provider:id" of the chat whose agent is calling, when Ally knows it */
   caller?: string;
+  signal?: AbortSignal;
 }
 
 type JsonRpc = { jsonrpc?: string; id?: string | number | null; method?: string; params?: any };

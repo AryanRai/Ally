@@ -100,7 +100,8 @@ function listClaudeSessions(limit: number): AgentSessionSummary[] {
       else if (l.type === 'summary' && l.summary && !title) title = l.summary;
       if ((l.type === 'user' || l.type === 'assistant') && !l.isSidechain) {
         hasConversation = true;
-        cwd ??= l.cwd;
+        // The latest folder wins: a session can move (e.g. resumed from another project)
+        if (l.cwd) cwd = l.cwd;
         if (!fallback && l.type === 'user' && !l.isMeta) fallback = firstUserText(l.message?.content);
       }
     }
@@ -334,7 +335,7 @@ export function rebuildClaudeHistory(records: any[]): { cwd?: string; messages: 
   let cwd: string | undefined;
   for (const l of records) {
     if (l.isSidechain || (l.type !== 'user' && l.type !== 'assistant')) continue;
-    cwd ??= l.cwd;
+    if (l.cwd) cwd = l.cwd; // latest folder, so turns run where the session now lives
     const ts = Date.parse(l.timestamp) || Date.now();
     const content = l.message?.content;
     if (l.type === 'user') {

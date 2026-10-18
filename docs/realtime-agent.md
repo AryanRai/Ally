@@ -28,7 +28,7 @@ mic / computer audio ──VAD──▶ Google Chirp (per utterance) ─┐
 screen thumbnail ─change?─▶ snapshot ─▶ Windows OCR ────────┼─▶ timeline (10 min)
 foreground window ──────────────────────────────────────────┘        │
                                                                      ▼
-                                       relevance gate: Jev (or basic heuristics) + policy
+                                       relevance gate: Gemini / Jev / basic heuristics + policy
                                                                      │ triggers
                                                                      ▼
                          turn queue (one at a time; your asks first) ─▶ startAgentRun (selected chat)
@@ -53,6 +53,16 @@ foreground window ────────────────────�
 ## Jev
 
 Add a TypeSafe API key in **Realtime ⋯ → Diagnostics → Settings** (or set `TYPESAFE_API_KEY`). The key is stored in `perception-settings.json` in Ally's user data, used only by the main process, and never sent to the renderer. Without a key, Ally uses basic heuristics and labels the bar "basic relevance (no Jev)". It never pretends Jev answered.
+
+## Gemini on Google Cloud (Orbit)
+
+**Realtime ⋯ → Diagnostics → Settings → Relevance provider** supports **Gemini · Google Cloud**, **Jev · TypeSafe**, or **Basic · local only**. Existing settings keep their Jev choice until changed. Basic disables only the remote relevance classifier; Google speech transcription has its own settings.
+
+For the user's paid Orbit project, select Gemini, project `orbit-494815`, location `global`, model `gemini-2.5-flash-lite`. This uses the existing Google Application Default Credentials, not an AI Studio API key. Vertex AI must be enabled and the account must have prediction access and permission to charge the project. The request explicitly selects this quota project. Credentials and access tokens remain in Electron main. No capture starts when the provider is saved; sessions still require explicit activation and restore paused.
+
+`electron/perception/vertex.ts` sends bounded text only: selected-chat scope, recent transcript/OCR/window text, mode and recent notes. It never sends raw audio or screenshots to this classifier. Structured output is strictly validated into the same relevance scores; incomplete, blocked, malformed or timed-out responses visibly fall back to basic heuristics. Gemini scores are estimates, not calibrated Jev probabilities. The existing policy still enforces thresholds, topic cooldowns, quiet mode and agent-turn limits. The classifier cannot run tools or authorize actions. Stop/start invalidates pending relevance decisions so a slow response cannot trigger work in a different session.
+
+**Verified 2026-10-18:** paid Orbit Vertex inference with synthetic firmware context correctly identified a related GNSS/UART question and rejected unrelated coffee/traffic talk. After avoiding unnecessary CLI project discovery during authentication, measured requests were about **2.53 s cold** and **0.98 s warm** on this PC. These are individual synthetic measurements, not a sustained meeting benchmark. No real chat turns, microphone recording or captured private context were used. Focused perception tests include request billing, ADC project reuse, structured-score validation, deadlines, safe errors, legacy settings preservation, provider routing, cooldowns and stale-session rejection.
 
 ## Verified (2026-10-17, isolated Ally instance)
 

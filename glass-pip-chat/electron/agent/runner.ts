@@ -1,3 +1,4 @@
+import { completeUnread } from './unread.js';
 // Spawning agent turns and streaming their normalized events.
 import { spawn, ChildProcess } from 'node:child_process';
 import fs from 'node:fs';
@@ -9,8 +10,10 @@ import { ClaudeStreamParser, StreamParser } from './parsers.js';
 import { runCodexTurn } from './codexRun.js';
 import { runCodexDesktopTurn } from './codexDesktopRun.js';
 import { trackRunningSession, finishRunningSession } from './runningSessions.js';
-import { FollowupReceipts, type FollowupMode } from './followups.js';
+import { FollowupReceipts, type FollowupIntent, type FollowupMode } from './followups.js';
+import { messageQueue, queuedPrompt, queueUnavailable } from './messageQueue.js';
 import { thumbnails } from './thumbs.js';
+import { claudeResumeLaunch } from './claudeResume.js';
 import { allyChatsMcpServers } from '../chatsMcp/registry.js';
 import type { AgentEvent, AgentRobotContext, AgentRunOptions, AgentInteractionHandler } from './types.js';
 
@@ -20,8 +23,8 @@ interface ActiveRun {
 }
 
 const runs = new Map<string, ActiveRun>();
-const codexRuns = new Map<string, { stop: () => void; steer?: (text: string) => Promise<boolean> }>();
-const managedRuns = new Map<string, { stop: () => void; steer: (text: string, requestId: string) => Promise<FollowupMode> }>();
+const codexRuns = new Map<string, { stop: () => void; steer?: (text: string, images?: string[]) => Promise<boolean> }>();
+const managedRuns = new Map<string, { stop: () => void; steer: (text: string, requestId: string, intent?: FollowupIntent, images?: string[]) => Promise<FollowupMode> }>();
 let runCounter = 0;
 
 /** MCP servers Robot mode hands the agent, by server name: perception (HowYouSeeMe) and motion (DroidCore). */
@@ -36,16 +39,16 @@ export function robotMcpServers(robot?: AgentRobotContext): Record<string, strin
  * Robot context and MCP servers go through temp files so long text never hits the
  * command line. Every non-ephemeral run also gets Ally's ally_chats server.
  */
-function writeRobotFiles(runId: string, opts: AgentRunOptions): { files: string[]; promptFile?: string; mcpFile?: string } {
+function writeRobotFiles(runId: string, opts: AgentRunOptions, context?: string): { files: string[]; promptFile?: string; mcpFile?: string } {
   const servers = Object.entries({ ...robotMcpServers(opts.robot), ...allyChatsMcpServers(opts) });
-  if (!opts.robot && !servers.length) return { files: [] };
+  if (!opts.robot && !servers.length && !context) return { files: [] };
   const dir = path.join(os.tmpdir(), 'ally-agent');
   fs.mkdirSync(dir, { recursive: true });
   const files: string[] = [];
   let promptFile: string | undefined;
-  if (opts.robot) {
+  if (opts.robot || context) {
     promptFile = path.join(dir, `${runId}-prompt.md`);
-    fs.writeFileSync(promptFile, opts.robot.instructions);
+    fs.writeFileSync(promptFile, [opts.robot?.instructions, context].filter(Boolean).join('\n\n'));
     files.push(promptFile);
   }
   let mcpFile: string | undefined;
@@ -110,32 +113,54 @@ export async function startAgentRun(
   const publicId = `conversation-${Date.now()}-${++runCounter}`;
   let sessionId = opts.sessionId, currentId: string | undefined;
   let stopped = false, finished = false, ending = false;
-  const queued: string[] = [];
+  let queueKey = opts.ephemeral ? publicId : opts.queueKey || (sessionId ? `${opts.provider}:${sessionId}` : publicId);
+  const sendQueuedNow = async (item: import('./messageQueue.js').QueuedMessage) => {
+    const live = currentId ? codexRuns.get(currentId) : undefined;
+    if (finished || stopped || ending || !live?.steer) throw queueUnavailable('Send now is unavailable here. This message stays in the queue; it can run after the response.');
+    if (!await live.steer(queuedPrompt(item), item.images)) throw queueUnavailable('Send now is unavailable here. This message stays in the queue.');
+    emit(publicId, { kind: 'input', text: item.text, mode: 'steered', queuedId: item.id });
+  };
+  let unregisterQueue = messageQueue.register(queueKey, sendQueuedNow);
+  const queued = () => messageQueue.snapshot(queueKey).items;
   const pending = new Set<Promise<FollowupMode>>();
   const receipts = new FollowupReceipts();
   const summary = () => sessionId && !opts.ephemeral ? { provider: opts.provider, id: sessionId, title: opts.prompt.slice(-80), cwd: opts.cwd, updatedAt: Date.now() } : undefined;
   const complete = (event: AgentEvent) => {
     if (finished) return;
     finished = true;
+    unregisterQueue();
+    if (stopped || (event.kind === 'done' && event.isError)) messageQueue.pause(queueKey, 'Current work stopped. Queued messages are kept; send or cancel them when ready.');
+    if (sessionId && !opts.ephemeral && event.kind === 'done' && !stopped) completeUnread(opts.provider, sessionId, publicId);
     managedRuns.delete(publicId);
     finishRunningSession(publicId);
     emit(publicId, event);
   };
-  const launch = async (prompt: string, initial = false) => {
+  const launch = async (prompt: string, initial = false, images?: string[]) => {
     ending = false;
     currentId = undefined;
-    const id = await startTrackedRun({ ...opts, prompt, sessionId, images: initial ? opts.images : undefined }, (_id, event) => {
+    const id = await startTrackedRun({ ...opts, prompt, sessionId, images: initial ? opts.images : images }, (_id, event) => {
       if (finished) return;
-      if (event.kind === 'session') sessionId = event.sessionId;
+      if (event.kind === 'session') {
+        sessionId = event.sessionId;
+        // New conversations acquire their canonical identity before accepting input.
+        if (!opts.ephemeral && queueKey !== `${opts.provider}:${sessionId}`) {
+          unregisterQueue(); const previousKey = queueKey; queueKey = `${opts.provider}:${sessionId}`;
+          messageQueue.move(previousKey, queueKey); unregisterQueue = messageQueue.register(queueKey, sendQueuedNow);
+        }
+      }
       if (event.kind === 'done') {
         if (ending) return;
         ending = true;
         if (event.sessionId) sessionId = event.sessionId;
         void (async () => {
           await Promise.allSettled([...pending]);
-          if (!stopped && !event.isError && queued.length && sessionId) {
-            const next = queued.splice(0).join('\n\n');
+          await messageQueue.settled(queueKey);
+          const item = !stopped && !event.isError && sessionId ? messageQueue.claim(queueKey) : undefined;
+          if (item && sessionId) {
+            const next = queuedPrompt(item);
+            const images = item.images;
             emit(publicId, { kind: 'continuation' });
+            emit(publicId, { kind: 'input', text: item.text, mode: 'steered', queuedId: item.id });
             try {
               const previous = currentId ? runs.get(currentId) : undefined;
               if (previous) await new Promise<void>((resolve, reject) => {
@@ -143,11 +168,12 @@ export async function startAgentRun(
                 const released = () => { clearTimeout(timer); resolve(); };
                 previous.child.once('close', released);
               });
-              if (stopped) { complete({ kind: 'done', sessionId, isError: true, error: 'Stopped by you. Queued input was not sent: ' + next }); return; }
-              await launch(next);
-            } catch (error) { complete({ kind: 'done', sessionId, isError: true, error: String(error) }); }
+              if (stopped) { messageQueue.fail(queueKey, item.id, 'Stopped before sending'); complete({ kind: 'done', sessionId, isError: true, error: 'Stopped by you. Queued input was not sent: ' + next }); return; }
+              await launch(next, false, images?.length ? images : undefined);
+              messageQueue.sent(queueKey, item.id);
+            } catch (error) { messageQueue.fail(queueKey, item.id, String(error), true); complete({ kind: 'done', sessionId, isError: true, error: String(error) }); }
           } else {
-            complete(queued.length ? { ...event, isError: true, error: `${event.error || (stopped ? 'Stopped by you.' : 'Could not continue this session.')} Queued input was not sent: ${queued.join(' / ')}` } : event);
+            complete(queued().length ? { ...event, isError: true, error: `${event.error || (stopped ? 'Stopped by you.' : 'Could not continue this session.')} Queued input was not sent: ${queued().map(input => input.text).join(' / ')}` } : event);
           }
         })();
       } else {
@@ -160,30 +186,32 @@ export async function startAgentRun(
   };
   managedRuns.set(publicId, {
     stop: () => { stopped = true; if (currentId) stopAgentRun(currentId); },
-    steer: (text, requestId) => receipts.submit(requestId, text, async () => {
+    steer: (text, requestId, intent = 'auto', images) => receipts.submit(requestId, text, async () => {
       if (finished || stopped || ending) throw new Error('This response has finished. Send your input as a new message.');
       const operation = (async (): Promise<FollowupMode> => {
         const live = currentId ? codexRuns.get(currentId) : undefined;
-        if (live?.steer && await live.steer(text)) { emit(publicId, { kind: 'input', text, mode: 'steered' }); return 'steered'; }
+        if (intent !== 'queue' && live?.steer && await live.steer(text, images)) { emit(publicId, { kind: 'input', text, mode: 'steered' }); return 'steered'; }
+        if (intent === 'steer') throw new Error('Steer now is unavailable on this connection. Your draft is kept; choose Queue to send after this response.');
         // Unsupported connections continue in the same session after this response.
-        queued.push(text);
+        messageQueue.enqueue(queueKey, { id: requestId, text, images });
         emit(publicId, { kind: 'input', text, mode: 'queued' });
         return 'queued';
       })();
       pending.add(operation);
       try { return await operation; } finally { pending.delete(operation); }
-    }),
+    }, intent, JSON.stringify(images ?? [])),
   });
   try { await launch(opts.prompt, true); }
-  catch (error) { managedRuns.delete(publicId); finishRunningSession(publicId); throw error; }
+  catch (error) { unregisterQueue(); managedRuns.delete(publicId); finishRunningSession(publicId); throw error; }
   if (!finished) trackRunningSession(publicId, summary());
   return publicId;
 }
 
-export async function steerAgentRun(runId: string, text: string, requestId: string): Promise<FollowupMode> {
+export async function steerAgentRun(runId: string, text: string, requestId: string, intent: FollowupIntent = 'auto', images?: string[]): Promise<FollowupMode> {
   const run = managedRuns.get(runId);
   if (!run) throw new Error('This response is no longer active. Send your input as a new message.');
-  return run.steer(text, requestId);
+  if (!['auto', 'steer', 'queue'].includes(intent)) throw new Error('Invalid input mode');
+  return run.steer(text, requestId, intent, images);
 }
 
 async function startTrackedRun(
@@ -223,7 +251,8 @@ async function startTrackedRun(
     codexRuns.set(runId, run);
     return runId;
   }
-  const robot = writeRobotFiles(runId, opts);
+  const launch = claudeResumeLaunch(opts.cwd, opts.sessionId);
+  const robot = writeRobotFiles(runId, opts, launch.context);
   const cleanup = () => robot.files.forEach(f => fs.rmSync(f, { force: true }));
 
   const args = claudeArgs(opts, robot);
@@ -234,7 +263,7 @@ async function startTrackedRun(
   }
 
   const child = spawn(launcher.command, [...launcher.prefixArgs, ...args], {
-    cwd: opts.cwd,
+    cwd: launch.cwd,
     env: childEnv(),
     shell: launcher.shell,
     windowsHide: true,

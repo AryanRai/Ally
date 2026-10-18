@@ -10,6 +10,7 @@ import { registerChatsMcp } from './chatsMcp/index.js';
 import { registerCursorIpc, stopCursorWatch } from './ipc/cursor.js';
 import { registerAgentIpc } from './agent/ipc.js';
 import { registerCircleIpc, startCircle } from './capture/circle.js';
+import { registerVisualTutorIpc } from './visualTutor/ipc.js';
 import { startShakeDetection, stopShakeDetection } from './capture/shake.js';
 
 /** Global hotkeys: accelerator → renderer event sent after showing the window. */
@@ -52,6 +53,7 @@ registerPerceptionIpc(getWindow);
 registerChatsMcp(getWindow);
 registerCursorIpc();
 registerCircleIpc();
+registerVisualTutorIpc(getWindow);
 registerAgentIpc(getWindow, config => {
   // `screen` (used by the detector) is only available once the app is ready
   void app.whenReady().then(() => {

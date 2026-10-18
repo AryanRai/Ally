@@ -9,7 +9,6 @@ import java.io.File
 import dev.ally.device.*
 import dev.ally.device.DeviceLink
 import dev.ally.device.BridgeHttpError
-import dev.ally.device.reconnectingTurnRead
 import dev.ally.device.ReplyCard
 import dev.ally.device.ReplyContentParser
 import kotlinx.coroutines.*
@@ -22,28 +21,33 @@ import java.net.HttpURLConnection
 import java.net.URLEncoder
 import java.util.UUID
 
-data class PhoneChat(val id: String, val title: String, val provider: String, val cwd: String)
-data class PhoneMessage(val id: String, val role: String, val text: String, val cards: List<ReplyCard> = emptyList(), val attachments: List<DeviceAttachment> = emptyList())
-data class PhoneState(val chats: List<PhoneChat> = emptyList(), val messages: List<PhoneMessage> = emptyList(), val selected: PhoneChat? = null,
+data class PhoneChat(val id: String, val title: String, val provider: String, val cwd: String, val unread: Boolean = false, val sessionKey: String = "")
+data class PhoneMessage(val id: String, val role: String, val text: String, val cards: List<ReplyCard> = emptyList(), val attachments: List<DeviceAttachment> = emptyList(), val timestamp: Long = System.currentTimeMillis())
+data class PhoneState(val readReceipt: ChatReadReceipt? = null, val chats: List<PhoneChat> = emptyList(), val messages: List<PhoneMessage> = emptyList(), val selected: PhoneChat? = null,
+    val queue: MessageQueue = MessageQueue(), val queueChanging: Boolean = false, val queueError: String = "",
     val running: List<PhoneChat> = emptyList(), val runningStatus: String = "Checking live status…", val liveText: String = "",
     val share: ShareDraft = ShareDraft(), val importingShare: Boolean = false, val pendingSend: Boolean = false, val sentSequence: Int = 0, val sentText: String = "", val liveAttachments: List<DeviceAttachment> = emptyList(),
     val externalRunning: Boolean = false, val syncStatus: String = "", val provider: String = "codex", val permission: String = "readonly", val busy: Boolean = false, val loading: Boolean = false, val error: String = "", val activity: String = "", val approval: JSONObject? = null,
-    val inputStatus: String = "", val more: Int? = null, val before: Int? = null, val recording: Boolean = false, val transcribing: Boolean = false,
+    val inputMode: String = "queue", val inputStatus: String = "", val more: Int? = null, val before: Int? = null, val recording: Boolean = false, val transcribing: Boolean = false,
     val microphoneLevel: Float = 0f, val recordingSeconds: Float = 0f, val liveTranscript: String = "", val voiceDraft: String = "")
 private typealias BridgeError = BridgeHttpError
 
-class PhoneModel(app: Application) : AndroidViewModel(app) {
-    private val shares = ShareDraftStore(File(app.filesDir, "share-draft"))
+internal class PhoneConversation(private val app: Application, private val chatKey: String, private val viewModelScope: CoroutineScope, migrate: Boolean, storageKey: String = chatKey) {
+    private fun getApplication(): Application = app
+    private val shares = ShareDraftStore(File(app.filesDir, DeviceLink.prefs(app).getString("phoneShareFolder:$storageKey", null) ?: (if (migrate) "share-draft" else "share-draft-${UUID.nameUUIDFromBytes(storageKey.toByteArray())}").also { DeviceLink.prefs(app).edit().putString("phoneShareFolder:$storageKey", it).commit() }))
     private var shared = shares.read()
-    val state = MutableStateFlow(PhoneState(share = shared))
-    private val prefs = DeviceLink.prefs(app)
+    val state = MutableStateFlow(PhoneState(share = shared, selected = chatKey.takeIf { it.isNotBlank() }?.let { PhoneChat(it, "Opening chat…", it.substringBefore(':'), "") }))
+    private val prefs = ChatPreferences(DeviceLink.prefs(app), storageKey, setOf("phoneTurn", "phonePendingText", "phonePendingChat", "phoneRequestId", "phoneInputText", "phoneInputId", "phoneInputTurn", "phoneInputMode", "phoneInputShare", "phoneNewRequest", "phonePendingQueue"), migrate)
     private var turn: String? = prefs.getString("phoneTurn", null)
     private var pendingText: String? = prefs.getString("phonePendingText", null)
+    private var pendingQueue: Boolean? = prefs.getString("phonePendingQueue", null)?.toBooleanStrictOrNull()
     private var pendingChat: String? = prefs.getString("phonePendingChat", null)
     private var requestId: String? = prefs.getString("phoneRequestId", null)
     private var inputText: String? = prefs.getString("phoneInputText", null)
     private var inputId: String? = prefs.getString("phoneInputId", null)
     private var inputTurn: String? = prefs.getString("phoneInputTurn", null)
+    private var inputShare = prefs.getString("phoneInputShare", null) == "true"
+    private var inputMode: String? = prefs.getString("phoneInputMode", null)
     private fun pulse(strong: Boolean = false) = PhoneHaptics.pulse(getApplication(), strong)
     private var pollJob: Job? = null
     private var voice: PhoneVoice? = null
@@ -51,8 +55,10 @@ class PhoneModel(app: Application) : AndroidViewModel(app) {
     private var voiceTurn: String? = null
     private val voiceActive get() = state.value.recording || state.value.transcribing
     init {
-        state.update { it.copy(pendingSend = pendingText != null) }
-        (pendingChat ?: prefs.getString("phoneChat", null))?.let { id -> select(id) }
+        state.update { it.copy(pendingSend = pendingText != null, inputMode = inputMode ?: "queue") }
+        (pendingChat ?: chatKey.takeIf { it.isNotBlank() })?.let { id -> task {
+            try { history(id) } finally { if (turn != null) poll() }
+        } }
         inputText?.let { text -> state.update { it.copy(voiceDraft = text, inputStatus = "Previous input delivery unconfirmed. Use Retry before sending again.") } }
     }
     private fun enc(value: String) = URLEncoder.encode(value, "UTF-8")
@@ -77,19 +83,26 @@ class PhoneModel(app: Application) : AndroidViewModel(app) {
         try { block() } catch (e: CancellationException) { throw e } catch (e: Exception) { state.update { it.copy(error = e.message ?: "Connection unavailable") } }
         finally { state.update { it.copy(loading = false) } }
     }
-    private fun chat(j: JSONObject) = PhoneChat(j.getString("id"), j.optString("title", "Chat"), j.optString("provider", "codex"), j.optString("cwd"))
+    private fun chat(j: JSONObject) = PhoneChat(j.getString("id"), j.optString("title", "Chat"), j.optString("provider", "codex"), j.optString("cwd"), j.optBoolean("unread"), j.optString("provider", "codex") + ":" + j.optString("sessionId").takeIf { it.isNotBlank() && it != "null" }.orEmpty().ifBlank { j.getString("id").substringAfter(':') })
     suspend fun refreshRunning() {
         try {
             val a = request("/v1/running").optJSONArray("chats") ?: JSONArray()
             val rows = (0 until a.length()).map { chat(a.getJSONObject(it)) }.distinctBy { it.id }
             state.update { it.copy(running = rows, runningStatus = if (rows.isEmpty()) "No active chats" else "") }
         } catch (e: CancellationException) { throw e } catch (e: Exception) {
-            state.update { it.copy(running = emptyList(), runningStatus = "Live status unavailable · reconnect to desktop") }
+            state.update { it.copy(runningStatus = "Reconnecting · showing last known active chats") }
         }
+    }
+    fun runningSnapshot(rows: List<PhoneChat>, status: String) {
+        state.update { it.copy(running = rows, runningStatus = status) }
     }
     private var refreshingSelected = false
     suspend fun refreshSelected() {
         val id = state.value.selected?.id ?: return
+        // A saved receipt can outlive the desktop process, including when the
+        // initial history request failed. Always restart its read-only recovery.
+        if (turn != null) { poll(); return }
+        refreshQueue()
         if (refreshingSelected || voiceActive || state.value.loading || state.value.busy || turn != null || pendingText != null) return
         refreshingSelected = true
         try {
@@ -99,9 +112,30 @@ class PhoneModel(app: Application) : AndroidViewModel(app) {
             if (state.value.selected?.id == id) state.update { it.copy(externalRunning = false, syncStatus = "Live status unavailable · reconnecting…") }
         } finally { refreshingSelected = false }
     }
+    suspend fun refreshQueue() {
+        val id = state.value.selected?.id ?: return
+        try {
+            val q = MessageQueue.parse(request("/v1/queue/${enc(id)}")) ?: return
+            if (state.value.selected?.id == id && !state.value.queueChanging && (state.value.queue.chatId!=q.chatId || q.revision>=state.value.queue.revision)) state.update { it.copy(queue=q,queueError="") }
+        } catch (e: CancellationException) { throw e } catch (_: Exception) {
+            if(state.value.queue.items.isNotEmpty()) state.update { it.copy(queueError="Queue unavailable · reconnect to manage messages") }
+        }
+    }
+    fun queueChange(change: JSONObject) {
+        val id=state.value.selected?.id ?: return
+        if(state.value.queueChanging) return
+        state.update { it.copy(queueChanging=true,queueError="") }
+        viewModelScope.launch {
+            try {
+                val q=MessageQueue.parse(request("/v1/queue/${enc(id)}",change)) ?: return@launch
+                state.update { it.copy(queue=q) }
+            } catch(e: CancellationException) { throw e } catch(e: Exception) { state.update { it.copy(queueError=e.message ?: "Queue change failed") } }
+            finally { state.update { it.copy(queueChanging=false) } }
+        }
+    }
     fun voiceError(message: String) { state.update { it.copy(error = message) } }
     fun startRecording() {
-        if (state.value.importingShare || state.value.externalRunning || voiceActive || state.value.loading || pendingText != null || inputText != null) return
+        if (state.value.importingShare || voiceActive || state.value.loading || pendingText != null || inputText != null) return
         if (state.value.selected == null) { voiceError("Choose a conversation before talking."); return }
         try {
             voiceTurn = turn
@@ -110,11 +144,11 @@ class PhoneModel(app: Application) : AndroidViewModel(app) {
                 { text -> state.update { it.copy(liveTranscript = text) } })
             state.update { it.copy(recording = true, liveTranscript = "", voiceDraft = "", error = "", recordingSeconds = 0f) }
             pulse()
-            voice!!.start(::finishRecording, { error -> cancelRecording(); voiceError(error) },
+            voice!!.start({ finishRecording() }, { error -> cancelRecording(); voiceError(error) },
                 { level, seconds -> state.update { it.copy(microphoneLevel = level, recordingSeconds = seconds) } })
         } catch (e: Exception) { cancelRecording(); voiceError(e.message ?: "Microphone unavailable") }
     }
-    fun finishRecording() {
+    fun finishRecording(review: Boolean = prefs.getBoolean("phone.voice.review",false)) {
         if (!state.value.recording) return
         val capture = voice ?: return
         pulse()
@@ -124,7 +158,7 @@ class PhoneModel(app: Application) : AndroidViewModel(app) {
                 val text = capture.finish()
                 state.update { it.copy(transcribing = false, liveTranscript = "") }
                 voice = null
-                when (voiceDelivery(voiceTurn, turn, prefs.getBoolean("phone.voice.review",false))) {
+                when (voiceDelivery(voiceTurn, turn, review)) {
                     VoiceDelivery.REVIEW -> state.update { it.copy(voiceDraft = text) }
                     VoiceDelivery.FINISHED -> state.update { it.copy(voiceDraft = text, inputStatus = "The response finished while you were talking. Review your words and send when ready.") }
                     VoiceDelivery.SEND -> send(text)
@@ -156,10 +190,26 @@ class PhoneModel(app: Application) : AndroidViewModel(app) {
         val r = request("/v1/chats/${enc(id)}$before")
         if (expectedSelection != null && (state.value.selected?.id != expectedSelection || state.value.loading || state.value.busy || voiceActive || turn != null)) return
         val selected = chat(r.getJSONObject("chat")); val a = r.optJSONArray("messages") ?: JSONArray()
-        val messages = (0 until a.length()).map { val m = a.getJSONObject(it); val reply = ReplyContentParser.parse(m); PhoneMessage(m.optString("id"), m.optString("role"), reply.text, reply.cards, AttachmentParser.list(m)) }
-        prefs.edit().putString("phoneChat", selected.id).apply()
-        state.update { it.copy(selected = selected, provider = selected.provider, externalRunning = r.optBoolean("running") && r.optString("activeTurnId").let { t -> t.isBlank() || t == "null" }, syncStatus = "", liveText = if (it.selected?.id == selected.id) it.liveText else "", messages = if (older) (messages + it.messages).distinctBy { m -> m.id } else if (expectedSelection != null) mergePhoneHistory(it.messages, messages) else messages, before = if (expectedSelection != null && it.messages.isNotEmpty()) it.before else if (r.isNull("before")) null else r.optInt("before"), permission = prefs.getString("phonePermission:${selected.id}", "readonly")!!) }
+        val messages = (0 until a.length()).map { val m = a.getJSONObject(it); val reply = ReplyContentParser.parse(m); PhoneMessage(m.optString("id"), m.optString("role"), reply.text, reply.cards, AttachmentParser.list(m), m.optLong("timestamp")) }
+
+        state.update { it.copy(readReceipt = if (older) it.readReceipt else ChatReadReceipt.parse(r.optJSONObject("readState")), selected = selected, provider = selected.provider, externalRunning = r.optBoolean("running") && r.optString("activeTurnId").let { t -> t.isBlank() || t == "null" }, syncStatus = "", liveText = if (it.selected?.id == selected.id) it.liveText else "", messages = if (older) (messages + it.messages).distinctBy { m -> m.id } else if (expectedSelection != null) mergePhoneHistory(it.messages, messages) else messages, before = if (expectedSelection != null && it.messages.isNotEmpty()) it.before else if (r.isNull("before")) null else r.optInt("before"), permission = prefs.getString("phonePermission:${selected.id}", "readonly")!!) }
         r.optString("activeTurnId").takeIf { it.isNotBlank() && it != "null" }?.let { turn = it; prefs.edit().putString("phoneTurn", it).apply() }
+    }
+    suspend fun refreshUnread() {
+        try {
+            val flags = ChatReadReceipt.states(request("/v1/read-states"))
+            fun update(row: PhoneChat) = row.copy(unread = flags[row.sessionKey] ?: row.unread)
+            state.update { it.copy(chats = it.chats.map(::update), running = it.running.map(::update)) }
+        } catch (e: CancellationException) { throw e } catch (_: Exception) { /* Keep badges through reconnect. */ }
+    }
+    suspend fun viewed(receipt: ChatReadReceipt) {
+        if (!receipt.unread || state.value.readReceipt != receipt || state.value.busy || state.value.externalRunning) return
+        try {
+            if (request("/v1/read-state", receipt.json()).optBoolean("accepted")) {
+                state.update { if (it.readReceipt == receipt) it.copy(readReceipt = receipt.copy(unread = false)) else it }
+                refreshUnread()
+            }
+        } catch (e: CancellationException) { throw e } catch (_: Exception) { /* Retry only while still viewing this reply. */ }
     }
     fun older() { if(voiceActive) return; val id = state.value.selected?.id ?: return; task { history(id, true) } }
     fun newChat() { if (voiceActive || state.value.busy || state.value.loading || turn != null || pendingText != null || inputText != null) return; task {
@@ -201,6 +251,7 @@ class PhoneModel(app: Application) : AndroidViewModel(app) {
             AttachmentParser.one(json.getJSONObject("attachment")) ?: error("Invalid attachment response")
         } finally { c.disconnect() }
     }
+    fun inputMode(value: String) { if (inputText == null && value in setOf("queue", "steer")) state.update { it.copy(inputMode = value) } }
     fun send(text: String) {
         val chat = state.value.selected ?: return
         if (voiceActive || state.value.loading || state.value.importingShare) return
@@ -208,17 +259,16 @@ class PhoneModel(app: Application) : AndroidViewModel(app) {
         val message = pendingText ?: listOf(shared.text, text).filter { it.isNotBlank() }.joinToString("\n\n")
         if (message.isBlank() && shared.files.isEmpty()) return
         if (message.length > 12000) { voiceError("Message exceeds 12,000 characters"); return }
-        if (state.value.externalRunning) { voiceError("This chat is working in another app. Wait for it to finish before sending."); return }
-        if (state.value.busy || turn != null) {
-            if (hasShare) { voiceError("Your shared draft is saved. Send it when this response finishes."); return }
-            addInput(text); return
+        if (state.value.busy || turn != null || state.value.externalRunning) {
+            addInput(message, hasShare); return
         }
         if (inputText != null) { voiceError("Retry the unconfirmed input first."); return }
         if (pendingText != null && text != pendingText) { voiceError("Retry the previous message first; its delivery is uncertain."); return }
         pendingChat = pendingChat ?: chat.id
         if (pendingChat != chat.id) { voiceError("Retry the message in its original chat."); return }
+        pendingQueue = pendingQueue ?: state.value.externalRunning
         pendingText = message; requestId = requestId ?: UUID.randomUUID().toString()
-        prefs.edit().putString("phonePendingText", message).putString("phonePendingChat", pendingChat).putString("phoneRequestId", requestId).commit()
+        prefs.edit().putString("phonePendingText", message).putString("phonePendingChat", pendingChat).putString("phoneRequestId", requestId).putString("phonePendingQueue", pendingQueue.toString()).commit()
         state.update { it.copy(pendingSend = true) }
         task {
             val uploaded = try { shared.files.map { item ->
@@ -229,30 +279,53 @@ class PhoneModel(app: Application) : AndroidViewModel(app) {
             } } catch (e: Exception) {
                 // No message request has started: the draft is safe to edit after an upload failure.
                 if (e is CancellationException) throw e
-                pendingText = null; pendingChat = null; requestId = null
-                prefs.edit().remove("phonePendingText").remove("phonePendingChat").remove("phoneRequestId").commit()
+                pendingText = null; pendingChat = null; requestId = null; pendingQueue = null
+                prefs.edit().remove("phonePendingText").remove("phonePendingChat").remove("phoneRequestId").remove("phonePendingQueue").commit()
                 state.update { it.copy(pendingSend = false) }; throw e
             }
-            val r = request("/v1/messages", JSONObject().put("provider", chat.provider).put("chatId", chat.id).put("permission", state.value.permission).put("requestId", requestId).put("text", message).put("attachments", JSONArray(uploaded.map { it.id })))
-            turn = r.getString("id"); prefs.edit().putString("phoneTurn", turn).remove("phonePendingText").remove("phonePendingChat").remove("phoneRequestId").commit(); pendingText = null; pendingChat = null; requestId = null
+            val r = request("/v1/messages", JSONObject().put("provider", chat.provider).put("chatId", chat.id).put("permission", state.value.permission).put("requestId", requestId).put("text", message).put("attachments", JSONArray(uploaded.map { it.id })).put("queueAfterCurrent", pendingQueue == true))
+            if(r.optBoolean("queued")) {
+                prefs.edit().remove("phonePendingText").remove("phonePendingChat").remove("phoneRequestId").remove("phonePendingQueue").commit()
+                pendingText=null; pendingChat=null; requestId=null; pendingQueue=null
+                shares.clear(shared); shared=ShareDraft()
+                state.update { it.copy(queue=MessageQueue.parse(r) ?: it.queue,share=shared,pendingSend=false,sentSequence=it.sentSequence+1,sentText=message,inputStatus="Queued after this response") }
+                return@task
+            }
+            turn = r.getString("id"); prefs.edit().putString("phoneTurn", turn).remove("phonePendingText").remove("phonePendingChat").remove("phoneRequestId").remove("phonePendingQueue").commit(); pendingText = null; pendingChat = null; requestId = null; pendingQueue = null
             shares.clear(shared); shared = ShareDraft()
             pulse()
             state.update { it.copy(share = shared, pendingSend = false, sentSequence = it.sentSequence + 1, sentText = message, liveText = "", liveAttachments = emptyList(), messages = it.messages + PhoneMessage("local-${turn}", "user", message.ifBlank { "Shared attachments" }, attachments = uploaded)) }; poll()
         }
     }
-    private fun addInput(text: String) {
+    private fun addInput(text: String, withShare: Boolean = inputShare) {
         if (state.value.loading) return
         if (inputText != null && inputText != text) { state.update { it.copy(error = "Retry the previous input first; its delivery is uncertain.", voiceDraft = text) }; return }
-        val target = inputTurn ?: turn ?: return
+        var target = inputTurn ?: turn ?: state.value.selected?.id?.takeIf { state.value.externalRunning }?.let { "chat:$it" } ?: return
+        inputMode = inputMode ?: state.value.inputMode
+        // Queue belongs to the conversation, not an expiring desktop turn receipt.
+        if(inputMode=="queue") target="chat:${state.value.selected?.id ?: return}"
+        inputShare = withShare
         inputText = text; inputTurn = target; inputId = inputId ?: UUID.randomUUID().toString()
-        prefs.edit().putString("phoneInputText", text).putString("phoneInputTurn", target).putString("phoneInputId", inputId).commit()
+        prefs.edit().putString("phoneInputText", text).putString("phoneInputTurn", target).putString("phoneInputId", inputId).putString("phoneInputMode", inputMode).putString("phoneInputShare", inputShare.toString()).commit()
         task {
             try {
-                val result = request("/v1/turns/${enc(target)}/input", JSONObject().put("text", text).put("requestId", inputId))
-                state.update { it.copy(sentSequence = it.sentSequence + 1, sentText = text, inputStatus = if (result.optString("mode") == "steered") "Added to current work" else "Queued after this response",
-                    messages = it.messages + PhoneMessage("input-$inputId", "user", text)) }
-                inputText = null; inputId = null; inputTurn = null
-                prefs.edit().remove("phoneInputText").remove("phoneInputId").remove("phoneInputTurn").apply()
+                if (inputShare && shared.files.isNotEmpty() && !request("/v1/status").optBoolean("inputAttachments")) {
+                    error("The desktop attachment update is still activating. Your draft is saved; retry shortly.")
+                }
+                val uploaded = if (inputShare) shared.files.map { item ->
+                    item.uploaded ?: upload(item).also { asset ->
+                        shared = shared.copy(files = shared.files.map { if (it.key == item.key) it.copy(uploaded = asset) else it })
+                        shares.save(shared); state.update { it.copy(share = shared) }
+                    }
+                } else emptyList()
+                if(inputMode=="queue" && !request("/v1/status").optBoolean("messageQueue")) error("The shared queue update is still activating. Your draft is saved; retry shortly.")
+                val result = request(if (target.startsWith("chat:")) "/v1/chats/${enc(target.removePrefix("chat:"))}/input" else "/v1/turns/${enc(target)}/input", JSONObject().put("text", text).put("requestId", inputId).put("mode", inputMode).put("permission",state.value.permission).put("attachments", JSONArray(uploaded.map { it.id })))
+                if (inputShare) { shares.clear(shared); shared = ShareDraft() }
+                state.update { it.copy(share = shared, sentSequence = it.sentSequence + 1, sentText = text, inputStatus = if (result.optString("mode") == "steered") "Added to current work" else "Queued after this response",
+                    queue = MessageQueue.parse(result) ?: it.queue,
+                    messages = if(result.optString("mode")=="queued") it.messages else it.messages + PhoneMessage("input-$inputId", "user", text.ifBlank { "Shared attachments" }, attachments = uploaded)) }
+                inputText = null; inputId = null; inputTurn = null; inputMode = null; inputShare = false
+                prefs.edit().remove("phoneInputText").remove("phoneInputId").remove("phoneInputTurn").remove("phoneInputMode").remove("phoneInputShare").apply()
                 pulse()
             } catch (e: Exception) {
                 if (e is CancellationException) throw e
@@ -263,8 +336,8 @@ class PhoneModel(app: Application) : AndroidViewModel(app) {
     }
     fun dismissInput() {
         if (state.value.loading) return
-        inputText = null; inputId = null; inputTurn = null
-        prefs.edit().remove("phoneInputText").remove("phoneInputId").remove("phoneInputTurn").apply()
+        inputText = null; inputId = null; inputTurn = null; inputMode = null; inputShare = false
+        prefs.edit().remove("phoneInputText").remove("phoneInputId").remove("phoneInputTurn").remove("phoneInputMode").remove("phoneInputShare").apply()
         state.update { it.copy(error = "", inputStatus = "Check chat history before resending unconfirmed input") }
     }
     fun retry() { if (inputText != null) addInput(inputText!!) else if (turn != null) poll() else pendingText?.let(::send) ?: state.value.selected?.let { select(it.id) } ?: catalog() }
@@ -275,10 +348,19 @@ class PhoneModel(app: Application) : AndroidViewModel(app) {
         pollJob = viewModelScope.launch {
             try {
                 while (isActive) {
-                    val r = reconnectingTurnRead({ state.update { it.copy(activity = "Reconnecting… Your task is still on the desktop", approval = null) } }) {
+                    val r = phoneTurnRead({ state.update { it.copy(activity = "Reconnecting… Checking the same chat", approval = null) } }, {
+                        if (turn == current) {
+                            turn = null; prefs.edit().remove("phoneTurn").apply()
+                            state.update { it.copy(busy = false, approval = null, syncStatus = "Desktop restarted · refreshing this chat…") }
+                            val id = state.value.selected?.id ?: chatKey
+                            if (id.isNotBlank()) history(id)
+                            state.update { it.copy(liveText = "", liveAttachments = emptyList(), activity = "", error = "") }
+                        }
+                    }) {
                         request("/v1/turns/${enc(current)}")
-                    }
+                    } ?: break
                     val nextApproval = r.optJSONArray("approvals")?.optJSONObject(0)
+                    MessageQueue.parse(r)?.let { q -> if(!state.value.queueChanging && (state.value.queue.chatId!=q.chatId || q.revision>=state.value.queue.revision)) state.update { it.copy(queue=q) } }
                     if (nextApproval != null && nextApproval.optString("id") != state.value.approval?.optString("id")) pulse(true)
                     state.update { it.copy(liveAttachments = AttachmentParser.list(r), liveText = r.optString("liveText").take(12000), activity = r.optString("activity", "Working…"), approval = nextApproval) }
                     if (r.optString("status") in setOf("done", "error")) {
@@ -302,7 +384,7 @@ class PhoneModel(app: Application) : AndroidViewModel(app) {
             } finally { state.update { it.copy(busy = turn != null, approval = null) } }
         }
     }
-    override fun onCleared() { cancelRecording(); super.onCleared() }
+    fun close() { cancelRecording() }
     fun stop() { val id = turn ?: return; task { request("/v1/turns/${enc(id)}/stop", JSONObject()) } }
     fun answer(action: String, values: Map<String, String>) { val id = turn ?: return; val approval = state.value.approval ?: return
         task { request("/v1/turns/${enc(id)}/approvals/${enc(approval.getString("id"))}", JSONObject().put("action", action).put("values", JSONObject(values))); pulse() }

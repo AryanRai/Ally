@@ -17,7 +17,7 @@ interface ChatInputProps {
   ref?: Ref<HTMLTextAreaElement>;
   input: string;
   setInput: (value: string) => void;
-  onSend: () => void;
+  onSend: (mode?: 'steer' | 'queue') => void;
   isTyping: boolean;
   workingStatus?: string;
   onStop: () => void;
@@ -155,7 +155,7 @@ export default function ChatInput({
 
         <PromptInput
           onSubmit={() => {
-            if (!stopDisabledReason) onSend();
+            onSend(isTyping ? 'queue' : undefined);
           }}
           className={BARE_GROUP}
         >
@@ -181,6 +181,12 @@ export default function ChatInput({
               rows={1}
               value={input}
               onChange={e => setInput(e.target.value)}
+              onKeyDown={event => {
+                if (isTyping && event.key === 'Enter' && !event.nativeEvent.isComposing) {
+                  event.preventDefault();
+                  if (canSend) onSend(event.shiftKey ? 'steer' : 'queue');
+                }
+              }}
               placeholder={placeholder}
               className="max-h-32 min-h-0 flex-1 resize-none border-0 bg-transparent! px-2 py-2 text-[13px] font-light shadow-none focus-visible:ring-0"
             />
@@ -225,7 +231,10 @@ export default function ChatInput({
                 { id: 'copy', icon: copied ? <Check /> : <ClipboardCopy />, label: copied ? 'Copied' : 'Copy chat', onClick: copyChat },
               ]}
             />
-            {isTyping && !stopDisabledReason && <button type="submit" disabled={!canSend} aria-label="Add input without stopping" title="Steer this work, or queue input when steering is unavailable" className="rounded-full border border-white/20 px-3 py-1 text-xs disabled:opacity-40">Add input</button>}
+            {isTyping && <>
+              <button type="button" disabled={!canSend} onClick={() => onSend('steer')} title="Shift+Enter" className="rounded-full border border-white/20 px-3 py-1 text-xs disabled:opacity-40">Steer now</button>
+              <button type="submit" disabled={!canSend} title="Enter · send after the current response" className="rounded-full border border-white/20 px-3 py-1 text-xs disabled:opacity-40">Queue</button>
+            </>}
             <PromptInputSubmit
               size={isTyping ? 'sm' : 'icon-sm'}
               variant={isTyping ? 'outline' : 'default'}

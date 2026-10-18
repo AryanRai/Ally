@@ -48,7 +48,7 @@ export interface DeviceToolSpec {
   inputSchema: Record<string, unknown>;
   /** The handler must obtain the user's approval on the device before acting, and never auto-approve. */
   requiresConfirmation?: boolean;
-  handler: (args: Record<string, unknown>) => Promise<ToolResult>;
+  handler: (args: Record<string, unknown>, ctx: CallContext) => Promise<ToolResult>;
 }
 
 /** Watch/phone actions become tools on this server for every agent. */
@@ -59,7 +59,7 @@ export function registerDeviceTool(spec: DeviceToolSpec): () => void {
     description: spec.requiresConfirmation ? `${spec.description} (The user confirms on the device before it runs.)` : spec.description,
     inputSchema: spec.inputSchema,
     annotations: { readOnlyHint: false, title: spec.name },
-    handler: args => spec.handler(args),
+    handler: (args, ctx) => spec.handler(args, ctx),
   });
   return () => deviceTools.delete(spec.name);
 }
@@ -204,9 +204,14 @@ async function startServer(): Promise<void> {
       let body: any;
       try { body = JSON.parse(Buffer.concat(chunks).toString('utf8')); }
       catch { res.writeHead(400, { 'Content-Type': 'application/json' }).end(JSON.stringify({ jsonrpc: '2.0', id: null, error: { code: -32700, message: 'Parse error' } })); return; }
-      const ctx: CallContext = { caller: gate.caller };
+      const controller = new AbortController();
+      const disconnected = () => { if (!res.writableEnded) controller.abort(); };
+      res.once('close', disconnected);
+      const ctx: CallContext = { caller: gate.caller, signal: controller.signal };
       const msgs = Array.isArray(body) ? body : [body];
       const replies = (await Promise.all(msgs.map(m => handleRpc(m, tools, ctx, SERVER_INSTRUCTIONS)))).filter(Boolean);
+      res.removeListener('close', disconnected);
+      if (controller.signal.aborted || res.destroyed) return;
       if (!replies.length) { res.writeHead(202).end(); return; }
       res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify(Array.isArray(body) ? replies : replies[0]));
     });

@@ -3,6 +3,15 @@ vi.mock('./thumbs.js', () => ({ thumbnails: (images?: string[]) => images?.lengt
 import { rebuildClaudeHistory, rebuildCodexHistory } from './sessions';
 
 describe('imported agent history', () => {
+  it('uses the folder a Claude session lives in now, not where it started', () => {
+    const result = rebuildClaudeHistory([
+      { type: 'user', cwd: 'C:\\old\\scratch', timestamp: '2026-10-16T00:00:00Z', message: { content: 'hi' } },
+      { type: 'assistant', cwd: 'C:\\old\\scratch', timestamp: '2026-10-16T00:00:01Z', message: { content: [{ type: 'text', text: 'hey' }] } },
+      { type: 'user', cwd: 'C:\\Projects\\Ally', timestamp: '2026-10-17T00:00:00Z', message: { content: 'continue' } },
+    ]);
+    expect(result.cwd).toBe('C:\\Projects\\Ally');
+  });
+
   it('keeps Claude reasoning, tool images, and usage without counting split messages twice', () => {
     const result = rebuildClaudeHistory([
       { type: 'user', timestamp: '2026-10-17T00:00:00Z', message: { content: 'Inspect this' } },

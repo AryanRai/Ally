@@ -9,6 +9,7 @@ const versions: Record<string, number> = {
   'thread-follower-read-model-settings': 1,
   'thread-follower-load-complete-history': 1,
   'thread-follower-start-turn': 2,
+  'thread-follower-steer-turn': 1,
   'thread-follower-interrupt-turn': 4,
   'thread-follower-command-approval-decision': 1,
   'thread-follower-file-approval-decision': 1,
@@ -169,4 +170,42 @@ export function assertDesktopIdle(state: any, conversationId: string) {
     || desktopTurns(state).some(turn => turn.status === 'inProgress')) {
     throw new Error('Desktop chat is busy, awaiting input, or its idle state cannot be confirmed');
   }
+}
+
+/** Codex may decorate its display turn ID after reconnect; the underlying
+ * app-server turn identity remains the prefix, as in the native client. */
+export const canonicalTurnId = (id?: string): string | undefined => id?.replace(/-berry-display-\d+$/, '');
+
+export async function readDesktopActivity(conversationId: string) {
+  let client: CodexDesktopClient | undefined;
+  try {
+    client = await CodexDesktopClient.connect();
+    const owner = await client.owner(conversationId);
+    const state = await client.snapshot(conversationId, owner);
+    if (state.id !== conversationId) return undefined;
+    const turn = desktopTurns(state).at(-1);
+    let idle = false;
+    try { assertDesktopIdle(state, conversationId); idle = true; } catch {}
+    return { turnId: canonicalTurnId(turn?.turnId), running: turn?.status === 'inProgress', idle };
+  } catch { return undefined; }
+  finally { client?.close(); }
+}
+
+export async function steerDesktopTurn(client: CodexDesktopClient, owner: string, conversationId: string, text: string, messageId: string = randomUUID(), images?: string[]) {
+  const state = await client.snapshot(conversationId, owner);
+  const turn = desktopTurns(state).at(-1);
+  if (state.id !== conversationId || turn?.status !== 'inProgress' || !turn.turnId) throw new Error('This response has finished. Your draft is kept.');
+  const result = await client.request('thread-follower-steer-turn', {
+    conversationId, clientUserMessageId: messageId,
+    input: [{ type: 'text', text, text_elements: [] }, ...(images ?? []).map(path => ({ type: 'localImage', path }))],
+    restoreMessage: { text, cwd: state.cwd, context: {} }, attachments: [],
+  }, owner, 20000);
+  if (canonicalTurnId(result.result?.result?.turnId) !== canonicalTurnId(turn.turnId)) throw new Error('Steering was not confirmed for the expected turn. Check this chat before resending.');
+  return true;
+}
+
+export async function steerExternalDesktopChat(sessionId: string, text: string, requestId: string, images?: string[]) {
+  const client = await CodexDesktopClient.connect();
+  try { return await steerDesktopTurn(client, await client.owner(sessionId), sessionId, text, requestId, images); }
+  finally { client.close(); }
 }

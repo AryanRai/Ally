@@ -43,3 +43,35 @@ describe('chat cancellation', () => {
     expect(bridge.stop).toHaveBeenLastCalledWith('second');
   });
 });
+
+
+it('keeps concurrent chat output, follow-ups and Stop isolated', async () => {
+  const listeners = new Set<(data: { runId: string; event: AgentEvent }) => void>();
+  const bridge = {
+    getConfig: vi.fn().mockResolvedValue({ permission: 'edit' }),
+    send: vi.fn().mockResolvedValueOnce('run-a').mockResolvedValueOnce('run-b'),
+    stop: vi.fn().mockResolvedValue(true), steer: vi.fn().mockResolvedValue('queued'),
+    onEvent: vi.fn(callback => { listeners.add(callback); return () => listeners.delete(callback); }),
+  };
+  window.pip.agent = bridge as unknown as NonNullable<typeof window.pip.agent>;
+  const { result } = renderHook(() => useAgentChat());
+  const a = { onText: vi.fn(), onThinking: vi.fn(), onSegments: vi.fn() };
+  const b = { onText: vi.fn(), onThinking: vi.fn(), onSegments: vi.fn() };
+  const emit = (runId: string, event: AgentEvent) => listeners.forEach(fn => fn({ runId, event }));
+  let first!: Promise<AgentTurnResult>, second!: Promise<AgentTurnResult>;
+  await act(async () => {
+    first = result.current.runTurn({ provider: 'codex', prompt: 'a', model: 'default' }, a, 'chat-a');
+    second = result.current.runTurn({ provider: 'claude', prompt: 'b', model: 'default' }, b, 'chat-b');
+  });
+  act(() => { emit('run-a', { kind: 'text', text: 'A' }); emit('run-b', { kind: 'text', text: 'B' }); });
+  expect(a.onText).toHaveBeenCalledExactlyOnceWith('A'); expect(b.onText).toHaveBeenCalledExactlyOnceWith('B');
+  await act(async () => { await result.current.steer('later', 'queue', 'chat-b'); });
+  expect(bridge.steer).toHaveBeenCalledWith('run-b', 'later', expect.any(String), 'queue');
+  act(() => { result.current.stop('chat-a'); });
+  expect(bridge.stop).toHaveBeenCalledExactlyOnceWith('run-a');
+  await act(async () => { emit('run-a', { kind: 'done' }); await first; });
+  expect(await first).toMatchObject({ stopped: true, text: 'A' });
+  await act(async () => { emit('run-b', { kind: 'text', text: ' continues' }); emit('run-b', { kind: 'done' }); await second; });
+  expect(await second).toMatchObject({ text: 'B continues', stopped: false });
+  expect(listeners.size).toBe(0);
+});

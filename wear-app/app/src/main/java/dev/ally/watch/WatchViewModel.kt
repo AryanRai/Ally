@@ -1,5 +1,7 @@
 package dev.ally.watch
 
+import dev.ally.device.ChatReadReceipt
+
 import dev.ally.device.AttachmentParser
 
 import android.app.Application
@@ -14,8 +16,11 @@ import java.util.UUID
 import java.net.URLEncoder
 import dev.ally.device.reconnectingTurnRead
 
-class WatchViewModel(application: Application) : AndroidViewModel(application) {
-    private val prefs = application.getSharedPreferences("ally-watch", 0)
+internal class WatchConversation(private val application: Application, initial: String, private val viewModelScope: CoroutineScope, migrate: Boolean, storageKey: String = initial) {
+    private fun getApplication(): Application = application
+    private val prefs = dev.ally.device.ChatPreferences(application.getSharedPreferences("ally-watch", 0), storageKey,
+        setOf("turn", "inputTarget", "inputRequest", "inputText", "inputMode", "history", "reply", "activity", "chatId", "provider", "newChatRequest", "pendingText", "pendingRequest", "pendingQueue"), migrate)
+    init { if (initial.isNotBlank() && !initial.startsWith("draft:")) prefs.edit().putString("chatId", initial).apply() }
     private val mutable = MutableStateFlow(WatchState(look = WatchLook.load(prefs), chatId = prefs.getString("chatId", null), permission = prefs.getString("permission:${prefs.getString("chatId", "")}", "readonly")!!, provider = prefs.getString("provider", "codex")!!, muted = prefs.getBoolean("muted", false)))
     val state = mutable.asStateFlow()
     var endpoint: String
@@ -35,22 +40,25 @@ class WatchViewModel(application: Application) : AndroidViewModel(application) {
     private var inputText: String? = prefs.getString("inputText", null)
     private var catalogWork: Job? = null
     private var approvalWork: Job? = null
-    private var lastText: String? = null
-    private var lastAudio: ByteArray? = null
-    private var requestId: String? = null
+    private var pendingQueue: Boolean? = prefs.getString("pendingQueue", null)?.toBooleanStrictOrNull()
+    private var lastText: String? = prefs.getString("pendingText", null)
+    private val pendingAudio = java.io.File(application.filesDir, "pending-${UUID.nameUUIDFromBytes(storageKey.toByteArray())}.wav")
+    private var lastAudio: ByteArray? = pendingAudio.takeIf { it.isFile }?.readBytes()
+    private var requestId: String? = prefs.getString("pendingRequest", null)
+    private var deliveryMode: String? = prefs.getString("inputMode", null)
     var foreground = false
     val busy get() = mutable.value.inputRecording || mutable.value.inputSending || mutable.value.loadingHistory || mutable.value.phase in setOf(Phase.RECORDING, Phase.UPLOADING, Phase.THINKING)
-    val canSwitchChat get() = !busy && !prefs.contains("turn") && inputText == null
+    val canSwitchChat get() = mutable.value.phase != Phase.RECORDING && !mutable.value.inputRecording
 
     init {
-        inputText?.let { text -> mutable.update { it.copy(inputDraft = text, inputStatus = "Input delivery unconfirmed · retry") } }
+        inputText?.let { text -> mutable.update { it.copy(inputDraft = text, inputMode = deliveryMode ?: "queue", inputStatus = "Input delivery unconfirmed · retry") } }
         mutable.update { it.copy(autoRead = prefs.getBoolean("autoRead", false), replyAlerts = prefs.getBoolean("replyAlerts", true)) }
         runCatching {
             val cached = JSONObject(prefs.getString("history", "{}")!!)
             if (ChatParser.matchesSelection(cached, mutable.value.chatId)) applyHistory(cached)
         }
         val savedTurn = prefs.getString("turn", null)
-        if (savedTurn != null) work = viewModelScope.launch { poll(savedTurn) } else refresh()
+        if (savedTurn != null) work = viewModelScope.launch { poll(savedTurn) } else if (!initial.startsWith("draft:")) refresh()
     }
     fun appearance(look: WatchLook) {
         look.save(prefs)
@@ -98,7 +106,7 @@ class WatchViewModel(application: Application) : AndroidViewModel(application) {
     private fun encoded(value: String) = URLEncoder.encode(value, "UTF-8")
     private fun selected(chat: WatchChat) {
         prefs.edit().putString("chatId", chat.id).putString("provider", chat.provider).remove("newChatRequest").apply()
-        mutable.update { it.copy(chatId = chat.id, provider = chat.provider, chatTitle = chat.title, permission = prefs.getString("permission:${chat.id}", "readonly")!!,
+        mutable.update { it.copy(chatId = chat.id, chatSessionKey = chat.sessionKey, provider = chat.provider, chatTitle = chat.title, permission = prefs.getString("permission:${chat.id}", "readonly")!!,
             context = "${if (chat.provider == "codex") "Codex" else "Claude"} · ${chat.title}") }
     }
     private suspend fun createChat(provider: String) {
@@ -142,6 +150,7 @@ class WatchViewModel(application: Application) : AndroidViewModel(application) {
     }
     private var refreshingSelected = false
     suspend fun refreshSelected() {
+        refreshQueue()
         val id = mutable.value.chatId ?: return
         if (refreshingSelected || busy || work?.isActive == true || prefs.contains("turn") || mutable.value.phase == Phase.OFFLINE) return
         refreshingSelected = true
@@ -162,6 +171,22 @@ class WatchViewModel(application: Application) : AndroidViewModel(application) {
         } catch (e: CancellationException) { throw e } catch (e: Exception) {
             mutable.update { it.copy(running = emptyList(), runningStatus = "Live status unavailable") }
         }
+    }
+    suspend fun refreshUnread() {
+        try {
+            val flags = ChatReadReceipt.states(api.request("/v1/read-states"))
+            fun update(row: WatchChat) = row.copy(unread = flags[row.sessionKey] ?: row.unread)
+            mutable.update { it.copy(chats = it.chats.map(::update), quickChats = it.quickChats.map(::update), running = it.running.map(::update)) }
+        } catch (e: CancellationException) { throw e } catch (_: Exception) { /* Keep badges through reconnect. */ }
+    }
+    suspend fun viewed(receipt: ChatReadReceipt) {
+        if (!receipt.unread || mutable.value.readReceipt != receipt || busy || mutable.value.externalRunning) return
+        try {
+            if (api.request("/v1/read-state", receipt.json().toString().toByteArray()).optBoolean("accepted")) {
+                mutable.update { if (it.readReceipt == receipt) it.copy(readReceipt = receipt.copy(unread = false)) else it }
+                refreshUnread()
+            }
+        } catch (e: CancellationException) { throw e } catch (_: Exception) { /* Retry only from a visible reader. */ }
     }
     suspend fun refreshQuickChats() = supervisorScope {
         mutable.update { it.copy(loadingQuickChats = true, quickChatsError = "") }
@@ -212,7 +237,7 @@ class WatchViewModel(application: Application) : AndroidViewModel(application) {
         selected(ChatParser.chat(result.getJSONObject("chat")))
         val messages = ChatParser.messages(result)
         if (!older) prefs.edit().putString("history", result.toString()).apply()
-        mutable.update { it.copy(externalRunning = result.optBoolean("running") && result.optString("activeTurnId").let { t -> t.isBlank() || t == "null" }, messages = if (older) (messages + it.messages).distinctBy { m -> m.id } else if (preserveOlder) it.messages.filter { old -> old.id.startsWith("history-") && old.id.substringAfter("history-").toIntOrNull()?.let { n -> n < (messages.firstOrNull()?.id?.substringAfter("history-")?.toIntOrNull() ?: 0) } == true } + messages else messages,
+        mutable.update { it.copy(readReceipt = if (older) it.readReceipt else ChatReadReceipt.parse(result.optJSONObject("readState")), externalRunning = result.optBoolean("running") && result.optString("activeTurnId").let { t -> t.isBlank() || t == "null" }, messages = if (older) (messages + it.messages).distinctBy { m -> m.id } else if (preserveOlder) it.messages.filter { old -> old.id.startsWith("history-") && old.id.substringAfter("history-").toIntOrNull()?.let { n -> n < (messages.firstOrNull()?.id?.substringAfter("history-")?.toIntOrNull() ?: 0) } == true } + messages else messages,
             historyBefore = if (preserveOlder && it.messages.isNotEmpty()) it.historyBefore else if (result.isNull("before")) null else result.getInt("before")) }
     }
     private suspend fun loadHistory(older: Boolean = false) {
@@ -239,8 +264,8 @@ class WatchViewModel(application: Application) : AndroidViewModel(application) {
         if (muted) { cancelRecording(); stopSpeaking() }
     }
     fun startRecording() {
-        if (prefs.contains("turn")) { startInputRecording(); return }
-        if (mutable.value.externalRunning || busy || prefs.contains("turn") || mutable.value.muted || mutable.value.phase == Phase.OFFLINE || mutable.value.chatId == null) return
+        if (prefs.contains("turn") || (mutable.value.externalRunning && mutable.value.inputMode == "steer")) { startInputRecording(); return }
+        if (busy || prefs.contains("turn") || mutable.value.muted || mutable.value.phase == Phase.OFFLINE || mutable.value.chatId == null) return
         if (!mutable.value.voiceReady) { refresh(); return }
         stopSpeaking()
         try {
@@ -281,10 +306,31 @@ class WatchViewModel(application: Application) : AndroidViewModel(application) {
         liveSpeech?.cancel(); liveSpeech = null
         mutable.update { it.copy(phase = Phase.IDLE, microphoneLevel = 0f, recordingSeconds = 0f, detail = "Recording cancelled") }
     }
+    suspend fun refreshQueue() {
+        val id=mutable.value.chatId ?: return
+        try {
+            val q=dev.ally.device.MessageQueue.parse(api.request("/v1/queue/${encoded(id)}")) ?: return
+            if(mutable.value.chatId==id && !mutable.value.queueChanging && (mutable.value.queue.chatId!=q.chatId || q.revision>=mutable.value.queue.revision)) mutable.update { it.copy(queue=q,queueError="") }
+        } catch(e: CancellationException) { throw e } catch(_: Exception) {
+            if(mutable.value.queue.items.isNotEmpty()) mutable.update { it.copy(queueError="Queue offline · reconnect") }
+        }
+    }
+    fun queueChange(change: JSONObject) {
+        val id=mutable.value.chatId ?: return
+        if(mutable.value.queueChanging) return
+        mutable.update { it.copy(queueChanging=true,queueError="") }
+        viewModelScope.launch {
+            try { dev.ally.device.MessageQueue.parse(api.request("/v1/queue/${encoded(id)}",change.toString().toByteArray()))?.let { q -> mutable.update { it.copy(queue=q) } } }
+            catch(e: CancellationException) { throw e } catch(e: Exception) { mutable.update { it.copy(queueError=e.message ?: "Queue change failed") } }
+            finally { mutable.update { it.copy(queueChanging=false) } }
+        }
+    }
+    fun inputMode(value: String) { if (inputText == null && value in setOf("queue", "steer")) mutable.update { it.copy(inputMode = value) } }
     fun send(text: String) {
         if (prefs.contains("turn") && text.isNotBlank()) { sendInput(text); return }
         if (inputText != null) { mutable.update { it.copy(inputStatus = "Retry or dismiss your previous input in Settings first") }; return }
-        if (mutable.value.externalRunning || busy || text.isBlank() || prefs.contains("turn") || mutable.value.chatId == null) return
+        if (mutable.value.externalRunning && text.isNotBlank()) { sendInput(text); return }
+        if (busy || text.isBlank() || prefs.contains("turn") || mutable.value.chatId == null) return
         stopSpeaking()
         clearReply()
         lastText = text.take(4000); lastAudio = null; requestId = UUID.randomUUID().toString()
@@ -293,7 +339,7 @@ class WatchViewModel(application: Application) : AndroidViewModel(application) {
     }
     private fun startInputRecording() {
         if (mutable.value.inputRecording || mutable.value.inputSending || mutable.value.muted || !mutable.value.voiceReady || inputText != null) return
-        inputTarget = prefs.getString("turn", null) ?: return
+        inputTarget = prefs.getString("turn", null) ?: mutable.value.chatId?.takeIf { mutable.value.externalRunning }?.let { "chat:$it" } ?: return
         stopSpeaking()
         try {
             liveSpeech = if (mutable.value.liveSpeech) LiveSpeech(endpoint, token) { text ->
@@ -323,13 +369,17 @@ class WatchViewModel(application: Application) : AndroidViewModel(application) {
     private suspend fun deliverInput(text: String) {
         require(text.isNotBlank() && text.length <= 12000) { "Input must contain 1–12000 characters" }
         check(inputText == null || inputText == text) { "Retry or dismiss your previous input first" }
-        val target = inputTarget ?: prefs.getString("turn", null) ?: error("Response finished. Send this as a new message.")
+        val previousTarget = inputTarget ?: prefs.getString("turn", null) ?: mutable.value.chatId?.takeIf { mutable.value.externalRunning }?.let { "chat:$it" } ?: error("Response finished. Send this as a new message.")
+        deliveryMode = deliveryMode ?: mutable.value.inputMode
+        val target=if(deliveryMode=="queue") "chat:${mutable.value.chatId ?: error("Select the original chat")}" else previousTarget
         inputTarget = target; inputText = text; inputRequest = inputRequest ?: UUID.randomUUID().toString()
-        prefs.edit().putString("inputTarget", target).putString("inputText", text).putString("inputRequest", inputRequest).commit()
-        val result = api.request("/v1/turns/${encoded(target)}/input", JSONObject().put("text", text).put("requestId", inputRequest).toString().toByteArray())
-        mutable.update { it.copy(inputStatus = if (result.optString("mode") == "steered") "Added to current work" else "Queued after this response", inputDraft = "") }
-        inputText = null; inputTarget = null; inputRequest = null
-        prefs.edit().remove("inputTarget").remove("inputText").remove("inputRequest").apply()
+        prefs.edit().putString("inputTarget", target).putString("inputText", text).putString("inputRequest", inputRequest).putString("inputMode", deliveryMode).commit()
+        if(deliveryMode=="queue" && !api.request("/v1/status").optBoolean("messageQueue")) error("Shared queue update is activating. Draft saved; retry shortly.")
+        val result = api.request(if (target.startsWith("chat:")) "/v1/chats/${encoded(target.removePrefix("chat:"))}/input" else "/v1/turns/${encoded(target)}/input", JSONObject().put("text", text).put("requestId", inputRequest).put("mode", deliveryMode).put("permission",mutable.value.permission).toString().toByteArray())
+        mutable.update { it.copy(queue=dev.ally.device.MessageQueue.parse(result) ?: it.queue,inputStatus = if (result.optString("mode") == "steered") "Added to current work" else "Queued after this response", inputDraft = "") }
+        acceptedDraft(text)
+        inputText = null; inputTarget = null; inputRequest = null; deliveryMode = null
+        prefs.edit().remove("inputTarget").remove("inputText").remove("inputRequest").remove("inputMode").apply()
     }
     private fun sendInput(text: String) {
         if (mutable.value.inputRecording || mutable.value.inputSending) return
@@ -344,8 +394,8 @@ class WatchViewModel(application: Application) : AndroidViewModel(application) {
     fun retryInput() { inputText?.let(::sendInput) }
     fun dismissInput() {
         if (mutable.value.inputSending || mutable.value.inputRecording) return
-        inputText = null; inputTarget = null; inputRequest = null
-        prefs.edit().remove("inputTarget").remove("inputText").remove("inputRequest").apply()
+        inputText = null; inputTarget = null; inputRequest = null; deliveryMode = null
+        prefs.edit().remove("inputTarget").remove("inputText").remove("inputRequest").remove("inputMode").apply()
         mutable.update { it.copy(inputDraft = "", inputStatus = "") }
     }
     fun retry() {
@@ -360,15 +410,30 @@ class WatchViewModel(application: Application) : AndroidViewModel(application) {
         prefs.edit().remove("reply").remove("activity").apply()
         mutable.update { it.copy(liveAttachments = emptyList(), liveText = "", reply = WatchReply("", emptyList()), steps = emptyList(), usage = "", turnId = null, approval = null, approvalError = "") }
     }
+    private fun acceptedDraft(text: String?) {
+        val base = application.getSharedPreferences("ally-watch", 0)
+        val key = "composer:${mutable.value.chatId}"
+        if (text != null && base.getString(key, null) == text) base.edit().remove(key).apply()
+    }
     private suspend fun submit(text: String?, audio: ByteArray?) {
         if (mutable.value.chatId == null) createChat(mutable.value.provider)
         val chatId = mutable.value.chatId!!
         val provider = mutable.value.provider
+        pendingQueue = pendingQueue ?: mutable.value.externalRunning
+        if (audio != null) pendingAudio.writeBytes(audio)
+        prefs.edit().putString("pendingText", text).putString("pendingRequest", requestId).putString("pendingQueue", pendingQueue.toString()).commit()
         val result = if (audio != null) api.request("/v1/audio?provider=$provider&requestId=$requestId&chatId=${encoded(chatId)}&permission=${mutable.value.permission}", audio, "audio/wav")
-        else api.request("/v1/messages", JSONObject().put("provider", provider).put("chatId", chatId).put("requestId", requestId).put("permission", mutable.value.permission).put("text", text).toString().toByteArray())
+        else api.request("/v1/messages", JSONObject().put("provider", provider).put("chatId", chatId).put("requestId", requestId).put("permission", mutable.value.permission).put("text", text).put("queueAfterCurrent", pendingQueue == true).toString().toByteArray())
         val id = result.getString("id")
-        prefs.edit().putString("turn", id).apply()
-        lastAudio = null
+        if(result.optBoolean("queued")) {
+            prefs.edit().remove("pendingText").remove("pendingRequest").remove("pendingQueue").apply()
+            pendingQueue=null; acceptedDraft(text); pendingAudio.delete(); lastAudio=null; lastText=null; requestId=null
+            mutable.update { it.copy(queue=dev.ally.device.MessageQueue.parse(result) ?: it.queue,phase=Phase.READY,detail="Queued after this response") }
+            return
+        }
+        prefs.edit().putString("turn", id).remove("pendingText").remove("pendingRequest").remove("pendingQueue").apply()
+        pendingQueue = null
+        acceptedDraft(text); pendingAudio.delete(); lastAudio = null
         poll(id)
     }
     private suspend fun poll(id: String) {
@@ -379,6 +444,7 @@ class WatchViewModel(application: Application) : AndroidViewModel(application) {
             while (polls < 240) {
                 val result = reconnectingTurnRead({ mutable.update { it.copy(detail = "Reconnecting… Your task is still on the desktop", approval = null) } }) { api.request("/v1/turns/$id") }
                 val approval = ApprovalParser.parse(result)
+                dev.ally.device.MessageQueue.parse(result)?.let { q -> if(!mutable.value.queueChanging && (mutable.value.queue.chatId!=q.chatId || q.revision>=mutable.value.queue.revision)) mutable.update { it.copy(queue=q) } }
                 if (approval == null) polls++
                 mutable.update { it.copy(approval = approval, approvalError = if (it.approval?.id == approval?.id) it.approvalError else "") }
                 result.optString("transcript").takeIf { it.isNotBlank() }?.let { lastText = it }
@@ -421,5 +487,5 @@ class WatchViewModel(application: Application) : AndroidViewModel(application) {
         mutable.update { it.copy(phase = if (reconnecting) Phase.OFFLINE else Phase.ERROR,
             detail = if (reconnecting) "Reconnecting to Ally… Keep Ally open on your PC" else e.message?.take(180) ?: "Connection interrupted. Retry when ready.") }
     }
-    override fun onCleared() { voice.cancel(); liveSpeech?.cancel(); speaker.close(); super.onCleared() }
+    fun close() { voice.cancel(); liveSpeech?.cancel(); speaker.close() }
 }

@@ -15,6 +15,8 @@ export interface AgentRobotContext {
 }
 
 export interface AgentRunOptions {
+  /** Canonical queue identity for linked device conversations. */
+  queueKey?: string;
   provider: AgentProvider;
   prompt: string;
   cwd: string;
@@ -33,6 +35,7 @@ export interface AgentRunOptions {
 }
 
 export interface AgentSessionSnapshot {
+  readState?: { key: string; revision: string; unread: boolean };
   title?: string;
   sessionId?: string;
   originalSessionId?: string;
@@ -45,7 +48,7 @@ export interface AgentSessionSnapshot {
 }
 
 export type AgentEvent =
-  | { kind: 'input'; text: string; mode: 'steered' | 'queued' }
+  | { kind: 'input'; text: string; mode: 'steered' | 'queued'; queuedId?: string }
   | { kind: 'continuation' }
   | { kind: 'session'; sessionId: string }
   | { kind: 'text'; text: string }

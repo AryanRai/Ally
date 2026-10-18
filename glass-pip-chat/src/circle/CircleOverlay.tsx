@@ -28,6 +28,7 @@ export default function CircleOverlay() {
   const [selection, setSelection] = useState<Rect | null>(null);
   const [typed, setTyped] = useState('');
   const [sending, setSending] = useState(false);
+  const [error, setError] = useState('');
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const points = useRef<Point[]>([]);
@@ -39,8 +40,9 @@ export default function CircleOverlay() {
 
   const submit = async (action: CircleAction | null, wholeScreen = false) => {
     if (sending) return;
-    setSending(true);
-    await window.pip.circle.submit({ rect: wholeScreen ? undefined : selection ?? undefined, prompt: buildCirclePrompt(action, typed) });
+    setSending(true); setError('');
+    try { await window.pip.circle.submit({ rect: wholeScreen ? undefined : selection ?? undefined, prompt: buildCirclePrompt(action, typed), ...(action?.id === 'draw' ? { mode: 'draw' as const } : {}) }); }
+    catch (error) { setError(error instanceof Error ? error.message : String(error)); setSending(false); }
   };
 
   useEffect(() => {
@@ -207,6 +209,7 @@ export default function CircleOverlay() {
                 </button>
               ))}
             </div>
+            {error && <p role="alert" className="mt-2 text-xs text-amber-200">{error}</p>}
           </motion.div>
         )}
       </AnimatePresence>

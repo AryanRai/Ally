@@ -8,6 +8,7 @@ import android.graphics.drawable.GradientDrawable
 import android.widget.*
 import android.view.View
 import android.text.InputType
+import org.json.JSONObject
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.collectLatest
 
@@ -46,17 +47,34 @@ class DeviceInboxActivity : Activity() {
         scope.launch { DeviceLink.inbox.collectLatest { items ->
             rows.removeAllViews()
             if (items.isEmpty()) rows.addView(label("Nothing waiting. New cards appear here.", 12f))
-            items.forEach { item ->
+            DeviceAlerts.ordered(items).forEach { item ->
                 val card = LinearLayout(this@DeviceInboxActivity).apply { orientation = LinearLayout.VERTICAL; setPadding(18, 14, 18, 14); background = GradientDrawable().apply { setColor(Color.rgb(28, 28, 32)); cornerRadius = 20f; setStroke(1, Color.rgb(55, 55, 62)) } }
+                card.addView(label(DeviceAlerts.kind(item).uppercase() + " · " + DeviceAlerts.status(item), 10f))
                 card.addView(label(item.optString("title"), 15f, true)); card.addView(label(item.optString("body"), 13f))
-                if (item.optBoolean("command")) {
+                val target = DeviceAlerts.chat(item)
+                if(target != null) {
+                    val open = { DeviceLink.markAlertViewed(this@DeviceInboxActivity,item.optString("id")); startActivity(DeviceLink.alertIntent(this@DeviceInboxActivity,item)) }
+                    card.setOnClickListener { open() }
+                    card.addView(button(if(item.optBoolean("interaction") && DeviceInteractions.awaiting(item)) "Open chat to answer" else "Open chat") { open() })
+                }
+                if(item.optBoolean("interaction")) {
+                    DeviceInteractions.answerSummary(item).takeIf { it.isNotBlank() }?.let { card.addView(label(it,12f)) }
+                    val actions=item.optJSONArray("actions")
+                    if(item.optJSONArray("fields")?.length()==0 && DeviceInteractions.canAnswer(item,DeviceLink.status.value=="Connected",DeviceLink.service?.connectionId)) {
+                        for(index in 0 until (actions?.length() ?: 0)) {
+                            val action=actions!!.getJSONObject(index)
+                            card.addView(button(action.optString("label")) { DeviceLink.answerInteraction(this@DeviceInboxActivity,item,action.optString("value"),emptyMap()) })
+                        }
+                    }
+                }
+                if (item.optBoolean("command") && DeviceAlerts.blocking(item)) {
                     card.addView(label(item.optString("action").replace('_', ' '), 12f))
                     if (item.has("url")) card.addView(label(item.optString("url"), 12f))
                     if (item.has("seconds")) card.addView(label("${item.optInt("seconds")} seconds · opens your timer app", 12f))
                     card.addView(button("Allow once") { DeviceLink.decide(this@DeviceInboxActivity, item, true) })
                     card.addView(button("Decline") { DeviceLink.decide(this@DeviceInboxActivity, item, false) })
                 }
-                card.addView(button("Dismiss") { if (item.optBoolean("command")) DeviceLink.receipt(this@DeviceInboxActivity, item.optString("id"), "rejected"); DeviceLink.dismiss(this@DeviceInboxActivity, item.optString("id")) })
+                if(!DeviceAlerts.blocking(item)) card.addView(button("Dismiss") { DeviceLink.dismiss(this@DeviceInboxActivity, item.optString("id")) })
                 rows.addView(card, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = 16 })
             }
             if (items.any { it.optBoolean("command") || it.optString("id") == intent.getStringExtra("id") }) {
