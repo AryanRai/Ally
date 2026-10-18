@@ -71,7 +71,11 @@ private class AllyAssistantSession(context: android.content.Context) : VoiceInte
         if (chatId != null) { host.openChat(chatId); sheet.followChat(); host.refresh() }
         return true
     }
-    override fun onCreateContentView(): View = AssistantSheet(context, hold, { if (entry.entry) entry.typed(it) else host.send(it) }, { host.mode(it) }, { expand() }, { hide() }, { entry.choose(it) }, { browse(it) }, { browse() }).also { sheet = it }
+    override fun onCreateContentView(): View = AssistantSheet(context, hold, { if (entry.entry) entry.typed(it) else host.send(it) }, { host.mode(it) }, { expand() }, { hide() }, { entry.choose(it) }, { browse(it) }, { browse() }, {
+        hold.abort()
+        startAssistantActivity(DeviceLink.inboxIntent(context).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        hide()
+    }).also { sheet = it }
     private var screenToken = 0L
     private var screenJob: Job? = null
     override fun onPrepareShow(args: Bundle?, showFlags: Int) {
@@ -157,7 +161,7 @@ private class AllyAssistantSession(context: android.content.Context) : VoiceInte
         sheet.reveal()
         hold.abort()
         activity.start()
-        observe?.cancel(); observe = scope.launch { combine(host.snapshots, entry.state, activity.state) { snapshot, _, agents -> entry.overlay(snapshot) to agents }.collect { (snapshot, agents) ->
+        observe?.cancel(); observe = scope.launch { combine(host.snapshots, entry.state, activity.state, DeviceLink.inbox) { snapshot, _, agents, _ -> entry.overlay(snapshot) to agents }.collect { (snapshot, agents) ->
             sheet.render(snapshot, agents)
             val receipt = snapshot.readReceipt
             if (receipt?.unread == true && !snapshot.working && sheet.showingReply && context.getSystemService(android.os.PowerManager::class.java).isInteractive) {

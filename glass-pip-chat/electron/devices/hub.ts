@@ -92,7 +92,9 @@ export class DeviceHub {
           fields: [], actions: [{ value: 'accept', label: 'Allow once' }, { value: 'decline', label: 'Decline' }], expiresAt: command.expiresAt }, approvalController.signal).then(answer => {
           const pending = this.pending.get(command.id);
           if (!pending) return;
-          if (answer.action !== 'accept' || command.expiresAt <= this.now() || this.devices.get(deviceId) !== device) { this.finish(command.id, false, 'Declined, cancelled or expired.'); return; }
+          if (answer.action !== 'accept' || command.expiresAt <= this.now() || this.devices.get(deviceId) !== device) {
+            this.finish(command.id, false, answer.action === 'decline' ? 'Declined by user.' : 'No decision received; request expired or was cancelled. Open Ally Inbox to review new requests; phone notification settings can hide alerts.'); return;
+          }
           pending.approved = true;
           if (action === 'phone_control_approve') { this.finish(command.id, true, 'User approved the exact plan in chat.'); return; }
           try { device.send({ type: 'authorized_command', command }); } catch { this.finish(command.id, false, 'Approved, but target device disconnected.'); }

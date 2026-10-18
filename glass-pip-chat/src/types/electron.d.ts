@@ -13,6 +13,7 @@ export interface PipAPI {
   captureQueryScreen?: () => Promise<{ path: string; thumbnail: string }>;
   onManualResize?: (callback: (size: { width: number; height: number }) => void) => () => void;
   openLocalDocument?: (file: string) => Promise<void>;
+  readVisualization?: (file: string) => Promise<string>;
   
   // Listen for focus input event
   onFocusInput: (callback: () => void) => () => void;
@@ -69,6 +70,11 @@ export interface PipAPI {
 
   // Circle to Ask
   circle: {
+    selectionState: () => Promise<import('../../electron/capture/types').CircleSelectionState>;
+    selectionAction: (action: import('../../electron/capture/types').CircleSelectionAction) => Promise<void>;
+    onSelection: (callback: (state: import('../../electron/capture/types').CircleSelectionState) => void) => () => void;
+    updateSelection: (state: import('../../electron/capture/types').CircleSelectionState) => Promise<void>;
+    onSelectionAction: (callback: (action: import('../../electron/capture/types').CircleSelectionAction) => void) => () => void;
     start: () => Promise<void>;
     setChat: (chatId?: string, title?: string) => Promise<void>;
     /** Frozen screenshot for the overlay page (PNG data URL) */

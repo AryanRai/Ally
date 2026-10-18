@@ -19,6 +19,7 @@ const pipAPI = {
     return () => ipcRenderer.removeListener('window:manual-resize', handler);
   },
   openLocalDocument: (file: string) => ipcRenderer.invoke('document:open', file),
+  readVisualization: (file: string) => ipcRenderer.invoke('document:visualization', file),
   
   // Listen for resize completion
   onResizeComplete: (callback: (size: { width: number; height: number }) => void) => {
@@ -115,6 +116,13 @@ const pipAPI = {
 
   // Circle to Ask (overlay page + the chat window that receives the result)
   circle: {
+    selectionState: () => ipcRenderer.invoke('circle:selection-state'),
+    selectionAction: (action: string) => ipcRenderer.invoke('circle:selection-action', action),
+    onSelection: (callback: (state: unknown) => void) => {
+      const handler = (_event: unknown, state: unknown) => callback(state);
+      ipcRenderer.on('circle:selection', handler);
+      return () => ipcRenderer.removeListener('circle:selection', handler);
+    },
     start: () => ipcRenderer.invoke('circle:start'),
     setChat: (chatId?: string, title?: string) => ipcRenderer.invoke('circle:chat', chatId, title),
     getShot: () => ipcRenderer.invoke('circle:getShot'),
@@ -131,7 +139,7 @@ const pipAPI = {
 
   tutor: {
     action: (id: string, action: import('./visualTutor/types').TutorAction) => ipcRenderer.invoke('tutor:action', id, action),
-    show: (id: string) => ipcRenderer.invoke('tutor:show', id),
+    show: (id: string, point?: { x: number; y: number }) => ipcRenderer.invoke('tutor:show', id, point),
     start: (chatId: string, displayId?: number, circleCaptureId?: string) => ipcRenderer.invoke('tutor:start', chatId, displayId, circleCaptureId),
     displays: () => ipcRenderer.invoke('tutor:displays'),
     state: () => ipcRenderer.invoke('tutor:state'),

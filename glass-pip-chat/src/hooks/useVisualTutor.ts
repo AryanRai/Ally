@@ -77,6 +77,7 @@ export function useVisualTutor(chatId: string | undefined, send: Send) {
     hide: () => action('chat'),
     decorate: (text: string) => tutorRequest(text, boardRef.current, current.current.chatId),
     show: () => { if (board) void window.pip?.tutor?.show(board.id).catch(error => setError(error.message)); },
+    showAt: (point: { x: number; y: number }) => { if (board) void window.pip?.tutor?.show(board.id, point).catch(error => setError(error.message)); },
     end: () => { pending.current = null; setPendingSelection(false); if (board) void window.pip?.tutor?.end(board.id).catch(error => setError(error.message)); },
   };
 }

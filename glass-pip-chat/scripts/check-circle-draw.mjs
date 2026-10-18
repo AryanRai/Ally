@@ -26,7 +26,7 @@ desktopCapturer.getSources = async () => {
 };
 let main, capture;
 const preload = path.join(temp, 'main.cjs');
-fs.writeFileSync(preload, `const {contextBridge,ipcRenderer}=require('electron');let last=null;ipcRenderer.on('circle:ask',(_,value)=>last=value);contextBridge.exposeInMainWorld('check',{chat:(id,title)=>ipcRenderer.invoke('circle:chat',id,title),circle:()=>ipcRenderer.invoke('circle:start'),last:()=>last,start:(id,capture)=>ipcRenderer.invoke('tutor:start',id,undefined,capture),end:id=>ipcRenderer.invoke('tutor:end',id),show:id=>ipcRenderer.invoke('tutor:show',id),action:(id,action)=>ipcRenderer.invoke('tutor:action',id,action),state:()=>ipcRenderer.invoke('tutor:state')});`);
+fs.writeFileSync(preload, `const {contextBridge,ipcRenderer}=require('electron');let last=null;ipcRenderer.on('circle:ask',(_,value)=>last=value);contextBridge.exposeInMainWorld('check',{chat:(id,title)=>ipcRenderer.invoke('circle:chat',id,title),circle:()=>ipcRenderer.invoke('circle:start'),selection:()=>ipcRenderer.invoke('circle:selection-state'),select:action=>ipcRenderer.invoke('circle:selection-action',action),last:()=>last,start:(id,capture)=>ipcRenderer.invoke('tutor:start',id,undefined,capture),end:id=>ipcRenderer.invoke('tutor:end',id),show:(id,point)=>ipcRenderer.invoke('tutor:show',id,point),action:(id,action)=>ipcRenderer.invoke('tutor:action',id,action),state:()=>ipcRenderer.invoke('tutor:state')});`);
 const deadline = setTimeout(() => { console.error('FAIL timeout'); app.exit(1); }, 60000);
 const wait = async read => { for (let i = 0; i < 120; i++) { const value = await read(); if (value) return value; await new Promise(resolve => setTimeout(resolve, 40)); } throw Error('UI state timed out'); };
 const js = (win, text) => win.webContents.executeJavaScript(text);
@@ -47,12 +47,15 @@ async function run() { try {
     const actualBounds = main.getBounds(); // Windows can round requested bounds at fractional display scales.
     await js(main, "window.check.chat('exact-chat','Design review').then(()=>window.check.circle())");
     const selection = BrowserWindow.getAllWindows().find(win => win.id !== main.id);
-    await wait(() => js(selection, "!!document.querySelector('[aria-label=\"Ally screen selection\"]') && !!document.querySelector('img')"));
+    await wait(() => js(selection, "!!document.querySelector('img')"));
     assert.deepEqual(await js(selection, 'Object.keys(window.pip)'), ['circle']);
     const context = await js(selection, 'window.pip.circle.context()'); assert.equal(context.title, 'Design review'); assert.equal(context.anchor.x, actualBounds.x - display.bounds.x);
     assert.equal(await js(selection, "document.body.textContent.includes('Draw to explain')"), false);
     const original = nativeImage.createFromDataURL(await js(selection, 'window.pip.circle.getShot()'));
-    await js(selection, `[...document.querySelectorAll('button')].find(b=>b.textContent==='${shape}').click()`);
+    await wait(() => js(main, 'window.check.selection().then(s=>s.active && s.ready)'));
+    assert.equal(await js(selection, "document.querySelectorAll('button').length"), 0, 'selection controls belong to the real pill');
+    await js(main, `window.check.select('${shape.toLowerCase()}')`);
+    await wait(() => js(main, `window.check.selection().then(s=>s.tool==='${shape.toLowerCase()}')`));
     await js(selection, `(()=>{const canvas=document.querySelector('canvas');canvas.setPointerCapture=()=>{};for(const [type,x,y] of [['pointerdown',450,200],['pointermove',650,250],['pointermove',800,400]])canvas.dispatchEvent(new PointerEvent(type,{bubbles:true,clientX:x,clientY:y,pointerId:1}));})()`);
     assert.equal(main.isVisible(), true, 'the real pill remains available during selection');
     await js(selection, 'Promise.all(document.getAnimations().map(a=>a.finished.catch(()=>{})))');
@@ -105,7 +108,8 @@ async function run() { try {
     fs.writeFileSync(path.join(temp, `diagram-${shape.toLowerCase()}.png`), (await overlay.webContents.capturePage()).toPNG());
     await js(overlay, `window.tutor.action(${JSON.stringify(capture.board.id)},'chat')`); assert.equal(overlay.isVisible(), false); assert.equal(main.isVisible(), true);
     await rpc('visual_tutor_draw', { boardId: capture.board.id, step }); assert.equal(overlay.isVisible(), false, 'late drawing updates respect return to chat');
-    await js(main, `window.check.show(${JSON.stringify(capture.board.id)})`); assert.equal(overlay.isVisible(), true);
+    await js(main, `window.check.show(${JSON.stringify(capture.board.id)},{x:${display.bounds.x + 900},y:${display.bounds.y + 350}})`); assert.equal(overlay.isVisible(), true);
+    const placed = await js(main, 'window.check.state()'); assert.ok(placed.panelAnchor && placed.panelAnchor.sequence > 0); assert.equal(captures - before, 1, 'reopening does not recapture');
     await js(main, `window.check.end(${JSON.stringify(capture.board.id)})`);
     assert.ok((await rpc('visual_tutor_draw', { boardId: capture.board.id, step })).isError, 'ending revokes late tool calls');
     fs.rmSync(capture.imagePath, { force: true });
@@ -114,7 +118,7 @@ async function run() { try {
   const boundsBeforeCancel = main.getBounds();
   await js(main, 'window.check.circle()');
   const cancel = BrowserWindow.getAllWindows().find(win => win.id !== main.id);
-  await wait(() => js(cancel, "!!document.querySelector('[aria-label=\"Cancel selection\"]')"));
+  await wait(() => js(cancel, "!!document.querySelector('canvas') && !!document.querySelector('img')"));
   void js(cancel, "window.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape'}))").catch(() => {});
   await wait(() => BrowserWindow.getAllWindows().length === 1);
   assert.deepEqual(main.getBounds(), boundsBeforeCancel); assert.equal(main.isVisible(), true); assert.deepEqual(await js(main, 'window.check.last()'), beforeCancel);

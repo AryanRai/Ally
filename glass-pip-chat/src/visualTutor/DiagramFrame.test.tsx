@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, expect, it } from 'vitest';
-import DiagramFrame, { diagramDocument } from './DiagramFrame';
+import DiagramFrame, { diagramDocument, FittedDiagram } from './DiagramFrame';
 afterEach(cleanup);
 it('isolates complex interactive SVG/HTML without parent, file/network, navigation or popup privileges', () => {
   const html = '<svg viewBox="0 0 100 100"><circle r="20" cx="50" cy="50"/></svg><input id="angle" type="range"><script>document.querySelector("input").addEventListener("input",()=>{});</script>';
@@ -16,4 +16,16 @@ it('strips navigation, nested frames, remote scripts, handlers and resource URLs
   const doc = diagramDocument('<base href="file:///"><meta http-equiv="refresh" content="0;url=https://evil.test"><iframe src="https://evil.test"></iframe><script src="https://evil.test/a.js"></script><a href="javascript:alert(1)" onclick="evil()">bad</a><svg><use href="#shape" /></svg>');
   expect(doc).not.toContain('evil.test'); expect(doc).not.toContain('onclick'); expect(doc).not.toContain('javascript:');
   expect(doc).toContain('href="#shape"'); expect(doc).toContain("form-action 'none'");
+});
+it('fits bounded content and ignores size messages from other windows', () => {
+  render(<FittedDiagram title="Fitted" html="<svg/>" />);
+  const frame = screen.getByTitle('Fitted') as HTMLIFrameElement;
+  fireEvent(window, new MessageEvent('message', { source: window, data: { type: 'ally-diagram-size', height: 90 } }));
+  expect(frame).toHaveStyle({ height: '260px' });
+  fireEvent(window, new MessageEvent('message', { source: frame.contentWindow, data: { type: 'ally-diagram-size', height: 130 } }));
+  expect(frame).toHaveStyle({ height: '130px' });
+  fireEvent(window, new MessageEvent('message', { source: frame.contentWindow, data: { type: 'ally-diagram-size', height: 9000 } }));
+  expect(frame).toHaveStyle({ height: '260px' });
+  expect(diagramDocument('<img src="data:image/png;base64,aGVsbG8="><img src="https://private.test/pixel">')).toContain('src="data:image/png;base64,aGVsbG8="');
+  expect(diagramDocument('<img src="https://private.test/pixel">')).not.toContain('private.test');
 });

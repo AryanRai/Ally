@@ -6,7 +6,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { getWindow } from '../window.js';
 import { CircleHandoff, circleRegion, type CircleCapture } from './circleHandoff.js';
-import type { CircleAsk, CircleSubmit, CircleContext } from './types.js';
+import type { CircleAsk, CircleSubmit, CircleContext, CircleSelectionState } from './types.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CAPTURE_DIR = path.join(os.tmpdir(), 'ally-captures');
@@ -21,6 +21,11 @@ let selectedChatId: string | undefined;
 let selectedChatTitle = '';
 let context: CircleContext | null = null;
 let opening = false;
+let selectionState: CircleSelectionState = { active: false, tool: 'freehand' };
+function publishSelection(state: CircleSelectionState) {
+  selectionState = state;
+  getMain()?.webContents.send('circle:selection', state);
+}
 const tutorHandoff = new CircleHandoff();
 export const takeCircleTutorCapture = (id: string, chatId: string) => tutorHandoff.take(id, chatId);
 let beforeCapture = () => {};
@@ -50,6 +55,8 @@ function closeOverlay() {
   overlay?.close();
   overlay = null;
   shot = null;
+  context = null;
+  publishSelection({ active: false, tool: 'freehand' });
   getMain()?.setAlwaysOnTop(true, 'floating');
 }
 
@@ -117,6 +124,8 @@ export async function startCircle(): Promise<void> {
     overlay.setBounds(display.bounds); // undo any DPI-driven size drift
     overlay.on('closed', () => {
       overlay = null;
+      shot = null; context = null;
+      publishSelection({ active: false, tool: 'freehand' });
     });
     overlay.on('blur', () => {
       // The real pill stays usable while selecting; unrelated app switches cancel.
@@ -144,6 +153,21 @@ export function registerCircleIpc(mainWindow = getWindow): void {
   const fromOverlay = (event: Electron.IpcMainInvokeEvent) => {
     if (event.sender !== overlay?.webContents || event.senderFrame !== event.sender.mainFrame) throw Error('Use the Ally selection surface.');
   };
+  const fromMain = (event: Electron.IpcMainInvokeEvent) => {
+    if (event.sender !== getMain()?.webContents || event.senderFrame !== event.sender.mainFrame) throw Error('Use the Ally pill.');
+  };
+  ipcMain.handle('circle:selection-state', event => { fromMain(event); return selectionState; });
+  ipcMain.handle('circle:selection-update', (event, state: CircleSelectionState) => {
+    fromOverlay(event);
+    if (!state || !['freehand', 'rectangle'].includes(state.tool) || typeof state.ready !== 'boolean' || typeof state.sending !== 'boolean' || (state.error != null && typeof state.error !== 'string')) throw Error('Invalid selection state');
+    publishSelection({ active: true, tool: state.tool, ready: state.ready && !!shot?.chatId, sending: state.sending, error: state.error?.slice(0, 300) });
+  });
+  ipcMain.handle('circle:selection-action', (event, action: unknown) => {
+    fromMain(event);
+    if (!['freehand', 'rectangle', 'whole', 'cancel'].includes(String(action)) || typeof action !== 'string') throw Error('Invalid selection action');
+    if (!overlay) return;
+    overlay.webContents.send('circle:selection-action', action);
+  });
   ipcMain.handle('circle:start', event => {
     if (event.sender !== getMain()?.webContents || event.senderFrame !== event.sender.mainFrame) throw Error('Start selection from Ally.');
     return startCircle();

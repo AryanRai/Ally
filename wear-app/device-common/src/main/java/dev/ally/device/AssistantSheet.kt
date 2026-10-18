@@ -17,7 +17,8 @@ import kotlin.math.*
 /** Compact Orbit-style input dock, in Android's own assistant window. */
 internal class AssistantSheet(context: Context, private val hold: AssistantHold, private val send: (String) -> Unit,
     private val mode: (String) -> Unit, private val open: () -> Unit, private val dismiss: () -> Unit, private val choose: (String) -> Unit,
-    private val selectChat: (String) -> Unit, private val beginMonitor: () -> Boolean) : FrameLayout(context) {
+    private val selectChat: (String) -> Unit, private val beginMonitor: () -> Boolean,
+    private val reviewPending: () -> Unit = open) : FrameLayout(context) {
     private val round = resources.configuration.isScreenRound
     private val muted = Color.rgb(155,158,169)
     private val motion get() = ValueAnimator.areAnimatorsEnabled() && !DeviceLink.prefs(context).getBoolean(if(round) "look.reducedMotion" else "phone.look.reducedMotion", false)
@@ -25,6 +26,7 @@ internal class AssistantSheet(context: Context, private val hold: AssistantHold,
     private val dock = LinearLayout(context)
     private val orb = FluidAssistantOrb(context)
     private val status = label("Hold the orb to talk", 11f, muted)
+    private val approvals = label("Approval waiting · Review", 11f, muted)
     private val chat = label("", 11f, muted)
     private val reply = label("", if(round) 12f else 15f)
     private val replyScroll = ScrollView(context)
@@ -115,6 +117,10 @@ internal class AssistantSheet(context: Context, private val hold: AssistantHold,
         panel.addView(dock,LinearLayout.LayoutParams(-1,-2).apply { topMargin=dp(6) })
         status.gravity=Gravity.CENTER; status.maxLines=2; status.setPadding(dp(2),dp(9),dp(2),0)
         panel.addView(status,LinearLayout.LayoutParams(-1,-2))
+        approvals.visibility=GONE; approvals.gravity=Gravity.CENTER
+        approvals.setPadding(dp(4),0,dp(4),0); approvals.isFocusable=true
+        approvals.setOnClickListener { reviewPending() }
+        panel.addView(approvals,LinearLayout.LayoutParams(-1,dp(36)))
         activityToggle.gravity=Gravity.CENTER_VERTICAL
         activityToggle.maxLines=1; activityToggle.ellipsize=android.text.TextUtils.TruncateAt.END
         activityToggle.isFocusable=true; activityToggle.isClickable=true
@@ -146,6 +152,7 @@ internal class AssistantSheet(context: Context, private val hold: AssistantHold,
     fun followChat() { activityExpanded=false; interacted=true; firstText=null; hasLiveReply=false }
     fun openMonitor() { activityExpanded=true; lastSnapshot?.let { render(it,lastActivity) } }
     fun render(s: AssistantSnapshot, agents: AssistantActivityState = lastActivity) {
+        approvals.visibility=if(!round && DeviceLink.inbox.value.any { DeviceAlerts.blocking(it) }) VISIBLE else GONE
         lastSnapshot=s; lastActivity=agents
         activityToggle.text="${agents.summary} ${if(activityExpanded) "▴" else "▾"}"
         activityToggle.contentDescription="${agents.summary}. ${if(activityExpanded) "Collapse" else "Show"} agent chats"

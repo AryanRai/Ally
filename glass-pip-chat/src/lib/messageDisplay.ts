@@ -37,6 +37,15 @@ export function displayAssistantText(raw: string): string {
       return line;
     }
     if (fence) return line;
+    const visualization = /^\uE200visualize\uE202(\{[^\r\n]+\})\uE201\s*$/.exec(line);
+    if (visualization) {
+      try {
+        const artifact = JSON.parse(visualization[1]);
+        if (typeof artifact.path === 'string' && /^(?:[a-z]:[\\/]|\/(?!\/))/i.test(artifact.path) && /\.html?$/i.test(artifact.path) && !/[\0\r\n]/.test(artifact.path)) {
+          return `[View diagram](/__ally_visualization__/${encodeURIComponent(artifact.path)})`;
+        }
+      } catch { /* Preserve malformed or incomplete streamed directives. */ }
+    }
     const file = /^:{1,2}codex-file-citation\{path="([^"\r\n]+)"(?: purpose="(?:input|output)")?\}\s*$/.exec(line);
     if (file && /^(?:[a-z]:[\\/]|\/(?!\/))/i.test(file[1]) && !/[\0\r\n]/.test(file[1])) {
       const label = file[1].split(/[\\/]/).at(-1)!.replace(/[\[\]\\]/g, '\\$&');

@@ -11,32 +11,32 @@ button:focus-visible { outline: 2px solid #70f0c0; outline-offset: 2px; }
 .tutor-mark { animation: tutor-appear .22s ease-out; }
 @keyframes tutor-appear { from { opacity: 0; } to { opacity: 1; } }
 .tutor-sketch-surface { position: absolute; inset: 0; cursor: crosshair; pointer-events: auto; touch-action: none; }
-.tutor-panel { position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); width: min(420px, calc(100% - 24px)); pointer-events: auto; padding: 8px; border: 1px solid #ffffff1a; border-radius: 18px; background: #0009; box-shadow: 0 12px 48px #0009; backdrop-filter: blur(24px); font-size: 13px; font-weight: 300; }
+.tutor-panel { position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); width: min(420px, calc(100% - 24px)); pointer-events: auto; padding: 8px; border: 1px solid #ffffff1a; border-radius: 8px; background: #0009; box-shadow: 0 12px 48px #0009; backdrop-filter: blur(24px); font-size: 13px; font-weight: 300; }
 .tutor-heading { display: flex; align-items: center; gap: 12px; font-size: 12px; }
 .tutor-panel { max-height: calc(100% - 20px); overflow: auto; }
 .tutor-panel .tutor-move-handle { flex: 1; min-width: 0; justify-content: flex-start; padding: 0; gap: 8px; cursor: grab; touch-action: none; user-select: none; }
 .tutor-panel .tutor-move-handle:active { cursor: grabbing; }
 .tutor-panel .tutor-move-handle:hover { background: transparent; }
-.tutor-grip { flex-shrink: 0; color: #929baa; }
+.tutor-grip { flex-shrink: 0; color: #ffffff73; }
 .tutor-brand { display: flex; align-items: center; gap: 7px; font-weight: 550; }
 .tutor-brand > span:first-child { width: 6px; height: 6px; background: #f4f4f5; border-radius: 50%; }
-.tutor-quiet, .tutor-time { color: #a3a9b5; font-weight: 400; }
+.tutor-quiet, .tutor-time { color: #ffffff73; font-weight: 400; }
 .tutor-time { margin-left: auto; font-size: 10px; white-space: nowrap; }
 .tutor-panel button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; border: 0; border-radius: 8px; background: transparent; min-width: 28px; height: 28px; padding: 0 7px; color: #ffffff8c; transition: background-color .15s, color .15s; }
 .tutor-panel button:hover:not(:disabled), .tutor-panel button[aria-pressed=true] { background: #ffffff12; }
 .tutor-panel button[aria-pressed=true] { color: #70f0c0; }
 .tutor-lesson h1 { font-size: 13px; font-weight: 400; line-height: 1.5; margin: 6px 2px; overflow-wrap: anywhere; }
-.tutor-lesson p { font-size: 12px; line-height: 1.6; color: #c3c7d0; white-space: pre-wrap; margin: 0 0 12px; max-height: 116px; overflow: auto; overscroll-behavior: contain; }
+.tutor-lesson p { font-size: 12px; line-height: 1.6; color: #ffffffd9; white-space: pre-wrap; margin: 0 0 12px; max-height: 116px; overflow: auto; overscroll-behavior: contain; }
 .tutor-controls, .tutor-navigation, .tutor-tools { display: flex; align-items: center; gap: 3px; }
 .tutor-controls { justify-content: space-between; border-top: 1px solid #ffffff12; padding-top: 7px; }
-.tutor-navigation > span { min-width: 48px; text-align: center; font-size: 11px; color: #b8bec9; }
+.tutor-navigation > span { min-width: 48px; text-align: center; font-size: 11px; color: #ffffffa6; }
 .tutor-panel .tutor-chat { font-size: 11px; padding: 0 9px; background: #ffffff0d; margin-left: 5px; }
 .tutor-follow { font-size: 10px; color: #70f0c0; }
-.tutor-hint { color: #929baa; font-size: 10px; line-height: 1.5; margin: 6px 0 0; }
+.tutor-hint { color: #ffffff73; font-size: 10px; line-height: 1.5; margin: 6px 0 0; }
 .tutor-error { color: #ffd378; font-size: 11px; }
 .tutor-error button { text-decoration: underline; margin-left: 6px; }
 @media (max-width: 440px) { .tutor-panel { padding: 10px; } .tutor-controls { flex-wrap: wrap; } .tutor-time { display: none; } }
 @media (prefers-reduced-motion: reduce) { .tutor-mark { animation: none; } }
 
 .tutor-diagram { max-height: min(56vh, 650px); overflow: auto; border: 1px solid #ffffff18; border-radius: 10px; margin: 8px 0; }
-.tutor-diagram-toggle { font-size: 10px; color: #b8bec9; padding: 5px 8px; }
+.tutor-diagram-toggle { font-size: 10px; color: #ffffffa6; padding: 5px 8px; }

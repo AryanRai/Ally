@@ -1,4 +1,6 @@
 export interface CircleRect { x: number; y: number; width: number; height: number }
+export interface CircleSelectionState { active: boolean; tool: 'freehand' | 'rectangle'; ready?: boolean; sending?: boolean; error?: string }
+export type CircleSelectionAction = 'freehand' | 'rectangle' | 'whole' | 'cancel';
 export interface CircleSubmit {
   /** Selection in overlay CSS pixels; omitted = whole screen. */
   rect?: CircleRect;
