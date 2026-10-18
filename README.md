@@ -85,14 +85,7 @@ Global shortcuts depend on the operating system and can conflict with other appl
 
 ## How Ally connects
 
-```mermaid
-flowchart LR
-    Desktop["Ally desktop"] <--> Agents["Claude Code / Codex"]
-    Desktop <--> Speech["Local / configured cloud speech"]
-    Phone["Android phone"] <--> Bridge["Authenticated device bridge"]
-    Watch["Wear OS watch"] <--> Bridge
-    Bridge <--> Desktop
-```
+<img src="docs/assets/architecture.svg" alt="Phone and watch connect through an authenticated bridge to Ally desktop, which connects to native agents and configured speech." width="960" />
 
 The device bridge listens on loopback. An explicitly configured HTTPS tunnel lets paired devices reach it remotely; development can use an ADB tunnel. **Keep the PC, Ally, and the chosen connection running.** This is a connection to your desktop agents, not an independently hosted cloud agent.
 
