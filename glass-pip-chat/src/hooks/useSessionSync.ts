@@ -21,6 +21,13 @@ export function useSessionSync(chats: ChatsApi, locallyRunning: boolean, onContr
   const control = useRef(onControl); control.current = onControl;
   const latest = useRef(chats);
   latest.current = chats;
+  const readerEngaged = useRef(false);
+  useEffect(() => {
+    const engage = () => { readerEngaged.current = true; };
+    const events = ['pointerdown', 'keydown', 'wheel'] as const;
+    events.forEach(event => window.addEventListener(event, engage, { passive: true }));
+    return () => events.forEach(event => window.removeEventListener(event, engage));
+  }, []);
   const chatId = chats.activeChat?.id;
   const provider = chats.activeChat?.agent?.provider;
   const sessionId = chats.activeChat?.agent?.sessionId;
@@ -48,7 +55,7 @@ export function useSessionSync(chats: ChatsApi, locallyRunning: boolean, onContr
         if (!snapshot.unchanged) latest.current.syncAgentSession(chatId, provider, resolved, sessionMessages(resolved, snapshot.messages), snapshot.cwd);
         // Receipts are issued after the reply has reached React, only in a visible,
         // focused reader. Merely fetching history or leaving a chat selected is not reading.
-        if (!snapshot.running && snapshot.readState?.unread && document.visibilityState === 'visible' && document.hasFocus()) {
+        if ((!latest.current.selectionRestored || readerEngaged.current) && !snapshot.running && snapshot.readState?.unread && document.visibilityState === 'visible' && document.hasFocus()) {
           const receipt = snapshot.readState;
           requestAnimationFrame(() => {
             if (!disposed && latest.current.activeChat?.id === chatId && document.hasFocus() && document.visibilityState === 'visible'

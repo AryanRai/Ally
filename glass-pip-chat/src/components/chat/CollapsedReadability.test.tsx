@@ -4,6 +4,24 @@ import CompactUserMessage from './CompactUserMessage';
 import CollapsedResponsePreview from './CollapsedResponsePreview';
 
 describe('compact readable messages', () => {
+  it('restores the exact older reply and scroll bookmark after remount and delayed history', () => {
+    localStorage.clear();
+    const older = [{id:'older',role:'assistant' as const,content:'Older saved answer',timestamp:1}];
+    const first = render(<CollapsedResponsePreview readerChatId="exact" responseId="prompt" response="Newest answer" olderReplies={older} isTyping={false} />);
+    fireEvent.click(screen.getByRole('button', {name:'Older reply'}));
+    const panel = screen.getByRole('region', { name: 'Latest reply' });
+    Object.defineProperties(panel, { scrollHeight: {value:1000}, clientHeight: {value:192} });
+    panel.scrollTop = 42; fireEvent.scroll(panel);
+    first.unmount();
+    const second = render(<CollapsedResponsePreview readerChatId="exact" responseId="prompt" response="Newest answer" olderReplies={[]} isTyping={false} />);
+    second.rerender(<CollapsedResponsePreview readerChatId="exact" responseId="prompt" response="Newest answer" olderReplies={older} isTyping={false} />);
+    expect(screen.getByText('Older saved answer')).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'Latest reply' }).scrollTop).toBe(42);
+    second.unmount();
+    render(<CollapsedResponsePreview readerChatId="different" responseId="prompt" response="Other chat answer" olderReplies={older} isTyping={false} />);
+    expect(screen.queryByText('Older saved answer')).not.toBeInTheDocument();
+    localStorage.clear();
+  });
   it('renders Markdown with an explicit expansion path for a long request', () => {
     render(<CompactUserMessage content={'# Request\n\nUse **Circle** and `drawing`.\n\n- Preserve [links](https://example.com)\n- Keep the entire request\n\n' + 'More detail. '.repeat(30)} />);
     expect(screen.getByRole('heading', { name: 'Request' })).toBeInTheDocument();

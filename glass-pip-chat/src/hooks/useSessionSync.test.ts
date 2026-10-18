@@ -3,12 +3,50 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { useSessionSync, replyReaderVisible } from './useSessionSync';
 import type { ChatsApi } from './useChats';
 import type { AgentSessionSnapshot } from '../../electron/agent/types';
+import { ChatManager } from '../utils/chatManager';
+import { useChats } from './useChats';
 
 const original = window.pip;
 afterEach(() => { window.pip = original; vi.restoreAllMocks(); document.querySelector('[data-ally-reply-reader]')?.parentElement?.remove(); });
 const snapshot = (text: string, revision: string): AgentSessionSnapshot => ({ revision, messages: [{ role: 'assistant', content: text, timestamp: 1 }] });
 
 describe('selected session synchronization', () => {
+  it('restores immediately without receipts and ignores hydration after the user navigates', async () => {
+    localStorage.clear();
+    const reset = () => { (ChatManager as unknown as { instance?: ChatManager }).instance = undefined; };
+    reset();
+    const manager = ChatManager.getInstance();
+    const saved = manager.openAgentSession({provider:'codex',sessionId:'old',cwd:'/exact'},'Saved',[{id:'saved',role:'assistant',content:'Saved reply',timestamp:1}]);
+    localStorage.setItem('ally-chat-drafts', JSON.stringify({[saved.id]:'Keep my draft'}));
+    reset();
+    let notify!: (provider: 'codex') => void;
+    const markRead = vi.fn().mockResolvedValue(true);
+    const value = {...snapshot('Hydrated','r'), readState:{key:'codex:old',revision:'unread',unread:true}};
+    const loadSession = vi.fn().mockResolvedValue(value);
+    vi.spyOn(document, 'hasFocus').mockReturnValue(true);
+    vi.spyOn(window, 'requestAnimationFrame').mockImplementation(callback => { callback(0); return 1; });
+    const clip = document.createElement('div');
+    const reader = document.createElement('div'); reader.dataset.allyReplyReader = 'true'; clip.append(reader); document.body.append(clip);
+    vi.spyOn(reader, 'getBoundingClientRect').mockReturnValue({top:0,bottom:40,left:0,right:100,width:100,height:40} as DOMRect);
+    window.pip = {agent:{loadSession,markRead,onSessionsChanged:(fn: typeof notify)=>{notify=fn;return ()=>{};}}} as any;
+    const {result,unmount} = renderHook(()=>{const chats=useChats();useSessionSync(chats,false);return chats;});
+    expect(result.current.activeChat?.id).toBe(saved.id);
+    await waitFor(()=>expect(result.current.activeChat?.messages[0].content).toBe('Hydrated'));
+    expect(markRead).not.toHaveBeenCalled();
+    act(()=>{window.dispatchEvent(new Event('pointerdown'));notify('codex');});
+    await waitFor(()=>expect(markRead).toHaveBeenCalledOnce());
+    let finish!: (value: AgentSessionSnapshot)=>void;
+    loadSession.mockImplementationOnce(()=>new Promise(resolve=>{finish=resolve;}));
+    act(()=>notify('codex'));
+    act(()=>{result.current.create();});
+    const selected = result.current.activeChat!.id;
+    await act(async()=>{finish({...value,sessionId:'migrated',originalSessionId:'old'});});
+    expect(result.current.activeChat?.id).toBe(selected);
+    expect(result.current.getChat(saved.id)?.agent?.sessionId).toBe('old');
+    expect(JSON.parse(localStorage.getItem('ally-chat-drafts')!)[saved.id]).toBe('Keep my draft');
+    expect(markRead).toHaveBeenCalledOnce();
+    unmount();clip.remove();localStorage.clear();reset();
+  });
   it('updates on notifications and ignores a late response after switching chats', async () => {
     let notify: (provider: 'codex') => void = () => {};
     const unsubscribe = vi.fn();

@@ -148,7 +148,7 @@ async function loadNativeCodexChat(id: string, previousRevision?: string): Promi
   const revision = createHash('sha256').update(JSON.stringify([sessionId, thread.name, thread.cwd, fingerprint ?? turns, running])).digest('hex');
   const identity = { createdAt: (thread.createdAt ?? 0) * 1000, sessionId, title: thread.name ? chatTitle(thread.name) : undefined, ...(sessionId !== id ? { originalSessionId: id } : {}) };
   if (revision === previousRevision) return { ...identity, cwd: thread.cwd, revision, unchanged: true, messages: [], running };
-  const snapshot = { ...identity, cwd: thread.cwd, revision, running, messages: cached?.snapshot?.revision === revision ? cached.snapshot.messages : codexHistoryMessages(turns, thread.createdAt * 1000) };
+  const snapshot = { ...identity, cwd: thread.cwd, revision, running, messages: cached?.snapshot?.revision === revision ? cached.snapshot.messages : await cooperativeCodexHistoryMessages(turns, thread.createdAt * 1000) };
   if (fingerprint) {
     const after = await fs.stat(thread.path).catch(() => undefined);
     if (after && stat && after.size === stat.size && after.mtimeMs === stat.mtimeMs && after.ctimeMs === stat.ctimeMs) {
@@ -157,6 +157,22 @@ async function loadNativeCodexChat(id: string, previousRevision?: string): Promi
     }
   }
   return snapshot;
+}
+
+/** Image decoding is synchronous in Electron. Bound accumulated work between
+ * native items so a long transcript cannot monopolize the main event loop. */
+export async function cooperativeCodexHistoryMessages(turns: any[], createdAt: number): Promise<AgentHistoryMessage[]> {
+  const iterator = codexHistorySteps(turns, createdAt);
+  let deadline = performance.now() + 8;
+  let next = iterator.next();
+  while (!next.done) {
+    if (performance.now() >= deadline) {
+      await new Promise<void>(resolve => setImmediate(resolve));
+      deadline = performance.now() + 8;
+    }
+    next = iterator.next();
+  }
+  return next.value;
 }
 
 function userImages(content: any[]): string[] {
@@ -172,6 +188,13 @@ function userImages(content: any[]): string[] {
 }
 
 export function codexHistoryMessages(turns: any[], createdAt: number): AgentHistoryMessage[] {
+  const iterator = codexHistorySteps(turns, createdAt);
+  let next = iterator.next();
+  while (!next.done) next = iterator.next();
+  return next.value;
+}
+
+function* codexHistorySteps(turns: any[], createdAt: number): Generator<void, AgentHistoryMessage[]> {
   const messages: AgentHistoryMessage[] = [];
   for (const turn of turns) {
     const ts = turn.startedAt ? turn.startedAt * 1000 : createdAt;
@@ -179,6 +202,7 @@ export function codexHistoryMessages(turns: any[], createdAt: number): AgentHist
     let assistant: AgentHistoryMessage | undefined;
     const tools = new Map<string, AgentToolExecution>();
     for (const item of turn.items ?? []) {
+      yield;
       if (item.type === 'userMessage') {
         assistant = undefined;
         const content = item.content ?? [];

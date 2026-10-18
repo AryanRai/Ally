@@ -27,7 +27,11 @@ const plainText = (m: Message) => m.content.replace(/<think>[\s\S]*?<\/think>/gi
  */
 export function useAgentConversation({ chats, robotMode, onSentence }: Options) {
   const agent = useAgentChat();
-  const [model, setModelState] = useState(() => localStorage.getItem(MODEL_KEY) || DEFAULT_AGENT_MODEL);
+  const [model, setModelState] = useState(() => {
+    const saved = localStorage.getItem(MODEL_KEY) || DEFAULT_AGENT_MODEL;
+    const provider = chats.activeChat?.agent?.provider;
+    return provider && parseAgentModel(saved)?.provider !== provider ? `${AGENT_MODEL_PREFIX[provider]}default` : saved;
+  });
   type Live = { isTyping: boolean; inputStatus: string; currentResponse: string; streamingSegments: Segment[]; thinkingText: string };
   const emptyLive: Live = { isTyping: false, inputStatus: '', currentResponse: '', streamingSegments: [], thinkingText: '' };
   const [liveChats, setLiveChats] = useState<Record<string, Live>>({});

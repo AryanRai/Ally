@@ -479,6 +479,7 @@ export default function GlassChatPiP() {
           >
             {state.collapsed ? (
               <CollapsedHeader
+                readerChatId={activeChat?.id}
                 onOpenAgent={async row => {
                   const sessionId = row.sessionId ?? row.id.replace(/^(codex|claude):/, '');
                   const saved = chats.chats.find(c => c.agent?.provider === row.provider && (c.agent.sessionId === sessionId || c.agent.originalSessionId === sessionId));

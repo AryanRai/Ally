@@ -26,6 +26,7 @@ export function useChats() {
   return {
     chats: state.chats,
     activeChat,
+    selectionRestored: manager.selectionRestored,
     /** Fresh read, for code that runs after an await */
     getChat: (chatId: string): Chat | null => manager.getChatById(chatId),
     select: (chatId: string) => mutate(m => m.switchToChat(chatId)),
