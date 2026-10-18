@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { AgentHistoryMessage } from '@/types/agent';
 import type { Message } from '@/types/chat';
 import type { ChatsApi } from './useChats';
+import { isDeviceProtocolTitle } from '../../electron/agent/chatTitle';
 
 export function sessionMessages(sessionId: string, messages: AgentHistoryMessage[]): Message[] {
   return messages.map((m, i) => ({
@@ -15,8 +16,9 @@ export function sessionMessages(sessionId: string, messages: AgentHistoryMessage
  * Follow the selected on-disk conversation without acquiring an agent writer.
  * Returns whether that conversation is mid-turn in another app (Claude Code / Codex).
  */
-export function useSessionSync(chats: ChatsApi, locallyRunning: boolean): boolean {
+export function useSessionSync(chats: ChatsApi, locallyRunning: boolean, onControl?: (value: { token?: string; canStop: boolean }) => void): boolean {
   const [externalRunning, setExternalRunning] = useState(false);
+  const control = useRef(onControl); control.current = onControl;
   const latest = useRef(chats);
   latest.current = chats;
   const chatId = chats.activeChat?.id;
@@ -25,6 +27,7 @@ export function useSessionSync(chats: ChatsApi, locallyRunning: boolean): boolea
   useEffect(() => {
     const api = window.pip?.agent;
     setExternalRunning(false);
+    control.current?.({ canStop: false });
     if (!api || !chatId || !provider || !sessionId || locallyRunning) return;
     let disposed = false;
     let inFlight = false;
@@ -37,8 +40,9 @@ export function useSessionSync(chats: ChatsApi, locallyRunning: boolean): boolea
         if (disposed) return;
         revision = snapshot.revision;
         const title = latest.current.activeChat?.title;
-        if (snapshot.title && title?.startsWith('You are Ally on a round smartwatch.')) latest.current.rename(chatId, snapshot.title);
-        setExternalRunning(!!snapshot.running);
+        if (snapshot.title && title && isDeviceProtocolTitle(title)) latest.current.rename(chatId, snapshot.title);
+        setExternalRunning(!!snapshot.running || !!snapshot.canStop);
+        control.current?.({ token: snapshot.interrupted?.token, canStop: !!snapshot.canStop });
         const resolved = snapshot.sessionId ?? sessionId;
         if (resolved !== sessionId) latest.current.setAgent(chatId, { provider, sessionId: resolved, originalSessionId: snapshot.originalSessionId ?? sessionId, cwd: snapshot.cwd });
         if (!snapshot.unchanged) latest.current.syncAgentSession(chatId, provider, resolved, sessionMessages(resolved, snapshot.messages), snapshot.cwd);

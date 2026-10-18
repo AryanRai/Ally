@@ -1,3 +1,4 @@
+import { configureDiscoveryReader, rememberCodexThread, hiddenConversation } from './codexDiscovery.js';
 import { canonicalTurnId, readDesktopActivity } from './codexDesktop.js';
 import { createHash } from 'node:crypto';
 import { localImageDataUrl } from './imageFile.js';
@@ -11,42 +12,69 @@ import { chatTitle, isDeviceProtocolTitle } from './chatTitle.js';
 import { codexTurnsPending } from './sessionActivity.js';
 import type { AgentHistoryMessage, AgentSessionSnapshot, AgentSessionSummary, AgentToolExecution } from './types.js';
 
-let connection: Promise<CodexRpc> | undefined;
+// List timeouts must not close a user's in-flight chat/history read.
+type ReadLane = 'list' | 'history' | 'metadata';
+const connections: Partial<Record<ReadLane, Promise<CodexRpc>>> = {};
 let binary: string | undefined;
 export function configureCodexHistory(bin?: string) {
   if (bin !== binary) { closeCodexHistory(); binary = bin; }
 }
 export function closeCodexHistory() {
-  const old = connection; connection = undefined;
-  void old?.then(rpc => rpc.close()).catch(() => {});
-}
-async function reader(): Promise<CodexRpc> {
-  if (!connection) {
-    const opening = CodexRpc.connect(binary).then(rpc => {
-      rpc.onClose = () => { if (connection === opening) connection = undefined; };
-      return rpc;
-    }).catch(error => { if (connection === opening) connection = undefined; throw error; });
-    connection = opening;
+  for (const lane of ['list', 'history', 'metadata'] as const) {
+    const old = connections[lane]; delete connections[lane];
+    void old?.then(rpc => rpc.close()).catch(() => {});
   }
-  return connection;
+}
+async function reader(lane: ReadLane = 'history'): Promise<CodexRpc> {
+  if (!connections[lane]) {
+    const opening = CodexRpc.connect(binary).then(rpc => {
+      rpc.onClose = () => { if (connections[lane] === opening) delete connections[lane]; };
+      return rpc;
+    }).catch(error => { if (connections[lane] === opening) delete connections[lane]; throw error; });
+    connections[lane] = opening;
+  }
+  return connections[lane]!;
 }
 
+/** A timed-out browsing pipe must not poison every later desktop/device refresh. */
+async function historyRead(rpc: CodexRpc, method: string, params: unknown, lane: ReadLane = method === 'thread/list' ? 'list' : 'history') {
+  try { return await rpc.request(method, params, 8000); }
+  catch (error) {
+    if (error instanceof Error && /timed out|connection.*closed|app-server closed/i.test(error.message)) {
+      const current = connections[lane];
+      if (current && await current.catch(() => undefined) === rpc && connections[lane] === current) {
+        delete connections[lane];
+        rpc.close();
+      }
+    }
+    throw error;
+  }
+}
+
+// Background receipt classification must not cancel a foreground chat open.
+configureDiscoveryReader(async id => (await historyRead(await reader('metadata'), 'thread/read', { threadId: id }, 'metadata')).thread);
+
 export async function listCodexChats(limit = 40): Promise<AgentSessionSummary[]> {
-  const rpc = await reader();
+  const rpc = await reader('list');
   const aliases = codexMigrationAliases();
   const originals = Object.fromEntries(Object.entries(aliases).map(([old, target]) => [target, old]));
   const result: AgentSessionSummary[] = [];
+  const seen = new Set<string>();
   let cursor: string | undefined;
   do {
-    const page = await rpc.request('thread/list', {
-      limit: Math.min(100, Math.max(1, limit)), cursor, sortKey: 'updated_at',
+    const page = await historyRead(rpc, 'thread/list', {
+      // Large native pages can stall the Windows app-server; follow its cursors.
+      limit: Math.min(5, Math.max(1, limit - result.length)), cursor, sortKey: 'created_at',
       // Include old exec chats for compatibility, but omit subagent/background threads.
       sourceKinds: ['cli', 'vscode', 'appServer', 'exec'],
     });
     for (const t of page.data) {
-      if (aliases[t.id]) continue;
+      rememberCodexThread(t);
+      if (hiddenConversation('codex', t.id)) continue;
+      if (aliases[t.id] || seen.has(t.id)) continue;
+      seen.add(t.id);
       result.push({ provider: 'codex', id: t.id, title: chatTitle(t.name || t.preview || 'Codex chat'),
-        cwd: t.cwd, updatedAt: t.updatedAt * 1000, originalSessionId: originals[t.id] });
+        cwd: t.cwd, createdAt: (t.createdAt ?? 0) * 1000, updatedAt: t.updatedAt * 1000, originalSessionId: originals[t.id] });
       if (result.length >= limit) return result;
     }
     cursor = page.nextCursor;
@@ -58,18 +86,19 @@ export async function listCodexChats(limit = 40): Promise<AgentSessionSummary[]>
 export async function loadCodexChat(id: string, previousRevision?: string): Promise<AgentSessionSnapshot> {
   const rpc = await reader();
   const sessionId = mappedCodexSession(id);
-  const thread = (await rpc.request('thread/read', { threadId: sessionId })).thread;
+  const thread = (await historyRead(rpc, 'thread/read', { threadId: sessionId })).thread;
+  rememberCodexThread(thread);
   const turns: any[] = [];
   if (thread.historyMode === 'paginated') {
     let cursor: string | undefined;
     do {
-      const page = await rpc.request('thread/turns/list', { threadId: sessionId, limit: 100, cursor, sortDirection: 'asc', itemsView: 'full' });
+      const page = await historyRead(rpc, 'thread/turns/list', { threadId: sessionId, limit: 5, cursor, sortDirection: 'asc', itemsView: 'full' });
       for (const turn of page.data) {
         if (turn.itemsView !== 'full') {
           turn.items = [];
           let itemCursor: string | undefined;
           do {
-            const items = await rpc.request('thread/items/list', { threadId: sessionId, turnId: turn.id, limit: 100, cursor: itemCursor });
+            const items = await historyRead(rpc, 'thread/items/list', { threadId: sessionId, turnId: turn.id, limit: 5, cursor: itemCursor });
             turn.items.push(...items.data.map((entry: any) => entry.item));
             itemCursor = items.nextCursor;
           } while (itemCursor);
@@ -79,7 +108,7 @@ export async function loadCodexChat(id: string, previousRevision?: string): Prom
       cursor = page.nextCursor;
     } while (cursor);
   } else {
-    turns.push(...(await rpc.request('thread/read', { threadId: sessionId, includeTurns: true })).thread.turns);
+    turns.push(...(await historyRead(rpc, 'thread/read', { threadId: sessionId, includeTurns: true })).thread.turns);
   }
   const activity = await readCodexActivity(thread.path).catch(() => undefined);
   const managed = isManagedSessionRunning('codex', sessionId);
@@ -89,7 +118,7 @@ export async function loadCodexChat(id: string, previousRevision?: string): Prom
   if (last?.status === 'interrupted' && ((activity?.pending && (activity.recent || managed) && canonicalTurnId(last.id) === canonicalTurnId(activity.turnId)) || (live?.running && canonicalTurnId(last.id) === live.turnId))) last.status = 'inProgress';
   const running = managed || live?.running === true || codexTurnsPending(turns);
   const revision = createHash('sha256').update(JSON.stringify([sessionId, thread.name, thread.cwd, turns, running])).digest('hex');
-  const identity = { sessionId, title: thread.name ? chatTitle(thread.name) : undefined, ...(sessionId !== id ? { originalSessionId: id } : {}) };
+  const identity = { createdAt: (thread.createdAt ?? 0) * 1000, sessionId, title: thread.name ? chatTitle(thread.name) : undefined, ...(sessionId !== id ? { originalSessionId: id } : {}) };
   if (revision === previousRevision) return { ...identity, cwd: thread.cwd, revision, unchanged: true, messages: [], running };
   return { ...identity, cwd: thread.cwd, revision, running, messages: codexHistoryMessages(turns, thread.createdAt * 1000) };
 }

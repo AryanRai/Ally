@@ -7,6 +7,10 @@ import kotlinx.coroutines.*
 class AllyPhoneApplication : AssistantApplication() {
     val model: PhoneModel by lazy { PhoneModel(this) }
     override val assistantHost: AssistantHost by lazy { object : AssistantHost {
+        override val provider get() = model.state.value.provider
+        override fun permissionFor(chatId: String) = DeviceLink.prefs(this@AllyPhoneApplication).getString("phonePermission:$chatId", "readonly")!!
+        override fun acceptTurn(chatId: String, turnId: String) = model.acceptAssistantTurn(chatId, turnId)
+        override fun openChat(chatId: String) = model.select(chatId)
         override val snapshots = model.state.map { s -> AssistantSnapshot(
             readReceipt = s.readReceipt.takeIf { s.voiceDraft.isBlank() && !s.recording && !s.transcribing && (s.liveText.isBlank() || s.liveText == s.messages.lastOrNull { m -> m.role == "assistant" }?.text) },
             title = s.selected?.title ?: "Choose a chat", status = when {
@@ -19,7 +23,7 @@ class AllyPhoneApplication : AssistantApplication() {
                 s.loading -> "Connecting…"
                 else -> "Hold the orb to talk"
             }, text = if (s.recording || s.transcribing) s.liveTranscript else s.voiceDraft.ifBlank { s.liveText }.ifBlank { s.messages.lastOrNull { it.role == "assistant" }?.text ?: "" },
-            recording = s.recording, working = s.busy || s.externalRunning || s.transcribing, level = s.microphoneLevel, mode = s.inputMode,
+            chatId = s.selected?.id, recording = s.recording, working = s.busy || s.externalRunning || s.transcribing, level = s.microphoneLevel, mode = s.inputMode,
             needsAttention = s.approval != null || s.error.isNotBlank()) }
         private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
         override fun refresh() { scope.launch { model.refreshSelected() } }

@@ -1,7 +1,18 @@
 import { describe, expect, it } from 'vitest';
-import { parseWatchReply } from './protocol';
+import { parseWatchReply, WATCH_INSTRUCTIONS } from './protocol';
 
 describe('watch UI catalog', () => {
+  it('keeps device instructions about optional UI without imposing a persona or brevity', () => {
+    expect(WATCH_INSTRUCTIONS).toContain('Plain text and Markdown replies are supported.');
+    expect(WATCH_INSTRUCTIONS).toContain('Only when using optional UI widgets');
+    expect(WATCH_INSTRUCTIONS).not.toMatch(/You are Ally|concise|glanceable|must be one JSON|viewing this conversation on a watch/);
+    expect(WATCH_INSTRUCTIONS).toContain('unless a real tool actually did it');
+  });
+  it('retains detailed ordinary Markdown and still accepts optional widget envelopes', () => {
+    const text = '## Explanation\n\n' + 'A detailed paragraph with **emphasis** and `code`.\n\n'.repeat(120);
+    expect(parseWatchReply(text)).toEqual({ text, components: [] });
+    expect(parseWatchReply(JSON.stringify({ text, components: [{ type: 'card', title: 'Detail', body: 'Optional' }] }))).toMatchObject({ text, components: [{ type: 'card', title: 'Detail', body: 'Optional' }] });
+  });
   it('selects the final reply after tool commentary, respecting escaped quotes and braces', () => {
     const final = { text: 'Folder {Ally} says "ready"', components: [{ type: 'checklist', items: ['Review'] }] };
     const result = parseWatchReply('{"text":"Checking…","components":[]}\nTool complete.\n```json\n' + JSON.stringify(final) + '\n```');

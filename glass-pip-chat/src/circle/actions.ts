@@ -12,7 +12,7 @@ export const CIRCLE_ACTIONS: CircleAction[] = [
     label: 'Search web',
     prompt: 'Identify what is in this image, then search the web for it and give me the most useful results with links.',
   },
-  { id: 'explain', label: 'Explain', prompt: 'Explain what this shows. If it is technical, go step by step.' },
+  { id: 'explain', label: 'Explain', prompt: 'Explain what this shows with drawings on the selected screen area. Use the Ally visual tutor tools to add useful arrows, labels or diagrams, then explain briefly. If it is technical, go step by step. If drawing is unavailable, say so clearly.' },
   {
     id: 'fix',
     label: 'Fix this',

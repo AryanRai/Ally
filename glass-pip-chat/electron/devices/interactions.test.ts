@@ -77,4 +77,12 @@ describe('real shared chat interactions', () => {
     const native=new WatchApprovals(vi.fn()); const controller=new AbortController(); const result=native.request('turn-1234','item/tool/requestUserInput',{questions:[{id:'choice',question:'Choose',options:[]}]},controller.signal,[],chatId);
     expect(interactions.list(chatId)).toHaveLength(1); controller.abort(); expect(await result).toEqual({answers:{}}); expect(interactions.list(chatId)).toHaveLength(0);
   });
+  it('retains the real watch answer when the native approval route resolves a mirrored request', async () => {
+    const native = new WatchApprovals(vi.fn());
+    const result = native.request('watch-turn', 'item/tool/requestUserInput', { questions: [{ id: 'choice', question: 'Choose', options: [{ label: 'A' }] }] }, new AbortController().signal, [], chatId);
+    const request = interactions.list(chatId)[0];
+    native.answer('watch-turn', request.id, { action: 'submit', values: { choice: 'A' } });
+    expect(await result).toEqual({ answers: { choice: { answers: ['A'] } } });
+    expect(interactions.history(chatId).find(row => row.id === request.id)).toMatchObject({ state: 'answered', answeredOn: 'watch', values: { choice: 'A' } });
+  });
 });

@@ -100,12 +100,18 @@ export interface PipAPI {
       /** Image files shown to the agent (e.g. a circled screen region) */
       images?: string[];
     }) => Promise<string>;
+    localImage: (source: string) => Promise<string>;
+    interactionHistory: (chatId: string) => Promise<import('../../electron/devices/interactions').InteractionHistory[]>;
+    answerInteraction: (chatId: string, id: string, answer: import('../../electron/watch/approvals').ApprovalAnswer) => Promise<{ accepted: boolean }>;
+    onInteractionsChanged: (callback: () => void) => () => void;
     sessionInput: (provider: AgentProvider, sessionId: string, text: string, requestId: string, mode: 'steer' | 'queue') => Promise<'steered' | 'queued'>;
     steer: (runId: string, text: string, requestId: string, mode?: 'auto' | 'steer' | 'queue') => Promise<'steered' | 'queued'>;
+    stopSession: (provider: AgentProvider, id: string) => Promise<boolean>;
     stop: (runId: string) => Promise<boolean>;
+    activity: () => Promise<ReturnType<typeof import('../../electron/watch/assistantActivity').assistantActivity>>;
     runningSessions: () => Promise<AgentSessionSummary[]>;
     listSessions: (provider: AgentProvider, limit?: number) => Promise<AgentSessionSummary[]>;
-    readStates: () => Promise<{ key: string; revision: string; unread: boolean }[]>;
+    readStates: (keys?: string[]) => Promise<{ key: string; revision: string; unread: boolean; hidden?: boolean }[]>;
     markRead: (provider: AgentProvider, id: string, revision: string) => Promise<boolean>;
     loadSession: (provider: AgentProvider, id: string, revision?: string) => Promise<import('../../electron/agent/types').AgentSessionSnapshot>;
     /** Claude Code sign-in state, verified with a real request */

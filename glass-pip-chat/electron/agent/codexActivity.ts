@@ -1,9 +1,15 @@
 import fs from 'node:fs/promises';
 import { isRunning } from './sessionActivity.js';
 
+export interface CodexActivity {
+  turnId: string | undefined; pending: boolean; recent: boolean; updatedAt: number;
+  /** Additive lifecycle detail; older readers may only provide pending. */
+  status?: 'running' | 'completed' | 'stopped';
+}
+
 /** The reader app-server does not own another server's runtime status. Use the
  * exact persisted turn lifecycle, without resuming or attaching a writer. */
-export async function readCodexActivity(file?: string, now = Date.now()) {
+export async function readCodexActivity(file?: string, now = Date.now()): Promise<CodexActivity | undefined> {
   if (!file) return undefined;
   const handle = await fs.open(file, 'r');
   try {
@@ -24,7 +30,7 @@ export async function readCodexActivity(file?: string, now = Date.now()) {
         if (r.type !== 'event_msg') continue;
         const p = r.payload;
         if (!['task_started', 'task_complete', 'turn_aborted'].includes(p?.type)) continue;
-        return { turnId: p.turn_id as string | undefined, pending: p.type === 'task_started',
+        return { turnId: p.turn_id as string | undefined, pending: p.type === 'task_started', status: (p.type === 'task_started' ? 'running' : p.type === 'task_complete' ? 'completed' : 'stopped') as 'running' | 'completed' | 'stopped',
           recent: isRunning(true, stat.mtimeMs, now), updatedAt: stat.mtimeMs };
       }
       if (remainder.length > 65536) remainder = ''; // lifecycle records are small

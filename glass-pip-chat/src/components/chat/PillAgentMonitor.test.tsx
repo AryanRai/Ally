@@ -1,0 +1,50 @@
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { afterEach, expect, it, vi } from 'vitest';
+import PillAgentMonitor from './PillAgentMonitor';
+import type { AssistantActivityRow } from '../../../electron/watch/assistantActivity';
+
+const original = window.pip;
+afterEach(() => { cleanup(); window.pip = original; vi.useRealTimers(); });
+const row: AssistantActivityRow = { id: 'codex:other', sessionId: 'other', provider: 'codex', title: 'Other working chat', status: 'running', detail: 'Working…', updatedAt: 1, unread: false };
+it('stays tiny and does not poll until opened, then selects the exact chat without sending or acknowledging', async () => {
+  const activity = vi.fn().mockResolvedValue({ chats: [row], running: 1, ready: 0, updatedAt: 1 });
+  const send = vi.fn(), markRead = vi.fn(), onOpen = vi.fn().mockResolvedValue(undefined);
+  window.pip = { agent: { activity, markRead, start: send } } as any;
+  render(<PillAgentMonitor onOpen={onOpen} />);
+  expect(screen.getByRole('button', { name: 'Agent status' })).toHaveAttribute('aria-expanded', 'false');
+  expect(activity).not.toHaveBeenCalled(); expect(screen.queryByRole('region')).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Agent status' }));
+  await screen.findByText('Other working chat');
+  expect(screen.getByText('1 active · 0 unread')).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: /Other working chat/ }));
+  await waitFor(() => expect(onOpen).toHaveBeenCalledWith(row));
+  expect(markRead).not.toHaveBeenCalled(); expect(send).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: 'Agent status' }));
+  expect(screen.queryByRole('region')).not.toBeInTheDocument();
+});
+it('retains explicitly stale rows on failure and stops polling when collapsed', async () => {
+  vi.useFakeTimers();
+  const activity = vi.fn().mockResolvedValueOnce({ chats: [row], running: 1 }).mockRejectedValue(Error('offline'));
+  window.pip = { agent: { activity } } as any;
+  const { unmount } = render(<PillAgentMonitor onOpen={vi.fn()} />);
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Agent status' })); });
+  await act(async () => { await vi.advanceTimersByTimeAsync(4000); });
+  expect(screen.getByText('Status unavailable')).toBeInTheDocument();
+  expect(screen.getByText('Other working chat')).toBeInTheDocument();
+  expect(screen.getByText('Last seen · Working · codex')).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Agent status' }));
+  await act(async () => { await vi.advanceTimersByTimeAsync(12000); });
+  expect(activity).toHaveBeenCalledTimes(2); unmount();
+});
+it('lists every active/unread row in a bounded scroll viewport and honestly reports unavailable status', async () => {
+  const rows = Array.from({ length: 32 }, (_, i) => ({ ...row, id: `codex:${i}`, sessionId: `${i}`, title: `Chat ${i}` }));
+  window.pip = { agent: { activity: vi.fn().mockResolvedValue({ chats: rows }) } } as any;
+  const { unmount } = render(<PillAgentMonitor onOpen={vi.fn()} />);
+  fireEvent.click(screen.getByRole('button', { name: 'Agent status' }));
+  await screen.findByText('Chat 31');
+  expect(screen.getByRole('region')).toHaveClass('max-h-28', 'overflow-y-auto');
+  expect(screen.getAllByRole('button')).toHaveLength(33); unmount();
+  window.pip = { agent: { activity: vi.fn().mockRejectedValue(Error('offline')) } } as any;
+  render(<PillAgentMonitor />); fireEvent.click(screen.getByRole('button', { name: 'Agent status' }));
+  await screen.findByText('Reconnect to check agents');
+});

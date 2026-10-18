@@ -1,3 +1,4 @@
+import { hiddenConversation, resolveCodexDiscovery } from '../agent/codexDiscovery.js';
 import { allReadStates, type ChatReadState } from '../agent/unread.js';
 import { loadAgentSession } from '../agent/sessions.js';
 import { loadCodexChat } from '../agent/codexHistory.js';
@@ -27,6 +28,8 @@ export class UnreadReplyFeed {
       const provider=match[1] as AgentProvider, id=match[2];
       if(this.deps.busy(provider,id)) continue;
       try {
+        if (provider === 'codex') await resolveCodexDiscovery(id);
+        if (hiddenConversation(provider, id)) continue;
         const snapshot=await this.deps.load(provider,id);
         if(this.stopped) return;
         const current=this.deps.states().find(s => s.key===state.key);

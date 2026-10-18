@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { ArrowLeft, ArrowRight, ArrowUpRight, Check, Eye, Layers, MessageCircle, Pencil, Undo2, X } from 'lucide-react';
+import { ArrowLeft, ArrowRight, ArrowUpRight, Check, Eye, GripVertical, Layers, MessageCircle, Pencil, Undo2, X } from 'lucide-react';
 import type { TutorAction, TutorBoard, TutorPoint, VisualTutorApi } from '../../electron/visualTutor/types';
 import Marks from './Marks';
 import './tutor.css';
@@ -12,6 +12,29 @@ export default function Overlay() {
   const [stroke, setStroke] = useState<TutorPoint[]>([]);
   const [error, setError] = useState('');
   const strokeRef = useRef<TutorPoint[]>([]);
+  const panelRef = useRef<HTMLElement>(null);
+  const dragRef = useRef<{ pointerId: number; x: number; y: number; left: number; top: number } | null>(null);
+  const [position, setPosition] = useState<{ left: number; top: number } | null>(null);
+  const clampPanel = (left: number, top: number) => {
+    const panel = panelRef.current;
+    return {
+      left: Math.max(10, Math.min(left, window.innerWidth - (panel?.offsetWidth ?? 0) - 10)),
+      top: Math.max(10, Math.min(top, window.innerHeight - (panel?.offsetHeight ?? 0) - 10)),
+    };
+  };
+  useEffect(() => {
+    const panel = panelRef.current;
+    if (!panel) return;
+    const keepVisible = () => setPosition(previous => {
+      if (!previous) return previous;
+      const next = clampPanel(previous.left, previous.top);
+      return next.left === previous.left && next.top === previous.top ? previous : next;
+    });
+    const observer = new ResizeObserver(keepVisible);
+    observer.observe(panel);
+    window.addEventListener('resize', keepVisible);
+    return () => { observer.disconnect(); window.removeEventListener('resize', keepVisible); };
+  }, [board?.id]);
   useEffect(() => {
     const off = window.tutor.onChanged(setBoard);
     void window.tutor.overlay().then(state => { setBoard(previous => previous && state.board && previous.revision > state.board.revision ? previous : state.board); setScreenshot(state.screenshot); }).catch(error => setError(String(error)));
@@ -58,8 +81,36 @@ export default function Overlay() {
       else strokeRef.current = [...strokeRef.current.slice(0, -1), next];
       setStroke(strokeRef.current);
     }} onPointerUp={endStroke} onPointerCancel={event => { if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId); strokeRef.current = []; setStroke([]); }} />}
-    <section className="tutor-panel" aria-label="Visual tutor controls" onPointerEnter={() => window.tutor.interactive(true)} onPointerLeave={() => window.tutor.interactive(false)}>
-      <div className="tutor-heading"><span className="tutor-brand"><span />Ally <span className="tutor-quiet">/ Your selection</span></span><span className="tutor-time">Snapshot {new Date(board.capturedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>{action('End visual tutor', 'close', <X size={16} />)}</div>
+    <section ref={panelRef} className="tutor-panel" style={position ? { ...position, bottom: 'auto', transform: 'none' } : undefined} aria-label="Visual tutor controls" onPointerEnter={() => window.tutor.interactive(true)} onPointerLeave={() => { if (!dragRef.current) window.tutor.interactive(false); }}>
+      <div className="tutor-heading"><button type="button" className="tutor-move-handle" aria-label="Move explanation panel" title="Drag to move · arrow keys to reposition" onPointerDown={event => {
+        if (event.button !== 0 || !panelRef.current) return;
+        const rect = panelRef.current.getBoundingClientRect();
+        dragRef.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY, left: rect.left, top: rect.top };
+        window.tutor.interactive(true);
+        event.currentTarget.setPointerCapture(event.pointerId);
+        event.preventDefault();
+      }} onPointerMove={event => {
+        const drag = dragRef.current;
+        if (!drag || drag.pointerId !== event.pointerId) return;
+        setPosition(clampPanel(drag.left + event.clientX - drag.x, drag.top + event.clientY - drag.y));
+      }} onPointerUp={event => {
+        if (dragRef.current?.pointerId !== event.pointerId) return;
+        dragRef.current = null;
+        event.currentTarget.releasePointerCapture(event.pointerId);
+        const rect = panelRef.current!.getBoundingClientRect();
+        window.tutor.interactive(event.clientX >= rect.left && event.clientX <= rect.right && event.clientY >= rect.top && event.clientY <= rect.bottom);
+      }} onPointerCancel={event => {
+        if (dragRef.current?.pointerId !== event.pointerId) return;
+        dragRef.current = null;
+        if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+        window.tutor.interactive(false);
+      }} onLostPointerCapture={() => { if (dragRef.current) { dragRef.current = null; window.tutor.interactive(false); } }} onKeyDown={event => {
+        const delta = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[event.key];
+        if (!delta || !panelRef.current) return;
+        event.preventDefault(); event.stopPropagation();
+        const rect = panelRef.current.getBoundingClientRect(), distance = event.shiftKey ? 40 : 10;
+        setPosition(clampPanel(rect.left + delta[0] * distance, rect.top + delta[1] * distance));
+      }}><GripVertical size={13} className="tutor-grip" /><span className="tutor-brand"><span />Ally <span className="tutor-quiet">/ Your selection</span></span><span className="tutor-time">Snapshot {new Date(board.capturedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span></button>{action('End visual tutor', 'close', <X size={16} />)}</div>
       <div className="tutor-lesson" aria-live="polite"><h1>{step?.title ?? 'Ready to explain'}</h1><p>{step?.explanation || (board.steps.length ? 'Ask Ally a follow-up in your chat.' : 'Ally can add drawings here while answering in your chat.')}</p></div>
       {error && <p role="alert" className="tutor-error">{error}<button onClick={() => setError('')}>Dismiss</button></p>}
       <div className="tutor-controls"><div className="tutor-navigation">{action('Previous step', 'previous', <ArrowLeft size={16} />, board.selected === 0)}<span>{board.steps.length ? `${board.selected + 1} / ${board.steps.length}` : 'No steps yet'}</span>{action('Next step', 'next', <ArrowRight size={16} />, board.selected >= board.steps.length - 1)}{!board.following && <button className="tutor-follow" onClick={() => act('latest')}>Latest <ArrowUpRight size={13} /></button>}</div><div className="tutor-tools">{action(board.frozen ? 'Return to live screen' : 'Freeze snapshot for stable drawings', 'freeze', board.frozen ? <Layers size={16} /> : <Eye size={16} />, false, board.frozen)}{action(board.sketching ? 'Finish sketching' : 'Sketch a question', 'sketch', board.sketching ? <Check size={16} /> : <Pencil size={16} />, false, board.sketching)}{action('Undo last sketch', 'undo', <Undo2 size={16} />, !board.sketches.length)}<button className="tutor-chat" onClick={() => act('chat')}><MessageCircle size={14} />Back to chat</button></div></div>

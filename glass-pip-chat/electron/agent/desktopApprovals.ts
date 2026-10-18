@@ -1,40 +1,27 @@
-import type { MessageBoxOptions } from 'electron';
+import { randomUUID } from 'node:crypto';
 import type { AgentInteractionHandler } from './types.js';
 import { approvalSpec } from '../watch/approvals.js';
+import { interactions, type InteractionBroker } from '../devices/interactions.js';
 
-type ShowDialog = (options: MessageBoxOptions) => Promise<number>;
-
-/** Native, cancellable decisions for desktop turns; only actual RPC requests enter here. */
-export function desktopInteraction(show: ShowDialog): AgentInteractionHandler {
+/** Genuine RPC decisions go to the chat timeline; no model-authored button grants consent. */
+export function desktopInteraction(chatId: () => string | undefined, broker: InteractionBroker = interactions): AgentInteractionHandler {
   return async (method, params, signal) => {
     const spec = approvalSpec(method, params);
     if (signal.aborted) return spec.cancel;
-    const controller = new AbortController();
-    const cancel = () => controller.abort();
-    signal.addEventListener('abort', cancel, { once: true });
-    const timer = setTimeout(cancel, 10 * 60_000);
-    const ask = async (message: string, detail: string, buttons: string[]) => {
-      if (controller.signal.aborted) return 0;
-      const response = await show({ type: 'question', title: 'Ally · Your decision', message, detail,
-        buttons, defaultId: 0, cancelId: 0, noLink: true, signal: controller.signal });
-      return controller.signal.aborted || !Number.isInteger(response) || response < 0 || response >= buttons.length ? 0 : response;
-    };
-    try {
-      const values: Record<string, string> = {};
-      for (const field of spec.fields) {
-        if (!field.options.length || field.secret) {
-          await ask('A text answer is needed', `${field.label}\n\nThis native dialog cannot collect that answer. Cancel this request and reply in chat, or use the watch question screen.`, ['Cancel request']);
-          return spec.cancel;
-        }
-        const selected = await ask(field.label, spec.detail, ['Cancel request', ...field.options.map(o => o.label)]);
-        if (!selected) return spec.cancel;
-        values[field.id] = field.options[selected - 1].value;
-      }
-      // Choice questions are fully answered by the explicit selection(s) above.
-      if (spec.fields.length && ['item/tool/requestUserInput', 'tool/requestUserInput'].includes(method)) return spec.answer({ action: 'submit', values });
-      const actions = spec.actions.filter(a => a.value !== 'cancel');
-      const selected = await ask(spec.title, spec.detail, ['Cancel request', ...actions.map(a => a.label)]);
-      return selected ? spec.answer({ action: actions[selected - 1].value, values }) : spec.cancel;
-    } finally { clearTimeout(timer); signal.removeEventListener('abort', cancel); }
+    const chat = chatId();
+    if (!chat) throw Error('This decision needs the original chat session. Reopen that chat in Ally.');
+    return new Promise((resolve, reject) => {
+      let withdraw: (() => void) | undefined;
+      const abort = () => withdraw?.();
+      const settle = (result: unknown) => { signal.removeEventListener('abort', abort); resolve(result); };
+      try {
+        withdraw = broker.add({ id: randomUUID(), chatId: chat, kind: spec.fields.length ? 'question' : 'approval',
+          title: spec.title, detail: spec.detail, fields: spec.fields, actions: spec.actions,
+          desktopOnly: spec.fields.some(field => field.secret), expiresAt: Date.now() + 600_000 },
+          answer => { const result = spec.answer(answer); settle(result); }, () => settle(spec.cancel));
+      } catch (error) { reject(error); return; }
+      signal.addEventListener('abort', abort, { once: true });
+      if (signal.aborted) abort();
+    });
   };
 }

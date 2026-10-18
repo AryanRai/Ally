@@ -16,6 +16,23 @@ describe('ChatManager', () => {
     manager = freshManager();
   });
 
+  it('keeps creation order through browsing, streaming, renaming, sending and restart', () => {
+    const old = manager.openAgentSession({provider:'codex',sessionId:'old'}, 'Old', [{...message('u'),timestamp:10}], 5);
+    const newer = manager.openAgentSession({provider:'claude',sessionId:'new'}, 'New', [{...message('v'),timestamp:20}], 15);
+    const order = () => manager.getAllChats().map(c=>c.id);
+    const before = order();
+    manager.switchToChat(old.id);
+    manager.openAgentSession(old.agent!, 'Old', [{...message('reply','assistant'),timestamp:500}], 5);
+    manager.updateChatTitle(old.id, 'Renamed');
+    manager.addMessage(old.id, message('follow-up'));
+    manager.syncAgentSession(old.id,'codex','old',[{...message('done','assistant'),timestamp:999}]);
+    expect(order()).toEqual(before);
+    expect(order().indexOf(newer.id)).toBeLessThan(order().indexOf(old.id));
+    manager = freshManagerKeepingStorage();
+    expect(order()).toEqual(before);
+    expect(manager.createNewChat('Newest').id).toBe(order()[0]);
+  });
+
   it('starts with a welcome chat', () => {
     expect(manager.getAllChats()).toHaveLength(1);
     expect(manager.getActiveChat()?.messages[0].role).toBe('assistant');

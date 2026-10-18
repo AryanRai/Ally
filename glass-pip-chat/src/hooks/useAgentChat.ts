@@ -60,6 +60,7 @@ export function useAgentChat() {
       model: string;
       cwd?: string;
       sessionId?: string;
+      resumeToken?: string;
       robot?: { instructions: string };
       images?: string[];
     },
@@ -165,7 +166,7 @@ export function useAgentChat() {
           }
           case 'done':
             if (ev.sessionId) sessionId = ev.sessionId;
-            finish({ ...(ev.isError && !cancelRequested ? { error: ev.error || 'Agent failed' } : {}), stopped: cancelRequested, usage: ev.usage });
+            finish({ ...(ev.isError && !cancelRequested && !ev.stopped ? { error: ev.error || 'Agent failed' } : {}), stopped: cancelRequested || !!ev.stopped, usage: ev.usage });
             break;
           case 'stderr':
             break;

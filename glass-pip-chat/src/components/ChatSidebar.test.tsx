@@ -1,9 +1,37 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, within, waitFor } from '@testing-library/react';
-import ChatSidebar, { groupByProject, runningEntries } from './ChatSidebar';
+import ChatSidebar, { groupByProject, runningEntries, recentEntries } from './ChatSidebar';
 import type { Chat } from '@/types/chat';
 
 const chat = (provider: 'claude' | 'codex', sessionId: string): Chat => ({ id: provider, title: `${provider} conversation`, messages: [], createdAt: 1, updatedAt: 2, agent: { provider, sessionId, cwd: 'C:\\Users\\test' } });
+beforeEach(() => localStorage.clear());
+
+it('hides cached native and imported internal aliases while preserving a real Guardian review chat and its unread receipt', async () => {
+  const previous = window.pip, markRead = vi.fn();
+  const readStates = vi.fn().mockResolvedValue([
+    { key: 'codex:internal-review', revision: 'internal', unread: false, hidden: true },
+    { key: 'codex:user-review', revision: 'real', unread: true },
+  ]);
+  window.pip = { agent: { readStates, markRead } } as any;
+  try {
+    const internal = { ...chat('codex', 'internal-review'), id: 'saved-internal', title: 'Internal cached row' };
+    const real = { ...chat('codex', 'user-review'), id: 'saved-user', title: 'Guardian review' };
+    render(<ChatSidebar chats={[internal, real]} externalSessions={[{ provider: 'codex', id: 'internal-review', title: 'Internal native row', updatedAt: 1 }]} activeChat={null} onChatSelect={vi.fn()} onChatCreate={vi.fn()} onChatDelete={vi.fn()} onChatRename={vi.fn()} isCollapsed={false} onToggleCollapse={vi.fn()} theme="dark" platform="win32" />);
+    await waitFor(() => expect(screen.queryByText('Internal cached row')).not.toBeInTheDocument());
+    expect(screen.queryByText('Internal native row')).not.toBeInTheDocument();
+    expect(screen.getByText('Guardian review')).toBeInTheDocument();
+    expect(readStates).toHaveBeenCalledWith(['codex:internal-review', 'codex:user-review']);
+    expect(markRead).not.toHaveBeenCalled();
+  } finally { window.pip = previous; }
+});
+
+it('keeps every recent and unread chat, including notifications outside the loaded page',()=>{
+  const entries=Array.from({length:12},(_,i)=>({kind:'chat' as const,chat:{...chat('codex',`session-${i}`),id:`chat-${i}`},updatedAt:i}));
+  const rows=recentEntries(entries,new Set(['codex:session-0','claude:older-unread']));
+  expect(rows).toHaveLength(13);
+  expect(rows.at(-1)?.kind).toBe('session');
+  expect(recentEntries(entries,new Set()).map(row=>row.kind==='chat' && row.chat.id)).toEqual(rows.filter(row=>row.kind==='chat').map(row=>row.kind==='chat' && row.chat.id));
+});
 describe('provider sections', () => {
   it('keeps progress and Stop on the running chat when selection changes', () => {
     const onStop = vi.fn();
@@ -67,7 +95,49 @@ it('shows blue unread dots for linked and native chats without clearing them fro
   window.pip = { agent: { readStates, markRead } } as unknown as typeof window.pip;
   try {
     render(<ChatSidebar chats={[chat('codex', 'x'), chat('claude', 'c')]} activeChat="claude" onChatSelect={() => {}} onChatCreate={() => {}} onChatDelete={() => {}} onChatRename={() => {}} isCollapsed={false} onToggleCollapse={() => {}} theme="dark" platform="win32" />);
-    await waitFor(() => expect(screen.getAllByLabelText('Unread reply')).toHaveLength(2));
+    fireEvent.click(screen.getByRole('button', { name: /Recent & unread/ }));
+    await waitFor(() => expect(screen.getAllByLabelText('Unread reply')).toHaveLength(3));
     expect(markRead).not.toHaveBeenCalled();
   } finally { window.pip = original; }
+});
+
+it('opens recent chats like a folder and reveals every remaining chat only on View more', () => {
+  const chats = Array.from({ length: 12 }, (_, i) => ({ ...chat('codex', `session-${i}`), id: `chat-${i}`, title: `Chat ${i}`, createdAt: i + 1 }));
+  const select = vi.fn();
+  const props = { chats, activeChat: null, onChatSelect: select, onChatCreate: vi.fn(), onChatDelete: vi.fn(), onChatRename: vi.fn(), isCollapsed: false, onToggleCollapse: vi.fn(), theme: 'dark' as const, platform: 'win32' };
+  const { unmount } = render(<ChatSidebar {...props} />);
+  const recent = within(screen.getByRole('region', { name: 'Recent chats' }));
+  expect(recent.getByRole('button', { name: /Recent & unread/ })).toHaveAttribute('aria-expanded', 'false');
+  expect(recent.queryByText('Chat 11')).not.toBeInTheDocument();
+  fireEvent.click(recent.getByRole('button', { name: /Recent & unread/ }));
+  expect(recent.getByRole('button', { name: /Recent & unread/ })).toHaveAttribute('aria-expanded', 'true');
+  expect(recent.getByText('Chat 11')).toBeInTheDocument();
+  expect(recent.queryByText('Chat 0')).not.toBeInTheDocument();
+  fireEvent.click(recent.getByRole('button', { name: 'View more (6)' }));
+  for (const c of chats) expect(recent.getByText(c.title)).toBeInTheDocument();
+  fireEvent.click(recent.getByText('Chat 0'));
+  expect(select).toHaveBeenCalledWith('chat-0');
+  fireEvent.click(recent.getByRole('button', { name: 'View less' }));
+  expect(recent.queryByText('Chat 0')).not.toBeInTheDocument();
+  unmount();
+  render(<ChatSidebar {...props} />);
+  expect(within(screen.getByRole('region', { name: 'Recent chats' })).getByRole('button', { name: /Recent & unread/ })).toHaveAttribute('aria-expanded', 'true');
+});
+
+it('keeps older unread chats behind View more without acknowledging their receipt', async () => {
+  const previous = window.pip;
+  const markRead = vi.fn();
+  window.pip = { agent: { readStates: vi.fn().mockResolvedValue([{ key: 'claude:older-unread', revision: 'pending', unread: true }]), markRead } } as any;
+  const open = vi.fn();
+  try {
+    const chats = Array.from({ length: 8 }, (_, i) => ({ ...chat('codex', `s-${i}`), id: `c-${i}`, createdAt: i + 1 }));
+    render(<ChatSidebar chats={chats} activeChat={null} onChatSelect={vi.fn()} onOpenAgentSession={open} onChatCreate={vi.fn()} onChatDelete={vi.fn()} onChatRename={vi.fn()} isCollapsed={false} onToggleCollapse={vi.fn()} theme="dark" platform="win32" />);
+    const recent = within(screen.getByRole('region', { name: 'Recent chats' }));
+    await waitFor(() => expect(recent.getByLabelText('Unread reply')).toBeInTheDocument());
+    fireEvent.click(recent.getByRole('button', { name: /Recent & unread/ }));
+    fireEvent.click(recent.getByRole('button', { name: 'View more (3)' }));
+    fireEvent.click(recent.getByText('Unread conversation'));
+    expect(open).toHaveBeenCalledWith(expect.objectContaining({ provider: 'claude', id: 'older-unread' }));
+    expect(markRead).not.toHaveBeenCalled();
+  } finally { window.pip = previous; }
 });

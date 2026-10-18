@@ -46,6 +46,10 @@ export class ChatManager {
         if (parsed.chats.length === 0) {
           return this.createInitialState();
         }
+        for (const chat of parsed.chats) {
+          const first = chat.messages.find(m => m.timestamp > 0)?.timestamp;
+          if (chat.agent?.sessionId && first) chat.createdAt = Math.min(chat.createdAt, first);
+        }
         return parsed;
       }
     } catch (error) {
@@ -184,7 +188,7 @@ export class ChatManager {
   }
 
   getAllChats(): Chat[] {
-    return [...this.state.chats].sort((a, b) => b.updatedAt - a.updatedAt);
+    return [...this.state.chats].sort((a, b) => b.createdAt - a.createdAt || b.id.localeCompare(a.id));
   }
 
   getChatById(chatId: string): Chat | null {
@@ -280,15 +284,15 @@ export class ChatManager {
    * Open an existing agent session as a chat. Reuses the chat already linked to
    * that session (refreshing its messages) instead of creating a duplicate.
    */
-  openAgentSession(agent: NonNullable<Chat['agent']>, title: string, messages: Message[]): Chat {
+  openAgentSession(agent: NonNullable<Chat['agent']>, title: string, messages: Message[], createdAt?: number): Chat {
     let chat = this.state.chats.find(c => c.agent?.provider === agent.provider && (c.agent?.sessionId === agent.sessionId || (!!agent.originalSessionId && c.agent?.sessionId === agent.originalSessionId)));
     const now = Date.now();
     if (chat) {
       chat.messages = retainUsage(chat.messages, messages);
       chat.agent = agent;
-      chat.updatedAt = now;
+      if (createdAt && agent.sessionId) chat.createdAt = Math.min(chat.createdAt, createdAt);
     } else {
-      chat = { id: `chat_${now}_${Math.random().toString(36).substr(2, 9)}`, title, messages, createdAt: now, updatedAt: now, agent };
+      chat = { id: `chat_${now}_${Math.random().toString(36).substr(2, 9)}`, title, messages, createdAt: createdAt ?? messages.find(m => m.timestamp > 0)?.timestamp ?? 0, updatedAt: messages.at(-1)?.timestamp ?? 0, agent };
       this.state.chats.push(chat);
     }
     this.state.activeChat = chat.id;

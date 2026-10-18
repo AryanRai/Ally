@@ -145,13 +145,22 @@ const pipAPI = {
     listModels: (provider: 'claude' | 'codex') => ipcRenderer.invoke('agent:listModels', provider),
     greeting: (provider: 'claude' | 'codex', model: string) => ipcRenderer.invoke('agent:greeting', provider, model),
     send: (opts: Record<string, unknown>) => ipcRenderer.invoke('agent:send', opts),
+    localImage: (source: string) => ipcRenderer.invoke('agent:localImage', source),
+    interactionHistory: (chatId: string) => ipcRenderer.invoke('agent:interactionHistory', chatId),
+    answerInteraction: (chatId: string, id: string, answer: import('./watch/approvals').ApprovalAnswer) => ipcRenderer.invoke('agent:answerInteraction', chatId, id, answer),
+    onInteractionsChanged: (callback: () => void) => {
+      const handler = () => callback(); ipcRenderer.on('agent:interactionsChanged', handler);
+      return () => ipcRenderer.removeListener('agent:interactionsChanged', handler);
+    },
     sessionInput: (provider: AgentProvider, sessionId: string, text: string, requestId: string, mode: 'steer' | 'queue') => ipcRenderer.invoke('agent:sessionInput', provider, sessionId, text, requestId, mode),
     steer: (runId: string, text: string, requestId: string, mode?: 'auto' | 'steer' | 'queue') => ipcRenderer.invoke('agent:steer', runId, text, requestId, mode),
+    stopSession: (provider: AgentProvider, id: string) => ipcRenderer.invoke('agent:stopSession', provider, id),
     stop: (runId: string) => ipcRenderer.invoke('agent:stop', runId),
+    activity: () => ipcRenderer.invoke('agent:activity'),
     runningSessions: () => ipcRenderer.invoke('agent:runningSessions'),
     listSessions: (provider: 'claude' | 'codex', limit?: number) => ipcRenderer.invoke('agent:listSessions', provider, limit),
     loadSession: (provider: 'claude' | 'codex', id: string, revision?: string) => ipcRenderer.invoke('agent:loadSession', provider, id, revision),
-    readStates: () => ipcRenderer.invoke('agent:readStates'),
+    readStates: (keys?: string[]) => ipcRenderer.invoke('agent:readStates', keys),
     markRead: (provider: 'claude' | 'codex', id: string, revision: string) => ipcRenderer.invoke('agent:markRead', provider, id, revision),
     onSessionsChanged: (callback: (provider: 'claude' | 'codex') => void) => {
       const handler = (_: any, provider: 'claude' | 'codex') => callback(provider);

@@ -5,7 +5,7 @@ type Send = (text: string, source: 'circle', extras: { image: { path: string; th
 export function tutorRequest(text: string, board: TutorBoard | null, chatId?: string): string {
   if (!board || board.chatId !== chatId) return text;
   const focus = board.focus ? ` The attached image is only the selected crop. Its full-display bounds in 0–1000 coordinates are ${JSON.stringify(board.focus)}. Map a point (u,v) in the crop (0–1000) to screen (x + u*width/1000, y + v*height/1000) using these bounds. Draw around this selected area.` : '';
-  return `${text}\n\n[Ally visual tutor: ${board.id}. When a drawing would help explain this, use visual_tutor_read, then visual_tutor_draw on ally_chats. Drawing is optional; answer normally when it adds no value. The screen snapshot is from ${new Date(board.capturedAt).toISOString()}, not a live feed.${focus} My amber sketches are available in visual_tutor_read.]`;
+  return `${text}\n\n[Ally visual tutor: ${board.id}. When asked for drawings, use visual_tutor_read, then visual_tutor_draw on ally_chats before your final explanation. Otherwise drawing is optional when it helps. If a requested drawing cannot be displayed, explain why instead of silently giving only text. The screen snapshot is from ${new Date(board.capturedAt).toISOString()}, not a live feed.${focus} My amber sketches are available in visual_tutor_read.]`;
 }
 
 /** The existing conversation owns reasoning, voice, history and the exact agent session. */

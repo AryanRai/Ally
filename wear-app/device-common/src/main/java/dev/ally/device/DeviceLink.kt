@@ -253,6 +253,18 @@ class DeviceLinkService : Service() {
     private var socket: WebSocket? = null
     private var retry: Job? = null
     private var backoff = 1000L
+    private var surfaceRefresh: Job? = null
+    private var surfaceDirty = false
+    private fun refreshSurfaces() {
+        surfaceDirty=true
+        if(surfaceRefresh?.isActive==true) return
+        surfaceRefresh=scope.launch {
+            do {
+                surfaceDirty=false; delay(250)
+                SurfaceStatus.refresh(this@DeviceLinkService)
+            } while(surfaceDirty && isActive)
+        }
+    }
     override fun onBind(intent: Intent?): IBinder? = null
     override fun onCreate() { super.onCreate(); DeviceLink.service = this }
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -285,14 +297,16 @@ class DeviceLinkService : Service() {
                 if (text.length > 16000) return@launch
                 val msg = runCatching { JSONObject(text) }.getOrNull() ?: return@launch
                 when (msg.optString("type")) {
-                    "interaction", "interaction_closed", "interaction_ack", "interaction_sync" -> DeviceLink.interactionEvent(this@DeviceLinkService,msg,connectionId)
+                    "interaction", "interaction_closed", "interaction_ack", "interaction_sync" -> { DeviceLink.interactionEvent(this@DeviceLinkService,msg,connectionId); refreshSurfaces() }
                     "authorized_command" -> DeviceLink.executeAuthorized(this@DeviceLinkService,msg.getJSONObject("command"),connectionId)
                     "ready" -> {
                         backoff = 1000L; DeviceLink.status.value = "Connected"
+                        refreshSurfaces()
                         val queued = JSONArray(p.getString("deviceReceipts", "[]")); for (i in 0 until queued.length()) webSocket.send(queued.getJSONObject(i).toString())
                         p.edit().remove("deviceReceipts").apply()
                     }
                     "card", "command" -> {
+                        if(msg.optString("type")=="card") refreshSurfaces()
                         val command = msg.optString("type") == "command"
                         val item = msg.optJSONObject(if (command) "command" else "card") ?: return@launch
                         val itemId = item.optString("id"); if (itemId.isBlank() || itemId.length > 160) return@launch
@@ -311,6 +325,7 @@ class DeviceLinkService : Service() {
     private fun reconnect(ws: WebSocket, code: Int?) { scope.launch {
         if (socket !== ws) return@launch
         socket = null
+        SurfaceStatus.failed(this@DeviceLinkService)
         if (code == 401 || code == 403) { DeviceLink.status.value = "Pairing rejected; check token"; DeviceLink.prefs(this@DeviceLinkService).edit().putBoolean("deviceConnected", false).apply(); stopSelf(); return@launch }
         DeviceLink.status.value = "Reconnecting…"; retry?.cancel(); retry = scope.launch { delay(backoff); backoff = (backoff * 2).coerceAtMost(30_000); connect() }
     } }

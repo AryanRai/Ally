@@ -85,13 +85,22 @@ export class WatchApprovals {
       const timer = setTimeout(cancel, 10 * 60_000);
       this.pending.set(id, { turnId, spec, request: { id, title: spec.title, detail: spec.detail, fields: spec.fields, actions: spec.actions, expiresAt: Date.now() + 10 * 60_000, ...(attachments.length ? { attachments } : {}) }, settle });
       if (chatId && !spec.fields.some(f => f.secret)) {
-        try { withdraw = interactions.add({ ...this.pending.get(id)!.request, chatId, kind: spec.fields.length ? 'question' : 'approval' }, answer => this.answer(turnId, id, answer), cancel); }
+        try { withdraw = interactions.add({ ...this.pending.get(id)!.request, chatId, kind: spec.fields.length ? 'question' : 'approval' }, answer => this.completeAnswer(turnId, id, answer), cancel); }
         catch { /* Keep the original native approval available when it cannot be mirrored. */ }
       }
       signal.addEventListener('abort', cancel, { once: true }); this.changed(turnId);
     });
   }
   answer(turnId: string, id: string, answer: ApprovalAnswer) {
+    const mirrored = interactions.list().find(request => request.id === id);
+    if (mirrored) {
+      if (this.pending.get(id)?.turnId !== turnId) throw Error('This approval has expired or was already answered');
+      interactions.answer(id, answer, 'watch');
+      return;
+    }
+    this.completeAnswer(turnId, id, answer);
+  }
+  private completeAnswer(turnId: string, id: string, answer: ApprovalAnswer) {
     const fingerprint = JSON.stringify({ action: answer.action, values: Object.entries(answer.values ?? {}).sort(([a], [b]) => a.localeCompare(b)) });
     const old = this.answered.get(id);
     if (old?.turnId === turnId && old.answer === fingerprint) return;

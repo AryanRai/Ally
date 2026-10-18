@@ -29,7 +29,7 @@ class AssistantUnlockActivity : Activity() {
     private fun openAssistant() {
         if (launched || isFinishing || getSystemService(KeyguardManager::class.java).isDeviceLocked) return
         launched = true
-        if (!AllyAssistantService.showUnlocked()) {
+        if (!AllyAssistantService.showUnlocked(screenContext = false)) {
             packageManager.getLaunchIntentForPackage(packageName)?.let { startActivity(it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)) }
         }
         finish()

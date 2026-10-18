@@ -6,6 +6,20 @@ export const STALE_TURN_MS = 10 * 60_000;
 
 const FINISHED = new Set(['end_turn', 'stop_sequence', 'max_tokens', 'refusal']);
 
+/** Only explicit lifecycle evidence is a terminal status; disappearance is not completion. */
+export function claudeTerminalStatus(records: any[]): 'completed' | 'stopped' | 'error' | undefined {
+  for (let i = records.length - 1; i >= 0; i--) {
+    const r = records[i];
+    if (r?.isSidechain || r?.isMeta || !['user', 'assistant'].includes(r?.type)) continue;
+    if (r.type === 'assistant') {
+      if (r.isApiErrorMessage || r.message?.model === '<synthetic>') return 'error';
+      return FINISHED.has(r.message?.stop_reason) ? 'completed' : undefined;
+    }
+    return /^\[Request interrupted/.test(userText(r.message?.content).trim()) ? 'stopped' : undefined;
+  }
+  return undefined;
+}
+
 function userText(content: unknown): string {
   if (typeof content === 'string') return content;
   if (Array.isArray(content)) return content.filter((b: any) => b?.type === 'text').map((b: any) => b.text ?? '').join('\n');

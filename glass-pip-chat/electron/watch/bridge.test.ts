@@ -9,11 +9,11 @@ import type { AgentEvent } from '../agent/types';
 
 const fake = vi.hoisted(() => ({ root: '', load: vi.fn(), start: vi.fn(), stop: vi.fn(), activity: vi.fn(), steer: vi.fn(), input: vi.fn() }));
 vi.mock('electron', () => ({ app: { getPath: () => fake.root } }));
-vi.mock('../agent/runner.js', () => ({ startAgentRun: fake.start, stopAgentRun: fake.stop, steerAgentRun: fake.input }));
+vi.mock('../agent/runner.js', () => ({ startAgentRun: fake.start, stopAgentRun: fake.stop, steerAgentRun: fake.input, canStopAgentSession: () => false, stopAgentSession: () => false }));
 vi.mock('../agent/sessions.js', () => ({ listAgentSessions: vi.fn(), loadAgentSession: fake.load }));
 vi.mock('../agent/codexHistory.js', () => ({ listCodexChats: vi.fn(), loadCodexChat: fake.load, repairCodexDeviceTitle: vi.fn(async () => {}) }));
 vi.mock('../agent/codexDesktop.js', () => ({ readDesktopActivity: fake.activity, steerExternalDesktopChat: fake.steer }));
-vi.mock('../agent/runningSessions.js', () => ({ listRunningSessions: vi.fn(async () => []) }));
+vi.mock('../agent/runningSessions.js', () => ({ listRunningSessions: vi.fn(async () => []), listSessionActivity: vi.fn(async () => []) }));
 vi.mock('../speech/runtime.js', () => ({ ensureSpeechRuntime: vi.fn(async () => ({})), getSpeechRuntimeStatus: vi.fn(async () => ({ ready: true, state: 'ready' })) }));
 vi.mock('../speech/settings.js', () => ({ speechSettings: vi.fn(() => ({ cloud: false })) }));
 vi.mock('./speechSocket.js', () => ({ attachSpeechSocket: () => () => {} }));
@@ -23,9 +23,53 @@ vi.mock('./transport.js', () => ({ startWatchTransport: vi.fn() }));
 vi.mock('./cloudTunnel.js', () => ({ startCloudTunnel: vi.fn() }));
 import { startWatchBridge } from './bridge';
 import { messageQueue } from '../agent/messageQueue';
+import { interruptedSessions, RESUME_PROMPT } from '../agent/interrupted';
 
 let stop: (() => void) | undefined;
 afterEach(() => { stop?.(); vi.restoreAllMocks(); vi.clearAllMocks(); if (fake.root) fs.rmSync(fake.root, { recursive: true, force: true }); });
+
+it('publishes authenticated exact-chat activity without resuming chats or acknowledging replies',async()=>{
+  fake.root=fs.mkdtempSync(path.join(os.tmpdir(),'ally-assistant-activity-'));
+  messageQueue.configure(path.join(fake.root,'queue.json'));
+  fs.writeFileSync(path.join(fake.root,'watch-bridge.json'),JSON.stringify({enabled:true,token:'synthetic-only',port:0,sessions:{}}));
+  fs.writeFileSync(path.join(fake.root,'watch-chats.json'),JSON.stringify([{id:'device-chat',provider:'codex',sessionId:'original',title:'Ally',cwd:fake.root,messages:[],updatedAt:1}]));
+  vi.mocked((await import('../agent/runningSessions.js')).listSessionActivity).mockResolvedValue([
+    {id:'original',provider:'codex',title:'Ally',updatedAt:Date.now(),status:'running'},
+    {id:'ready',provider:'claude',title:'Portfolio',updatedAt:Date.now(),status:'completed'},
+  ]);
+  const create=vi.spyOn(http,'createServer');
+  stop=startWatchBridge(()=>({defaultCwd:fake.root,permission:'readonly'}));
+  const server=create.mock.results[0].value as http.Server;
+  if(!server.listening) await once(server,'listening');
+  const url=`http://127.0.0.1:${(server.address() as {port:number}).port}/v1/assistant/activity`;
+  expect((await fetch(url)).status).toBe(401);
+  const response=await fetch(url,{headers:{Authorization:'Bearer synthetic-only'}});
+  expect(response.status).toBe(200);
+  expect(await response.json()).toMatchObject({running:1,ready:1,chats:[{id:'device-chat',status:'running'},{id:'claude:ready',status:'completed'}]});
+  expect(fake.start).not.toHaveBeenCalled(); expect(fake.load).not.toHaveBeenCalled();
+});
+
+it('authenticates assistant routing and offers previous chats without creating or submitting anything', async () => {
+  fake.root = fs.mkdtempSync(path.join(os.tmpdir(), 'ally-assistant-route-'));
+  messageQueue.configure(path.join(fake.root, 'queue.json'));
+  fs.writeFileSync(path.join(fake.root, 'watch-bridge.json'), JSON.stringify({ enabled: true, token: 'synthetic-only', port: 0, sessions: {} }));
+  fs.writeFileSync(path.join(fake.root, 'watch-chats.json'), '[]');
+  vi.mocked((await import('../agent/codexHistory.js')).listCodexChats).mockResolvedValue([{ id: 'voice', provider: 'codex', title: 'Ally voice button', cwd: fake.root, updatedAt: 1 }]);
+  vi.mocked((await import('../agent/sessions.js')).listAgentSessions).mockResolvedValue([]);
+  const create = vi.spyOn(http, 'createServer');
+  stop = startWatchBridge(() => ({ defaultCwd: fake.root, permission: 'readonly' }));
+  const server = create.mock.results[0].value as http.Server;
+  if (!server.listening) await once(server, 'listening');
+  const base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+  const post = (body: object, token = 'synthetic-only') => fetch(base + '/v1/assistant/route', { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  expect((await post({ text: 'Ally voice' }, 'wrong')).status).toBe(401);
+  expect((await post({ text: '' })).status).toBe(400);
+  const result = await post({ text: 'Fix that Ally voice button' });
+  expect(result.status).toBe(200);
+  expect(await result.json()).toMatchObject({ kind: 'choose', chats: [{ id: 'codex:voice', provider: 'codex' }] });
+  expect(fake.start).not.toHaveBeenCalled();
+  expect(JSON.parse(fs.readFileSync(path.join(fake.root, 'watch-chats.json'), 'utf8'))).toEqual([]);
+});
 
 it('pauses automatic queue delivery after provider failure and permits an explicit recovery send', async () => {
   fake.root = fs.mkdtempSync(path.join(os.tmpdir(), 'ally-error-recovery-'));
@@ -78,6 +122,8 @@ it('publishes partial replies before completion and keeps exact-session routing,
   await vi.waitFor(() => expect(fake.start).toHaveBeenCalledTimes(1));
   expect(await request('/v1/chats/chat')).toMatchObject({ running: true, activeTurnId: accepted.id });
   expect(fake.start.mock.calls[0][0]).toMatchObject({ cwd: fake.root, sessionId: 'original', permission: 'readonly' });
+  expect(fake.start.mock.calls[0][0].prompt).toContain('Plain text and Markdown replies are supported.');
+  expect(fake.start.mock.calls[0][0].prompt).not.toMatch(/round smartwatch|concise and glanceable/);
   emit({ kind: 'tool_start', id: 'browser', name: 'cua_repl.js', input: { title: 'Check browser connection' } });
   expect(await request(`/v1/turns/${accepted.id}`)).toMatchObject({ activity: 'Using browser · Check browser connection' });
   emit({ kind: 'tool_update', id: 'browser', input: { title: 'Inspect Instagram' } });
@@ -91,9 +137,10 @@ it('publishes partial replies before completion and keeps exact-session routing,
   emit({ kind: 'text', text: 'lo","components":[]}' });
   emit({ kind: 'continuation' });
   expect((await request(`/v1/turns/${accepted.id}`)).liveText).toBe('');
-  emit({ kind: 'text', text: '{"text":"Follow-up complete","components":[]}' });
+  const complete = '## Follow-up complete\n\nA detailed explanation.\n\n- **First point**\n- `Second point`';
+  emit({ kind: 'text', text: complete });
   emit({ kind: 'done' });
-  expect(await request(`/v1/turns/${accepted.id}`)).toMatchObject({ status: 'done', reply: { text: 'Follow-up complete', components: [] } });
+  expect(await request(`/v1/turns/${accepted.id}`)).toMatchObject({ status: 'done', reply: { text: complete, components: [] } });
   expect(await request('/v1/chats/chat')).toMatchObject({ running: false });
   const next = await request('/v1/messages', { ...message, requestId: 'two' });
   await vi.waitFor(() => expect(fake.start).toHaveBeenCalledTimes(2));
@@ -257,4 +304,37 @@ it('shares unread receipts across clients, never marks history reads, and reject
   expect((await read()).states[0].unread).toBe(true);
   expect(await acknowledge(newer)).toEqual({ accepted: true });
   expect((await read()).states[0].unread).toBe(false);
+});
+
+
+it('exposes a shared stopped receipt and accepts one explicit same-chat Resume from any device', async () => {
+  fake.root = fs.mkdtempSync(path.join(os.tmpdir(), 'ally-resume-bridge-'));
+  interruptedSessions.configure(path.join(fake.root, 'interrupted.json'));
+  messageQueue.configure(path.join(fake.root, 'queue.json'));
+  fs.writeFileSync(path.join(fake.root, 'watch-bridge.json'), JSON.stringify({ enabled: true, token: 'synthetic-only', port: 0, sessions: {} }));
+  fs.writeFileSync(path.join(fake.root, 'watch-chats.json'), JSON.stringify([{ id: 'chat', provider: 'claude', sessionId: 'original', title: 'Synthetic', cwd: fake.root, messages: [], updatedAt: 1 }]));
+  fake.load.mockResolvedValue({ cwd: fake.root, messages: [] });
+  fake.stop.mockImplementation(() => { interruptedSessions.stopped('claude:original'); return true; });
+  fake.start.mockImplementation(async (options) => { interruptedSessions.starting('claude:original', options.resumeToken); return 'run'; });
+  const create = vi.spyOn(http, 'createServer');
+  stop = startWatchBridge(() => ({ defaultCwd: fake.root, permission: 'readonly' }));
+  const server = create.mock.results[0].value as http.Server;
+  if (!server.listening) await once(server, 'listening');
+  const base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+  const request = (route: string, body?: object) => fetch(base + route, { headers: { Authorization: 'Bearer synthetic-only', 'Content-Type': 'application/json' }, ...(body ? { method:'POST', body:JSON.stringify(body) } : {}) });
+  const send = { provider:'claude', chatId:'chat', permission:'readonly', text:'Original request', requestId:'first' };
+  expect((await request('/v1/messages',send)).status).toBe(202);
+  await vi.waitFor(()=>expect(fake.start).toHaveBeenCalledOnce());
+  expect((await request('/v1/chats/chat/stop',{})).status).toBe(200);
+  const history = await (await request('/v1/chats/chat')).json();
+  expect(history).toMatchObject({canStop:false, running:false, interrupted:{token:expect.any(String)}});
+  const resume = {...send, text:'Continue', requestId:'resume-once', resumeToken:history.interrupted.token};
+  const first = await (await request('/v1/messages',resume)).json();
+  await vi.waitFor(()=>expect(fake.start).toHaveBeenCalledTimes(2));
+  const second = await (await request('/v1/messages',resume)).json();
+  expect(second.id).toBe(first.id);
+  expect(fake.start.mock.calls[1][0]).toMatchObject({ sessionId:'original', provider:'claude', permission:'readonly', resumeToken:history.interrupted.token, prompt:expect.stringContaining(RESUME_PROMPT) });
+  expect((await request('/v1/messages',{...resume,requestId:'other-device'})).status).toBe(409);
+  expect(fake.start).toHaveBeenCalledTimes(2);
+  expect((await (await request('/v1/chats/chat')).json()).interrupted).toBeUndefined();
 });

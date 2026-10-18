@@ -28,7 +28,7 @@ internal fun quickChatGroups(running: List<WatchChat>, recent: List<WatchChat>):
     val active = running.distinctBy { it.id }.sortedByDescending { it.updatedAt }
     val activeIds = active.map { it.id }.toSet()
     return QuickChatGroups(active, recent.distinctBy { it.id }.filterNot { it.id in activeIds }
-        .sortedByDescending { it.updatedAt }.take(6))
+        .sortedWith(compareByDescending<WatchChat> { it.createdAt }.thenByDescending { it.id }))
 }
 
 @Composable
@@ -41,7 +41,7 @@ internal fun QuickChats(model: WatchViewModel, state: WatchState, back: () -> Un
             launch { while (isActive) { model.refreshQuickChats(); delay(15000) } }
         }
     }
-    val groups = remember(state.running, state.quickChats) { quickChatGroups(state.running, state.quickChats) }
+    val groups = remember(state.running, state.quickChats,state.attentionChats) { quickChatGroups(state.running, state.quickChats+state.attentionChats) }
     val scroll = rememberLazyListState()
     LazyColumn(Modifier.fillMaxSize().background(Ink).bezelScroll(scroll), state = scroll,
         contentPadding = PaddingValues(horizontal = 25.dp, vertical = 28.dp),

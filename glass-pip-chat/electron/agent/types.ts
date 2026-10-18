@@ -17,6 +17,8 @@ export interface AgentRobotContext {
 export interface AgentRunOptions {
   /** Canonical queue identity for linked device conversations. */
   queueKey?: string;
+  /** Receipt from the exact stopped session; never a replay of its last input. */
+  resumeToken?: string;
   provider: AgentProvider;
   prompt: string;
   cwd: string;
@@ -35,6 +37,9 @@ export interface AgentRunOptions {
 }
 
 export interface AgentSessionSnapshot {
+  createdAt?: number;
+  interrupted?: { token: string; stoppedAt: number };
+  canStop?: boolean;
   readState?: { key: string; revision: string; unread: boolean };
   title?: string;
   sessionId?: string;
@@ -58,7 +63,7 @@ export type AgentEvent =
   | { kind: 'tool_update'; id: string; input: Record<string, unknown> }
   /** `images`: data URLs the tool returned (screenshots, image reads) */
   | { kind: 'tool_end'; id: string; output?: string; isError?: boolean; images?: string[] }
-  | { kind: 'done'; sessionId?: string; isError?: boolean; error?: string; costUsd?: number; usage?: AgentUsage }
+  | { kind: 'done'; stopped?: boolean; sessionId?: string; isError?: boolean; error?: string; costUsd?: number; usage?: AgentUsage }
   | { kind: 'stderr'; text: string };
 
 /** Per-turn totals the CLIs report. */
@@ -98,6 +103,7 @@ export interface AgentModel {
 }
 
 export interface AgentSessionSummary {
+  createdAt?: number;
   originalSessionId?: string;
   provider: AgentProvider;
   id: string;

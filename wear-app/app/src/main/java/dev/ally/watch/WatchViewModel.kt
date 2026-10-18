@@ -34,6 +34,12 @@ internal class WatchConversation(private val application: Application, initial: 
     private var liveSpeech: LiveSpeech? = null
     private val speaker = ReplySpeaker(application, viewModelScope) { playing, error -> mutable.update { it.copy(speaking = playing, speechError = error) } }
     private var work: Job? = null
+    fun acceptAssistantTurn(id: String) {
+        work?.cancel()
+        prefs.edit().putString("turn", id).commit()
+        mutable.update { it.copy(phase = Phase.THINKING, detail = "Thinking…") }
+        work = viewModelScope.launch { poll(id) }
+    }
     private var inputWork: Job? = null
     private var inputTarget: String? = prefs.getString("inputTarget", null)
     private var inputRequest: String? = prefs.getString("inputRequest", null)
@@ -75,7 +81,7 @@ internal class WatchConversation(private val application: Application, initial: 
         if (chat.isBlank() || chat == mutable.value.chatId) { refresh(); return }
         viewModelScope.launch { work?.join(); selectChat(chat) }
     }
-    fun readReply(text: String) { if (foreground && !mutable.value.muted && mutable.value.phase != Phase.RECORDING) speaker.speak(text, endpoint, token, mutable.value.liveSpeech) }
+    fun readReply(text: String) { if (foreground && !mutable.value.muted && !dev.ally.device.AssistantVisibility.recording && mutable.value.phase != Phase.RECORDING) speaker.speak(text, endpoint, token, mutable.value.liveSpeech) }
     fun configure(url: String, secret: String) {
         if (busy) return
         work?.cancel(); work = null
@@ -168,15 +174,19 @@ internal class WatchConversation(private val application: Application, initial: 
         try {
             val rows = ChatParser.chats(api.request("/v1/running")).distinctBy { it.id }
             mutable.update { it.copy(running = rows, runningStatus = if (rows.isEmpty()) "No active chats" else "") }
+            try { val attention=ChatParser.chats(api.request("/v1/assistant/activity")).filter { it.unread }; mutable.update { it.copy(attentionChats=attention) } }
+            catch(e: CancellationException) { throw e } catch(_: Exception) { /* Keep unread rows through reconnect. */ }
         } catch (e: CancellationException) { throw e } catch (e: Exception) {
             mutable.update { it.copy(running = emptyList(), runningStatus = "Live status unavailable") }
         }
     }
     suspend fun refreshUnread() {
         try {
-            val flags = ChatReadReceipt.states(api.request("/v1/read-states"))
+            val response = api.request("/v1/read-states")
+            val hidden = ChatReadReceipt.hidden(response)
+            val flags = ChatReadReceipt.states(response)
             fun update(row: WatchChat) = row.copy(unread = flags[row.sessionKey] ?: row.unread)
-            mutable.update { it.copy(chats = it.chats.map(::update), quickChats = it.quickChats.map(::update), running = it.running.map(::update)) }
+            mutable.update { it.copy(chats = it.chats.filter { row -> row.sessionKey !in hidden }.map(::update), quickChats = it.quickChats.filter { row -> row.sessionKey !in hidden }.map(::update), running = it.running.filter { row -> row.sessionKey !in hidden }.map(::update),attentionChats=it.attentionChats.filter { row -> row.sessionKey !in hidden }.map(::update).filter { row->row.unread }) }
         } catch (e: CancellationException) { throw e } catch (_: Exception) { /* Keep badges through reconnect. */ }
     }
     suspend fun viewed(receipt: ChatReadReceipt) {
@@ -237,7 +247,7 @@ internal class WatchConversation(private val application: Application, initial: 
         selected(ChatParser.chat(result.getJSONObject("chat")))
         val messages = ChatParser.messages(result)
         if (!older) prefs.edit().putString("history", result.toString()).apply()
-        mutable.update { it.copy(readReceipt = if (older) it.readReceipt else ChatReadReceipt.parse(result.optJSONObject("readState")), externalRunning = result.optBoolean("running") && result.optString("activeTurnId").let { t -> t.isBlank() || t == "null" }, messages = if (older) (messages + it.messages).distinctBy { m -> m.id } else if (preserveOlder) it.messages.filter { old -> old.id.startsWith("history-") && old.id.substringAfter("history-").toIntOrNull()?.let { n -> n < (messages.firstOrNull()?.id?.substringAfter("history-")?.toIntOrNull() ?: 0) } == true } + messages else messages,
+        mutable.update { it.copy(resumeToken = if (older) it.resumeToken else result.optJSONObject("interrupted")?.optString("token")?.takeIf { t -> t.isNotBlank() }, canStop = result.optBoolean("canStop"), readReceipt = if (older) it.readReceipt else ChatReadReceipt.parse(result.optJSONObject("readState")), externalRunning = result.optBoolean("running") && result.optString("activeTurnId").let { t -> t.isBlank() || t == "null" }, messages = if (older) (messages + it.messages).distinctBy { m -> m.id } else if (preserveOlder) it.messages.filter { old -> old.id.startsWith("history-") && old.id.substringAfter("history-").toIntOrNull()?.let { n -> n < (messages.firstOrNull()?.id?.substringAfter("history-")?.toIntOrNull() ?: 0) } == true } + messages else messages,
             historyBefore = if (preserveOlder && it.messages.isNotEmpty()) it.historyBefore else if (result.isNull("before")) null else result.getInt("before")) }
     }
     private suspend fun loadHistory(older: Boolean = false) {
@@ -398,6 +408,30 @@ internal class WatchConversation(private val application: Application, initial: 
         prefs.edit().remove("inputTarget").remove("inputText").remove("inputRequest").remove("inputMode").apply()
         mutable.update { it.copy(inputDraft = "", inputStatus = "") }
     }
+    fun stop() {
+        val chat = mutable.value.chatId ?: return
+        if (mutable.value.inputSending || mutable.value.inputRecording) return
+        viewModelScope.launch {
+            try { api.request("/v1/chats/${encoded(chat)}/stop", JSONObject().toString().toByteArray()) }
+            catch (e: Exception) { if (e is CancellationException) throw e; mutable.update { it.copy(inputStatus = e.message ?: "Stop was not confirmed") } }
+        }
+    }
+    fun resume() {
+        val receipt = mutable.value.resumeToken ?: return
+        val chat = mutable.value.chatId ?: return
+        if (busy || mutable.value.externalRunning || work?.isActive == true) return
+        if (inputText != null || prefs.contains("turn") || prefs.contains("pendingRequest")) {
+            mutable.update { it.copy(inputStatus = "Resolve your unsent input before resuming.") }; return
+        }
+        mutable.update { it.copy(phase = Phase.UPLOADING, detail = "Resuming…") }
+        work = viewModelScope.launch {
+            try {
+                val result = api.request("/v1/messages", dev.ally.device.ResumeChatRequest.build(mutable.value.provider, chat, mutable.value.permission, receipt).toString().toByteArray())
+                val id = result.getString("id"); prefs.edit().putString("turn", id).commit()
+                mutable.update { it.copy(resumeToken = null, liveText = "") }; poll(id)
+            } catch (e: Exception) { fail(e) }
+        }
+    }
     fun retry() {
         if (busy) return
         val pending = prefs.getString("turn", null)
@@ -468,7 +502,15 @@ internal class WatchConversation(private val application: Application, initial: 
                         if (foreground && mutable.value.autoRead && !mutable.value.inputRecording && !mutable.value.inputSending) readReply(reply.readAloudText())
                         return
                     }
-                    "error" -> { prefs.edit().remove("turn").apply(); mutable.update { it.copy(approval = null) }; requestId = UUID.randomUUID().toString(); error(result.optString("error", "Agent unavailable")) }
+                    "error" -> {
+                        if (result.optString("error") == "Stopped by you") {
+                            lastText = null; lastAudio = null; requestId = null
+                            prefs.edit().remove("turn").remove("pendingRequest").remove("pendingText").remove("pendingQueue").apply()
+                            mutable.update { it.copy(phase = Phase.READY, turnId = null, approval = null, detail = "Stopped", inputStatus = "") }
+                            try { loadHistory() } catch (e: CancellationException) { throw e } catch (_: Exception) { }
+                            return
+                        }
+                        prefs.edit().remove("turn").apply(); mutable.update { it.copy(approval = null) }; requestId = UUID.randomUUID().toString(); error(result.optString("error", "Agent unavailable")) }
                 }
                 delay(1500)
             }

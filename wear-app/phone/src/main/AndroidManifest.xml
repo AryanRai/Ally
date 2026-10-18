@@ -14,6 +14,17 @@
     </queries>
     <application android:name=".AllyPhoneApplication" android:label="Ally" android:theme="@android:style/Theme.Material.NoActionBar" android:icon="@drawable/ic_ally"
         android:allowBackup="false" android:usesCleartextTraffic="false" android:dataExtractionRules="@xml/backup_rules">
+        <receiver android:name=".AllyAgentWidget" android:label="@string/widget_agents_label" android:exported="false">
+            <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE"/><action android:name="dev.ally.phone.SURFACE_CHANGED"/></intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/ally_agent_widget"/>
+        </receiver>
+        <receiver android:name=".AllyQuickWidget" android:label="@string/widget_quick_label" android:exported="false">
+            <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE"/></intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/ally_quick_widget"/>
+        </receiver>
+        <service android:name=".AllyQuickTile" android:label="Ally agents" android:icon="@drawable/ic_ally" android:exported="true" android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter><action android:name="android.service.quicksettings.action.QS_TILE"/></intent-filter>
+        </service>
         <service android:name="dev.ally.device.AllyAssistantService" android:label="Ally" android:exported="true" android:permission="android.permission.BIND_VOICE_INTERACTION">
             <intent-filter><action android:name="android.service.voice.VoiceInteractionService" /></intent-filter>
             <meta-data android:name="android.voice_interaction" android:resource="@xml/ally_assistant" />

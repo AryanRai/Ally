@@ -10,6 +10,10 @@ data class ChatReadReceipt(val key: String, val revision: String, val unread: Bo
             if (json == null || json.optString("key").isBlank() || json.optString("revision").isBlank()) return null
             return ChatReadReceipt(json.getString("key"), json.getString("revision"), json.optBoolean("unread"))
         }
+        fun hidden(response: JSONObject): Set<String> {
+            val rows = response.optJSONArray("states") ?: return emptySet()
+            return (0 until rows.length()).map { rows.getJSONObject(it) }.filter { it.optBoolean("hidden") }.map { it.getString("key") }.toSet()
+        }
         fun states(response: JSONObject): Map<String, Boolean> {
             val rows = response.optJSONArray("states") ?: return emptyMap()
             return (0 until rows.length()).associate { val r = rows.getJSONObject(it); r.getString("key") to r.optBoolean("unread") }

@@ -74,6 +74,11 @@ class MainActivity : ComponentActivity() {
     override fun onResume() { super.onResume(); DeviceLink.resume(this) }
     override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); setIntent(intent); acceptDestination(intent) }
     private fun acceptDestination(intent: Intent) {
+        dev.ally.device.SurfaceActions.handle(this,intent) { model.select(it); destination="Chat" to ((destination?.second ?: 0)+1) }
+        if(intent.getBooleanExtra("allyAgentMonitor",false)) {
+            intent.removeExtra("allyAgentMonitor")
+            window.decorView.post { dev.ally.device.AllyAssistantService.showMonitor() }
+        }
         intent.getStringExtra("openChat")?.takeIf { it.matches(Regex("(codex|claude):[\\w-]{8,100}")) }?.let {
             model.select(it); destination = "Chat" to ((destination?.second ?: 0)+1); intent.removeExtra("openChat")
         }
@@ -112,6 +117,7 @@ private fun PhoneApp(model: PhoneModel,destination: Pair<String,Int>?, changeLoo
     val drawer = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
     val keyboard = LocalSoftwareKeyboardController.current
+    val monitorContext=LocalContext.current
     fun navigate(target: String) { model.cancelRecording(); keyboard?.hide(); page=target; scope.launch { drawer.close() }; if(target=="Chats") model.catalog() }
     LaunchedEffect(state.voiceDraft) { if(state.voiceDraft.isNotBlank()) { draft=listOf(draft,state.voiceDraft).filter { it.isNotBlank() }.joinToString(" "); model.voiceDraftRead() } }
     val lifecycle = LocalLifecycleOwner.current.lifecycle
@@ -133,6 +139,7 @@ private fun PhoneApp(model: PhoneModel,destination: Pair<String,Int>?, changeLoo
                 }
             }
             Spacer(Modifier.weight(1f))
+            TextButton(onClick={ model.cancelRecording(); keyboard?.hide(); scope.launch { drawer.close() }; if(!dev.ally.device.AllyAssistantService.showMonitor()) android.widget.Toast.makeText(monitorContext,"Select Ally as your assistant first",android.widget.Toast.LENGTH_SHORT).show() },modifier=Modifier.padding(horizontal=20.dp)) { Text("Agent monitor",color=White) }
             HorizontalDivider(color=Line)
             Row(Modifier.padding(24.dp),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(10.dp)) {
                 Box(Modifier.size(5.dp).background(if(link=="Connected") Color(0xff95b6a1) else Muted,CircleShape))
@@ -309,7 +316,8 @@ private fun Composer(state: PhoneState,draft: String,onDraft: (String)->Unit,mod
             IconButton({picker.launch(arrayOf("*/*"))},enabled=editable,modifier=Modifier.size(48.dp).semantics { contentDescription="Attach images or files" }) { Text("+",fontSize=24.sp) }
             BasicTextField(draft,{onDraft(it.take(12000))},enabled=editable,modifier=Modifier.weight(1f).padding(horizontal=6.dp,vertical=9.dp).heightIn(min=24.dp,max=128.dp).semantics { contentDescription="Message Ally" },textStyle=TextStyle(color=White,fontFamily=Geist,fontSize=14.sp,lineHeight=22.sp),cursorBrush=SolidColor(White),maxLines=5,decorationBox={ inner -> if(draft.isEmpty()) Text("Hey, what’s on your mind?",color=Muted,fontSize=13.sp); inner() })
             val enabled=(state.selected!=null && (draft.isNotBlank() || state.share.text.isNotBlank() || state.share.files.isNotEmpty()) && editable)
-            if(state.busy) IconButton(onClick=model::stop,modifier=Modifier.size(48.dp).semantics { contentDescription="Stop response" }) { Glyph("stop",Modifier.size(18.dp),Muted) }
+            if(state.busy || state.canStop) IconButton(onClick=model::stop,modifier=Modifier.size(48.dp).semantics { contentDescription="Stop response" }) { Glyph("stop",Modifier.size(18.dp),Muted) }
+            else if(state.resumeToken != null && !state.externalRunning) IconButton(onClick=model::resume,enabled=!state.loading,modifier=Modifier.size(48.dp).semantics { contentDescription="Resume response" }) { Text("▶",color=White) }
             IconButton(onClick=send,enabled=enabled,modifier=Modifier.size(48.dp).semantics { contentDescription=if(state.busy || state.externalRunning) (if(state.inputMode=="queue") "Queue message" else "Steer now") else "Send message" }) {
                 Box(Modifier.size(34.dp).background(if(enabled) White else Color.White.copy(alpha=.06f),CircleShape),contentAlignment=Alignment.Center) { Glyph("send",Modifier.size(18.dp),if(enabled) Ink else Muted) }
             }
@@ -371,7 +379,7 @@ private fun ChatLibrary(state: PhoneState,model: PhoneModel,modifier: Modifier,o
         }
     }
     var search by rememberSaveable { mutableStateOf("") }
-    val visible=state.chats.filter { it.title.contains(search,true) || it.cwd.contains(search,true) }
+    val visible=(state.chats+state.attentionChats).distinctBy { it.id }.filter { it.title.contains(search,true) || it.cwd.contains(search,true) }
     LazyColumn(modifier.fillMaxWidth(),contentPadding=PaddingValues(24.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
         item { MicroLabel("Your workspace"); Text("Conversations",fontFamily=Geist,fontSize=29.sp,letterSpacing=(-.8).sp,modifier=Modifier.padding(top=8.dp,bottom=20.dp)) }
         item { Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(Panel).padding(horizontal=14.dp,vertical=14.dp),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(10.dp)) { Glyph("search",Modifier.size(17.dp),Muted); BasicTextField(search,{search=it},textStyle=TextStyle(color=White,fontFamily=Geist,fontSize=14.sp),singleLine=true,cursorBrush=SolidColor(White),modifier=Modifier.weight(1f).semantics { contentDescription="Search conversations" },decorationBox={inner -> if(search.isEmpty()) Text("Search chats or projects",color=Muted,fontSize=13.sp); inner() }) } }
@@ -385,9 +393,9 @@ private fun ChatLibrary(state: PhoneState,model: PhoneModel,modifier: Modifier,o
             LibraryChoice(chat,state.selected?.id,!state.recording && !state.transcribing) { model.select(chat.id); onSelect() }
         }
         if(state.runningStatus.isNotBlank()) item { Text(state.runningStatus,color=Muted,fontSize=12.sp,modifier=Modifier.padding(vertical=8.dp)) }
-        if(search.isBlank() && state.chats.isNotEmpty()) {
-            item { MicroLabel("Most recent") }
-            items(state.chats.take(3),key={"recent:${it.id}"}) { chat -> LibraryChoice(chat,state.selected?.id,!state.recording && !state.transcribing) { model.select(chat.id); onSelect() } }
+        if(search.isBlank() && (state.chats.isNotEmpty() || state.attentionChats.isNotEmpty())) {
+            item { MicroLabel("Recent & unread") }
+            items((state.chats+state.attentionChats).distinctBy { it.id }.sortedWith(compareByDescending<PhoneChat> { it.createdAt }.thenByDescending { it.id }),key={"recent:${it.id}"}) { chat -> LibraryChoice(chat,state.selected?.id,!state.recording && !state.transcribing) { model.select(chat.id); onSelect() } }
         }
         visible.groupBy { it.cwd }.forEach { (folder,chats) ->
             item(key="folder:$folder") { Row(Modifier.padding(top=14.dp,bottom=8.dp),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(8.dp)) { Glyph("folder",Modifier.size(14.dp),Muted); MicroLabel(folderName(folder)); Text("${chats.size}",fontFamily=Mono,color=Muted,fontSize=9.sp) } }

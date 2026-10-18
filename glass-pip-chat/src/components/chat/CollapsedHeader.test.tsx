@@ -132,3 +132,15 @@ describe('collapsed live reader', () => {
     expect(screen.getByRole('alert')).toHaveTextContent('draft is preserved');
   });
 });
+
+
+it('changes Stop into an explicit Resume control without sending the composer draft', () => {
+  const onResume=vi.fn(), onStop=vi.fn(), onSend=vi.fn();
+  const {rerender}=render(<CollapsedHeader {...props} onResume={onResume} onStop={onStop} onSend={onSend} isTyping />);
+  expect(screen.queryByRole('button',{name:'Resume response'})).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button',{name:'Stop response'})); expect(onStop).toHaveBeenCalledOnce();
+  rerender(<CollapsedHeader {...props} onResume={onResume} onStop={onStop} onSend={onSend} quickInput="Keep this draft" />);
+  expect(screen.queryByRole('button',{name:'Stop response'})).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button',{name:'Resume response'}));
+  expect(onResume).toHaveBeenCalledOnce();expect(onSend).not.toHaveBeenCalled();
+});

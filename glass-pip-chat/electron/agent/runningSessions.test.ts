@@ -37,6 +37,18 @@ it('reports both providers independently and removes completed, interrupted and 
   await write(codex, [ev('task_started')], now - STALE_TURN_MS - 1000);
   expect(await scanRunningSessions(home, now)).toEqual([]);
 });
+
+it('reports confirmed terminal activity separately without turning stale work into completion',async()=>{
+  const codex=`.codex/sessions/rollout-${id}.jsonl`;
+  await write(codex,[ev('task_started'),ev('task_complete')]);
+  await write(`.claude/projects/project/${id}.jsonl`,[{type:'assistant',message:{stop_reason:'end_turn'}}]);
+  const observe=vi.fn();
+  expect(await scanRunningSessions(home,now,observe)).toEqual([]);
+  expect(observe).toHaveBeenLastCalledWith(expect.arrayContaining([expect.objectContaining({provider:'codex',status:'completed'}),expect.objectContaining({provider:'claude',status:'completed'})]));
+  await write(codex,[ev('task_started')],now-STALE_TURN_MS-1000);
+  observe.mockClear(); await scanRunningSessions(home,now,observe);
+  expect(observe.mock.calls[0][0].some((s:any)=>s.provider==='codex')).toBe(false);
+});
 it('deduplicates continuations by original ID and honors the newest terminal event', async () => {
   await write(`.codex/sessions/rollout-${id}.jsonl`, [ev('task_started')], now - 1000);
   await write(`.codex/sessions/${id}_22222222-2222-2222-2222-222222222222.jsonl`, [ev('task_started'), ev('turn_aborted')]);

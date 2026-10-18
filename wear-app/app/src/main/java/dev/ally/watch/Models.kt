@@ -9,12 +9,12 @@ typealias WatchCard = dev.ally.device.ReplyCard
 typealias WatchAction = dev.ally.device.ReplyAction
 typealias WatchReply = dev.ally.device.ReplyContent
 
-data class WatchChat(val id: String, val provider: String, val title: String, val cwd: String, val updatedAt: Long = 0, val unread: Boolean = false, val sessionKey: String = "")
+data class WatchChat(val id: String, val provider: String, val title: String, val cwd: String, val updatedAt: Long = 0, val unread: Boolean = false, val sessionKey: String = "", val createdAt: Long = 0)
 data class ChatMessage(val id: String, val role: String, val reply: WatchReply, val steps: List<WatchStep>, val usage: String, val attachments: List<DeviceAttachment> = emptyList(), val timestamp: Long = System.currentTimeMillis())
 
 object ChatParser {
     fun matchesSelection(json: JSONObject, selectedId: String?) = selectedId != null && json.optJSONObject("chat")?.optString("id") == selectedId
-    fun chat(json: JSONObject) = WatchChat(json.getString("id"), json.getString("provider"), json.optString("title", "Chat"), json.optString("cwd"), json.optLong("updatedAt"), json.optBoolean("unread"), json.getString("provider") + ":" + json.optString("sessionId").takeIf { it.isNotBlank() && it != "null" }.orEmpty().ifBlank { json.getString("id").substringAfter(':') })
+    fun chat(json: JSONObject) = WatchChat(json.getString("id"), json.getString("provider"), json.optString("title", "Chat"), json.optString("cwd"), json.optLong("updatedAt"), json.optBoolean("unread"), json.getString("provider") + ":" + json.optString("sessionId").takeIf { it.isNotBlank() && it != "null" }.orEmpty().ifBlank { json.getString("id").substringAfter(':') }, json.optLong("createdAt"))
     fun chats(json: JSONObject): List<WatchChat> {
         val rows = json.optJSONArray("chats") ?: return emptyList()
         return (0 until rows.length()).map { chat(rows.getJSONObject(it)) }
@@ -46,6 +46,8 @@ data class WatchStep(val id: String, val name: String, val status: String, val d
     }
 }
 data class WatchState(
+    val resumeToken: String? = null,
+    val canStop: Boolean = false,
     val queue: dev.ally.device.MessageQueue = dev.ally.device.MessageQueue(),
     val queueChanging: Boolean = false,
     val queueError: String = "",
@@ -73,6 +75,7 @@ data class WatchState(
     val messages: List<ChatMessage> = emptyList(),
     val chats: List<WatchChat> = emptyList(),
     val running: List<WatchChat> = emptyList(),
+    val attentionChats: List<WatchChat> = emptyList(),
     val runningStatus: String = "Checking live status…",
     val quickChats: List<WatchChat> = emptyList(),
     val loadingQuickChats: Boolean = false,

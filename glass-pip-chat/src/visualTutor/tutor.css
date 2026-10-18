@@ -13,6 +13,11 @@ button:focus-visible { outline: 2px solid #70f0c0; outline-offset: 2px; }
 .tutor-sketch-surface { position: absolute; inset: 0; cursor: crosshair; pointer-events: auto; touch-action: none; }
 .tutor-panel { position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); width: min(520px, calc(100% - 32px)); pointer-events: auto; padding: 12px 14px 9px; border: 1px solid #ffffff24; border-radius: 18px; background: #09090bf5; box-shadow: 0 14px 50px #0006; backdrop-filter: blur(24px); }
 .tutor-heading { display: flex; align-items: center; gap: 12px; font-size: 12px; }
+.tutor-panel { max-height: calc(100% - 20px); overflow: auto; }
+.tutor-panel .tutor-move-handle { flex: 1; min-width: 0; justify-content: flex-start; padding: 0; gap: 8px; cursor: grab; touch-action: none; user-select: none; }
+.tutor-panel .tutor-move-handle:active { cursor: grabbing; }
+.tutor-panel .tutor-move-handle:hover { background: transparent; }
+.tutor-grip { flex-shrink: 0; color: #929baa; }
 .tutor-brand { display: flex; align-items: center; gap: 7px; font-weight: 550; }
 .tutor-brand > span:first-child { width: 6px; height: 6px; background: #f4f4f5; border-radius: 50%; }
 .tutor-quiet, .tutor-time { color: #a3a9b5; font-weight: 400; }
