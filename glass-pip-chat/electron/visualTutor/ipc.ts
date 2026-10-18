@@ -91,6 +91,7 @@ export function registerVisualTutorIpc(getMain: () => BrowserWindow | null): voi
       created.setIgnoreMouseEvents(true, { forward: true });
       created.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
       created.webContents.on('will-navigate', event => event.preventDefault());
+      created.webContents.on('will-frame-navigate', event => { if (!['about:blank', 'about:srcdoc'].includes(event.url)) event.preventDefault(); });
       created.on('closed', () => { if (overlay === created) { overlay = null; model.end(board.id); screenshot = ''; publish(); } });
       if (process.env.VITE_DEV_SERVER_URL) await created.loadURL(new URL('tutor.html', process.env.VITE_DEV_SERVER_URL).toString());
       else await created.loadFile(path.join(__dirname, '../../renderer/tutor.html'));
@@ -132,8 +133,9 @@ export function registerVisualTutorIpc(getMain: () => BrowserWindow | null): voi
   registerDeviceTool({ name: 'visual_tutor_read', description: 'Read an explicitly opened Ally visual tutor board, including teaching steps, screenshot time and user sketches. Requires boardId from the user’s visual tutor prompt. No new capture.',
     inputSchema: { type: 'object', properties: { boardId: { type: 'string' } }, required: ['boardId'], additionalProperties: false },
     handler: async args => { model.require(args.boardId); const board = model.get()!; return text(JSON.stringify({ ...board, instructions: tutorPrompt(board) })); } });
-  registerDeviceTool({ name: 'visual_tutor_draw', description: 'Draw or update a teaching step on the user-enabled Ally screen overlay. No code execution, screen capture or desktop control. Use 0–1000 screen-relative coordinates; same step ID replaces that step. Call visual_tutor_read to inspect user sketches.',
+  registerDeviceTool({ name: 'visual_tutor_draw', description: 'Draw or update a teaching step on the user-enabled Ally overlay. Optional step.diagram={html,height} displays complex self-contained HTML/SVG with isolated local scripts and interactive controls; no network, files, parent/tool access or desktop control. No screen capture. Use 0–1000 screen-relative coordinates; same step ID replaces that step. Call visual_tutor_read to inspect user sketches.',
     inputSchema: { type: 'object', properties: { boardId: { type: 'string' }, step: { type: 'object', properties: {
+      diagram: { type: 'object', properties: { html: { type: 'string', maxLength: 160000 }, height: { type: 'integer', minimum: 120, maximum: 600 } }, required: ['html'], additionalProperties: false },
       id: { type: 'string', maxLength: 80 }, title: { type: 'string', maxLength: 120 }, explanation: { type: 'string', maxLength: 1800 },
       marks: { type: 'array', maxItems: 80, items: { type: 'object', properties: { id: { type: 'string', maxLength: 80 }, kind: { enum: ['arrow', 'line', 'rect', 'ellipse', 'polyline', 'text'] }, color: { enum: ['mint', 'blue', 'amber', 'pink', 'white'] }, points: { type: 'array', minItems: 1, maxItems: 256, items: { type: 'object', properties: { x: { type: 'number', minimum: 0, maximum: 1000 }, y: { type: 'number', minimum: 0, maximum: 1000 } }, required: ['x', 'y'], additionalProperties: false } }, text: { type: 'string', maxLength: 240 } }, required: ['id', 'kind', 'color', 'points'], additionalProperties: false } },
     }, required: ['id', 'title', 'explanation', 'marks'], additionalProperties: false } }, required: ['boardId', 'step'], additionalProperties: false },

@@ -1,3 +1,7 @@
+import { randomUUID } from 'node:crypto';
+import { forwardDelivery } from './forwardDelivery.js';
+import { listRunningSessions } from '../agent/runningSessions.js';
+import { messageQueue } from '../agent/messageQueue.js';
 // ally-chats: an MCP server inside Ally that lets any agent find, read and
 // message the user's Claude Code and Codex chats, and open one in Ally.
 //
@@ -96,36 +100,18 @@ async function send(target: { provider: AgentProvider; id: string; cwd?: string;
   const from = opts.caller ? index.get(opts.caller.split(':')[0] as AgentProvider, opts.caller.slice(opts.caller.indexOf(':') + 1))?.title : undefined;
   const prompt = `[Forwarded by Ally at the user's request${from ? ` from the chat "${from}"` : ''}. Your reply is relayed back to the user; answer here, and ask them anything you need.]\n\n${message}`;
   const cfg = agentConfig();
+  if ((await listRunningSessions()).some(s => s.provider === target.provider && s.id === target.id)) {
+    const receiptId = randomUUID();
+    messageQueue.enqueue(key, { id: receiptId, text: prompt, permission: cfg.permission });
+    return { status: 'queued', reply: '', receiptId };
+  }
+  // Another request can arrive while native running-session discovery is pending.
+  if (forwarding.has(key)) return { status: 'error', reply: '', error: 'that chat is still answering a forwarded message' };
   forwarding.add(key);
-  let reply = '';
-  return new Promise<SendResult>(resolve => {
-    let settled = false;
-    const settle = (r: SendResult) => { if (!settled) { settled = true; resolve(r); } };
-    const timer = setTimeout(() => settle({ status: 'still_running', reply }), opts.wait ? opts.timeoutMs : 0);
-    startAgentRun(
-      {
-        provider: target.provider,
-        prompt,
-        cwd: target.cwd || cfg.defaultCwd,
-        sessionId: target.id,
-        permission: cfg.permission,
-        codexDesktop: cfg.codexDesktop === true,
-      },
-      (_runId, ev) => {
-        if (ev.kind === 'text') reply += ev.text;
-        if (ev.kind === 'done') {
-          forwarding.delete(key);
-          clearTimeout(timer);
-          reply = reply.trim().slice(0, 12_000);
-          settle(ev.isError ? { status: 'error', reply, error: ev.error ?? 'the agent reported an error' } : { status: 'replied', reply });
-        }
-      },
-      target.provider === 'claude' ? cfg.claudePath : cfg.codexPath,
-      undefined,
-      'desktop',
-    ).then(() => { if (!opts.wait) { clearTimeout(timer); settle({ status: 'still_running', reply: '' }); } })
-      .catch(e => { forwarding.delete(key); clearTimeout(timer); settle({ status: 'error', reply: '', error: e instanceof Error ? e.message : String(e) }); });
-  });
+  return forwardDelivery(emit => startAgentRun({ provider: target.provider, prompt, cwd: target.cwd || cfg.defaultCwd,
+    sessionId: target.id, permission: cfg.permission, codexDesktop: cfg.codexDesktop === true },
+    (_runId, event) => emit(event), target.provider === 'claude' ? cfg.claudePath : cfg.codexPath, undefined, 'desktop'),
+    opts.wait, opts.timeoutMs, () => forwarding.delete(key));
 }
 
 let getWin: () => BrowserWindow | null = () => null;

@@ -93,6 +93,19 @@ describe('tools', () => {
     await expect(call('ally_read_chat', { provider: 'codex', chat_id: 'nope' })).rejects.toThrow(/No codex chat/);
   });
 
+  it('distinguishes queued receipts and unconfirmed delivery from sent messages', async () => {
+    const { send, call } = setup();
+    const args = { provider: 'claude', chat_id: 'cc-ally-new', message: 'implement this', wait: false };
+    send.mockResolvedValueOnce({ status: 'queued', reply: '', receiptId: 'receipt-1' });
+    const queued = await call('ally_send_to_chat', args);
+    expect(queued.content[0].text).toMatch(/queued/i);
+    expect(queued.content[0].text).toMatch(/not.*delivered/i);
+    send.mockResolvedValueOnce({ status: 'unconfirmed', reply: '' });
+    const unknown = await call('ally_send_to_chat', args);
+    expect(unknown.isError).toBe(true);
+    expect(unknown.content[0].text).toMatch(/not.*claim.*sent/i);
+  });
+
   it('reads the latest messages', async () => {
     const { call } = setup();
     const r = await call('ally_read_chat', { provider: 'codex', chat_id: 'cx-gnss', last: 1 });

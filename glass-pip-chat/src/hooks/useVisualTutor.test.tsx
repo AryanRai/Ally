@@ -2,6 +2,7 @@ import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { tutorRequest, useVisualTutor } from './useVisualTutor';
 import type { TutorBoard } from '../../electron/visualTutor/types';
+import { CIRCLE_ACTIONS, buildCirclePrompt } from '../circle/actions';
 const board: TutorBoard = { id: 'session', chatId: 'chat-a', displayId: 1, bounds: { x: 0, y: 0, width: 1920, height: 1080 }, capturedAt: 1000, steps: [], sketches: [], selected: 0, following: true, sketching: false, frozen: false, revision: 0 };
 const capture = { board, imagePath: '/temporary/snapshot.png', thumbnail: 'data:image/jpeg;base64,test' };
 function api() {
@@ -42,14 +43,25 @@ describe('visual tutor chat integration', () => {
     expect(result.current.decorate('Hello')).toBe('Hello');
     expect(tutorRequest('Hello', board, 'chat-b')).toBe('Hello');
   });
-  it('surfaces capture and agent failures and revokes a failed lesson', async () => {
+  it('surfaces capture and agent failures while retaining an explicitly shared board after uncertain delivery', async () => {
     const tutor = api(); const send = vi.fn().mockResolvedValue({ error: 'MCP is disconnected' });
     const { result } = renderHook(() => useVisualTutor('chat-a', send));
     await act(async () => { await result.current.start('Explain'); });
-    expect(result.current.error).toBe('MCP is disconnected'); expect(tutor.end).toHaveBeenCalledWith('session');
+    expect(result.current.error).toBe('MCP is disconnected'); expect(tutor.end).not.toHaveBeenCalled();
+    expect(result.current.board?.id).toBe('session');
+    expect(result.current.decorate('Draw a follow-up')).toContain('session');
     tutor.start.mockRejectedValue(new Error('Capture permission denied'));
     await act(async () => { await result.current.start('Explain'); });
     expect(result.current.error).toBe('Capture permission denied');
+  });
+  it.each(CIRCLE_ACTIONS)('grants the same drawing and diagram context for $label and its follow-up', async action => {
+    const tutor = api(), send = vi.fn().mockResolvedValue(undefined);
+    const { result } = renderHook(() => useVisualTutor('chat-a', send));
+    await act(async () => { await result.current.start(buildCirclePrompt(action, 'My question'), undefined, 'circle-token', 'chat-a'); });
+    expect(tutor.start).toHaveBeenCalledWith('chat-a', undefined, 'circle-token');
+    expect(send.mock.calls[0][0]).toContain('Drawing is available for every Circle question');
+    expect(result.current.decorate('Show a complex diagram')).toContain('step.diagram');
+    expect(tutor.start).toHaveBeenCalledTimes(1);
   });
   it('uses the original Circle capture and includes crop-to-display mapping', async () => {
     const tutor=api(); tutor.start.mockResolvedValue({...capture,board:{...board,focus:{x:100,y:200,width:300,height:400}}});

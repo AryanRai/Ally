@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { robotMcpServers } from './runner';
+import { robotMcpServers, claudeArgs } from './runner';
+import { setEndpoint } from '../chatsMcp/registry';
 import { codexThreadConfig } from './codexRun';
 
 const robot = {
@@ -9,6 +10,17 @@ const robot = {
 };
 
 describe('robot MCP servers', () => {
+  it('allows capability-bound drawings in readonly chats without allowing forwarding or file writes', () => {
+    setEndpoint({ port: 18767, token: 'f'.repeat(48) });
+    try {
+      const args = claudeArgs({ provider: 'claude', prompt: 'explain my selection', cwd: '.', permission: 'readonly' }, {});
+      const allowed = args[args.indexOf('--allowedTools') + 1].split(',');
+      expect(allowed).toContain('mcp__ally_chats__visual_tutor_read');
+      expect(allowed).toContain('mcp__ally_chats__visual_tutor_draw');
+      expect(allowed).not.toContain('mcp__ally_chats__ally_send_to_chat');
+      expect(args).toContain('plan');
+    } finally { setEndpoint(null); }
+  });
   it('names perception and motion servers, skipping unset ones', () => {
     expect(robotMcpServers(robot)).toEqual({
       howyouseeme: 'http://localhost:8090/mcp',

@@ -6,7 +6,10 @@ import { fail, text, type CallContext, type ToolDef } from './protocol.js';
 import type { ChatIndex, IndexedChat } from './search.js';
 
 export interface SendResult {
-  status: 'replied' | 'still_running' | 'error';
+  status: 'replied' | 'still_running' | 'queued' | 'unconfirmed' | 'error';
+  accepted?: boolean;
+  turnId?: string;
+  receiptId?: string;
   reply: string;
   error?: string;
 }
@@ -148,6 +151,8 @@ export function chatTools(deps: ToolDeps): ToolDef[] {
         const wait = args.wait_for_reply !== false;
         const result = await deps.send(target, message, { wait, timeoutMs: clampInt(args.timeout_seconds, 180, 10, 600) * 1000, caller: ctx.caller });
         if (result.status === 'error') return fail(`Could not deliver to "${chat.title}": ${result.error}`);
+        if (result.status === 'unconfirmed' || (result.status === 'still_running' && result.accepted !== true)) return fail(`Delivery to "${chat.title}" is unconfirmed. Check that chat before retrying; do not claim it was sent. ${result.error ?? ''}`);
+        if (result.status === 'queued') return text(`Queued for "${chat.title}" (${provider}) after its current response. Not delivered to the agent yet.`, { chat: target, status: 'queued', receiptId: result.receiptId });
         if (!wait) return text(`Sent to "${chat.title}" (${provider}). Its reply will appear in that chat.`);
         if (result.status === 'still_running') return text(`Sent to "${chat.title}". It is still working; partial reply so far:\n\n${result.reply || '(nothing yet)'}\n\nThe full reply will appear in that chat.`);
         return text(`Reply from "${chat.title}" (${provider}):\n\n${result.reply || '(no text reply)'}`, { chat: target, reply: result.reply });

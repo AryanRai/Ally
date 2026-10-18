@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { ArrowLeft, ArrowRight, ArrowUpRight, Check, Eye, GripVertical, Layers, MessageCircle, Pencil, Undo2, X } from 'lucide-react';
 import type { TutorAction, TutorBoard, TutorPoint, VisualTutorApi } from '../../electron/visualTutor/types';
 import Marks from './Marks';
+import DiagramFrame from './DiagramFrame';
 import './tutor.css';
 
 declare global { interface Window { tutor: Pick<VisualTutorApi, 'overlay' | 'action' | 'sketch' | 'interactive' | 'onChanged'> } }
@@ -112,6 +113,7 @@ export default function Overlay() {
         setPosition(clampPanel(rect.left + delta[0] * distance, rect.top + delta[1] * distance));
       }}><GripVertical size={13} className="tutor-grip" /><span className="tutor-brand"><span />Ally <span className="tutor-quiet">/ Your selection</span></span><span className="tutor-time">Snapshot {new Date(board.capturedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span></button>{action('End visual tutor', 'close', <X size={16} />)}</div>
       <div className="tutor-lesson" aria-live="polite"><h1>{step?.title ?? 'Ready to explain'}</h1><p>{step?.explanation || (board.steps.length ? 'Ask Ally a follow-up in your chat.' : 'Ally can add drawings here while answering in your chat.')}</p></div>
+      {step?.diagram && <DiagramFrame key={step.id} diagram={step.diagram} title={step.title} />}
       {error && <p role="alert" className="tutor-error">{error}<button onClick={() => setError('')}>Dismiss</button></p>}
       <div className="tutor-controls"><div className="tutor-navigation">{action('Previous step', 'previous', <ArrowLeft size={16} />, board.selected === 0)}<span>{board.steps.length ? `${board.selected + 1} / ${board.steps.length}` : 'No steps yet'}</span>{action('Next step', 'next', <ArrowRight size={16} />, board.selected >= board.steps.length - 1)}{!board.following && <button className="tutor-follow" onClick={() => act('latest')}>Latest <ArrowUpRight size={13} /></button>}</div><div className="tutor-tools">{action(board.frozen ? 'Return to live screen' : 'Freeze snapshot for stable drawings', 'freeze', board.frozen ? <Layers size={16} /> : <Eye size={16} />, false, board.frozen)}{action(board.sketching ? 'Finish sketching' : 'Sketch a question', 'sketch', board.sketching ? <Check size={16} /> : <Pencil size={16} />, false, board.sketching)}{action('Undo last sketch', 'undo', <Undo2 size={16} />, !board.sketches.length)}<button className="tutor-chat" onClick={() => act('chat')}><MessageCircle size={14} />Back to chat</button></div></div>
       <div className="tutor-hint">{board.sketching ? 'Sketch in amber, then ask Ally about it. Esc ends this session.' : board.frozen ? 'Frozen snapshot · return to live screen to interact with your apps.' : 'Apps remain clickable · refresh from Ally if the page moves.'}</div>

@@ -6,6 +6,13 @@ export const step = (id = 'one'): TutorStep => ({ id, title: 'The triangle', exp
 const started = () => { const model = new TutorModel(); model.start(board()); return model; };
 
 describe('visual tutor scene boundary', () => {
+  it('accepts bounded complex diagrams separately from plain annotation text and revokes them with the board', () => {
+    const model = started();
+    expect(model.draw('session-1', { ...step(), diagram: { html: '<svg><circle r="4"/></svg><input type="range">', height: 300 } }).steps[0].diagram?.height).toBe(300);
+    expect(() => model.draw('session-1', { ...step(), diagram: { html: 'x'.repeat(160001) } })).toThrow();
+    expect(() => model.draw('session-1', { ...step(), diagram: { html: '<svg/>', height: 999 } })).toThrow();
+    model.end('session-1'); expect(() => model.draw('session-1', step())).toThrow();
+  });
   it('accepts the typed screen-relative drawing primitives', () => {
     for (const kind of ['arrow', 'line', 'rect', 'ellipse', 'polyline', 'text'] as const) {
       const scene = step(); scene.marks[0].kind = kind;
