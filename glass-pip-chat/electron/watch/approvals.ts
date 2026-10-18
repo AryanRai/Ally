@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { AgentPermission } from '../agent/types.js';
 import type { DeviceAttachment } from './media.js';
+import { interactions } from '../devices/interactions.js';
 
 export interface ApprovalField { id: string; label: string; secret: boolean; required: boolean; options: Array<{ value: string; label: string }>; freeText: boolean }
 export interface WatchApproval { id: string; title: string; detail: string; fields: ApprovalField[]; actions: Array<{ value: string; label: string }>; expiresAt: number; attachments?: DeviceAttachment[] }
@@ -72,16 +73,21 @@ export class WatchApprovals {
   private answered = new Map<string, { turnId: string; answer: string }>();
   constructor(private changed: (turnId: string) => void) {}
   list(turnId: string) { return [...this.pending.values()].filter(p => p.turnId === turnId).map(p => p.request); }
-  request(turnId: string, method: string, params: any, signal: AbortSignal, attachments: DeviceAttachment[] = []): Promise<unknown> {
+  request(turnId: string, method: string, params: any, signal: AbortSignal, attachments: DeviceAttachment[] = [], chatId?: string): Promise<unknown> {
     const spec = approvalSpec(method, params);
     if (signal.aborted) return Promise.resolve(spec.cancel);
     if (JSON.stringify(spec).length > 32000) throw new Error('Approval is too large for the watch. Continue on your PC.');
     const id = randomUUID();
     return new Promise(resolve => {
-      const settle = (result: unknown) => { clearTimeout(timer); signal.removeEventListener('abort', cancel); this.pending.delete(id); this.changed(turnId); resolve(result); };
+      let withdraw: (() => void) | undefined, settled = false;
+      const settle = (result: unknown) => { if (settled) return; settled = true; clearTimeout(timer); signal.removeEventListener('abort', cancel); this.pending.delete(id); withdraw?.(); this.changed(turnId); resolve(result); };
       const cancel = () => settle(spec.cancel);
       const timer = setTimeout(cancel, 10 * 60_000);
       this.pending.set(id, { turnId, spec, request: { id, title: spec.title, detail: spec.detail, fields: spec.fields, actions: spec.actions, expiresAt: Date.now() + 10 * 60_000, ...(attachments.length ? { attachments } : {}) }, settle });
+      if (chatId && !spec.fields.some(f => f.secret)) {
+        try { withdraw = interactions.add({ ...this.pending.get(id)!.request, chatId, kind: spec.fields.length ? 'question' : 'approval' }, answer => this.answer(turnId, id, answer), cancel); }
+        catch { /* Keep the original native approval available when it cannot be mirrored. */ }
+      }
       signal.addEventListener('abort', cancel, { once: true }); this.changed(turnId);
     });
   }

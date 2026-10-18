@@ -34,11 +34,12 @@ object ApprovalParser {
 }
 
 @Composable
-internal fun ApprovalScreen(request: WatchApproval, sending: Boolean, error: String, submit: (String, Map<String, String>) -> Unit) {
+internal fun ApprovalScreen(request: WatchApproval, sending: Boolean, error: String, submit: (String, Map<String, String>) -> Unit, embedded: Boolean = false) {
     // Every approval starts unanswered. No recommended option is implicitly granted.
     var values by remember(request.id) { mutableStateOf<Map<String, String>>(emptyMap()) }
     val scroll = key(request.id) { rememberScrollState() }
-    Column(Modifier.fillMaxSize().background(Ink).bezelScroll(scroll).verticalScroll(scroll).padding(horizontal = 27.dp, vertical = 32.dp),
+    val layout = if(embedded) Modifier.fillMaxWidth().background(Panel,androidx.compose.foundation.shape.RoundedCornerShape(12.dp)).padding(12.dp) else Modifier.fillMaxSize().background(Ink).bezelScroll(scroll).verticalScroll(scroll).padding(horizontal = 27.dp, vertical = 32.dp)
+    Column(layout,
         horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text(request.title, fontSize = 16.sp)
         if (request.detail.isNotBlank()) Text(request.detail, color = Muted, fontSize = 12.sp)

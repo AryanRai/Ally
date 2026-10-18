@@ -10,14 +10,23 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
     <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
-    <application android:label="Ally" android:theme="@android:style/Theme.DeviceDefault.NoActionBar"
+    <application android:name=".AllyWatchApplication" android:label="Ally" android:theme="@android:style/Theme.DeviceDefault.NoActionBar"
         android:icon="@drawable/ic_ally" android:allowBackup="false" android:dataExtractionRules="@xml/backup_rules" android:usesCleartextTraffic="false"
         android:networkSecurityConfig="@xml/network_security_config" android:supportsRtl="true">
         <meta-data android:name="com.google.android.wearable.standalone" android:value="true" />
         <service android:name=".ReplyMonitor" android:exported="false" android:foregroundServiceType="dataSync" />
+        <service android:name="dev.ally.device.AllyAssistantService" android:label="Ally" android:exported="true" android:permission="android.permission.BIND_VOICE_INTERACTION">
+            <intent-filter><action android:name="android.service.voice.VoiceInteractionService" /></intent-filter>
+            <meta-data android:name="android.voice_interaction" android:resource="@xml/ally_assistant" />
+        </service>
+        <service android:name="dev.ally.device.AllyRecognitionService" android:exported="true" android:permission="android.permission.BIND_SPEECH_RECOGNITION_SERVICE">
+            <intent-filter><action android:name="android.speech.RecognitionService" /></intent-filter>
+        </service>
+        <service android:name="dev.ally.device.AllyAssistantSessionService" android:exported="true" android:permission="android.permission.BIND_VOICE_INTERACTION" />
         <service android:name="dev.ally.device.DeviceLinkService" android:exported="false" android:foregroundServiceType="connectedDevice" />
         <receiver android:name="dev.ally.device.DeviceDismissReceiver" android:exported="false" />
         <activity android:name="dev.ally.device.DeviceInboxActivity" android:exported="false" />
+        <activity android:name="dev.ally.device.AssistantUnlockActivity" android:exported="false" android:excludeFromRecents="true" />
         <provider android:name="androidx.core.content.FileProvider" android:authorities="${applicationId}.attachments" android:exported="false" android:grantUriPermissions="true">
             <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/attachment_paths" />
         </provider>

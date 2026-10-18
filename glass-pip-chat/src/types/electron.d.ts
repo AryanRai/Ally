@@ -67,16 +67,21 @@ export interface PipAPI {
   // Circle to Ask
   circle: {
     start: () => Promise<void>;
+    setChat: (chatId?: string) => Promise<void>;
     /** Frozen screenshot for the overlay page (PNG data URL) */
     getShot: () => Promise<string | null>;
     /** `rect` in overlay CSS pixels; omit to send the whole screen */
-    submit: (payload: { rect?: { x: number; y: number; width: number; height: number }; prompt: string }) => Promise<void>;
+    submit: (payload: import('../../electron/capture/types').CircleSubmit) => Promise<void>;
     cancel: () => Promise<void>;
-    onAsk: (callback: (ask: { imagePath: string; thumbnail: string; prompt: string }) => void) => () => void;
+    onAsk: (callback: (ask: import('../../electron/capture/types').CircleAsk) => void) => () => void;
   };
+
+  tutor: Pick<import('../../electron/visualTutor/types').VisualTutorApi, 'start' | 'displays' | 'state' | 'end' | 'onChanged'>;
 
   // Claude Code / Codex agent backends
   agent: {
+    queue: (key: string) => Promise<import('../../electron/agent/messageQueueTypes').QueueSnapshot>;
+    queueChange: (key: string, change: import('../../electron/agent/messageQueueTypes').QueueChange) => Promise<import('../../electron/agent/messageQueueTypes').QueueSnapshot>;
     status: () => Promise<Record<AgentProvider, { available: boolean; path: string | null }>>;
     getConfig: () => Promise<AgentConfig>;
     updateConfig: (patch: Partial<AgentConfig>) => Promise<AgentConfig>;
@@ -94,10 +99,13 @@ export interface PipAPI {
       /** Image files shown to the agent (e.g. a circled screen region) */
       images?: string[];
     }) => Promise<string>;
-    steer: (runId: string, text: string, requestId: string) => Promise<'steered' | 'queued'>;
+    sessionInput: (provider: AgentProvider, sessionId: string, text: string, requestId: string, mode: 'steer' | 'queue') => Promise<'steered' | 'queued'>;
+    steer: (runId: string, text: string, requestId: string, mode?: 'auto' | 'steer' | 'queue') => Promise<'steered' | 'queued'>;
     stop: (runId: string) => Promise<boolean>;
     runningSessions: () => Promise<AgentSessionSummary[]>;
     listSessions: (provider: AgentProvider, limit?: number) => Promise<AgentSessionSummary[]>;
+    readStates: () => Promise<{ key: string; revision: string; unread: boolean }[]>;
+    markRead: (provider: AgentProvider, id: string, revision: string) => Promise<boolean>;
     loadSession: (provider: AgentProvider, id: string, revision?: string) => Promise<import('../../electron/agent/types').AgentSessionSnapshot>;
     /** Claude Code sign-in state, verified with a real request */
     claudeAccount: () => Promise<import('../../electron/agent/claudeLogin').ClaudeAccount>;

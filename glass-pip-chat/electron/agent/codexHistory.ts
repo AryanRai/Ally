@@ -1,3 +1,4 @@
+import { canonicalTurnId, readDesktopActivity } from './codexDesktop.js';
 import { createHash } from 'node:crypto';
 import { localImageDataUrl } from './imageFile.js';
 import { CodexRpc } from './codexRpc.js';
@@ -83,9 +84,10 @@ export async function loadCodexChat(id: string, previousRevision?: string): Prom
   const activity = await readCodexActivity(thread.path).catch(() => undefined);
   const managed = isManagedSessionRunning('codex', sessionId);
   const last = turns.at(-1);
+  const live = last?.status === 'interrupted' && !(activity?.pending && activity.recent && canonicalTurnId(last.id) === canonicalTurnId(activity.turnId)) ? await readDesktopActivity(sessionId) : undefined;
   // Only correct the matching active turn. Never erase an earlier real Stop.
-  if (activity?.pending && (activity.recent || managed) && last?.id === activity.turnId && last.status === 'interrupted') last.status = 'inProgress';
-  const running = managed || codexTurnsPending(turns);
+  if (last?.status === 'interrupted' && ((activity?.pending && (activity.recent || managed) && canonicalTurnId(last.id) === canonicalTurnId(activity.turnId)) || (live?.running && canonicalTurnId(last.id) === live.turnId))) last.status = 'inProgress';
+  const running = managed || live?.running === true || codexTurnsPending(turns);
   const revision = createHash('sha256').update(JSON.stringify([sessionId, thread.name, thread.cwd, turns, running])).digest('hex');
   const identity = { sessionId, title: thread.name ? chatTitle(thread.name) : undefined, ...(sessionId !== id ? { originalSessionId: id } : {}) };
   if (revision === previousRevision) return { ...identity, cwd: thread.cwd, revision, unchanged: true, messages: [], running };

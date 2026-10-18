@@ -27,15 +27,17 @@ const plainText = (m: Message) => m.content.replace(/<think>[\s\S]*?<\/think>/gi
 export function useAgentConversation({ chats, robotMode, onSentence }: Options) {
   const agent = useAgentChat();
   const [model, setModelState] = useState(() => localStorage.getItem(MODEL_KEY) || DEFAULT_AGENT_MODEL);
-  const [isTyping, setIsTyping] = useState(false);
-  const [runningChatId, setRunningChatId] = useState<string | null>(null);
-  const busy = useRef(false);
-  const runningId = useRef<string | null>(null);
-  const [inputStatus, setInputStatus] = useState('');
-  const [currentResponse, setCurrentResponse] = useState('');
-  const [streamingSegments, setStreamingSegments] = useState<Segment[]>([]);
-  const [thinkingText, setThinkingText] = useState('');
-  const spokenUpTo = useRef(0);
+  type Live = { isTyping: boolean; inputStatus: string; currentResponse: string; streamingSegments: Segment[]; thinkingText: string };
+  const emptyLive: Live = { isTyping: false, inputStatus: '', currentResponse: '', streamingSegments: [], thinkingText: '' };
+  const [liveChats, setLiveChats] = useState<Record<string, Live>>({});
+  const busy = useRef(new Set<string>());
+  const externalRequests = useRef(new Map<string, string>());
+  const selectedId = chats.activeChat?.id ?? '';
+  const selectedRef = useRef(selectedId); selectedRef.current = selectedId;
+  const { isTyping, inputStatus, currentResponse, streamingSegments, thinkingText } = liveChats[selectedId] ?? emptyLive;
+  const runningChatId = isTyping ? selectedId : null;
+  const updateLive = (chatId: string, patch: Partial<Live>) => setLiveChats(all => ({ ...all, [chatId]: { ...emptyLive, ...all[chatId], ...patch } }));
+  const spokenUpTo = useRef<Record<string, number>>({});
   // The active chat is running in the Claude Code / Codex app rather than in Ally
   const externalRunning = useSessionSync(chats, isTyping);
 
@@ -48,9 +50,9 @@ export function useAgentConversation({ chats, robotMode, onSentence }: Options) 
   }, []);
 
   /** Speak sentences completed since the last call; `final` flushes the remainder. */
-  const speakNewSentences = (text: string, final: boolean) => {
-    if (!onSentence) return;
-    const pending = text.slice(spokenUpTo.current);
+  const speakNewSentences = (chatId: string, text: string, final: boolean) => {
+    if (!onSentence || selectedRef.current !== chatId) return;
+    const pending = text.slice(spokenUpTo.current[chatId] ?? 0);
     let end = final ? pending.length : 0;
     if (!final) {
       for (const m of pending.matchAll(/[.!?]\s+/g)) end = m.index! + m[0].length;
@@ -59,16 +61,15 @@ export function useAgentConversation({ chats, robotMode, onSentence }: Options) 
     for (const sentence of pending.slice(0, end).split(/(?<=[.!?])\s+/)) {
       if (sentence.trim().length > 3) onSentence(sentence.trim());
     }
-    spokenUpTo.current += end;
+    spokenUpTo.current[chatId] = (spokenUpTo.current[chatId] ?? 0) + end;
   };
 
   /** Run one turn in `chatId` (the user message must already be in the chat). */
   const runTurn = useCallback(async (chatId: string, prompt: string, history: Message[], images?: string[]) => {
     const chat = chats.getChat(chatId);
-    if (!chat || busy.current) return;
-    busy.current = true;
-    runningId.current = chatId;
-    setInputStatus('');
+    if (!chat || busy.current.has(chatId)) return;
+    busy.current.add(chatId);
+    updateLive(chatId, { inputStatus: '' });
     chats.setSendFailure(chatId);
     const failedText = [...chat.messages].reverse().find(m => m.role === 'user')?.content ?? prompt;
     const { provider } = parsed;
@@ -95,29 +96,27 @@ export function useAgentConversation({ chats, robotMode, onSentence }: Options) 
     };
     if (!linked || linked.cwd !== runCwd) chats.setAgent(chatId, { provider, sessionId, cwd: runCwd });
 
-    setIsTyping(true);
-    setRunningChatId(chatId);
-    setCurrentResponse('');
-    setStreamingSegments([]);
-    setThinkingText('');
-    spokenUpTo.current = 0;
+    updateLive(chatId, { ...emptyLive, isTyping: true });
+    spokenUpTo.current[chatId] = 0;
 
     try {
       const result = await agent.runTurn(
         { provider, model: parsed.model, cwd: runCwd, sessionId, prompt: fullPrompt, images, robot: robotMode ? { instructions: ROBOT_INSTRUCTIONS } : undefined },
         {
-          onSegments: setStreamingSegments,
+          onSegments: value => updateLive(chatId, { streamingSegments: value }),
           onText: text => {
-            setCurrentResponse(text);
-            speakNewSentences(text, false);
+            updateLive(chatId, { currentResponse: text });
+            speakNewSentences(chatId, text, false);
           },
-          onThinking: setThinkingText,
+          onThinking: value => updateLive(chatId, { thinkingText: value }),
           onSession: link,
+          onQueuedInput: (id, text) => chats.addMessage(chatId, { id: `queued-${id}`, role: 'user', content: text, timestamp: Date.now() }),
         },
+        chatId,
       );
       if (result.sessionId && result.sessionId !== sessionId) link(result.sessionId);
       if (result.error) chats.setSendFailure(chatId, { message: result.error, text: failedText });
-      if (!result.stopped) speakNewSentences(result.text, true);
+      if (!result.stopped) speakNewSentences(chatId, result.text, true);
       if (!result.stopped) window.pip?.notifyReply?.({ id: `reply-${chatId}-${Date.now()}`, chatId, title: result.error ? 'Ally needs attention' : chat.title || 'Ally reply', text: result.error || result.text });
 
       let content = result.text;
@@ -152,13 +151,9 @@ export function useAgentConversation({ chats, robotMode, onSentence }: Options) 
       });
       return { error: message };
     } finally {
-      busy.current = false;
-      runningId.current = null;
-      setIsTyping(false);
-      setRunningChatId(null);
-      setCurrentResponse('');
-      setStreamingSegments([]);
-      setThinkingText('');
+      busy.current.delete(chatId);
+      delete spokenUpTo.current[chatId];
+      updateLive(chatId, { ...emptyLive });
     }
   }, [agent, chats, cwd, parsed.model, parsed.provider, robotMode, onSentence]);
 
@@ -166,19 +161,37 @@ export function useAgentConversation({ chats, robotMode, onSentence }: Options) 
   const send = useCallback(async (
     text: string,
     source: 'text' | 'speech' | 'circle' = 'text',
-    extras: { context?: string; image?: { path: string; thumbnail: string } } = {},
+    extras: { mode?: 'auto' | 'steer' | 'queue'; context?: string; image?: { path: string; thumbnail: string } } = {},
   ) => {
     const { context, image } = extras;
     const chat = chats.activeChat;
     if (!chat || !text.trim()) return;
-    if (busy.current) {
+    if (externalRunning && !busy.current.has(chat.id) && chat.agent?.sessionId) {
+      const intent = extras.mode === 'steer' ? 'steer' : 'queue';
+      const key = JSON.stringify([chat.id, text, intent]);
+      const requestId = externalRequests.current.get(key) ?? crypto.randomUUID();
+      externalRequests.current.set(key, requestId);
       try {
-        if (chat.id !== runningId.current) throw new Error('Select the running chat to add input.');
+        if (image) throw new Error('External input accepts text. Send the image after this response.');
+        const mode = await window.pip.agent!.sessionInput(chat.agent.provider, chat.agent.sessionId, context ? `Context (from my clipboard):\n${context}\n\n${text}` : text, requestId, intent);
+        externalRequests.current.delete(key);
+        chats.setSendFailure(chat.id);
+        updateLive(chat.id, { inputStatus: mode === 'steered' ? 'Added to current work' : 'Queued after this response' });
+        if (mode !== 'queued') chats.addMessage(chat.id, { id: `input-${requestId}`, role: 'user', content: text, timestamp: Date.now(), metadata: { source, context } });
+        return;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        chats.setSendFailure(chat.id, { message, text }); return { error: message };
+      }
+    }
+    if (busy.current.has(chat.id)) {
+      try {
         if (image) throw new Error('Mid-turn input currently accepts text and voice. Send the image after this response.');
         const prompt = context ? `Context (from my clipboard):\n${context}\n\n${text}` : text;
-        const mode = await agent.steer(prompt);
-        setInputStatus(mode === 'steered' ? 'Added to current work' : 'Queued after this response');
-        chats.addMessage(chat.id, { id: `input-${crypto.randomUUID()}`, role: 'user', content: text, timestamp: Date.now(), metadata: { source, context } });
+        const mode = await agent.steer(prompt, extras.mode, chat.id);
+        chats.setSendFailure(chat.id);
+        updateLive(chat.id, { inputStatus: mode === 'steered' ? 'Added to current work' : 'Queued after this response' });
+        if (mode !== 'queued') chats.addMessage(chat.id, { id: `input-${crypto.randomUUID()}`, role: 'user', content: text, timestamp: Date.now(), metadata: { source, context } });
         return;
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
@@ -196,24 +209,24 @@ export function useAgentConversation({ chats, robotMode, onSentence }: Options) 
     });
     const prompt = context ? `Context (from my clipboard):\n${context}\n\n${text}` : text;
     return await runTurn(chat.id, prompt, history, image ? [image.path] : undefined);
-  }, [chats, isTyping, runTurn, agent]);
+  }, [chats, isTyping, externalRunning, runTurn, agent]);
 
   /** Re-ask the user message before `messageId` (the assistant reply is replaced). */
   const regenerate = useCallback(async (messageId: string) => {
     const chat = chats.activeChat;
-    if (!chat || busy.current) return;
+    if (!chat || busy.current.has(chat.id)) return;
     const index = chat.messages.findIndex(m => m.id === messageId);
     const userMessage = chat.messages[index - 1];
     if (index < 1 || userMessage?.role !== 'user') return;
     chats.deleteMessage(chat.id, messageId);
     await runTurn(chat.id, userMessage.content, chat.messages.slice(0, index - 1));
-  }, [chats, isTyping, runTurn, agent]);
+  }, [chats, isTyping, externalRunning, runTurn, agent]);
 
-  const stop = useCallback(() => agent.stop(), [agent]);
+  const stop = useCallback(() => agent.stop(selectedId), [agent, selectedId]);
 
   /** Continue an existing Claude Code / Codex session as an Ally chat. */
   const openSession = useCallback(async (session: AgentSessionSummary) => {
-    if (!window.pip?.agent || isTyping) return;
+    if (!window.pip?.agent) return;
     const { cwd: sessionCwd, messages, sessionId = session.id, originalSessionId } = await window.pip.agent.loadSession(session.provider, session.id);
     chats.openAgentSession(
       { provider: session.provider, sessionId, originalSessionId: originalSessionId ?? session.originalSessionId, cwd: sessionCwd ?? session.cwd },

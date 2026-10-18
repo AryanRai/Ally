@@ -1,3 +1,7 @@
+import { configureUnread, allReadStates, unreadState, acknowledgeUnread } from './unread.js';
+import { startNativeUnread, acknowledgeNativeUnread, reconcileNativeUnread } from './codexUnread.js';
+import { startUnreadTracking } from './unreadTracking.js';
+import { messageQueue, type QueueChange } from './messageQueue.js';
 // IPC surface for the agent backends (see preload `pip.agent`).
 import { app, BrowserWindow, dialog, ipcMain } from 'electron';
 import fs from 'node:fs';
@@ -35,6 +39,11 @@ function loadConfig(): AgentConfig {
 /** Registers `agent:*` IPC; `onConfig` sees the config at startup and after every change. */
 export function registerAgentIpc(getWindow: () => BrowserWindow | null, onConfig?: (config: AgentConfig) => void): void {
   let config = loadConfig();
+  configureUnread(path.join(app.getPath('userData'), 'chat-read-state.json'));
+  messageQueue.configure(path.join(app.getPath('userData'), 'message-queue.json'));
+  const stopNativeUnread = startNativeUnread();
+  const stopUnreadTracking = startUnreadTracking();
+  app.on('will-quit', () => { stopNativeUnread(); stopUnreadTracking(); });
   configureCodexMigrations(path.join(app.getPath('userData'), 'codex-migrations.json'));
   configureCodexHistory(config.codexPath);
   onConfig?.(config);
@@ -92,14 +101,40 @@ export function registerAgentIpc(getWindow: () => BrowserWindow | null, onConfig
     );
   });
 
-  ipcMain.handle('agent:steer', (_, runId: string, text: string, requestId: string) => steerAgentRun(runId, text, requestId));
+  ipcMain.handle('agent:sessionInput', async (_, provider: AgentProvider, sessionId: string, text: string, requestId: string, mode: 'steer' | 'queue') => {
+    if (!['codex', 'claude'].includes(provider) || typeof sessionId !== 'string' || !sessionId || sessionId.length > 200 || typeof text !== 'string' || !text.trim() || text.length > 12000 || !/^[\w-]{1,80}$/.test(requestId) || !['steer', 'queue'].includes(mode)) throw new Error('Invalid session input');
+    const bridge = JSON.parse(fs.readFileSync(path.join(app.getPath('userData'), 'watch-bridge.json'), 'utf8'));
+    if (!bridge.enabled) throw new Error('Enable the phone/watch connection in Ally settings to send input to an external chat. Your draft is kept.');
+    const chatId = `${provider}:${sessionId}`;
+    const route = mode === 'steer' ? `/v1/chats/${encodeURIComponent(chatId)}/input` : '/v1/messages';
+    const body = mode === 'steer' ? { text, requestId, mode } : { provider, chatId, text, requestId, queueAfterCurrent: true, permission: config.permission };
+    const response = await fetch(`http://127.0.0.1:${bridge.port}${route}`, { method: 'POST', headers: { Authorization: `Bearer ${bridge.token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(25000) });
+    const result = await response.json() as { error?: string };
+    if (!response.ok) throw new Error(result.error || 'Input was not confirmed. Your draft is kept.');
+    return mode === 'steer' ? 'steered' : 'queued';
+  });
+  ipcMain.handle('agent:queue', (_, key: string) => messageQueue.snapshot(key));
+  ipcMain.handle('agent:queueChange', (_, key: string, change: QueueChange) => messageQueue.change(key, change));
+  ipcMain.handle('agent:steer', (_, runId: string, text: string, requestId: string, mode?: 'auto' | 'steer' | 'queue') => steerAgentRun(runId, text, requestId, mode));
 
   ipcMain.handle('agent:stop', (_, runId: string) => stopAgentRun(runId));
 
   ipcMain.handle('agent:runningSessions', () => listRunningSessions());
   ipcMain.handle('agent:listSessions', (_, provider: AgentProvider, limit?: number) => provider === 'codex' ? listCodexChats(limit) : listAgentSessions(provider, limit));
 
-  ipcMain.handle('agent:loadSession', (_, provider: AgentProvider, id: string, revision?: string) => provider === 'codex' ? loadCodexChat(id, revision) : loadAgentSession(provider, id, revision));
+  ipcMain.handle('agent:readStates', () => allReadStates());
+  ipcMain.handle('agent:markRead', async (_, provider: AgentProvider, id: string, revision: string) => {
+    if (!['codex', 'claude'].includes(provider) || typeof id !== 'string' || typeof revision !== 'string') throw new Error('Invalid read receipt');
+    if (provider === 'codex') await reconcileNativeUnread(id);
+    const accepted = acknowledgeUnread(provider, id, revision);
+    if (accepted && provider === 'codex') acknowledgeNativeUnread(id);
+    return accepted;
+  });
+  ipcMain.handle('agent:loadSession', async (_, provider: AgentProvider, id: string, revision?: string) => {
+    const readState = unreadState(provider, id); // Captured before loading: never acknowledge a later unseen reply.
+    const snapshot = provider === 'codex' ? await loadCodexChat(id, revision) : await loadAgentSession(provider, id, revision);
+    return { ...snapshot, readState: { ...readState, key: `${provider}:${snapshot.sessionId ?? id}` } };
+  });
   const stopWatching = watchAgentSessions(provider => {
     const win = getWindow();
     if (win && !win.isDestroyed()) win.webContents.send('agent:sessionsChanged', provider);

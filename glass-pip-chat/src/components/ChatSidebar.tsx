@@ -1,3 +1,4 @@
+import { useUnreadChats } from '@/hooks/useUnreadChats';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import { ChevronRight, Folder, LoaderCircle, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Pencil, Square, SquarePen, Trash2 } from 'lucide-react';
@@ -95,7 +96,7 @@ export function groupByProject(chats: Chat[], sessions: AgentSessionSummary[], h
 }
 
 /** A Claude Code / Codex session not yet opened in Ally; clicking continues it here. */
-function SessionRow({ session, onOpen }: { session: AgentSessionSummary; onOpen: () => void }) {
+function SessionRow({ session, onOpen, unread = false }: { session: AgentSessionSummary; onOpen: () => void; unread?: boolean }) {
   return (
     <button
       type="button"
@@ -104,6 +105,7 @@ function SessionRow({ session, onOpen }: { session: AgentSessionSummary; onOpen:
       className="flex w-full items-center rounded-md text-left text-foreground/55 transition-colors hover:bg-white/[0.05] hover:text-foreground"
     >
       <span className="min-w-0 flex-1 truncate py-1.5 pl-2.5 pr-1 text-[13px] font-light">{session.title}</span>
+      {unread && <UnreadDot />}
       <span className="shrink-0 pr-1 font-mono text-[9px] uppercase tracking-[0.1em] text-foreground/30">{PROVIDER_TAG[session.provider]}</span>
       <span className="shrink-0 pr-2 font-mono text-[10px] text-foreground/30">{relativeTime(session.updatedAt)}</span>
     </button>
@@ -139,8 +141,10 @@ function ChatRow({
   canDelete,
   workingStatus,
   onStop,
+  unread = false,
 }: {
   chat: Chat;
+  unread?: boolean;
   active: boolean;
   onSelect: () => void;
   onRename: (title: string) => void;
@@ -195,6 +199,7 @@ function ChatRow({
         <span className="block truncate">{chat.title || 'Untitled'}</span>
         {workingStatus && <span role="status" className="mt-0.5 flex items-center gap-1 text-[10px] text-foreground/70"><LoaderCircle aria-hidden="true" className="size-3 shrink-0 animate-spin" /><span className="truncate">{workingStatus}</span></span>}
       </button>
+      {unread && !workingStatus && <UnreadDot />}
       {workingStatus && onStop && <button type="button" onClick={onStop} aria-label={`Stop ${chat.title || 'Untitled'}`} title="Stop response" className="mr-1 grid size-7 shrink-0 place-items-center rounded-full border border-white/15 bg-white/5 text-foreground/70 hover:bg-white/15 hover:text-foreground"><Square aria-hidden="true" className="size-2.5" fill="currentColor" /></button>}
       <span className="shrink-0 pr-1.5 text-[10px] text-foreground/45">{PROVIDER_TAG[chat.agent?.provider ?? 'unassigned']}</span>
       {!workingStatus && <span className="shrink-0 pr-2 font-mono text-[10px] text-foreground/30 group-hover/row:hidden">{relativeTime(chat.updatedAt)}</span>}
@@ -245,6 +250,9 @@ export default function ChatSidebar({
   workingStatus = 'Working…',
   onStop,
 }: ChatSidebarProps) {
+  const unreadKeys = useUnreadChats();
+  const chatUnread = (chat: Chat) => !!chat.agent && [chat.agent.sessionId, chat.agent.originalSessionId].some(id => id && unreadKeys.has(`${chat.agent!.provider}:${id}`));
+  const entryUnread = (entry: Entry) => entry.kind === 'chat' ? chatUnread(entry.chat) : unreadKeys.has(`${entry.session.provider}:${entry.session.id}`);
   const groups = useMemo(() => groupByProject(chats, externalSessions, homeCwd), [chats, externalSessions, homeCwd]);
   const running = runningEntries(chats, runningSessions, runningChatId);
   const recent = groups.flatMap(g => g.entries).sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 3);
@@ -253,6 +261,7 @@ export default function ChatSidebar({
     const provider = entry.kind === 'chat' ? entry.chat.agent?.provider : entry.session.provider;
     const cwd = entry.kind === 'chat' ? entry.chat.agent?.cwd : entry.session.cwd;
     return <button key={`${entry.kind}:${provider}:${item.id}`} type="button" onClick={() => entry.kind === 'chat' ? onChatSelect(entry.chat.id) : onOpenAgentSession?.(entry.session)} className="flex w-full items-start gap-2 rounded-md px-2.5 py-2 text-left hover:bg-white/[0.05]">
+      {!live && entryUnread(entry) && <UnreadDot />}
       {live && <LoaderCircle aria-hidden="true" className="mt-0.5 size-3 shrink-0 animate-spin text-amber-200/70" />}
       <span className="min-w-0 flex-1"><span className="block truncate text-[13px] text-foreground/85">{item.title || 'Untitled'}</span><span className="block truncate text-[10px] text-foreground/40">{PROVIDER_TAG[provider ?? 'unassigned']}{cwd ? ` · ${folderName(cwd)}` : ''}</span></span>
     </button>;
@@ -342,6 +351,7 @@ export default function ChatSidebar({
                           <ChatRow
                             key={entry.chat.id}
                             chat={entry.chat}
+                            unread={chatUnread(entry.chat)}
                             active={entry.chat.id === activeChat}
                             onSelect={() => onChatSelect(entry.chat.id)}
                             onRename={title => onChatRename(entry.chat.id, title)}
@@ -351,7 +361,7 @@ export default function ChatSidebar({
                             onStop={onStop}
                           />
                         ) : (
-                          <SessionRow
+                          <SessionRow unread={unreadKeys.has(`${entry.session.provider}:${entry.session.id}`)}
                             key={entry.session.provider + entry.session.id}
                             session={entry.session}
                             onOpen={() => onOpenAgentSession?.(entry.session)}
@@ -384,3 +394,5 @@ export default function ChatSidebar({
     </motion.nav>
   );
 }
+
+function UnreadDot() { return <span role="img" aria-label="Unread reply" title="Unread reply" className="mx-1 inline-block size-1.5 shrink-0 rounded-full bg-blue-400" />; }

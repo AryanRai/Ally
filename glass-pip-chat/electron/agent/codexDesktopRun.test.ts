@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { CodexChatUnownedError, CodexDesktopUnavailableError, CodexDesktopClient, assertDesktopIdle, desktopTurns } from './codexDesktop';
+import { CodexChatUnownedError, CodexDesktopUnavailableError, CodexDesktopClient, assertDesktopIdle, desktopTurns, steerDesktopTurn } from './codexDesktop';
 import { runCodexDesktopTurn, applyDesktopPatches, desktopTurnRequest } from './codexDesktopRun';
 import type { AgentEvent } from './types';
 
@@ -158,4 +158,21 @@ it('uses the previous connection if the desktop pipe is definitively absent', as
   const fallback = vi.fn(() => ({ stop: vi.fn() }));
   runCodexDesktopTurn(opts, () => {}, undefined, fallback); await flush();
   expect(fallback).toHaveBeenCalledOnce();
+});
+
+
+it('steers the exact native chat with a stable receipt and validates the canonical turn', async () => {
+  const { client, setState } = desktop();
+  const state = active('ongoing'); state.turns[0].turnId = 'our-turn-berry-display-2'; setState(state);
+  client.request.mockResolvedValueOnce({ result: { result: { turnId: 'our-turn' } } });
+  await expect(steerDesktopTurn(client as unknown as CodexDesktopClient, 'desktop-owner', 'same-chat', 'new guidance', 'receipt')).resolves.toBe(true);
+  expect(client.request).toHaveBeenCalledWith('thread-follower-steer-turn', expect.objectContaining({ conversationId: 'same-chat', clientUserMessageId: 'receipt', input: [{ type: 'text', text: 'new guidance', text_elements: [] }] }), 'desktop-owner', 20000);
+  client.request.mockResolvedValueOnce({ result: { result: { turnId: 'our-turn' } } });
+  await expect(steerDesktopTurn(client as unknown as CodexDesktopClient, 'desktop-owner', 'same-chat', 'see attached', 'image-receipt', ['screen.png'])).resolves.toBe(true);
+  expect(client.request).toHaveBeenLastCalledWith('thread-follower-steer-turn', expect.objectContaining({ clientUserMessageId: 'image-receipt', input: [{ type: 'text', text: 'see attached', text_elements: [] }, { type: 'localImage', path: 'screen.png' }] }), 'desktop-owner', 20000);
+  client.request.mockResolvedValueOnce({ result: { result: { turnId: 'different-turn' } } });
+  await expect(steerDesktopTurn(client as unknown as CodexDesktopClient, 'desktop-owner', 'same-chat', 'new guidance', 'receipt')).rejects.toThrow('expected turn');
+  setState(idle()); client.request.mockClear();
+  await expect(steerDesktopTurn(client as unknown as CodexDesktopClient, 'desktop-owner', 'same-chat', 'late input', 'receipt')).rejects.toThrow('finished');
+  expect(client.request).not.toHaveBeenCalled();
 });

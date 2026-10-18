@@ -5,6 +5,7 @@ import { claudeTurnPending, isRunning } from './sessionActivity.js';
 import type { AgentProvider, AgentSessionSummary } from './types.js';
 import { readCodexActivity } from './codexActivity.js';
 import { chatTitle } from './chatTitle.js';
+import { readDesktopActivity } from './codexDesktop.js';
 
 const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
 const managed = new Map<string, AgentSessionSummary>();
@@ -55,7 +56,15 @@ export async function scanRunningSessions(home = os.homedir(), now = Date.now())
       if (!entry.isFile() || !entry.name.endsWith('.jsonl') || !id) continue;
       try {
         const stat = await fs.stat(file);
-        if (!isRunning(true, stat.mtimeMs, now)) continue;
+        const recent = isRunning(true, stat.mtimeMs, now);
+        if (!recent && provider !== 'codex') continue;
+        const activity = provider === 'codex' ? await readCodexActivity(file, now) : undefined;
+        // Native Codex can keep executing while its rollout file's mtime is
+        // stale (including after Ally restarts). A stale pending lifecycle is
+        // only live when its exact desktop owner confirms it; never revive a
+        // crashed/abandoned turn based on an old task_started record alone.
+        const native = !recent && activity?.pending ? await nativeActivity(id) : undefined;
+        if (!recent && native?.running !== true) continue;
         const { head, tail } = await edges(file, stat.size);
         const records = [...head, ...tail];
         const meta = head.find(r => r.type === 'session_meta')?.payload;
@@ -64,16 +73,28 @@ export async function scanRunningSessions(home = os.homedir(), now = Date.now())
         const custom = [...records].reverse().find(r => r.type === 'custom-title' || r.type === 'ai-title');
         const customTitle = custom?.customTitle || custom?.aiTitle;
         const title = titles.get(id) || (customTitle !== 'Chat' ? customTitle : '') || textContent(prompt?.message?.content ?? prompt?.payload?.content).replace(/<[^>]+>[\s\S]*?<\/[^>]+>/g, '').trim() || `${provider === 'codex' ? 'Codex' : 'Claude'} chat`;
-        const summary = { id, provider, title: chatTitle(title), cwd, updatedAt: stat.mtimeMs };
+        const summary = { id, provider, title: chatTitle(title), cwd, updatedAt: native?.running ? now : stat.mtimeMs };
         const key = `${provider}:${id}`;
         // Continuations belong to the original chat. The latest written file wins.
-        if ((result.get(key)?.summary.updatedAt ?? 0) <= stat.mtimeMs) result.set(key, { summary, pending: provider === 'codex' ? (await readCodexActivity(file, now))?.pending === true : claudeTurnPending(tail) });
+        if ((result.get(key)?.summary.updatedAt ?? 0) <= summary.updatedAt) result.set(key, { summary, pending: provider === 'codex' ? native?.running === true || activity?.pending === true : claudeTurnPending(tail) });
       } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
     }
   };
   await visit(path.join(home, '.claude', 'projects'), 'claude', 1);
   await visit(path.join(home, '.codex', 'sessions'), 'codex', 4);
   return [...result.values()].filter(r => r.pending).map(r => r.summary).sort((a, b) => b.updatedAt - a.updatedAt);
+}
+
+// Bound both concurrent native reads and their lifetime. Failed native probes
+// fall back to the transcript rules and must not fail the whole running list.
+const nativeCache = new Map<string, { at: number; value: Awaited<ReturnType<typeof readDesktopActivity>> }>();
+async function nativeActivity(id: string) {
+  const cached = nativeCache.get(id);
+  if (cached && Date.now() - cached.at < 4000) return cached.value;
+  const value = await readDesktopActivity(id).catch(() => undefined);
+  nativeCache.set(id, { at: Date.now(), value });
+  if (nativeCache.size > 128) nativeCache.delete(nativeCache.keys().next().value!);
+  return value;
 }
 
 let cached: { at: number; sessions: AgentSessionSummary[] } | undefined;

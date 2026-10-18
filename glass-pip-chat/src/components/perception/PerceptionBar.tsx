@@ -110,7 +110,7 @@ export default function PerceptionBar({ perception, sessions, onOpenDebug }: Per
       {(turn || status?.relevance.engine === 'fallback' || error) && (
         <div className="flex min-w-0 items-center gap-2 px-1 pt-0.5 text-[10px] text-foreground/45">
           {turn && <span className="truncate">{turn.state === 'queued' ? 'Queued' : turn.origin === 'explicit' ? 'Answering' : 'Thinking about what was said'}{turn.tools.length ? ` · ${turn.tools.at(-1)}` : ''}…</span>}
-          {status?.relevance.engine === 'fallback' && <span className="shrink-0" title={status.relevance.degradedReason}>basic relevance (no Jev)</span>}
+          {status?.relevance.engine === 'fallback' && status.relevance.degradedReason && <span className="shrink-0" title={status.relevance.degradedReason}>basic relevance</span>}
           {error && <button type="button" className="truncate text-destructive/80" onClick={() => setError(undefined)} title="Dismiss">{error}</button>}
         </div>
       )}

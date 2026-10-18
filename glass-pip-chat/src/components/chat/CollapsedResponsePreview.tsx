@@ -1,166 +1,96 @@
-import { useRef, useEffect, useState } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import { Bot, Square, Maximize2 } from 'lucide-react';
-import { cn } from '../../lib/utils';
-import { ThemeUtils } from '../../utils/themeUtils';
-import MarkdownRenderer from '../MarkdownRenderer';
+import { useEffect, useRef, useState } from 'react';
+import { ChevronDown, ChevronUp, Copy, ArrowDown } from 'lucide-react';
+import WatchReplyContent from './WatchReplyContent';
+import { readableReply } from '@/lib/watchPresentation';
+import { compactReply } from '@/lib/compactPresentation';
 
 interface CollapsedResponsePreviewProps {
-  platform: string;
-  theme: 'light' | 'dark';
   response: string;
+  responseId?: string;
   isTyping: boolean;
-  onStop?: () => void;
-  onExpand?: () => void;
+  workingStatus?: string;
+  onCopy?: (text: string) => void;
 }
 
-export default function CollapsedResponsePreview({
-  platform,
-  theme,
-  response,
-  isTyping,
-  onStop,
-  onExpand
-}: CollapsedResponsePreviewProps) {
+/** A bounded live reader beneath the pill. Scrolling up pauses following. */
+export default function CollapsedResponsePreview({ response, responseId, isTyping, workingStatus, onCopy }: CollapsedResponsePreviewProps) {
+  const reply = compactReply(response);
   const scrollRef = useRef<HTMLDivElement>(null);
-  const [showFinalResponse, setShowFinalResponse] = useState(false);
-  const [autoHideTimer, setAutoHideTimer] = useState<NodeJS.Timeout | null>(null);
-  
-  // Auto-scroll to bottom when response updates (reader mode)
+  const following = useRef(true);
+  const draggingScrollbar = useRef(false);
+  const [paused, setPaused] = useState(false);
+  const [expanded, setExpanded] = useState(true);
+  const wasWorking = useRef(false);
+
   useEffect(() => {
-    if (scrollRef.current && response) {
+    if (isTyping && !wasWorking.current) {
+      setExpanded(true);
+      following.current = true;
+      setPaused(false);
+    }
+    wasWorking.current = isTyping;
+  }, [isTyping]);
+
+  useEffect(() => {
+    setExpanded(true);
+    following.current = true;
+    setPaused(false);
+  }, [responseId]);
+
+  useEffect(() => {
+    if (following.current && expanded && scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [response]);
+  }, [response, expanded]);
 
-  // Handle final response display and auto-hide
+  // Rich markdown and widgets can grow after the text chunk renders.
   useEffect(() => {
-    if (!isTyping && response) {
-      // Response just finished - show final response
-      setShowFinalResponse(true);
-      
-      // Clear any existing timer
-      if (autoHideTimer) {
-        clearTimeout(autoHideTimer);
-      }
-      
-      // Set timer to hide after 5 seconds
-      const timer = setTimeout(() => {
-        setShowFinalResponse(false);
-      }, 5000);
-      
-      setAutoHideTimer(timer);
-    } else if (isTyping) {
-      // Currently typing - clear any hide timer and show response
-      if (autoHideTimer) {
-        clearTimeout(autoHideTimer);
-        setAutoHideTimer(null);
-      }
-      setShowFinalResponse(false);
-    }
-    
-    return () => {
-      if (autoHideTimer) {
-        clearTimeout(autoHideTimer);
-      }
-    };
-  }, [isTyping, response]);
+    const panel = scrollRef.current;
+    const content = panel?.firstElementChild;
+    if (!panel || !content || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(() => {
+      if (following.current) panel.scrollTop = panel.scrollHeight;
+    });
+    observer.observe(content);
+    return () => observer.disconnect();
+  }, [expanded, !!response]);
 
-  // Show if typing, has response, or showing final response
-  if (!response && !isTyping && !showFinalResponse) {
-    return null;
-  }
-
-  return (
-    <AnimatePresence>
-      {(response || isTyping) && (
-        <motion.div
-          initial={{ height: 0, opacity: 0 }}
-          animate={{ height: 'auto', opacity: 1 }}
-          exit={{ height: 0, opacity: 0 }}
-          transition={{ duration: 0.2, ease: 'easeInOut' }}
-          className={cn(
-            "border-t overflow-hidden",
-            ThemeUtils.getBorderClass(platform, theme)
-          )}
-          style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
-        >
-          {/* Response Header */}
-          <div className="flex items-center justify-between px-3 py-1.5 bg-green-500/10">
-            <div className="flex items-center gap-2">
-              <Bot className="w-3 h-3 opacity-60" />
-              <span className="text-xs font-medium opacity-80">
-                {isTyping ? 'Thinking...' : showFinalResponse ? 'Final Response' : 'Response'}
-              </span>
-              {isTyping && (
-                <div className="w-1.5 h-1.5 bg-green-400 rounded-full animate-pulse" />
-              )}
-              {showFinalResponse && (
-                <div className="w-1.5 h-1.5 bg-white/10 rounded-full animate-pulse" />
-              )}
-            </div>
-            <div className="flex items-center gap-1">
-              {onExpand && (
-                <button
-                  onClick={onExpand}
-                  className="p-1 rounded-sm hover:bg-white/10 transition-colors"
-                  title="Expand to full chat"
-                >
-                  <Maximize2 className="w-3 h-3 text-white" />
-                </button>
-              )}
-              {isTyping && onStop && (
-                <button
-                  onClick={onStop}
-                  className="p-1 rounded-sm hover:bg-red-500/20 transition-colors"
-                  title="Stop generation"
-                >
-                  <Square className="w-3 h-3 text-red-400" />
-                </button>
-              )}
-            </div>
-          </div>
-
-          {/* Response Content - Auto-scrolling reader */}
-          <div
-            ref={scrollRef}
-            className={cn(
-              "max-h-40 overflow-y-auto px-3 pb-2 pt-1.5",
-              "transition-all duration-200",
-              ThemeUtils.getScrollbarClass(platform, theme)
-            )}
-          >
-            {isTyping && !response ? (
-              // Typing indicator
-              <div className="flex items-center gap-1 py-2">
-                <div className={cn(
-                  "w-1 h-1 rounded-full animate-bounce bg-green-400"
-                )} style={{ animationDelay: '0ms' }} />
-                <div className={cn(
-                  "w-1 h-1 rounded-full animate-bounce bg-green-400"
-                )} style={{ animationDelay: '150ms' }} />
-                <div className={cn(
-                  "w-1 h-1 rounded-full animate-bounce bg-green-400"
-                )} style={{ animationDelay: '300ms' }} />
-                <span className="text-xs opacity-70 ml-2">Thinking...</span>
-              </div>
-            ) : (
-              // Actual response with markdown
-              <div className="text-sm">
-                <MarkdownRenderer 
-                  content={response} 
-                  platform={platform}
-                  theme={theme}
-                  compact={false}
-                />
-                {isTyping && (
-                  <span className="inline-block w-2 h-4 bg-current animate-pulse ml-1 align-text-bottom" />
-                )}
-              </div>
-            )}
-          </div>
-        </motion.div>
-      )}
-    </AnimatePresence>
-  );
+  const pauseFollowing = () => { following.current = false; setPaused(true); };
+  if (!response && !isTyping) return null;
+  const status = isTyping ? workingStatus || (reply.text ? 'Writing…' : 'Thinking…') : reply.interrupted ? 'Earlier reply' : 'Latest reply';
+  return <section className="overflow-hidden rounded-xl border border-white/10 bg-white/[0.03]" aria-label="Current reply" style={{ userSelect: 'text' }}>
+    <div className="flex min-w-0 items-center gap-1 px-2 py-1">
+      <button type="button" onClick={() => setExpanded(value => !value)} aria-expanded={expanded} aria-label={expanded ? 'Collapse reply' : 'Show reply'} className="flex min-w-0 flex-1 items-center gap-2 py-1 text-left text-[11px] text-foreground/65">
+        <span className={`size-1.5 shrink-0 rounded-full ${isTyping ? 'animate-pulse bg-emerald-400' : 'bg-foreground/30'}`} />
+        <span role={isTyping ? 'status' : undefined} className="truncate">{status}</span>
+        {expanded ? <ChevronUp className="ml-auto size-3 shrink-0" /> : <ChevronDown className="ml-auto size-3 shrink-0" />}
+      </button>
+      {reply.text && onCopy && <button type="button" onClick={() => onCopy(readableReply(reply.text))} aria-label="Copy reply" title="Copy reply" className="grid size-7 shrink-0 place-items-center rounded-md text-foreground/55 hover:bg-white/10"><Copy className="size-3" /></button>}
+    </div>
+    {expanded && reply.text && <div data-ally-reply-reader ref={scrollRef} role="region" aria-label="Live reply" tabIndex={0}
+      onWheel={event => { if (event.deltaY < 0) pauseFollowing(); }}
+      onTouchMove={pauseFollowing}
+      onPointerDown={event => { draggingScrollbar.current = event.target === event.currentTarget; }}
+      onPointerUp={() => { draggingScrollbar.current = false; }}
+      onPointerCancel={() => { draggingScrollbar.current = false; }}
+      onKeyDown={event => { if (['ArrowUp', 'PageUp', 'Home'].includes(event.key)) pauseFollowing(); }}
+      onScroll={event => {
+        // Layout and browser scroll anchoring also emit scroll. Only the reader
+        // can pause following; arriving text must never pause itself.
+        if (following.current && !draggingScrollbar.current) return;
+        const panel = event.currentTarget;
+        following.current = panel.scrollHeight - panel.scrollTop - panel.clientHeight < 24;
+        setPaused(!following.current);
+      }}
+      className="max-h-48 overflow-y-auto overscroll-contain break-words px-3 pb-3 text-[13px] [overflow-wrap:anywhere] [&_pre]:max-w-full [&_pre]:overflow-x-auto">
+      <WatchReplyContent content={reply.text} streaming={isTyping} />
+    </div>}
+    {expanded && reply.interrupted && !isTyping && <p className="px-3 pb-2 text-[10px] text-foreground/45">This earlier reply was interrupted.</p>}
+    {expanded && paused && <button type="button" className="flex w-full items-center justify-center gap-1 border-t border-white/10 py-1.5 text-[11px] text-foreground/75 hover:bg-white/5" onClick={() => {
+      following.current = true;
+      draggingScrollbar.current = false;
+      setPaused(false);
+      if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }}><ArrowDown className="size-3" />Follow latest</button>}
+  </section>;
 }

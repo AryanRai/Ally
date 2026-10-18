@@ -17,6 +17,23 @@ describe('device delivery and approval boundaries', () => {
     hub.receipt('phone-one', { id, status: 'approved' }); hub.receipt('phone-one', { id, status: 'handed_off' });
     expect(await result).toEqual({ ok: true, message: expect.stringContaining('not verified') }); hub.close();
   });
+  it('validates app and alarm intents, requires approval, and reports handoff truthfully', async () => {
+    const hub = new DeviceHub(vi.fn()); const send = vi.fn(); hub.connect('phone-one', 'phone', send);
+    expect((await hub.command('phone', 'phone_open_app', { packageName: 'intent:unsafe' })).ok).toBe(false);
+    expect((await hub.command('phone', 'phone_set_alarm', { hour: 24, minute: 0 })).ok).toBe(false);
+    expect((await hub.command('phone', 'arbitrary_shell', {})).ok).toBe(false);
+    const result = hub.command('phone', 'phone_open_app', { packageName: 'com.android.settings' });
+    const command = send.mock.calls[0][0].command;
+    expect(command).toMatchObject({ packageName: 'com.android.settings', body: expect.stringContaining('com.android.settings') });
+    hub.receipt('phone-one', { id: command.id, status: 'approved' });
+    hub.receipt('phone-one', { id: command.id, status: 'handed_off' });
+    expect(await result).toEqual({ ok: true, message: expect.stringContaining('not verified') });
+    const alarm = hub.command('phone', 'phone_set_alarm', { hour: 7, minute: 5 });
+    const item = send.mock.calls[1][0].command;
+    expect(item).toMatchObject({ hour: 7, minute: 5, body: expect.stringContaining('07:05') });
+    hub.receipt('phone-one', { id: item.id, status: 'handed_off' });
+    expect((await alarm).ok).toBe(false); hub.close();
+  });
   it('expires requests without execution, and never replays commands', async () => {
     vi.useFakeTimers(); const hub = new DeviceHub(vi.fn()); const send = vi.fn();
     const disconnect = hub.connect('phone-one', 'phone', send);

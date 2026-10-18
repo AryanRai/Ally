@@ -61,7 +61,9 @@ export class ClaudeStreamParser implements StreamParser {
 
   handle(e: any): AgentEvent[] {
     const out: AgentEvent[] = [];
-    if (e.session_id && e.session_id !== this.sessionId) {
+    // Failed startup results carry a temporary CLI ID even when resume never
+    // opened a transcript. That ID must not replace the user's linked chat.
+    if (e.session_id && e.session_id !== this.sessionId && !(e.type === 'result' && e.is_error)) {
       this.sessionId = e.session_id;
       out.push({ kind: 'session', sessionId: e.session_id });
     }
@@ -125,7 +127,7 @@ export class ClaudeStreamParser implements StreamParser {
       case 'result':
         out.push({
           kind: 'done',
-          sessionId: e.session_id,
+          sessionId: e.is_error ? this.sessionId : e.session_id,
           isError: !!e.is_error,
           error: e.is_error ? claudeError(e) : undefined,
           costUsd: e.total_cost_usd,

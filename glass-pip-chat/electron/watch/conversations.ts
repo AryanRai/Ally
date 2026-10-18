@@ -1,3 +1,4 @@
+import { unreadState } from '../agent/unread.js';
 import fs from 'node:fs';
 import { chatUserText, chatTitle } from '../agent/chatTitle.js';
 import { randomUUID } from 'node:crypto';
@@ -13,7 +14,7 @@ interface Dependencies {
   list: (provider: AgentProvider, limit: number) => Promise<AgentSessionSummary[]>;
   load: (provider: AgentProvider, id: string) => Promise<AgentSessionSnapshot>;
 }
-export const chatSummary = ({ messages: _messages, ...chat }: WatchChat) => chat;
+export const chatSummary = ({ messages: _messages, ...chat }: WatchChat) => ({ ...chat, unread: unreadState(chat.provider, chat.sessionId ?? chat.id).unread });
 const userText = chatUserText;
 
 export function watchHistory(messages: AgentHistoryMessage[], media?: DeviceMedia): WatchMessage[] {
@@ -72,9 +73,24 @@ export class WatchConversations {
     const chat: WatchChat = { id, provider, sessionId, cwd: snapshot.cwd ?? '', title: snapshot.title || messages.find(m => m.role === 'user')?.text.slice(0, 80) || `${provider} chat`, updatedAt: messages.at(-1)?.timestamp || Date.now(), messages };
     this.chats.push(chat); this.save(); return chat;
   }
+  private async loadLinkedSession(chat: WatchChat): Promise<AgentSessionSnapshot> {
+    const linked = chat.sessionId!;
+    try { return await this.deps.load(chat.provider, linked); }
+    catch (error) {
+      // A failed CLI resume can announce a new ID without ever creating its
+      // transcript. Recover only the original identity encoded in this chat,
+      // and only after the loader confirms that the replacement is missing.
+      const original = chat.id.startsWith(`${chat.provider}:`) ? chat.id.slice(chat.provider.length + 1) : '';
+      if (!original || original === linked || !(error instanceof Error) || error.message !== `${chat.provider} session ${linked} not found`) throw error;
+      const snapshot = await this.deps.load(chat.provider, original);
+      chat.sessionId = original;
+      this.save();
+      return snapshot;
+    }
+  }
   async history(chat: WatchChat): Promise<WatchMessage[]> {
     if (chat.sessionId) {
-      const snapshot = await this.deps.load(chat.provider, chat.sessionId);
+      const snapshot = await this.loadLinkedSession(chat);
       chat.sessionId = snapshot.sessionId ?? chat.sessionId;
       chat.cwd = snapshot.cwd ?? chat.cwd;
       chat.title = snapshot.title ?? chat.title;
@@ -95,7 +111,7 @@ export class WatchConversations {
   async prepareRun(id: string): Promise<WatchChat> {
     const chat = await this.get(id);
     if (chat.sessionId) {
-      const snapshot = await this.deps.load(chat.provider, chat.sessionId);
+      const snapshot = await this.loadLinkedSession(chat);
       if (snapshot.cwd) { chat.cwd = snapshot.cwd; this.save(); }
     }
     if (chat.cwd && !fs.existsSync(chat.cwd)) {
@@ -111,7 +127,8 @@ export class WatchConversations {
       if (native && native.title !== 'Ally chat') { chat.title = native.title; chat.updatedAt = Math.max(chat.updatedAt, native.updatedAt); }
     }
     const linked = new Set(this.chats.filter(c => c.provider === provider).map(c => c.sessionId).filter((id): id is string => !!id));
-    const all = [...this.chats.filter(c => c.provider === provider).map(chatSummary), ...external.filter(s => !linked.has(s.id) && !(s.originalSessionId && linked.has(s.originalSessionId))).map(s => ({ id: `${provider}:${s.id}`, provider, sessionId: s.id, title: userText(s.title), cwd: s.cwd ?? '', updatedAt: s.updatedAt }))].sort((a, b) => b.updatedAt - a.updatedAt);
+    const savedIds = new Set(this.chats.filter(c => c.provider === provider).map(c => c.id));
+    const all = [...this.chats.filter(c => c.provider === provider).map(chatSummary), ...external.filter(s => !savedIds.has(`${provider}:${s.id}`) && !linked.has(s.id) && !(s.originalSessionId && linked.has(s.originalSessionId))).map(s => ({ id: `${provider}:${s.id}`, provider, sessionId: s.id, title: userText(s.title), cwd: s.cwd ?? '', updatedAt: s.updatedAt, unread: unreadState(provider, s.id).unread }))].sort((a, b) => b.updatedAt - a.updatedAt);
     return { chats: all.slice(offset, offset + 30), nextOffset: all.length > offset + 30 ? offset + 30 : null };
   }
   running(sessions: AgentSessionSummary[], activeChatIds: string[] = []) {
@@ -119,7 +136,7 @@ export class WatchConversations {
     for (const session of sessions) {
       const linked = this.chats.find(c => c.provider === session.provider && (c.sessionId === session.id || (!!session.originalSessionId && c.sessionId === session.originalSessionId)));
       const row = linked ? { ...chatSummary(linked), title: chatTitle(session.title), cwd: session.cwd ?? linked.cwd, updatedAt: session.updatedAt }
-        : { id: `${session.provider}:${session.id}`, provider: session.provider, sessionId: session.id, title: chatTitle(session.title), cwd: session.cwd ?? '', updatedAt: session.updatedAt };
+        : { id: `${session.provider}:${session.id}`, provider: session.provider, sessionId: session.id, title: chatTitle(session.title), cwd: session.cwd ?? '', updatedAt: session.updatedAt, unread: unreadState(session.provider, session.id).unread };
       rows.set(row.id, row);
     }
     for (const id of activeChatIds) {

@@ -7,6 +7,10 @@ import { DEFAULT_THRESHOLDS } from './relevance.js';
 import type { CaptureToggles, PerceptionMode, RelevanceThresholds } from './types.js';
 
 export interface PerceptionSettings {
+  relevanceProvider: 'jev' | 'vertex' | 'heuristic';
+  vertexProject: string;
+  vertexLocation: string;
+  vertexModel: string;
   jevEnabled: boolean;
   jevApiKey?: string;
   jevModel: string;
@@ -22,6 +26,10 @@ export interface PerceptionSettings {
 export type PublicPerceptionSettings = Omit<PerceptionSettings, 'jevApiKey'> & { jevKeySet: boolean };
 
 const DEFAULTS: PerceptionSettings = {
+  relevanceProvider: 'jev',
+  vertexProject: '',
+  vertexLocation: 'global',
+  vertexModel: 'gemini-2.5-flash-lite',
   jevEnabled: true,
   jevModel: 'jev-latest',
   thresholds: DEFAULT_THRESHOLDS,

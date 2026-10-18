@@ -7,26 +7,29 @@ import { once } from 'node:events';
 import { afterEach, expect, it, vi } from 'vitest';
 import type { AgentEvent } from '../agent/types';
 
-const fake = vi.hoisted(() => ({ root: '', load: vi.fn(), start: vi.fn(), stop: vi.fn() }));
+const fake = vi.hoisted(() => ({ root: '', load: vi.fn(), start: vi.fn(), stop: vi.fn(), activity: vi.fn(), steer: vi.fn(), input: vi.fn() }));
 vi.mock('electron', () => ({ app: { getPath: () => fake.root } }));
-vi.mock('../agent/runner.js', () => ({ startAgentRun: fake.start, stopAgentRun: fake.stop, steerAgentRun: vi.fn() }));
+vi.mock('../agent/runner.js', () => ({ startAgentRun: fake.start, stopAgentRun: fake.stop, steerAgentRun: fake.input }));
 vi.mock('../agent/sessions.js', () => ({ listAgentSessions: vi.fn(), loadAgentSession: fake.load }));
 vi.mock('../agent/codexHistory.js', () => ({ listCodexChats: vi.fn(), loadCodexChat: fake.load, repairCodexDeviceTitle: vi.fn(async () => {}) }));
+vi.mock('../agent/codexDesktop.js', () => ({ readDesktopActivity: fake.activity, steerExternalDesktopChat: fake.steer }));
 vi.mock('../agent/runningSessions.js', () => ({ listRunningSessions: vi.fn(async () => []) }));
-vi.mock('../speech/runtime.js', () => ({ ensureSpeechRuntime: vi.fn(async () => ({})), getSpeechRuntimeStatus: vi.fn() }));
-vi.mock('../speech/settings.js', () => ({ speechSettings: vi.fn() }));
+vi.mock('../speech/runtime.js', () => ({ ensureSpeechRuntime: vi.fn(async () => ({})), getSpeechRuntimeStatus: vi.fn(async () => ({ ready: true, state: 'ready' })) }));
+vi.mock('../speech/settings.js', () => ({ speechSettings: vi.fn(() => ({ cloud: false })) }));
 vi.mock('./speechSocket.js', () => ({ attachSpeechSocket: () => () => {} }));
 vi.mock('../devices/socket.js', () => ({ attachDeviceSocket: () => () => {} }));
 vi.mock('../notifications.js', () => ({ notifyReply: vi.fn() }));
 vi.mock('./transport.js', () => ({ startWatchTransport: vi.fn() }));
 vi.mock('./cloudTunnel.js', () => ({ startCloudTunnel: vi.fn() }));
 import { startWatchBridge } from './bridge';
+import { messageQueue } from '../agent/messageQueue';
 
 let stop: (() => void) | undefined;
 afterEach(() => { stop?.(); vi.restoreAllMocks(); vi.clearAllMocks(); if (fake.root) fs.rmSync(fake.root, { recursive: true, force: true }); });
 
 it('publishes partial replies before completion and keeps exact-session routing, retries, continuation and Stop', async () => {
   fake.root = fs.mkdtempSync(path.join(os.tmpdir(), 'ally-live-bridge-'));
+  messageQueue.configure(path.join(fake.root, 'message-queue.json'));
   fs.writeFileSync(path.join(fake.root, 'watch-bridge.json'), JSON.stringify({ enabled: true, token: 'synthetic-only', port: 0, sessions: {} }));
   fs.writeFileSync(path.join(fake.root, 'watch-chats.json'), JSON.stringify([{ id: 'chat', provider: 'claude', sessionId: 'original', title: 'Synthetic', cwd: path.join(fake.root, 'deleted'), messages: [], updatedAt: 1 }]));
   fake.load.mockResolvedValue({ cwd: fake.root, messages: [] });
@@ -67,6 +70,7 @@ it('publishes partial replies before completion and keeps exact-session routing,
 
 it('authenticates media, keeps uploads inert, routes attachments to the original session and retains screenshots', async () => {
   fake.root = fs.mkdtempSync(path.join(os.tmpdir(), 'ally-attachment-bridge-'));
+  messageQueue.configure(path.join(fake.root, 'message-queue.json'));
   fs.writeFileSync(path.join(fake.root, 'watch-bridge.json'), JSON.stringify({ enabled: true, token: 'synthetic-only', port: 0, sessions: {} }));
   fs.writeFileSync(path.join(fake.root, 'watch-chats.json'), JSON.stringify([{ id: 'chat', provider: 'codex', sessionId: 'original', title: 'Synthetic', cwd: fake.root, messages: [], updatedAt: 1 }]));
   fake.load.mockResolvedValue({ cwd: fake.root, messages: [] });
@@ -116,4 +120,106 @@ it('authenticates media, keeps uploads inert, routes attachments to the original
     expect(saved[0].messages[1].attachments).toHaveLength(1);
   });
   expect(fake.start).toHaveBeenCalledTimes(1);
+});
+
+
+it('queues behind a native turn, preserves receipts and cancels queued work without stopping the owner', async () => {
+  fake.root = fs.mkdtempSync(path.join(os.tmpdir(), 'ally-native-queue-'));
+  messageQueue.configure(path.join(fake.root, 'message-queue.json'));
+  fs.writeFileSync(path.join(fake.root, 'watch-bridge.json'), JSON.stringify({ enabled: true, token: 'synthetic-only', port: 0, sessions: {} }));
+  fs.writeFileSync(path.join(fake.root, 'watch-chats.json'), JSON.stringify([{ id: 'chat', provider: 'codex', sessionId: 'original', title: 'Synthetic', cwd: fake.root, messages: [], updatedAt: 1 }]));
+  fake.load.mockResolvedValue({ cwd: fake.root, messages: [] });
+  fake.activity.mockResolvedValue({ running: true, idle: false }); fake.steer.mockResolvedValue(true);
+  fake.start.mockResolvedValue('queued-run');
+  const create = vi.spyOn(http, 'createServer');
+  stop = startWatchBridge(() => ({ defaultCwd: fake.root, permission: 'readonly', codexDesktop: true }));
+  const server = create.mock.results[0].value as http.Server;
+  if (!server.listening) await once(server, 'listening');
+  const base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+  const post = (route: string, body: object) => fetch(base + route, { method: 'POST', headers: { Authorization: 'Bearer synthetic-only', 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const message = { provider: 'codex', chatId: 'chat', requestId: 'queue-one', text: 'later', queueAfterCurrent: true };
+  const accepted = await (await post('/v1/messages', message)).json();
+  await vi.waitFor(() => expect(fake.activity).toHaveBeenCalledWith('original'), { timeout: 2500 });
+  expect(fake.start).not.toHaveBeenCalled();
+  expect((await (await post('/v1/messages', message)).json()).id).toBe(accepted.id);
+  expect((await post('/v1/messages', { ...message, queueAfterCurrent: false })).status).toBe(409);
+  expect(accepted.queued).toBe(true);
+  await post('/v1/queue/chat', { action: 'cancel', id: accepted.id, revision: accepted.queue.revision });
+  fake.activity.mockResolvedValue({ running: false, idle: true });
+  await new Promise(resolve => setTimeout(resolve, 3100));
+  expect(fake.start).not.toHaveBeenCalled(); expect(fake.stop).not.toHaveBeenCalled();
+  const steer = { requestId: 'steer-one', text: 'guidance', mode: 'steer' };
+  expect((await post('/v1/chats/chat/input', steer)).status).toBe(200);
+  expect((await post('/v1/chats/chat/input', steer)).status).toBe(200);
+  expect(fake.steer).toHaveBeenCalledExactlyOnceWith('original', 'guidance', 'steer-one', undefined);
+  expect((await post('/v1/chats/chat/input', { ...steer, text: 'changed' })).status).toBe(409);
+  fake.activity.mockResolvedValue(undefined);
+  await post('/v1/messages', { ...message, requestId: 'queue-two' });
+  expect(fake.start).not.toHaveBeenCalled();
+  fake.activity.mockResolvedValue({ running: false, idle: true });
+  await vi.waitFor(() => expect(fake.start).toHaveBeenCalledOnce(), { timeout: 4500 });
+  expect(fake.start.mock.calls[0][0]).toMatchObject({ sessionId: 'original', codexDesktop: true });
+}, 15000);
+
+
+it('accepts attachment-only queue and steer inputs, preserving upload and request identity', async () => {
+  fake.root = fs.mkdtempSync(path.join(os.tmpdir(), 'ally-input-media-'));
+  messageQueue.configure(path.join(fake.root, 'message-queue.json'));
+  fs.writeFileSync(path.join(fake.root, 'watch-bridge.json'), JSON.stringify({ enabled: true, token: 'synthetic-only', port: 0, sessions: {} }));
+  fs.writeFileSync(path.join(fake.root, 'watch-chats.json'), JSON.stringify([{ id: 'chat', provider: 'codex', sessionId: 'original', title: 'Synthetic', cwd: fake.root, messages: [], updatedAt: 1 }]));
+  fake.load.mockResolvedValue({ cwd: fake.root, messages: [] });
+  fake.start.mockResolvedValue('run'); fake.input.mockResolvedValue('queued'); fake.steer.mockResolvedValue(true);
+  const create = vi.spyOn(http, 'createServer'); stop = startWatchBridge(() => ({ defaultCwd: fake.root, permission: 'readonly', codexDesktop: true }));
+  const server = create.mock.results[0].value as http.Server;
+  if (!server.listening) await once(server, 'listening');
+  const base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+  const auth = { Authorization: 'Bearer synthetic-only' };
+  const post = (route: string, body: object) => fetch(base + route, { method: 'POST', headers: { ...auth, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  expect(await (await fetch(base + '/v1/status', { headers: auth })).json()).toMatchObject({ inputAttachments: true });
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a5WQAAAAASUVORK5CYII=', 'base64');
+  const asset = (await (await fetch(base + '/v1/attachments', { method: 'POST', headers: { ...auth, 'Content-Type': 'image/png', 'X-Ally-Filename': 'screen.png' }, body: png })).json()).attachment;
+  const turn = await (await post('/v1/messages', { provider: 'codex', chatId: 'chat', permission: 'readonly', requestId: 'first', text: 'ongoing task' })).json();
+  await vi.waitFor(() => expect(fake.start).toHaveBeenCalledOnce());
+  const input = { text: '', attachments: [asset.id], requestId: 'shared', mode: 'queue' };
+  expect((await post(`/v1/turns/${turn.id}/input`, input)).status).toBe(200);
+  expect((await post(`/v1/turns/${turn.id}/input`, input)).status).toBe(200);
+  expect(fake.input).not.toHaveBeenCalled();
+  const queue = await (await fetch(base+'/v1/queue/chat', { headers: auth })).json();
+  expect(queue.queue.items).toMatchObject([{ id: 'shared', text: '', attachments: [{ name: 'screen.png' }] }]);
+  const queued = messageQueue.claim('codex:original');
+  expect(queued?.images?.[0]).toContain(asset.id);
+  messageQueue.fail('codex:original', 'shared', 'Synthetic paused input');
+  expect((await post(`/v1/turns/${turn.id}/input`, { ...input, attachments: [] })).status).toBe(400);
+  expect((await post(`/v1/turns/${turn.id}/input`, { ...input, text: 'changed' })).status).toBe(409);
+  const steer = { ...input, requestId: 'steer-image', mode: 'steer' };
+  expect((await post('/v1/chats/chat/input', steer)).status).toBe(200);
+  expect((await post('/v1/chats/chat/input', steer)).status).toBe(200);
+  expect(fake.steer).toHaveBeenCalledExactlyOnceWith('original', expect.stringContaining('screen.png'), 'steer-image', [expect.stringContaining(asset.id)]);
+  expect((await post('/v1/chats/chat/input', { ...steer, attachments: ['f'.repeat(64)] })).status).toBe(400);
+});
+
+it('shares unread receipts across clients, never marks history reads, and rejects stale revisions', async () => {
+  const { configureUnread, completeUnread } = await import('../agent/unread.js');
+  fake.root = fs.mkdtempSync(path.join(os.tmpdir(), 'ally-read-bridge-'));
+  configureUnread(path.join(fake.root, 'read-state.json'));
+  messageQueue.configure(path.join(fake.root, 'message-queue.json'));
+  fs.writeFileSync(path.join(fake.root, 'watch-bridge.json'), JSON.stringify({ enabled: true, token: 'synthetic-only', port: 0, sessions: {} }));
+  fs.writeFileSync(path.join(fake.root, 'watch-chats.json'), JSON.stringify([{ id: 'chat', provider: 'claude', sessionId: 'original', title: 'Synthetic', cwd: fake.root, messages: [], updatedAt: 1 }]));
+  fake.load.mockResolvedValue({ cwd: fake.root, messages: [{ role: 'assistant', content: 'Reply', timestamp: 1 }] });
+  const create = vi.spyOn(http, 'createServer'); stop = startWatchBridge(() => ({ defaultCwd: fake.root, permission: 'readonly' }));
+  const server = create.mock.results[0].value as http.Server;
+  if (!server.listening) await once(server, 'listening');
+  const base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+  const auth = { Authorization: 'Bearer synthetic-only', 'Content-Type': 'application/json' };
+  const read = async () => (await fetch(base + '/v1/read-states', { headers: auth })).json();
+  const receipt = completeUnread('claude', 'original', 'one');
+  const history = await (await fetch(base + '/v1/chats/chat', { headers: auth })).json();
+  expect(history.readState).toEqual(receipt); expect((await read()).states[0].unread).toBe(true);
+  expect((await fetch(base + '/v1/read-states')).status).toBe(401);
+  const acknowledge = async (body: unknown) => (await fetch(base + '/v1/read-state', { method: 'POST', headers: auth, body: JSON.stringify(body) })).json();
+  const newer = completeUnread('claude', 'original', 'two');
+  expect(await acknowledge(receipt)).toEqual({ accepted: false });
+  expect((await read()).states[0].unread).toBe(true);
+  expect(await acknowledge(newer)).toEqual({ accepted: true });
+  expect((await read()).states[0].unread).toBe(false);
 });

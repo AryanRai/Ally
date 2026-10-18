@@ -8,6 +8,7 @@ export interface AgentTurnCallbacks {
   onThinking: (thinking: string) => void;
   /** Fired as soon as the agent reports its session id (new sessions only) */
   onSession?: (sessionId: string) => void;
+  onQueuedInput?: (id: string, text: string) => void;
 }
 
 export interface AgentTurnResult {
@@ -29,7 +30,7 @@ const PERMISSION_ORDER: AgentPermission[] = ['readonly', 'edit', 'full'];
 export function useAgentChat() {
   const available = typeof window !== 'undefined' && !!window.pip?.agent;
   const [config, setConfig] = useState<AgentConfig | null>(null);
-  const activeRun = useRef<{ stop: () => void; steer: (text: string) => Promise<'steered' | 'queued'> } | null>(null);
+  const activeRuns = useRef(new Map<string, { stop: () => void; steer: (text: string, mode?: 'auto' | 'steer' | 'queue') => Promise<'steered' | 'queued'> }>());
 
   useEffect(() => {
     if (!available) return;
@@ -63,10 +64,11 @@ export function useAgentChat() {
       images?: string[];
     },
     cb: AgentTurnCallbacks,
+    chatKey = 'default',
   ): Promise<AgentTurnResult> => {
     const agent = window.pip?.agent;
     if (!agent) throw new Error('Claude Code / Codex need the desktop app');
-    if (activeRun.current) throw new Error('A chat is already working');
+    if (activeRuns.current.has(chatKey)) throw new Error('This chat is already working');
 
     const segments: Segment[] = [];
     const tools = new Map<string, ToolExecution>();
@@ -96,7 +98,7 @@ export function useAgentChat() {
         if (settled) return;
         settled = true;
         unsubscribe();
-        activeRun.current = null;
+        activeRuns.current.delete(chatKey);
         // Anything still running when the turn ends was interrupted
         for (const t of tools.values()) {
           if (t.status === 'executing') { t.status = 'error'; t.error = 'Interrupted'; t.endTime = Date.now(); }
@@ -107,6 +109,9 @@ export function useAgentChat() {
       const handle = ({ event: ev }: { runId: string; event: AgentEvent }) => {
         if (settled) return;
         switch (ev.kind) {
+          case 'input':
+            if (ev.queuedId && ev.mode === 'steered') cb.onQueuedInput?.(ev.queuedId, ev.text);
+            break;
           case 'continuation':
             appendText('\n\n');
             break;
@@ -179,14 +184,14 @@ export function useAgentChat() {
         }
       };
       const inputRequests = new Map<string, string>();
-      activeRun.current = { stop: cancel, steer: async text => {
+      activeRuns.current.set(chatKey, { stop: cancel, steer: async (text, intent = 'auto') => {
         if (!runId || settled || cancelRequested) throw new Error('This response is not accepting input yet. Your draft is kept.');
-        const requestId = inputRequests.get(text) ?? crypto.randomUUID();
-        inputRequests.set(text, requestId);
-        const mode = await agent.steer(runId, text, requestId);
-        inputRequests.delete(text);
+        const requestId = inputRequests.get(intent + text) ?? crypto.randomUUID();
+        inputRequests.set(intent + text, requestId);
+        const mode = await agent.steer(runId, text, requestId, intent);
+        inputRequests.delete(intent + text);
         return mode;
-      } };
+      } });
 
       agent.send(opts)
         .then(id => {
@@ -199,21 +204,23 @@ export function useAgentChat() {
         .catch(err => {
           settled = true;
           unsubscribe();
-          activeRun.current = null;
+          activeRuns.current.delete(chatKey);
           reject(err);
         });
     });
   }, []);
 
-  const stop = useCallback(() => {
-    if (!activeRun.current) return false;
-    activeRun.current.stop();
+  const stop = useCallback((chatKey = 'default') => {
+    const run = activeRuns.current.get(chatKey);
+    if (!run) return false;
+    run.stop();
     return true;
   }, []);
 
-  const steer = useCallback(async (text: string) => {
-    if (!activeRun.current) throw new Error('This response has finished. Send your message again.');
-    return activeRun.current.steer(text);
+  const steer = useCallback(async (text: string, mode: 'auto' | 'steer' | 'queue' = 'auto', chatKey = 'default') => {
+    const run = activeRuns.current.get(chatKey);
+    if (!run) throw new Error('This response has finished. Send your message again.');
+    return run.steer(text, mode);
   }, []);
 
   return { steer, available, config, updateConfig, cyclePermission, pickFolder, runTurn, stop };

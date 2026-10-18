@@ -34,12 +34,14 @@ export default function PerceptionDebug({ open, onOpenChange, perception }: { op
   const [tab, setTab] = useState<Tab>('pipeline');
   const [settings, setSettings] = useState<PublicPerceptionSettings | null>(null);
   const [key, setKey] = useState('');
+  const [saveError, setSaveError] = useState('');
 
   useEffect(() => { if (open) void api?.getSettings().then(setSettings); }, [open, api]);
 
   const save = async (patch: Partial<PublicPerceptionSettings> & { jevApiKey?: string }) => {
     if (!api) return;
-    setSettings(await api.updateSettings(patch));
+    try { setSettings(await api.updateSettings(patch)); setSaveError(''); }
+    catch { setSaveError('Could not save relevance settings. Try again.'); }
   };
   const threshold = (k: keyof RelevanceThresholds, label: string, min: number, max: number, step: number, scale = 1) => settings && (
     <label className="flex items-center gap-2 text-xs">
@@ -70,7 +72,7 @@ export default function PerceptionDebug({ open, onOpenChange, perception }: { op
               {row('Computer audio', s.audio.system_audio)}
               {row('Microphone', s.audio.microphone)}
               {row('Screen', `${s.screen} · OCR ${s.ocr}`)}
-              {row('Relevance', `${s.relevance.engine === 'jev' ? 'Jev (TypeSafe)' : 'basic heuristics'}${s.relevance.degradedReason ? `: ${s.relevance.degradedReason}` : ''}`)}
+              {row('Relevance', `${s.relevance.engine === 'vertex' ? 'Gemini (Google Vertex AI)' : s.relevance.engine === 'jev' ? 'Jev (TypeSafe)' : 'basic heuristics'}${s.relevance.degradedReason ? `: ${s.relevance.degradedReason}` : ''}`)}
               {row('Agent turn', s.activeTurn ? `${s.activeTurn.origin} · ${s.activeTurn.state}${s.activeTurn.tools.length ? ` · tools: ${s.activeTurn.tools.join(', ')}` : ''}` : 'idle')}
               {row('Queue depth', s.queueDepth)}
               {row('Quiet mode', s.quiet ? 'on' : 'off')}
@@ -103,7 +105,26 @@ export default function PerceptionDebug({ open, onOpenChange, perception }: { op
           )) : <p className="text-xs text-muted-foreground">No agent turns yet.</p>)}
           {tab === 'settings' && settings && (
             <div className="space-y-3">
+              {saveError && <p role="alert" className="text-xs text-destructive">{saveError}</p>}
               <div className="space-y-1.5">
+                <p className="px-label">Relevance provider</p>
+                <label className="flex items-center gap-2 text-xs">Provider
+                  <select aria-label="Relevance provider" value={settings.relevanceProvider} onChange={e => void save({ relevanceProvider: e.target.value as PublicPerceptionSettings['relevanceProvider'] })} className="rounded border border-border bg-background px-2 py-1">
+                    <option value="vertex">Gemini · Google Cloud</option>
+                    <option value="jev">Jev · TypeSafe</option>
+                    <option value="heuristic">Basic · local only</option>
+                  </select>
+                </label>
+                <p className="text-[11px] text-muted-foreground">Remote providers receive recent transcript text, screen text and the selected chat scope during an enabled realtime session. Basic relevance uses no remote classifier; speech transcription keeps its own provider.</p>
+              </div>
+              {settings.relevanceProvider === 'vertex' && <div className="space-y-1.5">
+                <p className="px-label">Google Vertex AI</p>
+                <label className="block text-xs">Google Cloud project<Input aria-label="Google Cloud project" defaultValue={settings.vertexProject} onBlur={e => void save({ vertexProject: e.target.value.trim() })} placeholder="Project ID" className="mt-1 h-7 text-xs" /></label>
+                <label className="block text-xs">Location<Input aria-label="Vertex AI location" defaultValue={settings.vertexLocation} onBlur={e => void save({ vertexLocation: e.target.value.trim() })} className="mt-1 h-7 text-xs" /></label>
+                <label className="block text-xs">Model<Input aria-label="Gemini model" defaultValue={settings.vertexModel} onBlur={e => void save({ vertexModel: e.target.value.trim() })} className="mt-1 h-7 text-xs" /></label>
+                <p className="text-[11px] text-muted-foreground">Uses this computer's Google Application Default Credentials and bills the selected project. No API key needed. Gemini scores are estimates; thresholds and cooldowns still apply.</p>
+              </div>}
+              {settings.relevanceProvider === 'jev' && <div className="space-y-1.5">
                 <p className="px-label">Jev (TypeSafe)</p>
                 <label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={settings.jevEnabled} onChange={e => void save({ jevEnabled: e.target.checked })} /> Use Jev for relevance (basic heuristics otherwise)</label>
                 <div className="flex gap-2">
@@ -112,7 +133,7 @@ export default function PerceptionDebug({ open, onOpenChange, perception }: { op
                   {settings.jevKeySet && <Button size="sm" variant="ghost" onClick={() => void save({ jevApiKey: '' })}>Remove</Button>}
                 </div>
                 <p className="text-[11px] text-muted-foreground">Stored in Ally's settings on this computer, used only by the main process. Get a key at the TypeSafe console.</p>
-              </div>
+              </div>}
               <div className="space-y-1.5">
                 <p className="px-label">Thresholds</p>
                 {threshold('quiet', 'Quiet note at', 0.2, 0.9, 0.01)}

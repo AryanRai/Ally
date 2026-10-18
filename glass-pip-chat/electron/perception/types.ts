@@ -105,7 +105,7 @@ export interface RelevanceDecision {
   id: string;
   at: string;
   /** 'jev' when the TypeSafe API answered; 'fallback' when it is unconfigured or failing */
-  engine: 'jev' | 'fallback';
+  engine: 'jev' | 'vertex' | 'fallback';
   scores: RelevanceScores;
   outcome: RelevanceOutcome;
   /** Why the policy chose this outcome (thresholds, cooldowns, dedupe…) */
@@ -171,7 +171,7 @@ export interface PerceptionStatus {
   audio: Record<AudioSource, 'off' | 'listening' | 'speaking' | 'error'>;
   screen: 'off' | 'watching' | 'error';
   ocr: 'available' | 'unavailable' | 'unknown';
-  relevance: { engine: 'jev' | 'fallback'; degradedReason?: string; thresholds: RelevanceThresholds };
+  relevance: { engine: 'jev' | 'vertex' | 'fallback'; degradedReason?: string; thresholds: RelevanceThresholds };
   queueDepth: number;
   activeTurn?: AgentTurnInfo;
   quiet: boolean;

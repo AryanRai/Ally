@@ -1,10 +1,13 @@
 // @vitest-environment node
-import { afterEach, beforeEach, expect, it } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { scanRunningSessions } from './runningSessions';
 import { STALE_TURN_MS } from './sessionActivity';
+import { readDesktopActivity } from './codexDesktop';
+
+vi.mock('./codexDesktop', () => ({ readDesktopActivity: vi.fn(async () => undefined) }));
 
 let home: string;
 const now = Date.now();
@@ -54,4 +57,25 @@ it('finds active sessions beyond the recent-chat page', async () => {
 it('detects a long running turn whose start is outside the transcript preview', async () => {
   await write(`.codex/sessions/rollout-${id}.jsonl`, [ev('task_started'), { type: 'response_item', payload: { output: 'x'.repeat(700000) } }]);
   expect(await scanRunningSessions(home, now)).toHaveLength(1);
+});
+
+it('recovers an exact native running chat even when its rollout mtime is stale after restart', async () => {
+  const live = '33333333-3333-3333-3333-333333333333';
+  vi.mocked(readDesktopActivity).mockResolvedValueOnce({ running: true, idle: false, turnId: 'native-live' });
+  await write(`.codex/sessions/rollout-${live}.jsonl`, [
+    { type: 'session_meta', payload: { cwd: '/still-working' } }, ev('task_started'),
+  ], now - 10 * STALE_TURN_MS);
+  const rows = await scanRunningSessions(home, now);
+  expect(rows).toEqual([expect.objectContaining({ id: live, provider: 'codex', cwd: '/still-working', updatedAt: now })]);
+  expect(readDesktopActivity).toHaveBeenCalledWith(live);
+});
+
+it('does not revive stale pending work when its native owner is idle or unavailable', async () => {
+  const idle = '44444444-4444-4444-4444-444444444444';
+  const unavailable = '55555555-5555-5555-5555-555555555555';
+  vi.mocked(readDesktopActivity).mockResolvedValueOnce({ running: false, idle: true, turnId: 'finished' }).mockRejectedValueOnce(new Error('Desktop restarting'));
+  await write(`.codex/sessions/rollout-${idle}.jsonl`, [ev('task_started')], now - STALE_TURN_MS - 1);
+  await write(`.codex/sessions/rollout-${unavailable}.jsonl`, [ev('task_started')], now - STALE_TURN_MS - 1);
+  await write(`.claude/projects/project/${id}.jsonl`, [{ type: 'user', message: { content: 'Still working' } }]);
+  expect(await scanRunningSessions(home, now)).toEqual([expect.objectContaining({ provider: 'claude', id })]);
 });

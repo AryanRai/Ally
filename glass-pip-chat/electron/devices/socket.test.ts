@@ -24,12 +24,28 @@ it('requires bridge authorization and rejects browser origins', async () => {
 });
 it('rejects an unpaired device', async () => { const ws = await setup({}); const [error] = await once(ws, 'error'); expect(error.message).toContain('401'); });
 it('coexists with speech upgrade handling and waits for a real decision', async () => {
-  const ws = await setup(); await once(ws, 'open'); const ready = once(ws, 'message'); ws.send(JSON.stringify({ type: 'hello', deviceId: 'phone-one', kind: 'phone' }));
-  expect(JSON.parse((await ready)[0].toString()).type).toBe('ready');
-  const command = once(ws, 'message'); const result = mocks.tools.get('phone_notify').handler({ title: 'Test', body: 'Synthetic' }); const item = JSON.parse((await command)[0].toString()).command;
-  ws.send(JSON.stringify({ type: 'receipt', id: item.id, status: 'approved' })); ws.send(JSON.stringify({ type: 'receipt', id: item.id, status: 'done' }));
+  const ws = await setup(); const phone = messages(ws); await once(ws, 'open'); ws.send(JSON.stringify({ type: 'hello', deviceId: 'phone-one', kind: 'phone' }));
+  await phone('ready'); await phone('interaction_sync');
+  const watch = new WebSocket(`ws://127.0.0.1:${(server.address() as any).port}/v1/devices/live`, { headers: { Authorization: 'Bearer paired' } }); clients.push(watch);
+  const wearable = messages(watch); await once(watch, 'open'); watch.send(JSON.stringify({ type: 'hello', deviceId: 'watch-one', kind: 'watch' })); await wearable('ready'); await wearable('interaction_sync');
+  const result = mocks.tools.get('phone_notify').handler({ title: 'Test', body: 'Synthetic' }, { caller: 'codex:session-1234' });
+  const request = (await wearable('interaction')).request; expect(request.chatId).toBe('codex:session-1234'); expect(request.targetDeviceId).toBe('phone-one');
+  await phone('interaction'); expect(phone.queued('authorized_command')).toBe(false);
+  watch.send(JSON.stringify({ type: 'interaction_answer', id: request.id, action: 'accept' }));
+  expect((await wearable('interaction_ack')).accepted).toBe(true);
+  expect((await phone('interaction_closed')).answeredOn).toBe('watch');
+  const item = (await phone('authorized_command')).command;
+  expect(item.id).toBe(request.id); ws.send(JSON.stringify({ type: 'receipt', id: item.id, status: 'done' }));
   expect((await result).isError).toBe(false);
-  const card = once(ws, 'message'); mocks.cards({ id: 'card', priority: 'phone', title: 'Note', body: 'Synthetic' }); expect(JSON.parse((await card)[0].toString()).type).toBe('card');
+  mocks.cards({ id: 'card', priority: 'phone', title: 'Note', body: 'Synthetic' }); expect((await phone('card')).card.id).toBe('card');
   ws.send(JSON.stringify({ type: 'receipt', id: 'card', status: 'dismissed' })); await vi.waitFor(() => expect(mocks.dismiss).toHaveBeenCalledWith('card'));
-  const reply = once(ws, 'message'); mocks.reply({ id: 'reply', title: 'Reply ready', text: 'Synthetic reply' }); expect(JSON.parse((await reply)[0].toString()).card.id).toBe('reply:reply');
+  mocks.reply({ id: 'reply', title: 'Reply ready', text: 'Synthetic reply' }); expect((await phone('card')).card.id).toBe('reply:phone:reply');
 });
+
+function messages(ws: WebSocket) {
+  const queue: any[] = []; const waiting = new Map<string, (value: any) => void>();
+  ws.on('message', data => { const value = JSON.parse(data.toString()); const resolve = waiting.get(value.type); if (resolve) { waiting.delete(value.type); resolve(value); } else queue.push(value); });
+  const next = (type: string): Promise<any> => { const index = queue.findIndex(value => value.type === type); return index >= 0 ? Promise.resolve(queue.splice(index, 1)[0]) : new Promise(resolve => waiting.set(type, resolve)); };
+  next.queued = (type: string) => queue.some(value => value.type === type);
+  return next;
+}

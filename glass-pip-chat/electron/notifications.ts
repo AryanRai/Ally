@@ -7,7 +7,7 @@ const replyListeners = new Set<(notice: ReplyNotice) => void>();
 export function onReplyNotice(listener: (notice: ReplyNotice) => void): () => void {
   replyListeners.add(listener); return () => { replyListeners.delete(listener); };
 }
-export interface ReplyNotice { id: string; chatId?: string; title: string; text: string; desktopOnly?: boolean; session?: { id: string; provider: 'codex' | 'claude'; title: string; cwd: string } }
+export interface ReplyNotice { id: string; chatId?: string; title: string; text: string; readRevision?: string; desktopOnly?: boolean; session?: { id: string; provider: 'codex' | 'claude'; title: string; cwd: string } }
 export function notifyReply(notice: ReplyNotice): void {
   if (!notice || typeof notice.id !== 'string' || typeof notice.text !== 'string' || shown.has(notice.id)) return;
   shown.add(notice.id); if (shown.size > 500) shown.delete(shown.values().next().value!);

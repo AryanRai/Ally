@@ -51,7 +51,7 @@ internal fun QuickChats(model: WatchViewModel, state: WatchState, back: () -> Un
             Text("Switch chat", fontFamily = Tanker, fontSize = 20.sp)
             Text("···", fontSize = 18.sp, modifier = Modifier.clickable(onClick = allChats).semantics { contentDescription = "All chats, search and folders" }.padding(8.dp))
         } }
-        if (!model.canSwitchChat) item { Text("Finish this turn or resolve your draft to switch chats.", color = Amber, fontSize = 10.sp, textAlign = TextAlign.Center) }
+        if (!model.canSwitchChat) item { Text("Finish recording to switch chats.", color = Amber, fontSize = 10.sp, textAlign = TextAlign.Center) }
         item { Text("RUNNING · ${groups.running.size}", fontFamily = Mono, color = Amber, fontSize = 10.sp, modifier = Modifier.fillMaxWidth()) }
         items(groups.running, key = { "running:${it.id}" }) { chat ->
             ChatChoice(chat, state.chatId, model.canSwitchChat) { model.selectChat(chat.id); chosen() }

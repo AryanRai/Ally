@@ -23,6 +23,8 @@ const tsc = (entry, module) =>
 tsc('electron/main.ts', 'esnext');
 // Preload (CommonJS for Electron's preload loader)
 tsc('electron/preload.ts', 'commonjs');
+mkdirSync(join(outDir, 'electron/visualTutor'), { recursive: true });
+cpSync(join(rootDir, 'electron/visualTutor/preload.cjs'), join(outDir, 'electron/visualTutor/preload.cjs'));
 
 // Copy assets next to the build
 const assetsSource = join(rootDir, 'assets');

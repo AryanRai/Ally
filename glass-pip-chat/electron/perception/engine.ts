@@ -61,6 +61,8 @@ export class PerceptionEngine {
       recentNotes: () => this.cards.recentTitles(),
       context: ms => this.timeline.window(ms),
       jev: () => ({ enabled: this.settings.jevEnabled, apiKey: this.settings.jevApiKey, model: this.settings.jevModel }),
+      provider: () => this.settings.relevanceProvider,
+      vertex: () => ({ project: this.settings.vertexProject, location: this.settings.vertexLocation, model: this.settings.vertexModel }),
       thresholds: () => this.settings.thresholds,
       onDecision: d => this.onDecision(d),
     });
