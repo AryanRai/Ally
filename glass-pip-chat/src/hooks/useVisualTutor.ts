@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import type { TutorBoard } from '../../electron/visualTutor/types';
+import type { TutorAction, TutorBoard } from '../../electron/visualTutor/types';
 
 type Send = (text: string, source: 'circle', extras: { image: { path: string; thumbnail: string } }) => Promise<{ error?: string } | undefined>;
 export function tutorRequest(text: string, board: TutorBoard | null, chatId?: string): string {
@@ -13,6 +13,8 @@ export function useVisualTutor(chatId: string | undefined, send: Send) {
   const [board, setBoard] = useState<TutorBoard | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [pendingSelection, setPendingSelection] = useState(false);
+  const pending = useRef<{ boardId: string; chatId: string; image: { path: string; thumbnail: string } } | null>(null);
   const current = useRef({ chatId, send }); current.current = { chatId, send };
   const boardRef = useRef(board); boardRef.current = board;
   const starting = useRef(false);
@@ -20,7 +22,7 @@ export function useVisualTutor(chatId: string | undefined, send: Send) {
     const api = window.pip?.tutor;
     if (!api) return;
     let received = false;
-    const off = api.onChanged(next => { received = true; setBoard(next); });
+    const off = api.onChanged(next => { received = true; boardRef.current = next; setBoard(next); if (pending.current && next?.id !== pending.current.boardId) { pending.current = null; setPendingSelection(false); } });
     void api.state().then(next => { if (!received) setBoard(next); }).catch(error => setError(error.message));
     return off;
   }, []);
@@ -29,9 +31,10 @@ export function useVisualTutor(chatId: string | undefined, send: Send) {
     if (active && active.chatId !== chatId) {
       void window.pip?.tutor?.end(active.id).catch(error => setError(error.message));
       setBoard(null);
+      pending.current = null; setPendingSelection(false);
     }
   }, [chatId, board?.id]);
-  const start = async (topic: string, displayId?: number, circleCaptureId?: string, originatingChatId?: string) => {
+  const start = async (topic: string, displayId?: number, circleCaptureId?: string, originatingChatId?: string, attachOnly = false) => {
     const api = window.pip?.tutor;
     if (!api) { setError('Visual tutor needs the updated desktop app.'); return; }
     const target = current.current;
@@ -44,7 +47,13 @@ export function useVisualTutor(chatId: string | undefined, send: Send) {
       opened = capture.board;
       if (current.current.chatId !== target.chatId) { await api.end(opened.id); return; }
       setBoard(opened);
+      boardRef.current = opened;
       setBusy(false);
+      if (attachOnly) {
+        pending.current = { boardId: opened.id, chatId: target.chatId, image: { path: capture.imagePath, thumbnail: capture.thumbnail } };
+        setPendingSelection(true);
+        return;
+      }
       // Capture ownership is settled before sending; follow-ups can use existing chat/voice.
       const result = await target.send(tutorRequest(topic.trim() || 'Explain what I am looking at, step by step, with drawings.', opened, target.chatId), 'circle', { image: { path: capture.imagePath, thumbnail: capture.thumbnail } });
       if (result?.error) throw new Error(result.error);
@@ -54,9 +63,20 @@ export function useVisualTutor(chatId: string | undefined, send: Send) {
       // already have accepted the message. Only explicit end/chat change revokes it.
     } finally { starting.current = false; setBusy(false); }
   };
-  return { board: board?.chatId === chatId ? board : null, busy, error, start,
+  const action = (action: TutorAction) => { if (board) void window.pip?.tutor?.action(board.id, action).catch(error => setError(error.message)); };
+  return { board: board?.chatId === chatId ? board : null, busy, error, start, pendingSelection,
+    attach: (token: string, target: string) => start('', undefined, token, target, true),
+    claimAttachment: (blocked = false): { blocked: boolean; image?: { path: string; thumbnail: string } } => {
+      const selection = pending.current;
+      if (!selection || selection.chatId !== current.current.chatId || selection.boardId !== boardRef.current?.id) return { blocked: false };
+      if (blocked) { setError('Selection attached. Send it when the current response finishes.'); return { blocked: true }; }
+      pending.current = null; setPendingSelection(false); setError('');
+      return { blocked: false, image: selection.image };
+    },
+    action,
+    hide: () => action('chat'),
     decorate: (text: string) => tutorRequest(text, boardRef.current, current.current.chatId),
     show: () => { if (board) void window.pip?.tutor?.show(board.id).catch(error => setError(error.message)); },
-    end: () => { if (board) void window.pip?.tutor?.end(board.id).catch(error => setError(error.message)); },
+    end: () => { pending.current = null; setPendingSelection(false); if (board) void window.pip?.tutor?.end(board.id).catch(error => setError(error.message)); },
   };
 }

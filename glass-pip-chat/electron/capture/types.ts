@@ -4,6 +4,7 @@ export interface CircleSubmit {
   rect?: CircleRect;
   prompt: string;
   mode?: 'draw';
+  attachOnly?: boolean;
 }
 export interface CircleAsk {
   imagePath: string;
@@ -11,6 +12,7 @@ export interface CircleAsk {
   prompt: string;
   chatId?: string;
   tutorCaptureId?: string;
+  attachOnly?: boolean;
 }
 
 export interface CircleContext { title: string; hasChat: boolean; display: { width: number; height: number }; anchor?: CircleRect }

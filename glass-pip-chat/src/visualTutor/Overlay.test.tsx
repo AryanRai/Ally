@@ -67,11 +67,13 @@ describe('visual teaching overlay', () => {
   });
   it('offers explicit freeze, sketch, chat and end controls without opening audio capture', async () => {
     const { api } = await mount();
-    for (const [label, action] of [['Freeze snapshot for stable drawings', 'freeze'], ['Sketch a question', 'sketch'], ['Back to chat', 'chat'], ['End visual tutor', 'close']]) {
+    for (const [label, action] of [['Freeze snapshot for stable drawings', 'freeze'], ['Sketch a question', 'sketch'], ['Minimise drawing', 'chat']]) {
       fireEvent.click(screen.getByRole('button', { name: label })); expect(api.action).toHaveBeenLastCalledWith('test-session', action);
     }
     expect(screen.getByRole('button', { name: 'Previous step' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Next step' })).toBeDisabled();
+    fireEvent.keyDown(window, { key: 'Escape' }); expect(api.action).toHaveBeenLastCalledWith('test-session', 'chat');
+    expect(screen.queryByText(board.steps[0].explanation)).not.toBeInTheDocument();
   });
   it('shows snapshot mode and reader-controlled navigation as state changes', async () => {
     const { changed, api } = await mount();

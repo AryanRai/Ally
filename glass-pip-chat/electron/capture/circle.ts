@@ -50,6 +50,7 @@ function closeOverlay() {
   overlay?.close();
   overlay = null;
   shot = null;
+  getMain()?.setAlwaysOnTop(true, 'floating');
 }
 
 function pruneOldCaptures() {
@@ -118,15 +119,13 @@ export async function startCircle(): Promise<void> {
       overlay = null;
     });
     overlay.on('blur', () => {
-      // Clicking another window (e.g. alt-tab) abandons the selection
-      if (overlay) {
-        closeOverlay();
-        restoreMain(false);
-      }
+      // The real pill stays usable while selecting; unrelated app switches cancel.
+      setTimeout(() => { if (overlay && BrowserWindow.getFocusedWindow() !== getMain()) { closeOverlay(); restoreMain(false); } }, 0);
     });
     overlay.once('ready-to-show', () => {
       overlay?.show();
       overlay?.focus();
+      main?.setAlwaysOnTop(true, 'screen-saver'); main?.showInactive(); main?.moveTop();
     });
 
     if (process.env.VITE_DEV_SERVER_URL) {
@@ -168,7 +167,7 @@ export function registerCircleIpc(mainWindow = getWindow): void {
   ipcMain.handle('circle:submit', async (event, payload: CircleSubmit) => {
     if (event.sender !== overlay?.webContents || event.senderFrame !== event.sender.mainFrame) throw Error('Submit the selection from Circle.');
     if (!shot) return;
-    if (!payload || typeof payload.prompt !== 'string' || payload.prompt.length > 8000 || (payload.mode != null && payload.mode !== 'draw')) throw Error('Invalid Circle request.');
+    if (!payload || typeof payload.prompt !== 'string' || payload.prompt.length > 8000 || (payload.mode != null && payload.mode !== 'draw') || (payload.attachOnly != null && typeof payload.attachOnly !== 'boolean')) throw Error('Invalid Circle request.');
     const { display, chatId } = shot;
     const rect = payload.rect ? circleRegion(payload.rect, display.bounds) : undefined;
     if (!chatId || chatId !== selectedChatId) throw Error('Choose a chat in Ally, then select the area again.');
@@ -176,7 +175,7 @@ export function registerCircleIpc(mainWindow = getWindow): void {
     // Its exact frozen crop is consumed once; no separate drawing capture or mode.
     const tutorCaptureId = tutorHandoff.issue(chatId, { ...shot, rect });
     closeOverlay(); restoreMain(true);
-    sendToRenderer('circle:ask', { imagePath: '', thumbnail: '', prompt: payload.prompt, chatId, tutorCaptureId } satisfies CircleAsk);
+    sendToRenderer('circle:ask', { imagePath: '', thumbnail: '', prompt: payload.prompt, chatId, tutorCaptureId, ...(payload.attachOnly ? { attachOnly: true } : {}) } satisfies CircleAsk);
   });
 
   app.on('will-quit', () => { closeOverlay(); tutorHandoff.clear(); });

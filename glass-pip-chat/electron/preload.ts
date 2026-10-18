@@ -129,6 +129,7 @@ const pipAPI = {
   },
 
   tutor: {
+    action: (id: string, action: import('./visualTutor/types').TutorAction) => ipcRenderer.invoke('tutor:action', id, action),
     show: (id: string) => ipcRenderer.invoke('tutor:show', id),
     start: (chatId: string, displayId?: number, circleCaptureId?: string) => ipcRenderer.invoke('tutor:start', chatId, displayId, circleCaptureId),
     displays: () => ipcRenderer.invoke('tutor:displays'),

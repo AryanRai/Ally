@@ -141,13 +141,15 @@ export default function GlassChatPiP() {
   const handleSend = async (messageInput?: string, fromQuickInput = false, mode: 'auto' | 'steer' | 'queue' = 'queue') => {
     const text = (messageInput ?? (fromQuickInput ? quickInput : input)).trim();
     if (!text) return;
+    const attachment = tutor.claimAttachment(activeIsWorking || externalWorking);
+    if (attachment.blocked) return;
     if (fromQuickInput) setQuickInput('');
     else setInput('');
     setInputHistory(prev => [...prev.filter(h => h !== text), text].slice(-50));
 
     const includeClipboard = context.shouldIncludeContext(fromQuickInput, state.collapsed);
     if (includeClipboard) context.clearNewContextFlag();
-    const result = await conversation.send(tutor.decorate(text), 'text', { mode, context: includeClipboard ? context.contextData.clipboard : undefined });
+    const result = await conversation.send(tutor.decorate(text), 'text', { mode, image: attachment.image, context: includeClipboard ? context.contextData.clipboard : undefined });
     if (result?.error) {
       // Preserve anything typed meanwhile; a failure also keeps a saved copy per chat.
       if (fromQuickInput) setQuickInput(current => current || text);
@@ -161,11 +163,13 @@ export default function GlassChatPiP() {
     const text = speech.lastRecognizedText;
     if (!text || !speech.voiceModeEnabled || speech.recognitionId === lastSpeechRef.current) return;
     lastSpeechRef.current = speech.recognitionId;
+    const attachment = tutor.claimAttachment(activeIsWorking || externalWorking);
+    if (attachment.blocked) { setInput(current => current ? `${current}\n${text}` : text); return; }
     if (isTyping) {
       speech.stopCurrentSpeech();
-      conversation.send(tutor.decorate(text), 'speech');
+      conversation.send(tutor.decorate(text), 'speech', { image: attachment.image });
     } else {
-      conversation.send(tutor.decorate(text), 'speech');
+      conversation.send(tutor.decorate(text), 'speech', { image: attachment.image });
     }
   }, [speech.recognitionId, speech.voiceModeEnabled]);
 
@@ -246,8 +250,13 @@ export default function GlassChatPiP() {
   conversationRef.current = conversation;
   const circleTarget = useRef({ chatId: activeChat?.id, agent: activeChat?.agent, tutor });
   circleTarget.current = { chatId: activeChat?.id, agent: activeChat?.agent, tutor };
-  useEffect(() => window.pip?.circle.onAsk(async ({ imagePath, thumbnail, prompt, chatId, tutorCaptureId }) => {
+  useEffect(() => window.pip?.circle.onAsk(async ({ imagePath, thumbnail, prompt, chatId, tutorCaptureId, attachOnly }) => {
     if (chatId && circleTarget.current.chatId !== chatId) return;
+    if (attachOnly && tutorCaptureId && chatId) {
+      await circleTarget.current.tutor.attach(tutorCaptureId, chatId);
+      (document.getElementById('quick-input') ?? inputRef.current)?.focus();
+      return;
+    }
     const meeting = perceptionRef.current.status?.session;
     const agent = circleTarget.current.agent;
     const sameMeeting = meeting?.state === 'running' && meeting.provider === agent?.provider && meeting.sessionId === agent?.sessionId;
@@ -488,7 +497,8 @@ export default function GlassChatPiP() {
                 uiSettings={appSettings.ui}
                 currentResponse={currentResponse || meetingTurn?.text}
                 responseSegments={currentResponse ? streamingSegments : undefined}
-                meetingControls={<><MessageQueueStack chatId={activeChat?.agent?.sessionId ? `${activeChat.agent.provider}:${activeChat.agent.sessionId}` : undefined} /><VisualTutorControls tutor={tutor} disabled={!activeChat || activeIsWorking || externalWorking} /></>}
+                meetingControls={<MessageQueueStack chatId={activeChat?.agent?.sessionId ? `${activeChat.agent.provider}:${activeChat.agent.sessionId}` : undefined} />}
+                drawingControls={<VisualTutorControls tutor={tutor} disabled={!activeChat || activeIsWorking || externalWorking} />}
                 menuControls={<PerceptionBar perception={perception} chat={activeChat} onOpenSession={openMeetingChat} />}
                 currentModel={conversation.model}
                 showModelSelector={showModelSelector}
