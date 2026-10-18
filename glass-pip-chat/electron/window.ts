@@ -189,6 +189,9 @@ export async function createWindow(): Promise<void> {
       visualEffectState: 'active' as const,
     } : {}),
     ...(process.platform === 'win32' ? {
+      // Remove the maximize/snap affordance, retaining WS_THICKFRAME for manual
+      // edge resizing and native rounded corners.
+      maximizable: false,
       backgroundMaterial: 'acrylic' as const,
       titleBarStyle: 'hidden' as const,
       titleBarOverlay: false
