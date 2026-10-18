@@ -1,0 +1,13 @@
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" android:layout_width="match_parent" android:layout_height="match_parent" android:orientation="vertical" android:padding="12dp" android:background="@drawable/widget_panel">
+    <LinearLayout android:layout_width="match_parent" android:layout_height="28dp" android:gravity="center_vertical">
+        <TextView android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:text="ALLY" android:fontFamily="@font/tanker" android:textSize="26sp" android:textColor="#F4F4F5"/>
+        <TextView android:id="@+id/widget_refresh" android:layout_width="44dp" android:layout_height="28dp" android:text="↻" android:gravity="center" android:textSize="22sp" android:textColor="#99999E" android:contentDescription="Refresh agent status"/>
+    </LinearLayout>
+    <TextView android:id="@+id/widget_status" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Agents · tap refresh" android:fontFamily="@font/geist_regular" android:textSize="16sp" android:textColor="#F4F4F5" android:maxLines="1" android:ellipsize="end"/>
+    <TextView android:id="@+id/widget_chat" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:gravity="center_vertical" android:text="Open Ally to see your agents" android:fontFamily="@font/geist_regular" android:textSize="12sp" android:textColor="#B5B5BB" android:maxLines="1" android:ellipsize="end"/>
+    <TextView android:id="@+id/widget_checked" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Tap refresh to check" android:fontFamily="@font/geist_mono" android:textSize="9sp" android:textColor="#99999E" android:layout_marginBottom="6dp"/>
+    <LinearLayout android:layout_width="match_parent" android:layout_height="36dp">
+        <TextView android:id="@+id/widget_voice" android:layout_width="0dp" android:layout_weight="1" android:layout_height="match_parent" android:background="@drawable/widget_primary" android:gravity="center" android:text="Talk to Ally" android:fontFamily="@font/geist_regular" android:textColor="#0C0C0D" android:textSize="12sp" android:contentDescription="Start Ally voice input"/>
+        <TextView android:id="@+id/widget_agents" android:layout_width="0dp" android:layout_weight="1" android:layout_height="match_parent" android:layout_marginStart="8dp" android:background="@drawable/widget_secondary" android:gravity="center" android:text="Agents ↗" android:fontFamily="@font/geist_regular" android:textColor="#F4F4F5" android:textSize="12sp" android:contentDescription="Open agent monitor without listening"/>
+    </LinearLayout>
+</LinearLayout>

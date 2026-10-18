@@ -1,7 +1,8 @@
 import fs from 'node:fs/promises';
+import { CodexDiscovery, hiddenConversation } from './codexDiscovery.js';
 import os from 'node:os';
 import path from 'node:path';
-import { claudeActivityAt, claudeTurnPending, isRunning } from './sessionActivity.js';
+import { claudeActivityAt, claudeTurnPending, claudeTerminalStatus, isRunning } from './sessionActivity.js';
 import type { AgentProvider, AgentSessionSummary } from './types.js';
 import { readCodexActivity } from './codexActivity.js';
 import { chatTitle } from './chatTitle.js';
@@ -11,6 +12,8 @@ const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
 const managed = new Map<string, AgentSessionSummary>();
 const settled = new Map<string, number>();
 const finishedRuns = new Set<string>();
+export interface SessionActivity extends AgentSessionSummary { status: 'running' | 'completed' | 'stopped' | 'error' }
+const recentActivity = new Map<string, SessionActivity>();
 export function isManagedSessionRunning(provider: AgentProvider, id: string) {
   return [...managed.values()].some(s => s.provider === provider && s.id === id);
 }
@@ -39,8 +42,10 @@ async function edges(file: string, size: number) {
   } finally { await handle.close(); }
 }
 
-export async function scanRunningSessions(home = os.homedir(), now = Date.now()): Promise<AgentSessionSummary[]> {
+export async function scanRunningSessions(home = os.homedir(), now = Date.now(), observe?: (rows: SessionActivity[]) => void): Promise<AgentSessionSummary[]> {
+  const discovery = new CodexDiscovery(home);
   const result = new Map<string, { summary: AgentSessionSummary; pending: boolean }>();
+  const observed = new Map<string, SessionActivity>();
   const titles = new Map<string, string>();
   try { for (const r of jsonl(await fs.readFile(path.join(home, '.codex', 'session_index.jsonl'), 'utf8'))) if (r.id && r.thread_name) titles.set(r.id, r.thread_name); } catch { /* no Codex history */ }
   const visit = async (dir: string, provider: AgentProvider, depth: number) => {
@@ -55,6 +60,7 @@ export async function scanRunningSessions(home = os.homedir(), now = Date.now())
       const id = entry.name.match(UUID)?.[0];
       if (!entry.isFile() || !entry.name.endsWith('.jsonl') || !id) continue;
       try {
+        if (provider === 'codex' && discovery.file(file)?.internal) continue;
         const stat = await fs.stat(file);
         const recent = isRunning(true, stat.mtimeMs, now);
         if (!recent && provider !== 'codex') continue;
@@ -75,6 +81,9 @@ export async function scanRunningSessions(home = os.homedir(), now = Date.now())
         const title = titles.get(id) || (customTitle !== 'Chat' ? customTitle : '') || textContent(prompt?.message?.content ?? prompt?.payload?.content).replace(/<[^>]+>[\s\S]*?<\/[^>]+>/g, '').trim() || `${provider === 'codex' ? 'Codex' : 'Claude'} chat`;
         const summary = { id, provider, title: chatTitle(title), cwd, updatedAt: native?.running ? now : stat.mtimeMs };
         const key = `${provider}:${id}`;
+        const live = provider === 'codex' ? native?.running === true || activity?.pending === true : isRunning(claudeTurnPending(tail), claudeActivityAt(tail, stat.mtimeMs), now);
+        const status = live ? 'running' : provider === 'codex' ? activity?.status : claudeTerminalStatus(tail);
+        if (status && status !== 'running' && (observed.get(key)?.updatedAt ?? 0) <= summary.updatedAt) observed.set(key, { ...summary, status });
         // Continuations belong to the original chat. The latest written file wins.
         if ((result.get(key)?.summary.updatedAt ?? 0) <= summary.updatedAt) result.set(key, { summary, pending: provider === 'codex' ? native?.running === true || activity?.pending === true : isRunning(claudeTurnPending(tail), claudeActivityAt(tail, stat.mtimeMs), now) });
       } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
@@ -82,6 +91,7 @@ export async function scanRunningSessions(home = os.homedir(), now = Date.now())
   };
   await visit(path.join(home, '.claude', 'projects'), 'claude', 1);
   await visit(path.join(home, '.codex', 'sessions'), 'codex', 4);
+  observe?.([...observed.values()].filter(s => !result.get(`${s.provider}:${s.id}`)?.pending));
   return [...result.values()].filter(r => r.pending).map(r => r.summary).sort((a, b) => b.updatedAt - a.updatedAt);
 }
 
@@ -101,11 +111,23 @@ let cached: { at: number; sessions: AgentSessionSummary[] } | undefined;
 let pending: Promise<AgentSessionSummary[]> | undefined;
 export async function listRunningSessions(): Promise<AgentSessionSummary[]> {
   if (!cached || Date.now() - cached.at > 4000) {
-    pending ??= scanRunningSessions().then(sessions => { cached = { at: Date.now(), sessions }; return sessions; }).finally(() => { pending = undefined; });
+    pending ??= scanRunningSessions(undefined, Date.now(), rows => {
+      for (const row of rows) recentActivity.set(`${row.provider}:${row.id}`, row);
+      for (const [key, row] of recentActivity) if (Date.now() - row.updatedAt > 30 * 60_000) recentActivity.delete(key);
+    }).then(sessions => { cached = { at: Date.now(), sessions }; return sessions; }).finally(() => { pending = undefined; });
     await pending;
   }
   for (const [key, at] of settled) if (Date.now() - at > 10 * 60_000) settled.delete(key);
   const merged = new Map((cached?.sessions ?? []).filter(s => s.updatedAt > (settled.get(`${s.provider}:${s.id}`) ?? 0)).map(s => [`${s.provider}:${s.id}`, s]));
   for (const s of managed.values()) merged.set(`${s.provider}:${s.id}`, { ...s, title: merged.get(`${s.provider}:${s.id}`)?.title ?? s.title });
-  return [...merged.values()].sort((a, b) => b.updatedAt - a.updatedAt);
+  for (const key of merged.keys()) recentActivity.delete(key);
+  return [...merged.values()].filter(s => !hiddenConversation(s.provider, s.id)).sort((a, b) => b.updatedAt - a.updatedAt);
+}
+
+/** Same bounded read-only scan as the running picker, plus confirmed recent endings. */
+export async function listSessionActivity(): Promise<SessionActivity[]> {
+  const running = await listRunningSessions();
+  const rows = new Map([...recentActivity].filter(([, row]) => Date.now() - row.updatedAt <= 30 * 60_000));
+  for (const row of running) rows.set(`${row.provider}:${row.id}`, { ...row, status: 'running' });
+  return [...rows.values()].filter(s => !hiddenConversation(s.provider, s.id)).sort((a, b) => b.updatedAt - a.updatedAt);
 }

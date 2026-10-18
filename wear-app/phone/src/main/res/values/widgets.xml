@@ -1,0 +1,4 @@
+<resources>
+    <string name="widget_agents_label">Ally · Agents</string><string name="widget_agents_description">Agent status, recent replies and quick voice access. Shows when status was checked.</string>
+    <string name="widget_quick_label">Ally · Quick actions</string><string name="widget_quick_description">Talk to Ally, open the agent monitor or view your inbox.</string>
+</resources>

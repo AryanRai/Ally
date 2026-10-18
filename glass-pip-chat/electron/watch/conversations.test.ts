@@ -10,6 +10,25 @@ let root: string;
 beforeEach(() => { root = fs.mkdtempSync(path.join(os.tmpdir(), 'ally-watch-chats-')); });
 afterEach(() => fs.rmSync(root, { recursive: true, force: true }));
 describe('watch conversations', () => {
+  it('keeps native creation order after open, completion, refresh and restart', async () => {
+    const native = [
+      {id:'new',provider:'codex' as const,title:'New',createdAt:20,updatedAt:30},
+      {id:'old',provider:'codex' as const,title:'Old',createdAt:10,updatedAt:999},
+    ];
+    const deps = {list:vi.fn(async()=>native),load:vi.fn(async()=>({createdAt:10,revision:'1',messages:[{role:'user' as const,content:'Original',timestamp:11}]}))};
+    const file=path.join(root,'stable.json');
+    let store=new WatchConversations(file,deps,{},root);
+    const ids=async()=> (await store.list('codex')).chats.map(c=>c.id);
+    expect(await ids()).toEqual(['codex:new','codex:old']);
+    const old=await store.get('codex:old');
+    store.record(old,'Follow-up',{text:'Done',components:[]},{steps:[]},'turn');
+    await store.history(old);
+    expect(await ids()).toEqual(['codex:new','codex:old']);
+    store=new WatchConversations(file,deps,{},root);
+    expect(await ids()).toEqual(['codex:new','codex:old']);
+    store.create('codex',root,'fresh');
+    expect((await ids())[0]).toBe('fresh');
+  });
   it('recovers the exact original Claude transcript when a replacement session was never created', async () => {
     const original = 'original-session', missing = 'missing-session';
     const load = vi.fn(async (_provider: string, id: string) => {
@@ -76,7 +95,7 @@ describe('watch conversations', () => {
     expect(fs.existsSync(missing)).toBe(false);
   });
   it('paginates native chats even when an unsent watch chat has no session yet', async () => {
-    const native = Array.from({ length: 65 }, (_, i) => ({ id: `native-${i}`, provider: 'codex' as const, title: `Chat ${i}`, updatedAt: 100 - i }));
+    const native = Array.from({ length: 65 }, (_, i) => ({ id: `native-${i}`, provider: 'codex' as const, title: `Chat ${i}`, createdAt: 100 - i, updatedAt: 100 - i }));
     const deps = { list: vi.fn(async (_provider: string, limit: number) => native.slice(0, limit)), load: vi.fn() };
     const store = new WatchConversations(path.join(root, 'chats.json'), deps, {}, '/home');
     store.create('codex', '/home');

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { AgentSessionSummary } from '@/types/agent';
 
 const LIMIT_PER_AGENT = 80;
@@ -10,18 +10,28 @@ const REFRESH_MS = 15_000;
  */
 export function useExternalSessions() {
   const [sessions, setSessions] = useState<AgentSessionSummary[]>([]);
+  const refreshing = useRef<Promise<void> | undefined>(undefined);
+  const mounted = useRef(false);
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback((): Promise<void> => {
+    if (refreshing.current) return refreshing.current;
     const agent = window.pip?.agent;
-    if (!agent) return;
-    const results = await Promise.allSettled([
-      agent.listSessions('claude', LIMIT_PER_AGENT),
-      agent.listSessions('codex', LIMIT_PER_AGENT),
-    ]);
-    setSessions(results.flatMap(r => (r.status === 'fulfilled' ? r.value : [])));
+    if (!agent || !mounted.current) return Promise.resolve();
+    const providers = ['claude', 'codex'] as const;
+    const pending = Promise.allSettled(providers.map(provider => agent.listSessions(provider, LIMIT_PER_AGENT)))
+      .then(results => {
+        if (!mounted.current) return;
+        // A failed refresh is not an authoritative empty list. Successful
+        // providers still replace their rows, including legitimate removals.
+        setSessions(previous => results.flatMap((result, i) => result.status === 'fulfilled'
+          ? result.value : previous.filter(session => session.provider === providers[i])));
+      }).finally(() => { if (refreshing.current === pending) refreshing.current = undefined; });
+    refreshing.current = pending;
+    return pending;
   }, []);
 
   useEffect(() => {
+    mounted.current = true;
     void refresh();
     const interval = setInterval(refresh, REFRESH_MS);
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -31,6 +41,7 @@ export function useExternalSessions() {
     });
     window.addEventListener('focus', refresh);
     return () => {
+      mounted.current = false;
       clearInterval(interval);
       clearTimeout(timer);
       unsubscribe?.();

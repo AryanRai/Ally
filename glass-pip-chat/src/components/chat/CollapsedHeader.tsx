@@ -1,17 +1,24 @@
 import { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowUp, ChevronDown, Clipboard, GripVertical, Lasso, Maximize2, MoreHorizontal, Square, Volume2, VolumeX, X } from 'lucide-react';
+import { ArrowUp, ChevronDown, Clipboard, GripVertical, Lasso, Maximize2, MoreHorizontal, Play, Square, Volume2, VolumeX, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { Message, Segment } from '@/types/chat';
 import AgentPresence from '@/components/glow/AgentPresence';
 import type { OrbMood } from '@/components/glow/EnergyOrb';
 import type { RobotPulse, RobotStatus } from '@/components/glow/RobotAvatar';
+import PillAgentMonitor from './PillAgentMonitor';
+import type { AssistantActivityRow } from '../../../electron/watch/assistantActivity';
 import CollapsedChatPreview from './CollapsedChatPreview';
 import CollapsedResponsePreview from './CollapsedResponsePreview';
 import { UnifiedModelSelector } from '../UnifiedModelSelector';
 import CompactUserMessage from './CompactUserMessage';
+import type { ChatInteractionCardProps } from './ChatInteractionCard';
 
 interface CollapsedHeaderProps {
+  onOpenAgent?: (row: AssistantActivityRow) => Promise<void>;
+  decisionControls?: React.ReactNode;
+  decisions?: ChatInteractionCardProps['request'][];
+  onAnswerDecision?: ChatInteractionCardProps['onAnswer'];
   meetingControls?: React.ReactNode;
   chatTitle?: string;
   workingStatus?: string;
@@ -26,6 +33,7 @@ interface CollapsedHeaderProps {
   setQuickInput: (value: string) => void;
   onSend: (message?: string, fromQuickInput?: boolean, mode?: 'steer' | 'queue') => void;
   onStop: () => void;
+  onResume?: () => void;
   onCollapseToggle: () => void;
   onSizeChange: () => void;
   onHide: () => void;
@@ -74,6 +82,10 @@ const iconButton = 'grid size-7 shrink-0 place-items-center rounded-[8px] text-f
  * into a toggled row, like the composer's tool strip.
  */
 export default function CollapsedHeader({
+  onOpenAgent,
+  decisionControls,
+  decisions,
+  onAnswerDecision,
   meetingControls,
   chatTitle,
   workingStatus,
@@ -88,6 +100,7 @@ export default function CollapsedHeader({
   setQuickInput,
   onSend,
   onStop,
+  onResume,
   onCollapseToggle,
   onSizeChange,
   onHide,
@@ -203,6 +216,7 @@ export default function CollapsedHeader({
           />
           {isTyping && <button type="button" disabled={!quickInput.trim()} onClick={() => onSend(quickInput, true, 'steer')} title="Shift+Enter · steer current work" className="px-1 text-[10px] disabled:opacity-30">Steer now</button>}
           {isTyping && !stopDisabledReason && <button type="button" onClick={onStop} className={iconButton} title="Stop response" aria-label="Stop response"><Square className="size-3" /></button>}
+          {!isTyping && onResume && <button type="button" onClick={onResume} className={iconButton} title="Resume response" aria-label="Resume response"><Play className="size-3" /></button>}
           <button
             type="submit"
             disabled={!quickInput.trim()}
@@ -300,6 +314,8 @@ export default function CollapsedHeader({
         {sendFailure && <p role="alert" className="text-xs text-amber-200">{sendFailure}</p>}
       </div>
 
+      <PillAgentMonitor onOpen={onOpenAgent} />
+
       {meetingControls && <div style={noDrag}>{meetingControls}</div>}
 
       {/* Clipboard context, when shown */}
@@ -324,8 +340,9 @@ export default function CollapsedHeader({
         </div>
       )}
 
+      {decisionControls && <div className="px-2 pb-2 select-text" style={noDrag}>{decisionControls}</div>}
       <div style={noDrag}>
-        <CollapsedChatPreview messages={messages.filter(message => message.id !== latestUser?.id && message.id !== latestReply?.id)} onPreviewToggle={onPreviewToggle} />
+        <CollapsedChatPreview messages={messages.filter(message => message.id !== latestUser?.id && message.id !== latestReply?.id)} decisions={decisions} onAnswer={onAnswerDecision} onPreviewToggle={onPreviewToggle} />
       </div>
     </div>
   );

@@ -1,5 +1,6 @@
 // Models and existing sessions on disk (listing + rebuilding history for import).
 import fs from 'node:fs';
+import { internalCodexSource } from './codexDiscovery.js';
 import os from 'node:os';
 import path from 'node:path';
 import { extractImages, stringifyToolOutput } from './parsers.js';
@@ -85,7 +86,6 @@ const claudeSummaryCache = new Map<string, { revision: string; summary: AgentSes
 function listClaudeSessions(limit: number): AgentSessionSummary[] {
   const out: AgentSessionSummary[] = [];
   for (const { file, mtime } of claudeSessionFiles()) {
-    if (out.length >= limit) break;
     const revision = fileRevision([file]);
     const cached = claudeSummaryCache.get(file);
     if (cached?.revision === revision) { if (cached.summary) out.push(cached.summary); continue; }
@@ -111,12 +111,13 @@ function listClaudeSessions(limit: number): AgentSessionSummary[] {
       id: path.basename(file, '.jsonl'),
       title: (title && title !== 'Chat' ? title : fallback || title || 'Untitled').slice(0, 80),
       cwd,
+      createdAt: lines.map(l => Date.parse(l.timestamp)).find(t => Number.isFinite(t) && t > 0) ?? fs.statSync(file).birthtimeMs,
       updatedAt: mtime,
     };
     claudeSummaryCache.set(file, { revision, summary });
     out.push(summary);
   }
-  return out;
+  return out.sort((a,b) => (b.createdAt ?? 0) - (a.createdAt ?? 0) || a.id.localeCompare(b.id)).slice(0, limit);
 }
 
 function codexRolloutFiles(): Map<string, string[]> {
@@ -224,10 +225,11 @@ function listCodexSessions(limit: number): AgentSessionSummary[] {
     const info = index.get(id);
     const file = paths[0];
     const meta = file ? readFirstLine(file) : null;
+    if (internalCodexSource(meta?.payload)) continue;
     const updatedAt = Math.max(info?.updatedAt ?? 0, ...paths.map(p => { try { return fs.statSync(p).mtimeMs; } catch { return 0; } }));
-    out.push({ provider: 'codex', id, title: (info?.title ?? 'Codex chat').slice(0, 80), cwd: meta?.payload?.cwd, updatedAt });
+    out.push({ provider: 'codex', id, title: (info?.title ?? 'Codex chat').slice(0, 80), cwd: meta?.payload?.cwd, createdAt: Date.parse(meta?.timestamp ?? meta?.payload?.timestamp) || 0, updatedAt });
   }
-  return out.sort((a, b) => b.updatedAt - a.updatedAt).slice(0, limit);
+  return out.sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0) || a.id.localeCompare(b.id)).slice(0, limit);
 }
 
 export function listAgentSessions(provider: AgentProvider, limit = 40): AgentSessionSummary[] {
@@ -253,7 +255,7 @@ export function loadAgentSession(provider: AgentProvider, id: string, previousRe
   const lastActivity = provider === 'claude' ? claudeActivityAt(records, lastWrite) : lastWrite;
   if (pendingByRevision.size > 50) pendingByRevision.clear();
   pendingByRevision.set(revision, { pending, lastActivity });
-  return { ...(provider === 'claude' ? rebuildClaudeHistory(records) : rebuildCodexHistory(records)), revision, running: isRunning(pending, lastActivity) };
+  return { ...(provider === 'claude' ? rebuildClaudeHistory(records) : rebuildCodexHistory(records)), createdAt: records.map(r => Date.parse(r.timestamp)).find(t => Number.isFinite(t) && t > 0) ?? 0, revision, running: isRunning(pending, lastActivity) };
 }
 
 class HistoryBuilder {

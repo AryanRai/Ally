@@ -1,8 +1,16 @@
 import { describe, expect, it } from 'vitest';
-import { claudeActivityAt, claudeTurnPending, codexRolloutPending, codexTurnsPending, isRunning, STALE_TURN_MS } from './sessionActivity';
+import { claudeActivityAt, claudeTurnPending, claudeTerminalStatus, codexRolloutPending, codexTurnsPending, isRunning, STALE_TURN_MS } from './sessionActivity';
 
 const assistant = (stop_reason: string, extra = {}) => ({ type: 'assistant', message: { stop_reason, content: [], ...extra } });
 const user = (content: unknown, extra = {}) => ({ type: 'user', message: { content }, ...extra });
+
+it('requires explicit final/interrupt/error evidence for Claude terminal status',()=>{
+  expect(claudeTerminalStatus([assistant('tool_use')])).toBeUndefined();
+  expect(claudeTerminalStatus([assistant('end_turn'),user('new question')])).toBeUndefined();
+  expect(claudeTerminalStatus([assistant('end_turn'),{type:'queue-operation'}])).toBe('completed');
+  expect(claudeTerminalStatus([user('[Request interrupted by user]')])).toBe('stopped');
+  expect(claudeTerminalStatus([{...assistant('',{model:'<synthetic>'}),isApiErrorMessage:true}])).toBe('error');
+});
 
 describe('claudeTurnPending', () => {
   it('is pending mid tool loop and after a fresh prompt', () => {

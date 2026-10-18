@@ -1,4 +1,6 @@
-import { configureUnread, allReadStates, unreadState, acknowledgeUnread } from './unread.js';
+import { interactions } from '../devices/interactions.js';
+import { interruptedSessions } from './interrupted.js';
+import { configureUnread, discoveryReadStates, unreadState, acknowledgeUnread } from './unread.js';
 import { startNativeUnread, acknowledgeNativeUnread, reconcileNativeUnread } from './codexUnread.js';
 import { startUnreadTracking } from './unreadTracking.js';
 import { messageQueue, type QueueChange } from './messageQueue.js';
@@ -7,15 +9,17 @@ import { app, BrowserWindow, dialog, ipcMain } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
 import { resolveAgentBinary } from './binaries.js';
-import { startAgentRun, steerAgentRun, stopAgentRun, stopAllAgentRuns } from './runner.js';
+import { startAgentRun, steerAgentRun, stopAgentRun, stopAllAgentRuns, canStopAgentSession, stopAgentSession } from './runner.js';
 import { listRunningSessions } from './runningSessions.js';
 import { listAgentModels, listAgentSessions, loadAgentSession } from './sessions.js';
+import { readAgentMonitor } from './agentMonitor.js';
 import { watchAgentSessions } from './sessionWatch.js';
 import { configureCodexMigrations } from './codexMigration.js';
 import { configureCodexHistory, listCodexChats, loadCodexChat, closeCodexHistory } from './codexHistory.js';
 import { generateGreeting } from './greeting.js';
 import { registerClaudeLoginIpc } from './claudeLogin.js';
 import { desktopInteraction } from './desktopApprovals.js';
+import { localImage } from './localImage.js';
 import { startWatchBridge } from '../watch/bridge.js';
 import type { AgentConfig, AgentProvider, AgentRunOptions } from './types.js';
 
@@ -39,6 +43,17 @@ function loadConfig(): AgentConfig {
 /** Registers `agent:*` IPC; `onConfig` sees the config at startup and after every change. */
 export function registerAgentIpc(getWindow: () => BrowserWindow | null, onConfig?: (config: AgentConfig) => void): void {
   let config = loadConfig();
+  interactions.configure(path.join(app.getPath('userData'), 'chat-interactions.json'));
+  const stopInteractionEvents = interactions.subscribe((event) => {
+    const win = getWindow(); if (!win || win.isDestroyed()) return;
+    win.webContents.send('agent:interactionsChanged');
+    if (event.type === 'interaction' && event.request.kind === 'question') {
+      if (!win.isVisible()) win.show();
+      win.flashFrame(true);
+    }
+  });
+  app.on('will-quit', stopInteractionEvents);
+  interruptedSessions.configure(path.join(app.getPath('userData'), 'interrupted-sessions.json'));
   configureUnread(path.join(app.getPath('userData'), 'chat-read-state.json'));
   messageQueue.configure(path.join(app.getPath('userData'), 'message-queue.json'));
   const stopNativeUnread = startNativeUnread();
@@ -77,6 +92,7 @@ export function registerAgentIpc(getWindow: () => BrowserWindow | null, onConfig
 
   ipcMain.handle('agent:send', async (event, opts: Omit<AgentRunOptions, 'cwd'> & { cwd?: string; robot?: { instructions: string } }) => {
     const sender = event.sender;
+    let sessionId = opts.sessionId;
     return startAgentRun(
       {
         ...opts,
@@ -89,16 +105,28 @@ export function registerAgentIpc(getWindow: () => BrowserWindow | null, onConfig
           motionMcpUrl: config.droidcoreMcpUrl,
         },
       },
-      (runId, ev) => { if (!sender.isDestroyed()) sender.send('agent:event', { runId, event: ev }); },
+      (runId, ev) => { if (ev.kind === 'session') sessionId = ev.sessionId; if (!sender.isDestroyed()) sender.send('agent:event', { runId, event: ev }); },
       binPath(opts.provider),
-      opts.provider === 'codex' ? desktopInteraction(async options => {
-        if (sender.isDestroyed()) return 0;
-        const parent = BrowserWindow.fromWebContents(sender);
-        const result = parent ? await dialog.showMessageBox(parent, options) : await dialog.showMessageBox(options);
-        return result.response;
-      }) : undefined,
+      opts.provider === 'codex' ? desktopInteraction(() => sessionId ? `${opts.provider}:${sessionId}` : undefined) : undefined,
       'desktop',
     );
+  });
+
+  const fromMain = (event: Electron.IpcMainInvokeEvent) => {
+    const win = getWindow();
+    if (!win || event.sender !== win.webContents || event.senderFrame !== win.webContents.mainFrame) throw Error('Decisions must come from Ally chat.');
+  };
+  ipcMain.handle('agent:localImage', (event, source: string) => { fromMain(event); return localImage(source); });
+  ipcMain.handle('agent:interactionHistory', (event, chatId: string) => {
+    fromMain(event);
+    if (typeof chatId !== 'string' || !/^(codex|claude):[\w-]{8,100}$/.test(chatId)) throw Error('Select the original chat');
+    return interactions.history(chatId);
+  });
+  ipcMain.handle('agent:answerInteraction', (event, chatId: string, id: string, answer: import('../watch/approvals').ApprovalAnswer) => {
+    fromMain(event);
+    const request = interactions.list(chatId).find(request => request.id === id);
+    if (!request) throw Error('This request was already answered, cancelled or expired.');
+    interactions.answer(id, answer, 'desktop'); return { accepted: true };
   });
 
   ipcMain.handle('agent:sessionInput', async (_, provider: AgentProvider, sessionId: string, text: string, requestId: string, mode: 'steer' | 'queue') => {
@@ -117,12 +145,18 @@ export function registerAgentIpc(getWindow: () => BrowserWindow | null, onConfig
   ipcMain.handle('agent:queueChange', (_, key: string, change: QueueChange) => messageQueue.change(key, change));
   ipcMain.handle('agent:steer', (_, runId: string, text: string, requestId: string, mode?: 'auto' | 'steer' | 'queue') => steerAgentRun(runId, text, requestId, mode));
 
+  ipcMain.handle('agent:stopSession', (_, provider: AgentProvider, id: string) => {
+    if (!['codex', 'claude'].includes(provider) || typeof id !== 'string' || !id || id.length > 240) throw Error('Invalid chat');
+    return stopAgentSession(`${provider}:${id}`);
+  });
+
   ipcMain.handle('agent:stop', (_, runId: string) => stopAgentRun(runId));
 
+  ipcMain.handle('agent:activity', event => { fromMain(event); return readAgentMonitor(); });
   ipcMain.handle('agent:runningSessions', () => listRunningSessions());
   ipcMain.handle('agent:listSessions', (_, provider: AgentProvider, limit?: number) => provider === 'codex' ? listCodexChats(limit) : listAgentSessions(provider, limit));
 
-  ipcMain.handle('agent:readStates', () => allReadStates());
+  ipcMain.handle('agent:readStates', (_, keys?: string[]) => discoveryReadStates(Array.isArray(keys) ? keys.filter(key => typeof key === 'string' && /^(codex|claude):[\w-]+$/.test(key)) : []));
   ipcMain.handle('agent:markRead', async (_, provider: AgentProvider, id: string, revision: string) => {
     if (!['codex', 'claude'].includes(provider) || typeof id !== 'string' || typeof revision !== 'string') throw new Error('Invalid read receipt');
     if (provider === 'codex') await reconcileNativeUnread(id);
@@ -133,7 +167,10 @@ export function registerAgentIpc(getWindow: () => BrowserWindow | null, onConfig
   ipcMain.handle('agent:loadSession', async (_, provider: AgentProvider, id: string, revision?: string) => {
     const readState = unreadState(provider, id); // Captured before loading: never acknowledge a later unseen reply.
     const snapshot = provider === 'codex' ? await loadCodexChat(id, revision) : await loadAgentSession(provider, id, revision);
-    return { ...snapshot, readState: { ...readState, key: `${provider}:${snapshot.sessionId ?? id}` } };
+    const key = `${provider}:${snapshot.sessionId ?? id}`;
+    const canStop = canStopAgentSession(key);
+    interruptedSessions.observe(key, Math.max(0, ...snapshot.messages.filter(m => m.role === 'user').map(m => m.timestamp)));
+    return { ...snapshot, canStop, interrupted: !snapshot.running && !canStop ? interruptedSessions.read(key) : undefined, readState: { ...readState, key: `${provider}:${snapshot.sessionId ?? id}` } };
   });
   const stopWatching = watchAgentSessions(provider => {
     const win = getWindow();

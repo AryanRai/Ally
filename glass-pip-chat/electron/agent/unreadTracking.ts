@@ -1,3 +1,4 @@
+import { hiddenConversation } from './codexDiscovery.js';
 import { reconcileNativeUnread } from './codexUnread.js';
 import { listRunningSessions, isManagedSessionRunning } from './runningSessions.js';
 import { loadAgentSession } from './sessions.js';
@@ -21,6 +22,7 @@ export function startUnreadTracking() {
       for (const s of running) if (!isManagedSessionRunning(s.provider, s.id)) { pending.set(chatKey(s.provider, s.id), s); trackUnread(s.provider, s.id); }
       for (const [key, s] of pending) {
         if (stopped) break;
+        if (hiddenConversation(s.provider, s.id)) { pending.delete(key); continue; }
         if (isManagedSessionRunning(s.provider, s.id)) { pending.delete(key); continue; }
         if (keys.has(key)) continue;
         try {

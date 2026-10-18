@@ -1,3 +1,4 @@
+import { interruptedSessions, RESUME_PROMPT } from './interrupted.js';
 import { completeUnread } from './unread.js';
 // Spawning agent turns and streaming their normalized events.
 import { spawn, ChildProcess } from 'node:child_process';
@@ -24,7 +25,7 @@ interface ActiveRun {
 
 const runs = new Map<string, ActiveRun>();
 const codexRuns = new Map<string, { stop: () => void; steer?: (text: string, images?: string[]) => Promise<boolean> }>();
-const managedRuns = new Map<string, { stop: () => void; steer: (text: string, requestId: string, intent?: FollowupIntent, images?: string[]) => Promise<FollowupMode> }>();
+const managedRuns = new Map<string, { key: () => string; stop: () => void; steer: (text: string, requestId: string, intent?: FollowupIntent, images?: string[]) => Promise<FollowupMode> }>();
 let runCounter = 0;
 
 /** MCP servers Robot mode hands the agent, by server name: perception (HowYouSeeMe) and motion (DroidCore). */
@@ -110,6 +111,10 @@ export async function startAgentRun(
   interact?: AgentInteractionHandler,
   interactionSurface: 'watch' | 'desktop' = 'watch',
 ): Promise<string> {
+  if (opts.resumeToken !== undefined) {
+    if (!opts.sessionId || opts.ephemeral) throw Error('Resume needs the original saved chat.');
+    opts = { ...opts, prompt: RESUME_PROMPT, images: undefined };
+  }
   const publicId = `conversation-${Date.now()}-${++runCounter}`;
   let sessionId = opts.sessionId, currentId: string | undefined;
   let stopped = false, finished = false, ending = false;
@@ -121,6 +126,8 @@ export async function startAgentRun(
     emit(publicId, { kind: 'input', text: item.text, mode: 'steered', queuedId: item.id });
   };
   let unregisterQueue = messageQueue.register(queueKey, sendQueuedNow);
+  try { if (!opts.ephemeral) interruptedSessions.starting(queueKey, opts.resumeToken); }
+  catch (error) { unregisterQueue(); throw error; }
   const queued = () => messageQueue.snapshot(queueKey).items;
   const pending = new Set<Promise<FollowupMode>>();
   const receipts = new FollowupReceipts();
@@ -128,6 +135,8 @@ export async function startAgentRun(
   const complete = (event: AgentEvent) => {
     if (finished) return;
     finished = true;
+    if (stopped && sessionId && !opts.ephemeral) interruptedSessions.stopped(`${opts.provider}:${sessionId}`);
+    if (event.kind === 'done' && stopped) event = { ...event, stopped: true };
     unregisterQueue();
     if (stopped || (event.kind === 'done' && event.isError)) messageQueue.pause(queueKey, 'Current work stopped. Queued messages are kept; send or cancel them when ready.');
     if (sessionId && !opts.ephemeral && event.kind === 'done' && !stopped) completeUnread(opts.provider, sessionId, publicId);
@@ -185,6 +194,7 @@ export async function startAgentRun(
     if (stopped) stopAgentRun(id);
   };
   managedRuns.set(publicId, {
+    key: () => queueKey,
     stop: () => { stopped = true; if (currentId) stopAgentRun(currentId); },
     steer: (text, requestId, intent = 'auto', images) => receipts.submit(requestId, text, async () => {
       if (finished || stopped || ending) throw new Error('This response has finished. Send your input as a new message.');
@@ -325,6 +335,15 @@ async function startTrackedRun(
   });
 
   return runId;
+}
+
+export function canStopAgentSession(key: string): boolean {
+  return [...managedRuns.values()].some(run => run.key() === key);
+}
+export function stopAgentSession(key: string): boolean {
+  const run = [...managedRuns.values()].find(run => run.key() === key);
+  if (!run) return false;
+  run.stop(); return true;
 }
 
 export function stopAgentRun(runId: string): boolean {

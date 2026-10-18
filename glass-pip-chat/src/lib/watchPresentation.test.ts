@@ -10,6 +10,9 @@ describe('watch message presentation preserves conversation content', () => {
     expect(watchUserText(raw.replace(/\n/g, '\r\n'))).toBe(message.replace(/\n/g, '\r\n'));
     expect(watchUserText(`Example:\n${raw}`)).toBe(`Example:\n${raw}`);
     expect(watchUserText('User message:\nOrdinary text')).toBe('User message:\nOrdinary text');
+    const legacy = 'You are Ally on a round smartwatch. Your final answer must be one JSON object.\n\nUser message:\nLegacy request';
+    expect(watchUserText(legacy)).toBe('Legacy request');
+    expect(watchUserText('You are Ally on a round smartwatch. Quoted opening without an envelope')).toBe('You are Ally on a round smartwatch. Quoted opening without an envelope');
   });
   it('decodes replies without truncating errors, quotes, or Unicode', () => {
     const text = `“Hello”\nNo approval is pending.\n${'detail '.repeat(2200)}`;

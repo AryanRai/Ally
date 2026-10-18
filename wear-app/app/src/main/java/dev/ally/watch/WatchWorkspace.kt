@@ -54,6 +54,11 @@ class WatchViewModel(app: Application) : AndroidViewModel(app) {
     }
     fun provider(value: String) = newChat(value)
     fun send(text: String) = current.send(text)
+    fun acceptAssistantTurn(chatId: String, turnId: String) {
+        selectChat(chatId)
+        check(workspace.selected == chatId) { "Open the accepted conversation to see your response" }
+        current.acceptAssistantTurn(turnId)
+    }
     fun inputMode(value: String) = current.inputMode(value)
     fun queueChange(change: org.json.JSONObject) = current.queueChange(change)
     fun refresh() = current.refresh()
@@ -77,6 +82,8 @@ class WatchViewModel(app: Application) : AndroidViewModel(app) {
     fun startRecording() = current.startRecording()
     fun finishRecording() = current.finishRecording()
     fun cancelRecording() = current.cancelRecording()
+    fun stop() = current.stop()
+    fun resume() = current.resume()
     fun retry() = current.retry()
     fun retryInput() = current.retryInput()
     fun dismissInput() = current.dismissInput()

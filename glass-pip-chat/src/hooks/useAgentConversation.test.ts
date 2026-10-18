@@ -1,3 +1,5 @@
+import { useEffect } from 'react';
+import { RESUME_PROMPT } from '../../electron/agent/resumePrompt';
 import { act, renderHook } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { useAgentConversation } from './useAgentConversation';
@@ -6,8 +8,9 @@ import { ChatManager } from '../utils/chatManager';
 
 const agent = vi.hoisted(() => ({ runTurn: vi.fn(), steer: vi.fn(), stop: vi.fn(), config: { defaultCwd: '/work' } }));
 vi.mock('./useAgentChat', () => ({ useAgentChat: () => agent }));
-vi.mock('./useSessionSync', () => ({ useSessionSync: () => false, sessionMessages: () => [] }));
-afterEach(() => vi.clearAllMocks());
+const sync = vi.hoisted(() => ({ control: { token: undefined as string | undefined, canStop: false } }));
+vi.mock('./useSessionSync', () => ({ useSessionSync: (_chats: unknown, _running: boolean, callback?: (value: typeof sync.control) => void) => { useEffect(() => callback?.(sync.control), [callback]); return false; }, sessionMessages: () => [] }));
+afterEach(() => { vi.clearAllMocks(); sync.control = { token: undefined, canStop: false }; });
 
 describe('failed desktop sends', () => {
   it('returns the failure, saves the original text, releases busy state and allows a retry', async () => {
@@ -91,4 +94,23 @@ it('projects only the selected stream and saves background results in their orig
   expect(manager.getChatById(first.id)!.messages.at(-1)!.content).toBe('first done');
   await act(async () => { pending.get(second.id)!.finish({ text: 'second done', thinking: '', segments: [] }); await b; });
   expect(manager.getChatById(second.id)!.messages.at(-1)!.content).toBe('second done');
+});
+
+
+it('resumes the selected original provider once even when another provider is the composer default', async () => {
+  localStorage.clear(); localStorage.setItem('ally-agent-model', 'claude:default');
+  (ChatManager as unknown as { instance?: ChatManager }).instance = undefined;
+  const manager = ChatManager.getInstance();
+  const chat = manager.openAgentSession({provider:'codex',sessionId:'original',cwd:'/work'},'Stopped chat',[]);
+  sync.control = {token:'stopped-receipt',canStop:false};
+  let finish!: (value: unknown) => void;
+  agent.runTurn.mockImplementationOnce(() => new Promise(resolve => {finish=resolve}));
+  const {result} = renderHook(()=>useAgentConversation({chats:useChats(),robotMode:false}));
+  expect(result.current.canResume).toBe(true);
+  let resumed!: ReturnType<typeof result.current.resume>;
+  await act(async()=> {resumed=result.current.resume(); await result.current.resume();});
+  expect(agent.runTurn).toHaveBeenCalledOnce();
+  expect(agent.runTurn.mock.calls[0][0]).toMatchObject({provider:'codex', sessionId:'original', cwd:'/work', model:'default',resumeToken:'stopped-receipt',prompt:RESUME_PROMPT});
+  expect(manager.getChatById(chat.id)?.messages.filter(m=>m.role==='user')).toHaveLength(1);
+  await act(async()=>{finish({text:'Continuing',thinking:'',segments:[]});await resumed;});
 });

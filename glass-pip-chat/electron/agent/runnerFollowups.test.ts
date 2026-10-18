@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { startAgentRun, steerAgentRun, stopAgentRun, stopAllAgentRuns } from './runner';
+import { interruptedSessions, RESUME_PROMPT } from './interrupted';
+import { startAgentRun, steerAgentRun, stopAgentRun, stopAllAgentRuns, stopAgentSession, canStopAgentSession } from './runner';
 import { runCodexTurn } from './codexRun';
 import { messageQueue } from './messageQueue';
 import type { AgentEvent, AgentRunOptions } from './types';
@@ -133,4 +134,33 @@ describe('input during an active response', () => {
     accept(true); await input; await flush();
     expect(emit.mock.calls.map(([,e]) => e.kind)).toEqual(['input', 'done']);
   });
+});
+
+
+it('shares Stop and resumes the exact session once without replaying input or images', async () => {
+  const turns = setup(); const emit = vi.fn(); const key = `codex:${opts.sessionId}`;
+  await startAgentRun({ ...opts, images: ['original.png'] }, emit);
+  expect(canStopAgentSession(key)).toBe(true);
+  expect(stopAgentSession(key)).toBe(true); await flush();
+  expect(emit.mock.calls.at(-1)?.[1]).toMatchObject({ kind: 'done', stopped: true });
+  const receipt = interruptedSessions.read(key)!; expect(receipt.token).toBeTruthy();
+  expect(canStopAgentSession(key)).toBe(false);
+  await expect(startAgentRun({ ...opts, resumeToken: 'stale' }, vi.fn())).rejects.toThrow('changed');
+  expect(interruptedSessions.read(key)).toEqual(receipt);
+  const resumed = await startAgentRun({ ...opts, resumeToken: receipt.token, images: ['original.png'] }, vi.fn());
+  expect(turns).toHaveLength(2);
+  expect(turns[1].opts).toMatchObject({ sessionId: opts.sessionId, provider: 'codex', permission: 'readonly', cwd: opts.cwd, prompt: RESUME_PROMPT });
+  expect(turns[1].opts.images).toBeUndefined();
+  expect(interruptedSessions.read(key)).toBeUndefined();
+  await expect(startAgentRun({ ...opts, resumeToken: receipt.token }, vi.fn())).rejects.toThrow();
+  stopAgentRun(resumed); await flush();
+});
+
+it('clears Resume on a new user message and never offers it after a successful reply', async () => {
+  const turns = setup(), key = `codex:${opts.sessionId}`;
+  interruptedSessions.stopped(key);
+  await startAgentRun(opts, vi.fn());
+  expect(interruptedSessions.read(key)).toBeUndefined();
+  turns[0].emit({kind:'done'}); await flush();
+  expect(interruptedSessions.read(key)).toBeUndefined();
 });

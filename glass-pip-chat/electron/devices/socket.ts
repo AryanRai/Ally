@@ -13,7 +13,10 @@ import { registerQuestionTool } from './questionTool.js';
 
 export function attachDeviceSocket(server: Server, authorize: (header?: string) => boolean): () => void {
   const hub = new DeviceHub(dismissAssistCard, Date.now, interactions);
-  const stopInteractions = interactions.subscribe(event => hub.broadcast(event));
+  const stopInteractions = interactions.subscribe(event => {
+    if (event.type === 'interaction' && event.request.desktopOnly) return;
+    hub.broadcast(event);
+  });
   const sockets = new WebSocketServer({ noServer: true, maxPayload: 32000 });
   const upgrade = (request: IncomingMessage, socket: Duplex, head: Buffer) => {
     if (request.url !== '/v1/devices/live') return;
@@ -36,8 +39,8 @@ export function attachDeviceSocket(server: Server, authorize: (header?: string) 
           if (m.type !== 'hello' || typeof m.deviceId !== 'string') throw new Error();
           disconnect = hub.connect(m.deviceId, m.kind as DeviceKind, send); id = m.deviceId; clearTimeout(hello);
           send({ type: 'ready' });
-          send({ type: 'interaction_sync', ids: interactions.list().map(request => request.id) });
-          for (const request of interactions.list()) send({ type: 'interaction', request });
+          send({ type: 'interaction_sync', ids: interactions.list().filter(request => !request.desktopOnly).map(request => request.id) });
+          for (const request of interactions.list().filter(request => !request.desktopOnly)) send({ type: 'interaction', request });
         } else if (m.type === 'receipt') hub.receipt(id, m);
         else if (m.type === 'interaction_answer') {
           try { interactions.answer(String(m.id), { action: m.action, values: m.values }, hub.list().find(d => d.id === id)?.kind || 'device'); send({ type: 'interaction_ack', id: m.id, accepted: true }); }

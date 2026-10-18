@@ -16,17 +16,29 @@ import kotlin.math.*
 
 /** Compact Orbit-style input dock, in Android's own assistant window. */
 internal class AssistantSheet(context: Context, private val hold: AssistantHold, private val send: (String) -> Unit,
-    private val mode: (String) -> Unit, private val open: () -> Unit, private val dismiss: () -> Unit) : FrameLayout(context) {
+    private val mode: (String) -> Unit, private val open: () -> Unit, private val dismiss: () -> Unit, private val choose: (String) -> Unit,
+    private val selectChat: (String) -> Unit, private val beginMonitor: () -> Boolean) : FrameLayout(context) {
     private val round = resources.configuration.isScreenRound
     private val muted = Color.rgb(155,158,169)
     private val motion get() = ValueAnimator.areAnimatorsEnabled() && !DeviceLink.prefs(context).getBoolean(if(round) "look.reducedMotion" else "phone.look.reducedMotion", false)
     private val panel = LinearLayout(context)
+    private val dock = LinearLayout(context)
     private val orb = FluidAssistantOrb(context)
     private val status = label("Hold the orb to talk", 11f, muted)
     private val chat = label("", 11f, muted)
     private val reply = label("", if(round) 12f else 15f)
     private val replyScroll = ScrollView(context)
     private val modes = LinearLayout(context)
+    private val routeOptions = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
+    private val routeScroll = ScrollView(context)
+    private var shownChoices = emptyList<AssistantChoice>()
+    private val activityToggle = label("Agents · checking…", 11f, muted)
+    private val activityRows = LinearLayout(context).apply { orientation=LinearLayout.VERTICAL }
+    private val activityScroll = ScrollView(context)
+    private var activityExpanded = false
+    private var lastSnapshot: AssistantSnapshot? = null
+    private var lastActivity = AssistantActivityState()
+    private var activitySignature = ""
     private val queue = label("Queue", 12f)
     private val steer = label("Steer now", 12f)
     private var interacted = false
@@ -71,10 +83,10 @@ internal class AssistantSheet(context: Context, private val hold: AssistantHold,
         if(!round) header.addView(SheetIcon(context,false).apply { contentDescription="Expand into full Ally app"; setOnClickListener { open() } },LinearLayout.LayoutParams(dp(40),dp(40)))
         header.addView(SheetIcon(context,true).apply { contentDescription="Dismiss assistant"; setOnClickListener { dismiss() } },LinearLayout.LayoutParams(dp(36),dp(40)))
         panel.addView(header)
-        reply.setPadding(dp(2),dp(8),dp(5),dp(10)); reply.setTextIsSelectable(true); reply.autoLinkMask=android.text.util.Linkify.WEB_URLS; reply.setLinkTextColor(Color.rgb(174,193,255))
+        reply.setPadding(dp(2),dp(if(round) 4 else 8),dp(5),dp(if(round) 5 else 10)); reply.setTextIsSelectable(true); reply.autoLinkMask=android.text.util.Linkify.WEB_URLS; reply.setLinkTextColor(Color.rgb(174,193,255))
         replyScroll.addView(reply); replyScroll.visibility=GONE
-        panel.addView(replyScroll,LinearLayout.LayoutParams(-1,dp(if(round) 56 else 118)))
-        val dock=LinearLayout(context).apply { gravity=Gravity.CENTER_VERTICAL; setPadding(dp(1),dp(1),dp(4),dp(1)); background=background(Color.argb(13,255,255,255),24,Color.argb(18,255,255,255)) }
+        panel.addView(replyScroll,LinearLayout.LayoutParams(-1,dp(if(round) 40 else 118)))
+        dock.apply { gravity=Gravity.CENTER_VERTICAL; setPadding(dp(1),dp(1),dp(4),dp(1)); background=background(Color.argb(13,255,255,255),24,Color.argb(18,255,255,255)) }
         orb.contentDescription="Hold to talk, release to send"; orb.isClickable=true
         orb.setOnClickListener { interacted=true; if(hold.held) hold.up() else hold.down() }
         var x=0f; var y=0f
@@ -103,6 +115,21 @@ internal class AssistantSheet(context: Context, private val hold: AssistantHold,
         panel.addView(dock,LinearLayout.LayoutParams(-1,-2).apply { topMargin=dp(6) })
         status.gravity=Gravity.CENTER; status.maxLines=2; status.setPadding(dp(2),dp(9),dp(2),0)
         panel.addView(status,LinearLayout.LayoutParams(-1,-2))
+        activityToggle.gravity=Gravity.CENTER_VERTICAL
+        activityToggle.maxLines=1; activityToggle.ellipsize=android.text.TextUtils.TruncateAt.END
+        activityToggle.isFocusable=true; activityToggle.isClickable=true
+        activityToggle.setPadding(dp(4),0,dp(4),0)
+        activityToggle.setOnClickListener {
+            if(activityExpanded || beginMonitor()) {
+                activityExpanded=!activityExpanded
+                lastSnapshot?.let { render(it,lastActivity) }
+            }
+        }
+        panel.addView(activityToggle,LinearLayout.LayoutParams(-1,dp(28)))
+        activityScroll.addView(activityRows); activityScroll.visibility=GONE
+        panel.addView(activityScroll,LinearLayout.LayoutParams(-1,dp(if(round) 88 else 144)))
+        routeScroll.addView(routeOptions); routeScroll.visibility=GONE
+        panel.addView(routeScroll,LinearLayout.LayoutParams(-1,dp(if(round) 52 else 176)))
         modes.gravity=Gravity.CENTER; modes.visibility=GONE
         queue.gravity=Gravity.CENTER; steer.gravity=Gravity.CENTER
         queue.contentDescription="Queue after current response"; steer.contentDescription="Add guidance to current work"
@@ -111,20 +138,60 @@ internal class AssistantSheet(context: Context, private val hold: AssistantHold,
         panel.addView(modes)
     }
     fun reveal() {
-        expanding=false; interacted=false; firstText=null; hasLiveReply=false; replyScroll.visibility=GONE; modes.visibility=GONE
+        expanding=false; activityExpanded=false; interacted=false; firstText=null; hasLiveReply=false; replyScroll.visibility=GONE; modes.visibility=GONE
         panel.animate().cancel(); panel.alpha=if(motion) 0f else 1f; panel.translationY=if(motion) dp(30).toFloat() else 0f
         panel.animate().alpha(1f).translationY(0f).setDuration(if(motion) 310 else 0).setInterpolator(PathInterpolator(.2f,.8f,.2f,1f)).start()
         orb.active=motion; orb.invalidate()
     }
-    fun render(s: AssistantSnapshot) {
+    fun followChat() { activityExpanded=false; interacted=true; firstText=null; hasLiveReply=false }
+    fun openMonitor() { activityExpanded=true; lastSnapshot?.let { render(it,lastActivity) } }
+    fun render(s: AssistantSnapshot, agents: AssistantActivityState = lastActivity) {
+        lastSnapshot=s; lastActivity=agents
+        activityToggle.text="${agents.summary} ${if(activityExpanded) "▴" else "▾"}"
+        activityToggle.contentDescription="${agents.summary}. ${if(activityExpanded) "Collapse" else "Show"} agent chats"
+        activityToggle.setTextColor(if(agents.stale) muted else if(agents.chats.any { it.status=="needs_input" || it.status=="error" }) Color.rgb(234,191,165) else Color.rgb(177,190,222))
+        activityToggle.visibility=VISIBLE
+        activityScroll.visibility=if(activityExpanded) VISIBLE else GONE
+        dock.visibility=if(round && (activityExpanded || s.choices.isNotEmpty())) GONE else VISIBLE
+        status.visibility=if(round && activityExpanded) GONE else VISIBLE
+        val signature="${s.chatId}|${agents.stale}|${agents.chats}"
+        if(signature!=activitySignature) {
+            activitySignature=signature; activityRows.removeAllViews()
+            if(agents.chats.isEmpty()) activityRows.addView(label(if(agents.stale) "Reconnect to see agent status" else if(!agents.checked) "Checking agent status…" else "No active or recent replies",11f,muted))
+            agents.chats.forEach { agent ->
+                val selected=agent.id==s.chatId
+                val indicator=when(agent.status) { "running" -> "●"; "needs_input" -> "!"; "unread" -> "•"; "completed" -> "✓"; "stopped" -> "■"; else -> "!" }
+                activityRows.addView(label("${if(selected) "› " else ""}${agent.title}\n$indicator ${if(agents.stale) "Last seen · " else ""}${agent.label} · ${agent.provider}",if(round) 10f else 12f,
+                    if(agent.status=="needs_input" || agent.status=="error") Color.rgb(234,191,165) else Color.rgb(212,219,234)).apply {
+                    maxLines=2; ellipsize=android.text.TextUtils.TruncateAt.END
+                    setPadding(dp(7),dp(3),dp(7),dp(3)); isClickable=true; isFocusable=true
+                    contentDescription="${agent.title}. ${if(agents.stale) "Last known status" else "Status"}: ${agent.label}. ${agent.provider}. ${agent.detail}. Open chat"
+                    background=background(Color.argb(if(selected) 34 else 16,180,199,255),10)
+                    setOnClickListener { selectChat(agent.id) }
+                },LinearLayout.LayoutParams(-1,dp(if(round) 42 else 46)).apply { topMargin=dp(2) })
+            }
+        }
+        if (s.choices != shownChoices) {
+            shownChoices=s.choices; routeOptions.removeAllViews()
+            s.choices.forEach { choice ->
+                routeOptions.addView(label(if(choice.id.startsWith("__")) choice.title else "${choice.title} · ${choice.provider}", if(round) 11f else 14f).apply {
+                    setPadding(dp(8),dp(5),dp(8),dp(5)); maxLines=2; ellipsize=android.text.TextUtils.TruncateAt.END
+                    contentDescription=text; isClickable=true; isFocusable=true
+                    background=background(Color.argb(20,255,255,255),12)
+                    setOnClickListener { choose(choice.id) }
+                },LinearLayout.LayoutParams(-1,dp(if(round) 44 else 48)).apply { topMargin=dp(4) })
+            }
+        }
+        routeScroll.visibility=if(s.choices.isEmpty() || activityExpanded) GONE else VISIBLE
         if(firstText==null) { firstText=s.text; hasLiveReply=false }
-        chat.text=s.title; status.text=s.status
+        chat.text=s.title; status.text=if(round && s.choices.isNotEmpty() && s.text.isNotBlank()) "“${s.text.take(55)}” · ${s.status}" else s.status
         status.setTextColor(if(s.needsAttention) Color.rgb(234,191,165) else muted)
         if(s.working && s.text.isNotBlank() && s.text!=firstText) hasLiveReply=true
-        val show=(interacted || s.needsAttention || hasLiveReply) && s.text.isNotBlank()
+        val show=(interacted || s.needsAttention || hasLiveReply) && s.text.isNotBlank() && !(round && s.choices.isNotEmpty())
         reply.text=s.text
-        replyScroll.visibility=if(show) VISIBLE else GONE
-        modes.visibility=if(s.working&&!s.recording) VISIBLE else GONE
+        replyScroll.visibility=if(show&&!activityExpanded) VISIBLE else GONE
+        if(round && show && !activityExpanded) status.visibility=GONE
+        modes.visibility=if(s.working&&!s.recording&&s.title!="New request"&&!activityExpanded) VISIBLE else GONE
         queue.alpha=if(s.mode=="queue") 1f else .4f; steer.alpha=if(s.mode=="steer") 1f else .4f
         orb.recording=s.recording; orb.working=s.working; orb.level=s.level; orb.invalidate()
     }

@@ -1,4 +1,6 @@
 "use client";
+import MarkdownImage, { chatUrlTransform, remarkLocalImages } from '@/components/chat/MarkdownImage';
+import { defaultRemarkPlugins } from 'streamdown';
 
 import { Button } from "@/components/ui/button";
 import {
@@ -321,6 +323,7 @@ export type MessageResponseProps = ComponentProps<typeof Streamdown>;
 
 // Code highlighting + math; mermaid/CJK plugins dropped to keep the overlay light
 const streamdownPlugins = { code, math };
+const chatRemarkPlugins = [...Object.values(defaultRemarkPlugins), remarkLocalImages];
 
 export const MessageResponse = memo(
   ({ className, ...props }: MessageResponseProps) => (
@@ -330,6 +333,9 @@ export const MessageResponse = memo(
         className
       )}
       plugins={streamdownPlugins}
+      remarkPlugins={chatRemarkPlugins}
+      urlTransform={chatUrlTransform}
+      components={{ img: (props: Record<string, unknown> | { src?: string; alt?: string; title?: string }) => <MarkdownImage src={typeof props.src === 'string' ? props.src : undefined} alt={typeof props.alt === 'string' ? props.alt : undefined} title={typeof props.title === 'string' ? props.title : undefined} /> }}
       {...props}
     />
   ),

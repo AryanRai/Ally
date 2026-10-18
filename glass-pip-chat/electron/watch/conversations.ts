@@ -1,3 +1,4 @@
+import { hiddenConversation, resolveCodexDiscovery } from '../agent/codexDiscovery.js';
 import { unreadState } from '../agent/unread.js';
 import fs from 'node:fs';
 import { chatUserText, chatTitle } from '../agent/chatTitle.js';
@@ -9,7 +10,7 @@ import { browserActivity } from '../agent/browserActivity.js';
 import type { DeviceAttachment, DeviceMedia } from './media.js';
 
 export interface WatchMessage extends WatchReply { id: string; role: 'user' | 'assistant'; timestamp: number; steps?: ActivityState['steps']; usage?: AgentUsage; attachments?: DeviceAttachment[] }
-export interface WatchChat { id: string; provider: AgentProvider; title: string; cwd: string; sessionId?: string; updatedAt: number; messages: WatchMessage[] }
+export interface WatchChat { id: string; provider: AgentProvider; title: string; cwd: string; sessionId?: string; createdAt?: number; updatedAt: number; messages: WatchMessage[] }
 interface Dependencies {
   list: (provider: AgentProvider, limit: number) => Promise<AgentSessionSummary[]>;
   load: (provider: AgentProvider, id: string) => Promise<AgentSessionSnapshot>;
@@ -44,6 +45,7 @@ export class WatchConversations {
         this.chats.push({ id: `${provider}:${sessionId}`, provider, sessionId, cwd, title: `Previous watch chat · ${provider === 'codex' ? 'Codex' : 'Claude'}`, updatedAt: Date.now(), messages: [] });
       }
     }
+    for (const chat of this.chats) chat.createdAt ??= chat.messages.find(m => m.timestamp > 0)?.timestamp ?? chat.updatedAt;
     this.save();
   }
   async repairTitles(repair: (id: string, title: string) => Promise<void>) {
@@ -56,7 +58,7 @@ export class WatchConversations {
   create(provider: AgentProvider, cwd: string, id: string = randomUUID()): WatchChat {
     const existing = this.chats.find(c => c.id === id);
     if (existing) return existing;
-    const chat: WatchChat = { id, provider, cwd, title: 'New watch chat', updatedAt: Date.now(), messages: [] };
+    const chat: WatchChat = { id, provider, cwd, title: 'New watch chat', createdAt: Date.now(), updatedAt: Date.now(), messages: [] };
     this.chats.push(chat); this.save(); return chat;
   }
   async get(id: string): Promise<WatchChat> {
@@ -70,7 +72,7 @@ export class WatchConversations {
     const linked = this.chats.find(c => c.provider === provider && c.sessionId === sessionId);
     if (linked) return linked;
     const messages = watchHistory(snapshot.messages, this.media);
-    const chat: WatchChat = { id, provider, sessionId, cwd: snapshot.cwd ?? '', title: snapshot.title || messages.find(m => m.role === 'user')?.text.slice(0, 80) || `${provider} chat`, updatedAt: messages.at(-1)?.timestamp || Date.now(), messages };
+    const chat: WatchChat = { id, provider, sessionId, cwd: snapshot.cwd ?? '', title: snapshot.title || messages.find(m => m.role === 'user')?.text.slice(0, 80) || `${provider} chat`, createdAt: snapshot.createdAt ?? messages.find(m => m.timestamp > 0)?.timestamp ?? 0, updatedAt: messages.at(-1)?.timestamp || 0, messages };
     this.chats.push(chat); this.save(); return chat;
   }
   private async loadLinkedSession(chat: WatchChat): Promise<AgentSessionSnapshot> {
@@ -122,32 +124,43 @@ export class WatchConversations {
   async list(provider: AgentProvider, offset = 0) {
     const limit = offset + 31;
     const external = await this.deps.list(provider, limit);
+    if (provider === 'codex') await Promise.all(this.chats.filter(c => c.provider === provider && c.sessionId).map(c => resolveCodexDiscovery(c.sessionId!)));
     for (const chat of this.chats.filter(c => c.provider === provider)) {
       const native = external.find(s => s.id === chat.sessionId);
-      if (native && native.title !== 'Ally chat') { chat.title = native.title; chat.updatedAt = Math.max(chat.updatedAt, native.updatedAt); }
+      if (native) {
+        if (native.title !== 'Ally chat') chat.title = native.title;
+        if (native.createdAt) chat.createdAt = native.createdAt;
+        chat.updatedAt = Math.max(chat.updatedAt, native.updatedAt);
+      }
     }
     const linked = new Set(this.chats.filter(c => c.provider === provider).map(c => c.sessionId).filter((id): id is string => !!id));
     const savedIds = new Set(this.chats.filter(c => c.provider === provider).map(c => c.id));
-    const all = [...this.chats.filter(c => c.provider === provider).map(chatSummary), ...external.filter(s => !savedIds.has(`${provider}:${s.id}`) && !linked.has(s.id) && !(s.originalSessionId && linked.has(s.originalSessionId))).map(s => ({ id: `${provider}:${s.id}`, provider, sessionId: s.id, title: userText(s.title), cwd: s.cwd ?? '', updatedAt: s.updatedAt, unread: unreadState(provider, s.id).unread }))].sort((a, b) => b.updatedAt - a.updatedAt);
+    const all = [...this.chats.filter(c => c.provider === provider && !hiddenConversation(c.provider, c.sessionId ?? c.id)).map(chatSummary), ...external.filter(s => !hiddenConversation(provider, s.id) && !savedIds.has(`${provider}:${s.id}`) && !linked.has(s.id) && !(s.originalSessionId && linked.has(s.originalSessionId))).map(s => ({ id: `${provider}:${s.id}`, provider, sessionId: s.id, title: userText(s.title), cwd: s.cwd ?? '', createdAt: s.createdAt ?? 0, updatedAt: s.updatedAt, unread: unreadState(provider, s.id).unread }))].sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
     return { chats: all.slice(offset, offset + 30), nextOffset: all.length > offset + 30 ? offset + 30 : null };
   }
+  routingPreview(id: string): string {
+    return this.chats.find(c => c.id === id)?.messages.filter(m => m.role === 'user').slice(-2).map(m => m.text).join('\n').slice(-500) ?? '';
+  }
+  activityChat(id: string) { const chat = this.chats.find(c => c.id === id); return chat && chatSummary(chat); }
+  activitySession(provider: AgentProvider, sessionId: string) { const chat=this.chats.find(c=>c.provider===provider && (c.sessionId===sessionId || c.id===sessionId)); return chat && chatSummary(chat); }
   running(sessions: AgentSessionSummary[], activeChatIds: string[] = []) {
     const rows = new Map<string, ReturnType<typeof chatSummary>>();
     for (const session of sessions) {
+      if (hiddenConversation(session.provider, session.id)) continue;
       const linked = this.chats.find(c => c.provider === session.provider && (c.sessionId === session.id || (!!session.originalSessionId && c.sessionId === session.originalSessionId)));
       const row = linked ? { ...chatSummary(linked), title: chatTitle(session.title), cwd: session.cwd ?? linked.cwd, updatedAt: session.updatedAt }
-        : { id: `${session.provider}:${session.id}`, provider: session.provider, sessionId: session.id, title: chatTitle(session.title), cwd: session.cwd ?? '', updatedAt: session.updatedAt, unread: unreadState(session.provider, session.id).unread };
+        : { id: `${session.provider}:${session.id}`, provider: session.provider, sessionId: session.id, title: chatTitle(session.title), cwd: session.cwd ?? '', createdAt: session.createdAt ?? 0, updatedAt: session.updatedAt, unread: unreadState(session.provider, session.id).unread };
       rows.set(row.id, row);
     }
     for (const id of activeChatIds) {
       const chat = this.chats.find(c => c.id === id);
       if (chat && !rows.has(id)) rows.set(id, chatSummary(chat));
     }
-    return { chats: [...rows.values()].sort((a, b) => b.updatedAt - a.updatedAt) };
+    return { chats: [...rows.values()].filter(c => !hiddenConversation(c.provider, c.sessionId ?? c.id)).sort((a, b) => b.updatedAt - a.updatedAt) };
   }
   link(chat: WatchChat, sessionId: string) { chat.sessionId = sessionId; this.save(); }
-  record(chat: WatchChat, transcript: string, reply: WatchReply, activity: ActivityState, turnId: string, uploads: DeviceAttachment[] = []) {
-    chat.messages.push({ id: `${turnId}-user`, role: 'user', text: transcript, attachments: uploads, components: [], timestamp: Date.now() }, { id: `${turnId}-assistant`, role: 'assistant', ...reply, attachments: [...activity.steps.flatMap(s => s.attachments ?? []), ...this.media?.markdown(reply.text) ?? []].slice(0, 12), steps: activity.steps, usage: activity.usage, timestamp: Date.now() });
+  record(chat: WatchChat, transcript: string, reply: WatchReply, activity: ActivityState, turnId: string, uploads: DeviceAttachment[] = [], startedAt = Date.now()) {
+    chat.messages.push({ id: `${turnId}-user`, role: 'user', text: transcript, attachments: uploads, components: [], timestamp: startedAt }, { id: `${turnId}-assistant`, role: 'assistant', ...reply, attachments: [...activity.steps.flatMap(s => s.attachments ?? []), ...this.media?.markdown(reply.text) ?? []].slice(0, 12), steps: activity.steps, usage: activity.usage, timestamp: Date.now() });
     if (chat.title === 'New watch chat') chat.title = transcript.slice(0, 80);
     chat.updatedAt = Date.now(); this.save();
   }

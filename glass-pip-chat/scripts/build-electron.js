@@ -13,16 +13,25 @@ console.log('Building Electron files...');
 rmSync(join(outDir, 'electron'), { recursive: true, force: true });
 
 // `--rootDir .` pins the layout: electron/main.ts -> dist/electron/main.js
-const tsc = (entry, module) =>
-  execSync(`npx tsc ${entry} --rootDir . --outDir dist --module ${module} --target es2022 --moduleResolution node --esModuleInterop true --skipLibCheck`, {
+const tsc = (entry, module, out = 'dist') =>
+  execSync(`npx tsc ${entry} --rootDir . --outDir ${out} --module ${module} --target es2022 --moduleResolution node --esModuleInterop true --skipLibCheck`, {
     cwd: rootDir,
     stdio: 'inherit',
   });
 
 // Main process (ES modules)
 tsc('electron/main.ts', 'esnext');
-// Preload (CommonJS for Electron's preload loader)
-tsc('electron/preload.ts', 'commonjs');
+// Preload (CommonJS for Electron's preload loader). tsc emits the preload's whole
+// import graph, so compile it apart and copy only preload.js: otherwise shared
+// modules would be re-emitted as CommonJS over the ESM main build.
+const preloadTmp = join(outDir, '.preload-tmp');
+rmSync(preloadTmp, { recursive: true, force: true });
+try {
+  tsc('electron/preload.ts', 'commonjs', 'dist/.preload-tmp');
+  cpSync(join(preloadTmp, 'electron/preload.js'), join(outDir, 'electron/preload.js'));
+} finally {
+  rmSync(preloadTmp, { recursive: true, force: true });
+}
 mkdirSync(join(outDir, 'electron/visualTutor'), { recursive: true });
 cpSync(join(rootDir, 'electron/visualTutor/preload.cjs'), join(outDir, 'electron/visualTutor/preload.cjs'));
 

@@ -1,5 +1,5 @@
 import { Ref, useState } from 'react';
-import { Clipboard, ClipboardCopy, Cpu, FolderOpen, Lasso, LoaderCircle, Check, ArrowUp, Square, Eye, ShieldCheck, ShieldAlert } from 'lucide-react';
+import { Clipboard, ClipboardCopy, Cpu, FolderOpen, Lasso, LoaderCircle, Check, ArrowUp, Play, Square, Eye, ShieldCheck, ShieldAlert } from 'lucide-react';
 import { PromptInput, PromptInputFooter, PromptInputSubmit, PromptInputTextarea } from '@/components/ai-elements/prompt-input';
 import ComposerTools from './ComposerTools';
 import AgentSelectors from './AgentSelectors';
@@ -21,6 +21,7 @@ interface ChatInputProps {
   isTyping: boolean;
   workingStatus?: string;
   onStop: () => void;
+  onResume?: () => void;
   /** The turn belongs to another app, so Ally can show it but not stop it */
   stopDisabledReason?: string;
   contextData: ContextData;
@@ -101,6 +102,7 @@ export default function ChatInput({
   isTyping,
   workingStatus = 'Working…',
   onStop,
+  onResume,
   stopDisabledReason,
   contextData,
   onExplainClipboard,
@@ -240,16 +242,17 @@ export default function ChatInput({
               variant={isTyping ? 'outline' : 'default'}
               status={isTyping ? 'streaming' : 'ready'}
               onStop={onStop}
-              aria-label={isTyping ? 'Stop response' : 'Send message'}
-              title={isTyping ? stopDisabledReason ?? 'Stop response' : 'Send message'}
-              disabled={isTyping ? !!stopDisabledReason : !canSend}
+              onClick={onResume && !isTyping && !canSend ? event => { event.preventDefault(); onResume(); } : undefined}
+              aria-label={isTyping ? 'Stop response' : onResume && !canSend ? 'Resume response' : 'Send message'}
+              title={isTyping ? stopDisabledReason ?? 'Stop response' : onResume && !canSend ? 'Resume response' : 'Send message'}
+              disabled={isTyping ? !!stopDisabledReason : !canSend && !onResume}
               className={cn(
                 'h-[30px] shrink-0 rounded-full transition-colors',
                 isTyping ? 'min-w-[72px] gap-2 border-white/20 bg-white/5 px-3 text-foreground/85 hover:bg-white/10' : 'w-[30px]',
-                !isTyping && (canSend ? 'bg-foreground text-background hover:bg-foreground/85' : 'bg-white/10 text-muted-foreground')
+                !isTyping && (canSend || onResume ? 'bg-foreground text-background hover:bg-foreground/85' : 'bg-white/10 text-muted-foreground')
               )}
             >
-              {isTyping ? <><Square className="size-3" fill="currentColor" /><span className="text-xs">Stop</span></> : <ArrowUp className="size-3.5" strokeWidth={2.5} />}
+              {isTyping ? <><Square className="size-3" fill="currentColor" /><span className="text-xs">Stop</span></> : onResume && !canSend ? <Play className="size-3.5" /> : <ArrowUp className="size-3.5" strokeWidth={2.5} />}
             </PromptInputSubmit>
           </PromptInputFooter>
         </PromptInput>

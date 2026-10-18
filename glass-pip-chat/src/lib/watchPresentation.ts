@@ -1,8 +1,9 @@
-import { parseWatchReply } from '../../electron/watch/protocol';
+import { DEVICE_PROTOCOL_PREFIX, parseWatchReply } from '../../electron/watch/protocol';
 
 /** Presentation only. Never rewrite saved messages or unwrap arbitrary JSON. */
 export function watchUserText(raw: string): string {
-  if (!raw.startsWith('You are Ally on a round smartwatch.') || !raw.includes('Your final answer must be one JSON object')) return raw;
+  const legacy = raw.startsWith('You are Ally on a round smartwatch.') && raw.includes('Your final answer must be one JSON object');
+  if (!legacy && !raw.startsWith(DEVICE_PROTOCOL_PREFIX)) return raw;
   const delimiter = /\r?\n\r?\nUser message:\r?\n/.exec(raw);
   return delimiter ? raw.slice(delimiter.index + delimiter[0].length) : raw;
 }

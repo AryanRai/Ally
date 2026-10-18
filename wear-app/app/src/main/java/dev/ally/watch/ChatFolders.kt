@@ -6,5 +6,5 @@ fun chatFolders(chats: List<WatchChat>, query: String = ""): List<ChatFolder> = 
     .groupBy { it.cwd.replace('\\', '/').trimEnd('/').let { path -> if (Regex("^[A-Za-z]:").containsMatchIn(path)) path.lowercase() else path } }
     .map { (key, rows) ->
         val path = rows.first().cwd.replace('\\', '/').trimEnd('/')
-        ChatFolder(key, path.substringAfterLast('/').ifBlank { "Other chats" }, path.substringBeforeLast('/', ""), rows.sortedByDescending { it.updatedAt })
-    }.sortedWith(compareByDescending<ChatFolder> { it.chats.maxOfOrNull { chat -> chat.updatedAt } ?: 0 }.thenBy { it.title.lowercase() })
+        ChatFolder(key, path.substringAfterLast('/').ifBlank { "Other chats" }, path.substringBeforeLast('/', ""), rows.sortedByDescending { it.createdAt })
+    }.sortedWith(compareByDescending<ChatFolder> { it.chats.maxOfOrNull { chat -> chat.createdAt } ?: 0 }.thenBy { it.title.lowercase() })

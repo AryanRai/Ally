@@ -19,6 +19,7 @@ class PhoneModel(app: Application) : AndroidViewModel(app) {
     val state = workspace.state
     private var refreshingRunning = false
     private var lastRunning: Pair<List<PhoneChat>, String>? = null
+    private var lastAttention = emptyList<PhoneChat>()
     init {
         prefs.edit().putBoolean("phoneMultichatMigrated", true).apply()
         workspace.restore(prefs.getStringSet("phoneOpenChats", emptySet())!!.filter { id ->
@@ -36,7 +37,7 @@ class PhoneModel(app: Application) : AndroidViewModel(app) {
         prefs.edit().putStringSet("phoneOpenChats", prefs.getStringSet("phoneOpenChats", emptySet())!! + id).apply()
         prefs.edit().putString("phoneChat", id).apply()
         val target = current
-        lastRunning?.let { (rows, status) -> target.runningSnapshot(rows, status) }
+        lastRunning?.let { (rows, status) -> target.runningSnapshot(rows, status,lastAttention) }
         viewModelScope.launch { target.refreshSelected() }
         viewModelScope.launch { refreshRunning() }
     }
@@ -53,6 +54,11 @@ class PhoneModel(app: Application) : AndroidViewModel(app) {
         }
     }
     fun send(text: String) = current.send(text)
+    fun acceptAssistantTurn(chatId: String, turnId: String) {
+        select(chatId)
+        check(workspace.selected == chatId) { "Open the accepted conversation to see your response" }
+        current.acceptAssistantTurn(turnId)
+    }
     fun inputMode(value: String) = current.inputMode(value)
     fun queueChange(change: JSONObject) = current.queueChange(change)
     fun catalog(provider: String = state.value.provider, more: Boolean = false) = current.catalog(provider, more)
@@ -68,7 +74,8 @@ class PhoneModel(app: Application) : AndroidViewModel(app) {
             source.refreshRunning()
             val snapshot = source.state.value
             lastRunning = snapshot.running to snapshot.runningStatus
-            workspace.controllers.forEach { it.runningSnapshot(snapshot.running, snapshot.runningStatus) }
+            lastAttention=snapshot.attentionChats
+            workspace.controllers.forEach { it.runningSnapshot(snapshot.running, snapshot.runningStatus,lastAttention) }
         } finally { refreshingRunning = false }
     }
     fun older() = current.older()
@@ -87,6 +94,7 @@ class PhoneModel(app: Application) : AndroidViewModel(app) {
     fun retry() = current.retry()
     fun dismissInput() = current.dismissInput()
     fun stop() = current.stop()
+    fun resume() = current.resume()
     fun answer(action: String, values: Map<String, String>) = current.answer(action, values)
     override fun onCleared() { workspace.controllers.forEach { it.close() }; super.onCleared() }
 }

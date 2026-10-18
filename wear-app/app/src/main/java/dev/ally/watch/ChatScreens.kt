@@ -38,7 +38,7 @@ internal fun ChatPicker(model: WatchViewModel, state: WatchState, back: () -> Un
     val scroll = rememberLazyListState()
     var query by remember { mutableStateOf("") }
     var expanded by remember(state.chatProvider) { mutableStateOf(setOf<String>()) }
-    val folders = remember(state.chats, query) { chatFolders(state.chats, query) }
+    val folders = remember(state.chats,state.attentionChats, query) { chatFolders((state.chats+state.attentionChats).distinctBy { it.id }, query) }
     LazyColumn(Modifier.fillMaxSize().background(Ink).bezelScroll(scroll), state = scroll, contentPadding = PaddingValues(horizontal = 25.dp, vertical = 30.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
         item { Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
@@ -61,9 +61,9 @@ internal fun ChatPicker(model: WatchViewModel, state: WatchState, back: () -> Un
             ChatChoice(chat, state.chatId, model.canSwitchChat) { model.selectChat(chat.id); chosen() }
         }
         if (state.runningStatus.isNotBlank()) item { Text(state.runningStatus, color = Muted, fontSize = 10.sp) }
-        if (query.isBlank() && state.chats.isNotEmpty()) {
-            item { Text("RECENT", fontFamily = Mono, color = Muted, fontSize = 10.sp, modifier = Modifier.fillMaxWidth()) }
-            items(state.chats.sortedByDescending { it.updatedAt }.take(3), key = { "recent:${it.id}" }) { chat -> ChatChoice(chat, state.chatId, model.canSwitchChat) { model.selectChat(chat.id); chosen() } }
+        if (query.isBlank() && (state.chats.isNotEmpty() || state.attentionChats.isNotEmpty())) {
+            item { Text("RECENT & UNREAD", fontFamily = Mono, color = Muted, fontSize = 10.sp, modifier = Modifier.fillMaxWidth()) }
+            items((state.chats+state.attentionChats).distinctBy { it.id }.sortedWith(compareByDescending<WatchChat> { it.createdAt }.thenByDescending { it.id }), key = { "recent:${it.id}" }) { chat -> ChatChoice(chat, state.chatId, model.canSwitchChat) { model.selectChat(chat.id); chosen() } }
         }
         item { Text("PROJECTS & FOLDERS", fontFamily = Mono, color = Muted, fontSize = 10.sp, modifier = Modifier.fillMaxWidth()) }
         folders.forEach { folder ->
@@ -98,7 +98,7 @@ internal fun ChatChoice(chat: WatchChat, selected: String?, enabled: Boolean, ch
 }
 
 @Composable
-internal fun HistoryScreen(state: WatchState, send: (String) -> Unit, back: () -> Unit, pulse: (Boolean) -> Unit, chats: () -> Unit, older: () -> Unit, read: (String) -> Unit, stopAudio: () -> Unit, readerVisible: Boolean, viewed: suspend (dev.ally.device.ChatReadReceipt) -> Unit, openQueue: () -> Unit = {}) {
+internal fun HistoryScreen(state: WatchState, send: (String) -> Unit, back: () -> Unit, pulse: (Boolean) -> Unit, chats: () -> Unit, older: () -> Unit, read: (String) -> Unit, stopAudio: () -> Unit, readerVisible: Boolean, viewed: suspend (dev.ally.device.ChatReadReceipt) -> Unit, openQueue: () -> Unit = {}, stop: () -> Unit = {}, resume: () -> Unit = {}) {
     val deviceInbox by dev.ally.device.DeviceLink.inbox.collectAsState()
     val sessionKey = (state.chats + state.quickChats + state.running).firstOrNull { it.id == state.chatId }?.sessionKey
     val requests = dev.ally.device.DeviceInteractions.forChat(deviceInbox,state.chatId,state.chatSessionKey,sessionKey,state.readReceipt?.key)
@@ -141,6 +141,8 @@ internal fun HistoryScreen(state: WatchState, send: (String) -> Unit, back: () -
         if (state.historyBefore != null) item { Button(onClick = older, enabled = !state.loadingHistory && !working) { Text("Earlier messages") } }
         if (state.queue.items.isNotEmpty()) item(key="queue") { Button(onClick=openQueue,modifier=Modifier.fillMaxWidth()) { Text("Queued · ${state.queue.items.size}",fontSize=11.sp) } }
         if (state.loadingHistory) item { Text("Loading conversation…", color = Muted, fontSize = 11.sp) }
+        if (state.canStop || (state.phase == Phase.THINKING && state.turnId != null)) item { Button(onClick = stop, modifier = Modifier.fillMaxWidth()) { Text("Stop response") } }
+        else if (state.resumeToken != null && !working) item { Button(onClick = resume, modifier = Modifier.fillMaxWidth()) { Text("Resume response") } }
         if (state.speaking) item { Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) { ReplyAudioControl(true, true, stopAudio) } }
         if (state.speechError.isNotBlank()) item { Text(state.speechError, color = Amber, fontSize = 10.sp) }
         items(timeline, key = { it.id }) { entry ->

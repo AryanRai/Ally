@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import { MessageResponse } from '@/components/ai-elements/message';
 import CompactMarkdown from './CompactMarkdown';
 import { displayAssistantText } from '@/lib/messageDisplay';
@@ -27,7 +28,7 @@ function WatchWidget({ component: c }: { component: Record<string, unknown> }) {
   </div>;
 }
 
-export default function WatchReplyContent({ content, streaming = false, compact = false }: { content: string; streaming?: boolean; compact?: boolean }) {
+function WatchReplyContent({ content, streaming = false, compact = false }: { content: string; streaming?: boolean; compact?: boolean }) {
   const reply = watchReplyView(content);
   if (!reply && streaming && /^\s*\{\s*"text"\s*:/.test(content)) {
     return <Shimmer className="text-xs" duration={1.2}>Receiving reply…</Shimmer>;
@@ -40,3 +41,7 @@ export default function WatchReplyContent({ content, streaming = false, compact 
     {reply && !streaming && <OriginalMessage text={content} label="Watch message details" />}
   </div>;
 }
+
+// Parent updates must not reparse unchanged replies. All inputs are primitives;
+// React's default comparison still renders every content/mode/streaming change.
+export default memo(WatchReplyContent);

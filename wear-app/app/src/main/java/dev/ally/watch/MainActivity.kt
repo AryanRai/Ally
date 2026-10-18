@@ -76,7 +76,11 @@ class MainActivity : ComponentActivity() {
     }
     override fun onResume() { super.onResume(); dev.ally.device.DeviceLink.resume(this); model.foreground = true; WatchNotifications.foreground = true; model.refresh(); openRequestChat(intent) }
     override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); setIntent(intent); openRequestChat(intent) }
-    private fun openRequestChat(intent: Intent) { intent.getStringExtra("openChat")?.let { model.openNotification(it); notificationSequence++; intent.removeExtra("openChat") } }
+    private fun openRequestChat(intent: Intent) {
+        dev.ally.device.SurfaceActions.handle(this,intent) { model.openNotification(it); notificationSequence++ }
+        if(intent.getBooleanExtra("allyAgentMonitor",false)) { intent.removeExtra("allyAgentMonitor"); window.decorView.post { dev.ally.device.AllyAssistantService.showMonitor() } }
+        intent.getStringExtra("openChat")?.let { model.openNotification(it); notificationSequence++; intent.removeExtra("openChat") }
+    }
     override fun onStop() { model.foreground = false; WatchNotifications.foreground = false; if (!dev.ally.device.AssistantVisibility.visible) model.cancelRecording(); model.stopSpeaking(); super.onStop() }
     private fun pulse(long: Boolean) {
         if (!model.state.value.muted) getSystemService(Vibrator::class.java)?.vibrate(
@@ -157,10 +161,10 @@ private fun WatchApp(model: WatchViewModel, pulse: (Boolean) -> Unit, hasMic: ()
             HorizontalPager(pager, userScrollEnabled = state.phase != Phase.RECORDING && !state.inputRecording) { page ->
                 Box(Modifier.fillMaxSize().hierarchicalFocusGroup(pager.currentPage == page && !pager.isScrollInProgress)) {
                 if (page == 0) InputScreen(if(state.inputRecording) state.copy(phase=Phase.RECORDING,detail=state.inputStatus) else if(state.inputSending) state.copy(phase=Phase.UPLOADING,detail=state.inputStatus) else if(state.inputStatus.isNotBlank()) state.copy(detail=state.inputStatus) else state, micHint, start, model::finishRecording, model::cancelRecording,
-                    { textInput = true }, { settings = true }, { if (state.speaking) model.stopSpeaking() else model.mute() }, model::retry, openQuickChats,
+                    { textInput = true }, { settings = true }, { if (state.speaking) model.stopSpeaking() else model.mute() }, model::retry, openQuickChats, model::stop, model::resume,
                     pager.currentPage == 0 && !pager.isScrollInProgress,
                     { scope.launch { pager.animateScrollToPage(1) } })
-                else HistoryScreen(state, model::send, { scope.launch { pager.animateScrollToPage(0) } }, pulse, openQuickChats, model::olderMessages, model::readReply, model::stopSpeaking, pager.currentPage == 1 && !pager.isScrollInProgress, model::viewed, { queueOpen=true })
+                else HistoryScreen(state, model::send, { scope.launch { pager.animateScrollToPage(0) } }, pulse, openQuickChats, model::olderMessages, model::readReply, model::stopSpeaking, pager.currentPage == 1 && !pager.isScrollInProgress, model::viewed, { queueOpen=true }, model::stop, model::resume)
                 }
             }
             if(pager.currentPage == 0 && state.queue.items.isNotEmpty() && state.phase != Phase.RECORDING && !state.inputRecording) {
@@ -191,7 +195,7 @@ private fun WatchApp(model: WatchViewModel, pulse: (Boolean) -> Unit, hasMic: ()
 
 @Composable
 private fun InputScreen(state: WatchState, micHint: Boolean, start: () -> Unit, finish: () -> Unit, cancel: () -> Unit,
-    type: () -> Unit, settings: () -> Unit, mute: () -> Unit, retry: () -> Unit, chats: () -> Unit,
+    type: () -> Unit, settings: () -> Unit, mute: () -> Unit, retry: () -> Unit, chats: () -> Unit, stop: () -> Unit, resume: () -> Unit,
     active: Boolean, replies: () -> Unit) {
     val canTalk = !state.externalRunning && !state.muted && state.phase !in setOf(Phase.UPLOADING)
     BoxWithConstraints(Modifier.fillMaxSize().bezelReplies(active && state.phase != Phase.RECORDING, replies)) {
@@ -218,6 +222,8 @@ private fun InputScreen(state: WatchState, micHint: Boolean, start: () -> Unit, 
                 fontSize = 10.sp, lineHeight = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center,
                 modifier = Modifier.heightIn(min = 16.dp).padding(horizontal = 5.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+                if (state.canStop || (state.phase == Phase.THINKING && state.turnId != null)) MiniButton("■", "Stop response", stop)
+                else if (state.resumeToken != null && !state.externalRunning) MiniButton("▶", "Resume response", resume, state.phase !in setOf(Phase.UPLOADING, Phase.RECORDING))
                 MiniButton("Aa", "Type a message", type, state.phase !in setOf(Phase.RECORDING, Phase.UPLOADING))
                 MiniButton(if (state.speaking) "■" else if (state.muted) "▶" else "Ⅱ", if (state.speaking) "Stop audio" else if (state.muted) "Resume microphone and haptics" else "Pause microphone and haptics", mute)
                 MiniButton("···", "Connection and settings", settings)
@@ -340,6 +346,7 @@ private fun SettingsScreen(model: WatchViewModel, state: WatchState, back: () ->
         Text("Your Ally", color = White, fontSize = 18.sp)
         Text(state.chatTitle, color = Muted, fontSize = 11.sp, maxLines = 2)
         Button(onClick = chats) { Text("Choose chat") }
+        Button(onClick = { model.cancelRecording(); if(!dev.ally.device.AllyAssistantService.showMonitor()) android.widget.Toast.makeText(deviceContext,"Select Ally as your assistant first",android.widget.Toast.LENGTH_SHORT).show() }) { Text("Agent monitor") }
         Button(onClick = appearance) { Text("Appearance") }
         Text("Voice & alerts", color = Muted, fontSize = 12.sp)
         Button(onClick = { deviceContext.startActivity(Intent(deviceContext, DeviceInboxActivity::class.java)) }) { Text("Cards & device connection", fontSize = 11.sp) }

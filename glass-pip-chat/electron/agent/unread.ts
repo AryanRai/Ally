@@ -1,8 +1,9 @@
 import fs from 'node:fs';
+import { hiddenConversation, resolveCodexDiscovery } from './codexDiscovery.js';
 import { randomUUID } from 'node:crypto';
 import type { AgentProvider } from './types.js';
 
-export interface ChatReadState { key: string; revision: string; unread: boolean }
+export interface ChatReadState { key: string; revision: string; unread: boolean; hidden?: boolean }
 interface Entry { revision: string; unread: boolean; source?: string; nativeTurn?: string; pending?: boolean }
 /** One durable read receipt per exact provider/session, shared by every Ally client.
  * A receipt acknowledges only the revision actually rendered, never a later reply. */
@@ -55,7 +56,17 @@ let store = new UnreadStore();
 export function configureUnread(file: string) { store = new UnreadStore(file); }
 export const chatKey = (provider: AgentProvider, id: string) => `${provider}:${id}`;
 export const unreadState = (provider: AgentProvider, id: string) => store.get(chatKey(provider, id));
-export const allReadStates = () => store.list();
+export const allReadStates = () => store.list().map(state => {
+  const split = state.key.indexOf(':');
+  return hiddenConversation(state.key.slice(0, split), state.key.slice(split + 1)) ? { ...state, unread: false, hidden: true } : state;
+});
+export async function discoveryReadStates(extraKeys: string[] = []) {
+  const keys = new Set([...store.list().filter(s => s.unread).map(s => s.key), ...extraKeys]);
+  await Promise.all([...keys].filter(key => key.startsWith('codex:')).map(key => resolveCodexDiscovery(key.slice(6))));
+  const states = allReadStates();
+  for (const key of keys) if (!states.some(s => s.key === key) && hiddenConversation('codex', key.slice(6))) states.push({ key, revision: '', unread: false, hidden: true });
+  return states;
+}
 export const completeUnread = (provider: AgentProvider, id: string, source: string) => store.complete(chatKey(provider, id), source);
 export const nativeUnread = (id: string, unread: boolean) => store.native(chatKey('codex', id), unread);
 export const acknowledgeUnread = (provider: AgentProvider, id: string, revision: string) => store.read(chatKey(provider, id), revision);

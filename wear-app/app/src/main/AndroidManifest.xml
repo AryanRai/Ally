@@ -14,6 +14,10 @@
         android:icon="@drawable/ic_ally" android:allowBackup="false" android:dataExtractionRules="@xml/backup_rules" android:usesCleartextTraffic="false"
         android:networkSecurityConfig="@xml/network_security_config" android:supportsRtl="true">
         <meta-data android:name="com.google.android.wearable.standalone" android:value="true" />
+        <service android:name=".AllyAgentTile" android:label="Ally agents" android:exported="true" android:permission="com.google.android.wearable.permission.BIND_TILE_PROVIDER">
+            <intent-filter><action android:name="androidx.wear.tiles.action.BIND_TILE_PROVIDER"/></intent-filter>
+            <meta-data android:name="androidx.wear.tiles.PREVIEW" android:resource="@drawable/ally_tile_preview"/>
+        </service>
         <service android:name=".ReplyMonitor" android:exported="false" android:foregroundServiceType="dataSync" />
         <service android:name="dev.ally.device.AllyAssistantService" android:label="Ally" android:exported="true" android:permission="android.permission.BIND_VOICE_INTERACTION">
             <intent-filter><action android:name="android.service.voice.VoiceInteractionService" /></intent-filter>

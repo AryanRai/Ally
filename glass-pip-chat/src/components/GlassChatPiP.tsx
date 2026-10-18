@@ -14,6 +14,9 @@ import { useSpeechService } from '../hooks/useSpeechService';
 import { useEditState } from '../hooks/useEditState';
 import { useChats } from '../hooks/useChats';
 import { useAgentConversation } from '../hooks/useAgentConversation';
+import { useChatInteractions } from '../hooks/useChatInteractions';
+import ChatInteractionCard from './chat/ChatInteractionCard';
+import { interactionTimeline } from '../lib/interactionTimeline';
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
 import { useExternalSessions } from '../hooks/useExternalSessions';
 import { AGENT_MODEL_PREFIX } from '../types/agent';
@@ -100,6 +103,11 @@ export default function GlassChatPiP() {
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const activeChat = chats.activeChat;
   const messages = activeChat?.messages ?? [];
+  const sessionKey = activeChat?.agent?.sessionId ? `${activeChat.agent.provider}:${activeChat.agent.sessionId}` : undefined;
+  const decisions = useChatInteractions(sessionKey);
+  const timeline = interactionTimeline(messages, decisions.rows);
+  const pendingDecisions = decisions.rows.filter(row => row.state === 'pending');
+  const decisionCards = <div className="max-h-80 space-y-2 overflow-y-auto">{pendingDecisions.map(request => <ChatInteractionCard key={request.id} request={request} onAnswer={decisions.answer} />)}</div>;
   const meetingTurn = meetingReply(perception, activeChat);
   const meetingWorking = meetingTurn?.state === 'running' || meetingTurn?.state === 'queued';
   const { isTyping, runningChatId } = conversation;
@@ -404,7 +412,8 @@ export default function GlassChatPiP() {
               homeCwd={conversation.homeCwd}
               runningChatId={runningChatId ?? (externalWorking ? activeChat?.id : null)}
               workingStatus={runningChatId ? workingStatus : externalStatus}
-              onStop={runningChatId ? conversation.stop : undefined}
+              onStop={conversation.canStop ? conversation.stop : undefined}
+              onResume={conversation.canResume ? () => void conversation.resume() : undefined}
               chats={chats.chats}
               activeChat={activeChat?.id || null}
               onChatSelect={selectChat}
@@ -435,12 +444,21 @@ export default function GlassChatPiP() {
           >
             {state.collapsed ? (
               <CollapsedHeader
+                onOpenAgent={async row => {
+                  const sessionId = row.sessionId ?? row.id.replace(/^(codex|claude):/, '');
+                  const saved = chats.chats.find(c => c.agent?.provider === row.provider && (c.agent.sessionId === sessionId || c.agent.originalSessionId === sessionId));
+                  if (saved) selectChat(saved.id);
+                  else await conversation.openSession({ id: sessionId, provider: row.provider, title: row.title, createdAt: row.createdAt, updatedAt: row.updatedAt });
+                }}
+                decisionControls={pendingDecisions.length ? decisionCards : undefined}
+                decisions={decisions.rows}
+                onAnswerDecision={decisions.answer}
                 platform={platform}
                 theme={theme}
                 key={activeChat?.id ?? 'empty'}
                 chatTitle={activeChat?.title}
                 workingStatus={conversation.inputStatus || (activeIsWorking ? workingStatus : meetingWorking ? (meetingTurn?.text ? 'Writing meeting notes…' : 'Working on meeting notes…') : externalWorking ? externalStatus : workingStatus)}
-                stopDisabledReason={externalWorking && !meetingWorking ? `Live in ${externalApp} · Stop there` : undefined}
+                stopDisabledReason={externalWorking && !meetingWorking && !conversation.canStop ? `Live in ${externalApp} · Stop there` : undefined}
                 sendFailure={activeChat?.sendFailure?.message}
                 onHeightChange={setCollapsedBodyHeight}
                 isTyping={activeIsWorking || externalWorking || meetingWorking}
@@ -448,6 +466,7 @@ export default function GlassChatPiP() {
                 quickInput={quickInput}
                 setQuickInput={setQuickInput}
                 onSend={(text, _quick, mode) => handleSend(text, true, mode)}
+                onResume={conversation.canResume ? () => void conversation.resume() : undefined}
                 onStop={activeIsWorking || !meetingWorking ? conversation.stop : () => void perception.api?.stopTurn()}
                 onCollapseToggle={toggleCollapse}
                 onSizeChange={win.handleSizeChange}
@@ -528,14 +547,17 @@ export default function GlassChatPiP() {
                 <ContextCards perception={perception} chat={activeChat} />
                 <Conversation className="flex-1 select-text">
                   <ConversationContent className={cn('px-3 py-3', { compact: 'gap-3', normal: 'gap-5', comfortable: 'gap-7' }[appSettings.ui.messageSpacing])}>
-                    {messages.length === 0 && !activeIsWorking ? (
+                    {timeline.length === 0 && !activeIsWorking && !pendingDecisions.length ? (
                       <ConversationEmptyState
                         title={conversation.providerLabel}
                         description="Ask anything, or circle something on screen."
                         className="[&_h3]:font-tanker [&_h3]:text-2xl [&_h3]:tracking-wide"
                       />
                     ) : (
-                      messages.map(message => (
+                      timeline.map(row => {
+                        if (row.kind === 'interaction') return <ChatInteractionCard key={`decision-${row.request.id}`} request={row.request} onAnswer={decisions.answer} />;
+                        const message = row.message;
+                        return (
                         <div key={message.id} data-ally-reply-reader={message.role === 'assistant' && message.id === messages.at(-1)?.id ? 'true' : undefined}><ChatMessage
                           message={message}
                           sessionWorking={externalWorking && message.id === messages.at(-1)?.id}
@@ -544,7 +566,8 @@ export default function GlassChatPiP() {
                           onDelete={messageHandlers.onDelete}
                           onRetry={messageHandlers.onRecompute}
                         /></div>
-                      ))
+                        );
+                      })
                     )}
                     {activeIsWorking && (
                       <Message from="assistant">
@@ -553,6 +576,7 @@ export default function GlassChatPiP() {
                         </MessageContent>
                       </Message>
                     )}
+                    {pendingDecisions.length > 0 && decisionCards}
                   </ConversationContent>
                   <ConversationScrollButton />
                 </Conversation>
@@ -575,8 +599,9 @@ export default function GlassChatPiP() {
                   onSend={(mode) => handleSend(undefined, false, mode)}
                   isTyping={isTyping || externalWorking}
                   workingStatus={conversation.inputStatus || (externalWorking ? externalStatus : activeIsWorking ? workingStatus : `${workingStatus} · ${runningChatTitle}`)}
-                  stopDisabledReason={externalWorking ? `Running in the ${externalApp} app. Stop it there.` : undefined}
+                  stopDisabledReason={externalWorking && !conversation.canStop ? `Running in the ${externalApp} app. Stop it there.` : undefined}
                   onStop={conversation.stop}
+                  onResume={conversation.canResume ? () => void conversation.resume() : undefined}
                   contextData={context.contextData}
                   onExplainClipboard={() => {
                     setInput(`Explain this: ${context.contextData.clipboard}`);

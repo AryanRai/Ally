@@ -1,3 +1,4 @@
+import { RESUME_PROMPT } from '../../electron/agent/resumePrompt';
 import { useCallback, useRef, useState } from 'react';
 import type { Segment } from '../types/chat';
 import { ROBOT_INSTRUCTIONS } from '../config/robotPersona';
@@ -39,7 +40,8 @@ export function useAgentConversation({ chats, robotMode, onSentence }: Options) 
   const updateLive = (chatId: string, patch: Partial<Live>) => setLiveChats(all => ({ ...all, [chatId]: { ...emptyLive, ...all[chatId], ...patch } }));
   const spokenUpTo = useRef<Record<string, number>>({});
   // The active chat is running in the Claude Code / Codex app rather than in Ally
-  const externalRunning = useSessionSync(chats, isTyping);
+  const [control, setControl] = useState<{ token?: string; canStop: boolean }>({ canStop: false });
+  const externalRunning = useSessionSync(chats, isTyping, setControl);
 
   const parsed = parseAgentModel(model) ?? parseAgentModel(DEFAULT_AGENT_MODEL)!;
   const cwd = chats.activeChat?.agent?.cwd || agent.config?.defaultCwd || '';
@@ -65,14 +67,15 @@ export function useAgentConversation({ chats, robotMode, onSentence }: Options) 
   };
 
   /** Run one turn in `chatId` (the user message must already be in the chat). */
-  const runTurn = useCallback(async (chatId: string, prompt: string, history: Message[], images?: string[]) => {
+  const runTurn = useCallback(async (chatId: string, prompt: string, history: Message[], images?: string[], resumeToken?: string) => {
     const chat = chats.getChat(chatId);
     if (!chat || busy.current.has(chatId)) return;
     busy.current.add(chatId);
     updateLive(chatId, { inputStatus: '' });
     chats.setSendFailure(chatId);
     const failedText = [...chat.messages].reverse().find(m => m.role === 'user')?.content ?? prompt;
-    const { provider } = parsed;
+    const selectedModel = resumeToken && chat.agent ? { provider: chat.agent.provider, model: 'default' } : parsed;
+    const { provider } = selectedModel;
 
     // Switching agent mid-chat starts a fresh session for the new provider
     const linked = chat.agent?.provider === provider ? chat.agent : undefined;
@@ -101,7 +104,7 @@ export function useAgentConversation({ chats, robotMode, onSentence }: Options) 
 
     try {
       const result = await agent.runTurn(
-        { provider, model: parsed.model, cwd: runCwd, sessionId, prompt: fullPrompt, images, robot: robotMode ? { instructions: ROBOT_INSTRUCTIONS } : undefined },
+        { provider, model: selectedModel.model, cwd: runCwd, sessionId, prompt: fullPrompt, images, resumeToken, robot: robotMode ? { instructions: ROBOT_INSTRUCTIONS } : undefined },
         {
           onSegments: value => updateLive(chatId, { streamingSegments: value }),
           onText: text => {
@@ -222,16 +225,27 @@ export function useAgentConversation({ chats, robotMode, onSentence }: Options) 
     await runTurn(chat.id, userMessage.content, chat.messages.slice(0, index - 1));
   }, [chats, isTyping, externalRunning, runTurn, agent]);
 
-  const stop = useCallback(() => agent.stop(selectedId), [agent, selectedId]);
+  const stop = useCallback(() => {
+    if (agent.stop(selectedId)) return;
+    const linked = chats.activeChat?.agent;
+    if (linked?.sessionId) void window.pip.agent?.stopSession(linked.provider, linked.sessionId).catch(error => chats.setSendFailure(selectedId, { message: String(error), text: '' }));
+  }, [agent, selectedId, chats]);
+  const resume = useCallback(async () => {
+    const chat = chats.activeChat;
+    if (!chat?.agent?.sessionId || !control.token || busy.current.has(chat.id) || externalRunning) return;
+    chats.addMessage(chat.id, { id: `resume-${crypto.randomUUID()}`, role: 'user', content: RESUME_PROMPT, timestamp: Date.now() });
+    await runTurn(chat.id, RESUME_PROMPT, chat.messages, undefined, control.token);
+  }, [chats, control.token, externalRunning, runTurn]);
 
   /** Continue an existing Claude Code / Codex session as an Ally chat. */
   const openSession = useCallback(async (session: AgentSessionSummary) => {
     if (!window.pip?.agent) return;
-    const { cwd: sessionCwd, messages, sessionId = session.id, originalSessionId } = await window.pip.agent.loadSession(session.provider, session.id);
+    const { cwd: sessionCwd, messages, sessionId = session.id, originalSessionId, createdAt } = await window.pip.agent.loadSession(session.provider, session.id);
     chats.openAgentSession(
       { provider: session.provider, sessionId, originalSessionId: originalSessionId ?? session.originalSessionId, cwd: sessionCwd ?? session.cwd },
       session.title,
       sessionMessages(sessionId, messages),
+      session.createdAt ?? createdAt,
     );
     // Follow-ups should go to the same agent
     if (parseAgentModel(model)?.provider !== session.provider) setModel(`${AGENT_MODEL_PREFIX[session.provider]}default`);
@@ -280,6 +294,9 @@ export function useAgentConversation({ chats, robotMode, onSentence }: Options) 
     send,
     regenerate,
     stop,
+    resume,
+    canResume: !!chats.activeChat?.agent?.sessionId && !!control.token && !isTyping && !externalRunning,
+    canStop: isTyping || control.canStop,
     openSession,
   };
 }

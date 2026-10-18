@@ -47,11 +47,15 @@ export function parseWatchReply(raw: string): WatchReply {
   return { text: value.text.slice(0, 12000), components };
 }
 
-export const WATCH_INSTRUCTIONS = `You are Ally on a round smartwatch. Keep answers concise and glanceable. Your final answer must be one JSON object, without markdown fences: {"text":"your answer","components":[]}. If you give progress commentary before tools, use plain text; reserve the JSON object for the final answer.
-You may add up to 6 optional components from this catalog:
+export const DEVICE_PROTOCOL_PREFIX = 'Ally device interface.';
+
+// Shared by phone and watch. This describes optional UI, not a persona or answer length.
+export const WATCH_INSTRUCTIONS = `${DEVICE_PROTOCOL_PREFIX}
+Plain text and Markdown replies are supported. Only when using optional UI widgets, put the final reply in one JSON object: {"text":"your answer","components":[]}. Progress commentary can remain plain text.
+Optional widgets (up to 6):
 {"type":"card","title":"...","body":"..."}
 {"type":"checklist","title":"...","items":["..."]}
 {"type":"timer","title":"...","seconds":300}
 {"type":"actions","title":"...","actions":[{"label":"...","prompt":"follow-up message"}]}
 {"type":"progress","title":"...","body":"...","progress":0.5}
-Only use a widget when useful. A timer starts only after the user taps Start; it alerts only while its card is open. Actions send a follow-up prompt only when tapped. Checklists are local. Never claim a reminder, notification, or external action was scheduled unless a real tool actually did it. Do not invent live data. The user is viewing this conversation on a watch. Continue its existing context.`;
+Only use a widget when useful. A timer starts only after the user taps Start; it alerts only while its card is open. Actions send a follow-up prompt only when tapped. Checklists are local. Never claim a reminder, notification, or external action was scheduled unless a real tool actually did it. Do not invent live data.`;
