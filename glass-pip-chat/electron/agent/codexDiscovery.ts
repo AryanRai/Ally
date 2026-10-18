@@ -80,6 +80,11 @@ export class CodexDiscovery {
     const value = values.find(v => v.internal) ?? values[0];
     return value && { ...value, title: this.titles.get(id) ?? value.title };
   }
+  paths(id: string): string[] {
+    if (!/^[\da-f]{8}(?:-[\da-f]{4}){3}-[\da-f]{12}$/i.test(id)) return [];
+    this.index();
+    return [...this.files.get(id) ?? []];
+  }
 }
 const local = new CodexDiscovery();
 const native = new Map<string, { at: number; value?: Metadata }>();
@@ -91,6 +96,7 @@ export function rememberCodexThread(thread: any) {
     native.set(thread.id, { at: Date.now(), value: local.remember(thread) });
 }
 export function codexDiscovery(id: string) { return local.get(id) ?? native.get(id)?.value; }
+export const codexRolloutPaths = (id: string) => local.paths(id);
 export const hiddenConversation = (provider: string, id: string) => provider === 'codex' && codexDiscovery(id)?.internal === true;
 /** At most two metadata-only RPCs at once, deduplicated and cached including
  * failures. A missing source stays reachable; titles never imply exclusion. */

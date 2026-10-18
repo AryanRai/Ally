@@ -1,8 +1,10 @@
 import { configureDiscoveryReader, rememberCodexThread, hiddenConversation } from './codexDiscovery.js';
 import { canonicalTurnId, readDesktopActivity } from './codexDesktop.js';
 import { createHash } from 'node:crypto';
+import fs from 'node:fs/promises';
 import { localImageDataUrl } from './imageFile.js';
 import { CodexRpc } from './codexRpc.js';
+import { CodexLocalHistory } from './codexLocalHistory.js';
 import { CodexEventParser } from './codexEvents.js';
 import { codexMigrationAliases, mappedCodexSession } from './codexMigration.js';
 import { thumbnails } from './thumbs.js';
@@ -20,6 +22,7 @@ export function configureCodexHistory(bin?: string) {
   if (bin !== binary) { closeCodexHistory(); binary = bin; }
 }
 export function closeCodexHistory() {
+  nativeTurns.clear();
   for (const lane of ['list', 'history', 'metadata'] as const) {
     const old = connections[lane]; delete connections[lane];
     void old?.then(rpc => rpc.close()).catch(() => {});
@@ -82,17 +85,42 @@ export async function listCodexChats(limit = 40): Promise<AgentSessionSummary[]>
   return result;
 }
 
-/** No thread/resume here: browsing must not own a writer. */
+const localHistory = new CodexLocalHistory();
+const historyLoads = new Map<string, Promise<AgentSessionSnapshot>>();
+const nativeTurns = new Map<string, { fingerprint: string; turns: any[]; snapshot?: AgentSessionSnapshot }>();
+/** Repeated desktop/device reads share one immutable load; each caller owns its receipt/revision. */
 export async function loadCodexChat(id: string, previousRevision?: string): Promise<AgentSessionSnapshot> {
+  const sessionId = mappedCodexSession(id);
+  let work = historyLoads.get(sessionId);
+  if (!work) {
+    work = (async () => {
+      const local = await localHistory.read(sessionId).catch(() => undefined);
+      if (local) {
+        const running = isManagedSessionRunning('codex', sessionId) || !!local.running;
+        return { ...local, running, revision: `${local.revision}:${running}`, ...(sessionId !== id ? { originalSessionId: id } : {}) };
+      }
+      return loadNativeCodexChat(id);
+    })().finally(() => { if (historyLoads.get(sessionId) === work) historyLoads.delete(sessionId); });
+    historyLoads.set(sessionId, work);
+  }
+  const loaded = await work;
+  const result = { ...loaded, originalSessionId: sessionId !== id ? id : undefined };
+  return result.revision === previousRevision ? { ...result, unchanged: true, messages: [] } : result;
+}
+/** Native fallback: no thread/resume here, browsing must not own a writer. */
+async function loadNativeCodexChat(id: string, previousRevision?: string): Promise<AgentSessionSnapshot> {
   const rpc = await reader();
   const sessionId = mappedCodexSession(id);
   const thread = (await historyRead(rpc, 'thread/read', { threadId: sessionId })).thread;
   rememberCodexThread(thread);
-  const turns: any[] = [];
-  if (thread.historyMode === 'paginated') {
+  const stat = typeof thread.path === 'string' ? await fs.stat(thread.path).catch(() => undefined) : undefined;
+  const fingerprint = stat ? JSON.stringify([thread.path, stat.ino, stat.size, stat.mtimeMs, stat.ctimeMs, thread.updatedAt, thread.name, thread.cwd]) : undefined;
+  const cached = fingerprint && nativeTurns.get(sessionId)?.fingerprint === fingerprint ? nativeTurns.get(sessionId) : undefined;
+  const turns: any[] = cached ? [...cached.turns.slice(0, -1), ...(cached.turns.length ? [{ ...cached.turns.at(-1) }] : [])] : [];
+  if (!cached && thread.historyMode === 'paginated') {
     let cursor: string | undefined;
     do {
-      const page = await historyRead(rpc, 'thread/turns/list', { threadId: sessionId, limit: 5, cursor, sortDirection: 'asc', itemsView: 'full' });
+      const page = await historyRead(rpc, 'thread/turns/list', { threadId: sessionId, limit: 20, cursor, sortDirection: 'asc', itemsView: 'full' });
       for (const turn of page.data) {
         if (turn.itemsView !== 'full') {
           turn.items = [];
@@ -107,7 +135,7 @@ export async function loadCodexChat(id: string, previousRevision?: string): Prom
       }
       cursor = page.nextCursor;
     } while (cursor);
-  } else {
+  } else if (!cached) {
     turns.push(...(await historyRead(rpc, 'thread/read', { threadId: sessionId, includeTurns: true })).thread.turns);
   }
   const activity = await readCodexActivity(thread.path).catch(() => undefined);
@@ -117,10 +145,18 @@ export async function loadCodexChat(id: string, previousRevision?: string): Prom
   // Only correct the matching active turn. Never erase an earlier real Stop.
   if (last?.status === 'interrupted' && ((activity?.pending && (activity.recent || managed) && canonicalTurnId(last.id) === canonicalTurnId(activity.turnId)) || (live?.running && canonicalTurnId(last.id) === live.turnId))) last.status = 'inProgress';
   const running = managed || live?.running === true || codexTurnsPending(turns);
-  const revision = createHash('sha256').update(JSON.stringify([sessionId, thread.name, thread.cwd, turns, running])).digest('hex');
+  const revision = createHash('sha256').update(JSON.stringify([sessionId, thread.name, thread.cwd, fingerprint ?? turns, running])).digest('hex');
   const identity = { createdAt: (thread.createdAt ?? 0) * 1000, sessionId, title: thread.name ? chatTitle(thread.name) : undefined, ...(sessionId !== id ? { originalSessionId: id } : {}) };
   if (revision === previousRevision) return { ...identity, cwd: thread.cwd, revision, unchanged: true, messages: [], running };
-  return { ...identity, cwd: thread.cwd, revision, running, messages: codexHistoryMessages(turns, thread.createdAt * 1000) };
+  const snapshot = { ...identity, cwd: thread.cwd, revision, running, messages: cached?.snapshot?.revision === revision ? cached.snapshot.messages : codexHistoryMessages(turns, thread.createdAt * 1000) };
+  if (fingerprint) {
+    const after = await fs.stat(thread.path).catch(() => undefined);
+    if (after && stat && after.size === stat.size && after.mtimeMs === stat.mtimeMs && after.ctimeMs === stat.ctimeMs) {
+      nativeTurns.delete(sessionId); nativeTurns.set(sessionId, { fingerprint, turns, snapshot });
+      while (nativeTurns.size > 8) nativeTurns.delete(nativeTurns.keys().next().value!);
+    }
+  }
+  return snapshot;
 }
 
 function userImages(content: any[]): string[] {

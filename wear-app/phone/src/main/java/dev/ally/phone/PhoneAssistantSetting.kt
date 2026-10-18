@@ -13,6 +13,8 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import dev.ally.device.AllyAssistantService
 
 @Composable
 internal fun PhoneAssistantSetting() {
@@ -20,6 +22,7 @@ internal fun PhoneAssistantSetting() {
     val roles = remember { context.getSystemService(RoleManager::class.java) }
     var held by remember { mutableStateOf(roles?.isRoleHeld(RoleManager.ROLE_ASSISTANT) == true) }
     var error by remember { mutableStateOf("") }
+    val ready by AllyAssistantService.ready.collectAsStateWithLifecycle()
     val launcher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
         held = roles?.isRoleHeld(RoleManager.ROLE_ASSISTANT) == true
     }
@@ -29,10 +32,11 @@ internal fun PhoneAssistantSetting() {
         lifecycle.addObserver(observer); onDispose { lifecycle.removeObserver(observer) }
     }
     MicroLabel("Phone assistant")
-    Text(if(held) "Ally is your default assistant" else "Launch Ally with your Android assistant gesture or button", fontSize=14.sp)
+    Text(if(held && ready) "Ally is your default assistant" else if(held) "Ally is selected · Android assistant disconnected" else "Launch Ally with your Android assistant gesture or button", fontSize=14.sp)
+    if(held && !ready) Text("In Android's Digital assistant settings, choose None, then Ally again to reconnect the power-button gesture.",color=Muted,fontSize=12.sp)
     TextButton({
         error = ""
-        try { launcher.launch(if (!held && roles?.isRoleAvailable(RoleManager.ROLE_ASSISTANT) == true) roles.createRequestRoleIntent(RoleManager.ROLE_ASSISTANT) else Intent(Settings.ACTION_VOICE_INPUT_SETTINGS)) }
+        try { launcher.launch(if (!held && roles?.isRoleAvailable(RoleManager.ROLE_ASSISTANT) == true) roles.createRequestRoleIntent(RoleManager.ROLE_ASSISTANT) else Intent(Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS)) }
         catch (_: Exception) { error = "Open Android Settings → Apps → Default apps → Digital assistant app → Ally." }
     }) { Text(if(held) "Assistant settings" else "Use Ally as assistant") }
     TextButton({

@@ -148,6 +148,7 @@ export class ChatManager {
   switchToChat(chatId: string): boolean {
     const chat = this.state.chats.find(c => c.id === chatId);
     if (!chat) return false;
+    if (this.state.activeChat === chatId) return true;
 
     this.state.activeChat = chatId;
     this.saveState();
@@ -298,15 +299,15 @@ export class ChatManager {
    * Open an existing agent session as a chat. Reuses the chat already linked to
    * that session (refreshing its messages) instead of creating a duplicate.
    */
-  openAgentSession(agent: NonNullable<Chat['agent']>, title: string, messages: Message[], createdAt?: number): Chat {
+  openAgentSession(agent: NonNullable<Chat['agent']>, title: string, messages?: Message[], createdAt?: number): Chat {
     let chat = this.state.chats.find(c => c.agent?.provider === agent.provider && (c.agent?.sessionId === agent.sessionId || (!!agent.originalSessionId && c.agent?.sessionId === agent.originalSessionId)));
     const now = Date.now();
     if (chat) {
-      chat.messages = retainUsage(chat.messages, messages);
+      if (messages) chat.messages = retainUsage(chat.messages, messages);
       chat.agent = agent;
       if (createdAt && agent.sessionId) chat.createdAt = Math.min(chat.createdAt, createdAt);
     } else {
-      chat = { id: `chat_${now}_${Math.random().toString(36).substr(2, 9)}`, title, messages, createdAt: createdAt ?? messages.find(m => m.timestamp > 0)?.timestamp ?? 0, updatedAt: messages.at(-1)?.timestamp ?? 0, agent };
+      chat = { id: `chat_${now}_${Math.random().toString(36).substr(2, 9)}`, title, messages: messages ?? [], createdAt: createdAt ?? messages?.find(m => m.timestamp > 0)?.timestamp ?? 0, updatedAt: messages?.at(-1)?.timestamp ?? 0, agent };
       this.state.chats.push(chat);
     }
     this.state.activeChat = chat.id;
