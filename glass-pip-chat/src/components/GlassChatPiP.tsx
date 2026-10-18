@@ -99,13 +99,17 @@ export default function GlassChatPiP() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
   const [collapsedBodyHeight, setCollapsedBodyHeight] = useState(76);
   const [isContextExpanded, setIsContextExpanded] = useState(false);
+  const [screenAutoAttach, setScreenAutoAttach] = useState(() => localStorage.getItem('ally-screen-auto-attach') === 'true');
+  const [screenNotice, setScreenNotice] = useState('');
+  const preparingScreen = useRef(false);
+  useEffect(() => { localStorage.setItem('ally-screen-auto-attach', String(screenAutoAttach)); }, [screenAutoAttach]);
 
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const activeChat = chats.activeChat;
   const messages = activeChat?.messages ?? [];
   const sessionKey = activeChat?.agent?.sessionId ? `${activeChat.agent.provider}:${activeChat.agent.sessionId}` : undefined;
   const decisions = useChatInteractions(sessionKey);
-  const timeline = interactionTimeline(messages, decisions.rows);
+  const timeline = useMemo(() => state.collapsed ? [] : interactionTimeline(messages, decisions.rows), [messages, decisions.rows, state.collapsed]);
   const pendingDecisions = decisions.rows.filter(row => row.state === 'pending');
   const decisionCards = <div className="max-h-80 space-y-2 overflow-y-auto">{pendingDecisions.map(request => <ChatInteractionCard key={request.id} request={request} onAnswer={decisions.answer} />)}</div>;
   const meetingTurn = meetingReply(perception, activeChat);
@@ -141,10 +145,24 @@ export default function GlassChatPiP() {
   const handleSend = async (messageInput?: string, fromQuickInput = false, mode: 'auto' | 'steer' | 'queue' = 'queue') => {
     const text = (messageInput ?? (fromQuickInput ? quickInput : input)).trim();
     if (!text) return;
+    if (preparingScreen.current) return;
+    if (screenAutoAttach && (activeIsWorking || externalWorking) && !tutor.board) { setScreenNotice('Screen auto-attach waits for this response to finish. Your question is saved.'); return; }
+    const targetChatId = activeChat?.id;
     const attachment = tutor.claimAttachment(activeIsWorking || externalWorking);
     if (attachment.blocked) return;
-    if (fromQuickInput) setQuickInput('');
-    else setInput('');
+    if (screenAutoAttach && !attachment.image) {
+      if (tutor.board) { setScreenNotice('Drawing context attached · clear it to auto-attach a fresh screen.'); }
+      else {
+        preparingScreen.current = true; setScreenNotice('Attaching screen…');
+        try {
+          if (!window.pip?.captureQueryScreen) throw Error('Desktop capture unavailable');
+          attachment.image = await window.pip.captureQueryScreen(); setScreenNotice('');
+        } catch { setScreenNotice('Screen unavailable · sending your question without it.'); }
+        finally { preparingScreen.current = false; }
+        if (circleTarget.current.chatId !== targetChatId) { setScreenNotice('Chat changed · screen was not sent.'); return; }
+      }
+    }
+    setInput(current => current.trim() === text ? '' : current);
     setInputHistory(prev => [...prev.filter(h => h !== text), text].slice(-50));
 
     const includeClipboard = context.shouldIncludeContext(fromQuickInput, state.collapsed);
@@ -165,6 +183,13 @@ export default function GlassChatPiP() {
     lastSpeechRef.current = speech.recognitionId;
     const attachment = tutor.claimAttachment(activeIsWorking || externalWorking);
     if (attachment.blocked) { setInput(current => current ? `${current}\n${text}` : text); return; }
+    if (screenAutoAttach && !attachment.image) {
+      // Reuse exact-query capture, busy checks and error handling; voice remains
+      // a draft until submission rather than silently dropping context.
+      setInput(current => current ? `${current}\n${text}` : text);
+      void handleSend(text, true);
+      return;
+    }
     if (isTyping) {
       speech.stopCurrentSpeech();
       conversation.send(tutor.decorate(text), 'speech', { image: attachment.image });
@@ -468,7 +493,7 @@ export default function GlassChatPiP() {
                 chatTitle={activeChat?.title}
                 workingStatus={conversation.inputStatus || (activeIsWorking ? workingStatus : meetingWorking ? (meetingTurn?.text ? 'Writing meeting notes…' : 'Working on meeting notes…') : externalWorking ? externalStatus : workingStatus)}
                 stopDisabledReason={externalWorking && !meetingWorking && !conversation.canStop ? `Live in ${externalApp} · Stop there` : undefined}
-                sendFailure={activeChat?.sendFailure?.message}
+                sendFailure={activeChat?.sendFailure?.message || screenNotice}
                 onHeightChange={setCollapsedBodyHeight}
                 heightConstrained={!!manualSize}
                 isTyping={activeIsWorking || externalWorking || meetingWorking}
@@ -498,7 +523,10 @@ export default function GlassChatPiP() {
                 currentResponse={currentResponse || meetingTurn?.text}
                 responseSegments={currentResponse ? streamingSegments : undefined}
                 meetingControls={<MessageQueueStack chatId={activeChat?.agent?.sessionId ? `${activeChat.agent.provider}:${activeChat.agent.sessionId}` : undefined} />}
-                drawingControls={<VisualTutorControls tutor={tutor} disabled={!activeChat || activeIsWorking || externalWorking} />}
+                drawingControls={<VisualTutorControls compact tutor={tutor} disabled={!activeChat || activeIsWorking || externalWorking} />}
+                screenAutoAttach={screenAutoAttach}
+                onScreenAutoAttachToggle={() => setScreenAutoAttach(value => !value)}
+                onClipboardAutoAttachToggle={() => context.setContextToggleEnabled(!context.contextToggleEnabled)}
                 menuControls={<PerceptionBar perception={perception} chat={activeChat} onOpenSession={openMeetingChat} />}
                 currentModel={conversation.model}
                 showModelSelector={showModelSelector}

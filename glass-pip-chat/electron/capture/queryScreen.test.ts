@@ -1,0 +1,21 @@
+import { expect, it, vi } from 'vitest';
+const fixture = vi.hoisted(() => ({ capture: vi.fn(), windows: [] as any[], write: vi.fn() }));
+vi.mock('./circle.js', () => ({ captureDisplay: fixture.capture }));
+vi.mock('electron', () => ({ BrowserWindow: { getAllWindows: () => fixture.windows }, screen: { getCursorScreenPoint: () => ({ x: 10, y: 20 }), getDisplayNearestPoint: () => ({ id: 1 }) } }));
+vi.mock('node:fs/promises', () => ({ default: { mkdir: vi.fn(), readdir: async () => [], writeFile: fixture.write } }));
+import { queryScreen } from './queryScreen';
+it('captures fresh once per query, excludes Ally and restores it on denial without reusing an old screen', async () => {
+  vi.useFakeTimers();
+  const main = { isVisible: () => true, hide: vi.fn(), showInactive: vi.fn(), isDestroyed: () => false } as any;
+  const image = { isEmpty: () => false, getSize: () => ({ width: 800 }), resize: () => image, toPNG: () => Buffer.from('synthetic'), toJPEG: () => Buffer.from('fixture') };
+  fixture.capture.mockResolvedValue(image);
+  const first = queryScreen(main); expect(main.hide).toHaveBeenCalledOnce(); expect(fixture.capture).not.toHaveBeenCalled();
+  await vi.advanceTimersByTimeAsync(160); const result = await first;
+  expect(result.path).toMatch(/query-.*\.png$/); expect(main.showInactive).toHaveBeenCalledOnce(); expect(fixture.capture).toHaveBeenCalledOnce();
+  fixture.capture.mockRejectedValueOnce(Error('OS denial'));
+  const failed = queryScreen(main); const check = expect(failed).rejects.toThrow('OS denial'); await vi.advanceTimersByTimeAsync(160); await check;
+  expect(main.showInactive).toHaveBeenCalledTimes(2); expect(fixture.write).toHaveBeenCalledTimes(1);
+  fixture.windows = [{ getTitle: () => 'Ally Visual Tutor' }];
+  await expect(queryScreen(main)).rejects.toThrow(/drawing/); expect(fixture.capture).toHaveBeenCalledTimes(2);
+  vi.useRealTimers();
+});

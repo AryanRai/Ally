@@ -16,7 +16,7 @@ export function useChatInteractions(chatId?: string) {
       loading = true;
       try {
         const rows = await api.interactionHistory(chatId);
-        if (!disposed) setData({ chatId, rows });
+        if (!disposed) setData(previous => previous.chatId === chatId && JSON.stringify(previous.rows) === JSON.stringify(rows) ? previous : { chatId, rows });
       } catch { /* Retain the last confirmed state during reconnects. */ }
       finally { loading = false; if (dirty && !disposed) { dirty = false; void refresh(); } }
     };

@@ -1,5 +1,10 @@
 const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('tutor', {
+  onPillBounds: callback => {
+    const handler = (_, bounds) => callback(bounds);
+    ipcRenderer.on('tutor:pill-bounds', handler);
+    return () => ipcRenderer.removeListener('tutor:pill-bounds', handler);
+  },
   overlay: () => ipcRenderer.invoke('tutor:overlay'),
   action: (id, action) => ipcRenderer.invoke('tutor:action', id, action),
   sketch: (id, points) => ipcRenderer.invoke('tutor:sketch', id, points),

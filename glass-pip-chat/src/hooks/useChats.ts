@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { ChatManager } from '../utils/chatManager';
 import type { Chat, Message } from '../types/chat';
 
@@ -21,7 +21,7 @@ export function useChats() {
     return result;
   }, [manager, refresh]);
 
-  const activeChat = state.active ? { ...state.active, messages: [...state.active.messages] } : null;
+  const activeChat = useMemo(() => state.active ? { ...state.active, messages: [...state.active.messages] } : null, [state]);
 
   return {
     chats: state.chats,

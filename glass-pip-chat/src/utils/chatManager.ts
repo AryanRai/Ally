@@ -6,17 +6,31 @@ const CHAT_STORAGE_KEY = 'glass_pip_chats';
 function retainUsage(previous: Message[], incoming: Message[]): Message[] {
   const key = (m: Message) => `${m.role}:${m.content.replace(/<think>[\s\S]*?<\/think>/gi, '').trim()}`;
   const candidates = new Map<string, Message[]>();
-  for (const m of previous) candidates.set(key(m), [...(candidates.get(key(m)) ?? []), m]);
+  const previousKeys = previous.map(key);
+  const userPositions = new Map<string, number[]>();
+  const candidateOffsets = new Map<string, number>();
+  previous.forEach((message, index) => {
+    const value = previousKeys[index];
+    const bucket = candidates.get(value) ?? []; bucket.push(message); candidates.set(value, bucket);
+    if (message.role === 'user') { const positions = userPositions.get(value) ?? []; positions.push(index); userPositions.set(value, positions); }
+  });
   let previousUser = -1;
   return incoming.map(m => {
+    const value = key(m);
     if (m.role === 'user') {
-      previousUser = previous.findIndex((old, index) => index > previousUser && old.role === 'user' && key(old) === key(m));
+      const positions = userPositions.get(value) ?? [];
+      // Binary search retains ordered duplicate-user matching without repeatedly
+      // scanning and normalizing the entire long transcript.
+      let left = 0, right = positions.length;
+      while (left < right) { const middle = (left + right) >>> 1; if (positions[middle] <= previousUser) left = middle + 1; else right = middle; }
+      previousUser = positions[left] ?? -1;
     }
     const localReply = previousUser >= 0 ? previous[previousUser + 1] : undefined;
     if (m.role === 'assistant' && m.content.trim() === '⏹️ Stopped' && localReply?.role === 'assistant' && localReply.content.endsWith('⏹️ Stopped')) {
       return { ...m, content: localReply.content, metadata: { ...localReply.metadata, usage: { ...localReply.metadata?.usage, ...m.metadata?.usage } } };
     }
-    const old = candidates.get(key(m))?.shift();
+    const offset = candidateOffsets.get(value) ?? 0;
+    const old = candidates.get(value)?.[offset]; candidateOffsets.set(value, offset + 1);
     if (!old?.metadata?.usage) return m;
     return { ...m, metadata: { ...m.metadata, usage: { ...old.metadata.usage, ...m.metadata?.usage } } };
   });

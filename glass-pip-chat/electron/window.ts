@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { exec } from 'node:child_process';
 import { boundsPersistence } from './boundsPersistence.js';
 import { openLocalDocument } from './localDocument.js';
+import { queryScreen } from './capture/queryScreen.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -399,6 +400,10 @@ function ensureWindowOnScreen(x: number, y: number, width: number, height: numbe
 }
 
 export function registerWindowIpc(): void {
+  ipcMain.handle('context:query-screen', async event => {
+    if (!win || event.sender !== win.webContents || event.senderFrame !== event.sender.mainFrame) throw Error('Capture must originate from Ally');
+    return queryScreen(win);
+  });
   ipcMain.handle('document:open', async (event, file: unknown) => {
     if (event.sender !== win?.webContents) throw Error('Unsupported document source');
     await openLocalDocument(file);

@@ -6,7 +6,7 @@ import DiagramFrame from './DiagramFrame';
 import { dockCanvas } from './dock';
 import './tutor.css';
 
-declare global { interface Window { tutor: Pick<VisualTutorApi, 'overlay' | 'action' | 'sketch' | 'interactive' | 'onChanged'> } }
+declare global { interface Window { tutor: Pick<VisualTutorApi, 'overlay' | 'action' | 'sketch' | 'interactive' | 'onChanged' | 'onPillBounds'> } }
 
 export default function Overlay() {
   const [board, setBoard] = useState<TutorBoard | null>(null);
@@ -39,6 +39,9 @@ export default function Overlay() {
     window.addEventListener('resize', keepVisible);
     return () => { observer.disconnect(); window.removeEventListener('resize', keepVisible); };
   }, [board?.id]);
+  useEffect(() => {
+    return window.tutor.onPillBounds?.(bounds => setBoard(previous => previous ? { ...previous, pillBounds: { ...bounds, x: bounds.x - previous.bounds.x, y: bounds.y - previous.bounds.y } } : previous));
+  }, []);
   useEffect(() => {
     const off = window.tutor.onChanged(setBoard);
     void window.tutor.overlay().then(state => { setBoard(previous => previous && state.board && previous.revision > state.board.revision ? previous : state.board); setScreenshot(state.screenshot); }).catch(error => setError(String(error)));
