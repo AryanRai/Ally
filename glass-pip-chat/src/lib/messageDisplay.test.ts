@@ -12,6 +12,11 @@ const request = 'Integrate **Circle**, `drawing` and [meetings](https://example.
 const directive = '::created-thread{threadId="01a14c73-31e1-7310-9342-7131de45d662"}';
 
 describe('display-only envelopes', () => {
+  it('projects standalone file citations as file links while preserving quoted/code examples', () => {
+    const citation = ':codex-file-citation{path="C:/study/Formula Sheet.pdf" purpose="output"}';
+    expect(displayAssistantText(citation)).toBe('[Formula Sheet.pdf](/__ally_document__/C%3A%2Fstudy%2FFormula%20Sheet.pdf)');
+    for (const raw of [`\`${citation}\``, `> ${citation}`, `\`\`\`\n${citation}\n\`\`\``, ':codex-file-citation{path="javascript:alert(1)" purpose="output"}']) expect(displayAssistantText(raw)).toBe(raw);
+  });
   it('unwraps the exact real browser envelope and preserves the complete request', () => {
     const raw = `<in-app-browser-context source="ambient-ui-state">\n${browser}\n</in-app-browser-context>\n\n## My request:\n${request}`;
     expect(displayUserText(raw)).toBe(request);

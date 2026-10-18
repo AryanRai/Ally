@@ -5,6 +5,7 @@ import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import 'katex/dist/katex.min.css';
 import { mathMarkdown } from '@/lib/mathMarkdown';
+import ChatLink from './ChatLink';
 
 /** Narrow, selectable Markdown with real paragraph/list structure and no icon toolbar. */
 export default function CompactMarkdown({ children }: { children: string }) {
@@ -12,7 +13,7 @@ export default function CompactMarkdown({ children }: { children: string }) {
     <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[[rehypeKatex, { trust: false, strict: 'ignore', throwOnError: false }]]} urlTransform={chatUrlTransform}
       components={{
         img: MarkdownImage,
-        a: ({ children, ...props }) => <a {...props} target="_blank" rel="noreferrer">{children}</a>,
+        a: ChatLink,
         table: ({ children, ...props }) => <div className="max-w-full overflow-x-auto"><table {...props}>{children}</table></div>,
       }}>{mathMarkdown(children)}</ReactMarkdown>
   </div>;

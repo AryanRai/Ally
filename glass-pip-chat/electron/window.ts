@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { exec } from 'node:child_process';
 import { boundsPersistence } from './boundsPersistence.js';
+import { openLocalDocument } from './localDocument.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -14,6 +15,8 @@ let isQuitting = false;
 let win: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let resizeCompletion: ReturnType<typeof setTimeout> | undefined;
+let manualResizing = false;
+let manualCompletion: ReturnType<typeof setTimeout> | undefined;
 const BOUNDS_FILE = path.join(app.getPath('userData'), 'window-bounds.json');
 
 let currentTheme: 'light' | 'dark' = 'dark';
@@ -247,6 +250,18 @@ export async function createWindow(): Promise<void> {
 
   // Save window bounds on move and resize
   w.on('resize', pendingBounds.schedule);
+  const settleManualResize = () => {
+    if (!manualResizing) return;
+    if (manualCompletion) clearTimeout(manualCompletion);
+    manualCompletion = setTimeout(() => {
+      manualCompletion = undefined; manualResizing = false;
+      if (w.isDestroyed() || w !== win) return;
+      const [width, height] = w.getSize();
+      w.webContents.send('window:manual-resize', { width, height });
+    }, 150);
+  };
+  w.on('will-resize', () => { manualResizing = true; settleManualResize(); });
+  w.on('resize', settleManualResize);
   w.on('move', pendingBounds.schedule);
   app.once('before-quit', pendingBounds.flush);
   
@@ -384,6 +399,10 @@ function ensureWindowOnScreen(x: number, y: number, width: number, height: numbe
 }
 
 export function registerWindowIpc(): void {
+  ipcMain.handle('document:open', async (event, file: unknown) => {
+    if (event.sender !== win?.webContents) throw Error('Unsupported document source');
+    await openLocalDocument(file);
+  });
   // IPC handlers
   ipcMain.on('pip:show', () => {
     if (win) win.show();
@@ -415,6 +434,7 @@ export function registerWindowIpc(): void {
   // Window resizing handlers
   ipcMain.on('window:resize', (_, { width, height }) => {
     if (!win) return;
+    if (manualResizing) return;
     if (!Number.isFinite(width) || !Number.isFinite(height)) return;
     if (resizeCompletion) clearTimeout(resizeCompletion);
 

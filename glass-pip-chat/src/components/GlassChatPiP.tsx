@@ -55,7 +55,7 @@ const COLLAPSED = {
 /** The glass PiP overlay: chat sidebar, agent conversation, voice and clipboard context. */
 export default function GlassChatPiP() {
   const win = useWindowManagement();
-  const { state, platform, theme, isResizing, setIsResizing, sizePx } = win;
+  const { state, manualSize, platform, theme, isResizing, setIsResizing, sizePx } = win;
   const context = useContextMonitoring();
   const speech = useSpeechService();
   const chats = useChats();
@@ -319,17 +319,17 @@ export default function GlassChatPiP() {
 
   const sidebarWidth = state.collapsed ? 0 : sidebarCollapsed ? SIDEBAR_WIDTH.collapsed : SIDEBAR_WIDTH.expanded;
   const contentWidth = Math.min(
-    state.collapsed ? COLLAPSED.widthBySize[state.size] ?? 360 : sizePx[state.size].w + sidebarWidth,
+    manualSize ? manualSize.width - padding * 2 : state.collapsed ? COLLAPSED.widthBySize[state.size] ?? 360 : sizePx[state.size].w + sidebarWidth,
     MAX_CONTENT.width - padding * 2,
   );
-  const contentHeight = Math.min(state.collapsed ? collapsedHeight : sizePx[state.size].h, MAX_CONTENT.height - padding * 2);
+  const contentHeight = manualSize ? manualSize.height - padding * 2 : Math.min(state.collapsed ? collapsedHeight : sizePx[state.size].h, MAX_CONTENT.height - padding * 2);
 
   // The expanded sidebar doesn't fit next to the largest chat area
   useEffect(() => {
-    if (!state.collapsed && sizePx[state.size].w + SIDEBAR_WIDTH.expanded > MAX_CONTENT.width - padding * 2) {
+    if (!state.collapsed && (sizePx[state.size].w + SIDEBAR_WIDTH.expanded > MAX_CONTENT.width - padding * 2 || (manualSize && manualSize.width < SIDEBAR_WIDTH.expanded + 280))) {
       setSidebarCollapsed(true);
     }
-  }, [state.size, state.collapsed, padding]);
+  }, [state.size, state.collapsed, padding, manualSize?.width]);
 
   useEffect(() => {
     if (!window.pip) return;
@@ -383,7 +383,7 @@ export default function GlassChatPiP() {
         platform === 'win32' && 'win32-acrylic',
         platform === 'linux' && 'linux-glass-effect'
       )}
-      style={{ width: contentWidth + padding * 2, height: contentHeight + padding * 2, zIndex: 50 }}
+      style={{ width: '100vw', height: '100vh', padding, boxSizing: 'border-box', zIndex: 50 }}
       initial={{ opacity: 0, scale: 0.9 }}
       animate={{ opacity: 1, scale: isResizing && !nativeFrame ? 1.02 : 1 }}
       transition={{ type: 'spring', stiffness: 400, damping: 35 }}
@@ -400,7 +400,7 @@ export default function GlassChatPiP() {
           platform === 'linux' && 'linux-blur',
           platform !== 'win32' && platform !== 'linux' && 'backdrop-blur-2xl backdrop-saturate-150'
         )}
-        style={{ width: contentWidth, height: contentHeight, margin: `${padding}px` }}
+        style={{ width: '100%', height: '100%' }}
       >
         <FlowField state={backdropState} />
         {/* Orbit Mary's panel glow: while the agent works and while you type */}
@@ -432,7 +432,7 @@ export default function GlassChatPiP() {
           </div>
         )}
 
-        <div className="flex-1 flex flex-col min-w-0 chat-main-area">
+        <div className="flex-1 flex flex-col min-h-0 min-w-0 chat-main-area">
           {/* Header */}
           <div
             className={cn(
@@ -461,6 +461,7 @@ export default function GlassChatPiP() {
                 stopDisabledReason={externalWorking && !meetingWorking && !conversation.canStop ? `Live in ${externalApp} · Stop there` : undefined}
                 sendFailure={activeChat?.sendFailure?.message}
                 onHeightChange={setCollapsedBodyHeight}
+                heightConstrained={!!manualSize}
                 isTyping={activeIsWorking || externalWorking || meetingWorking}
                 messages={messages}
                 quickInput={quickInput}

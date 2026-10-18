@@ -33,6 +33,11 @@ export function displayAssistantText(raw: string): string {
       return line;
     }
     if (fence) return line;
+    const file = /^:{1,2}codex-file-citation\{path="([^"\r\n]+)"(?: purpose="(?:input|output)")?\}\s*$/.exec(line);
+    if (file && /^(?:[a-z]:[\\/]|\/(?!\/))/i.test(file[1]) && !/[\0\r\n]/.test(file[1])) {
+      const label = file[1].split(/[\\/]/).at(-1)!.replace(/[\[\]\\]/g, '\\$&');
+      return `[${label}](/__ally_document__/${encodeURIComponent(file[1])})`;
+    }
     const created = /^::created-thread\{(threadId|clientThreadId)="([\da-f-]{36})"\}\s*$/i.exec(line);
     if (!created) return line;
     return created[1] === 'threadId'
