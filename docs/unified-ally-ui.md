@@ -23,8 +23,14 @@ The frozen handoff is single-use, expires after 60 seconds and is bound to the c
 
 Validation build: `%LOCALAPPDATA%/Ally/builds/unified-ui-20261018/glass-pip-chat`. Test-only source snapshot: `Exo/.ally-unified-ui-validation/glass-pip-chat`. AppData virtualization prevented the first isolated Vitest attempt from progressing; the workspace-local snapshot completed the full suite. Shared `dist` was not touched.
 
-The separate message-readability chat began editing during this task. Its work, including the additive `responseSegments` prop, remains in the shared checkout but is excluded from this tested commit/build until its owner finishes validation. The first shared-suite run encountered those in-progress changes; the clean isolated suite above is authoritative for this integration.
+The original isolated verification above covered the initial UI integration. Message readability and stale Claude activity were subsequently validated and merged together in PR31. The combined runtime below includes those changes and the completed browser activity and native-chat recovery fixes.
 
 ## Runtime
 
-The existing `claude-resume-20261018` desktop (PID6884 when checked) was preserved. This integration has **not been deployed**, and no restart helper is armed. Coordinate any future activation with active chats and other ready changes. Phone/watch APKs, pairing and assistant routing are unchanged. The pre-existing Vercel Root Directory issue is unrelated and untouched.
+The combined desktop was deployed on 2026-10-18 at 02:03 UTC after the user's explicit restart request. Runtime: `%LOCALAPPDATA%/Ally/builds/unified-live-20261018/glass-pip-chat`, PID56660 at verification. `deployment.json` in its parent records completion; the previous browser-activity build is retained for rollback.
+
+Local and cloud bridge connections, speech readiness, message queue, attachments, eight existing MCP tools, phone/watch reconnection and the original Claude history all passed read-only health checks. The three active native Codex chats had no Ally-managed turn; their Codex processes were preserved. No capture or device action was pending. Existing APKs, pairing and assistant routing remain in place.
+
+The combined Vite/Electron builds and native Circle/drawing/Meeting checks passed. The Circle QA now checks the actual OS window bounds to account for fractional display scaling. Failed native responses allow explicit new sends while automatic queues remain paused with the provider error. Writer-conflict errors distinguish failure before submission from uncertain acceptance after submission; no automatic retry or fork occurs. The existing local Codex desktop connection setting is enabled in the new runtime. The pre-existing Vercel Root Directory issue remains unrelated to this desktop deployment.
+
+Final combined verification: **454 tests across 87 files passed**, with TypeScript passing on the same settled source. Deployed source hashes match the publication checkout.

@@ -5,6 +5,18 @@ import type { DeviceAttachment, DeviceMedia } from './media.js';
 export interface WatchActivity { id: string; name: string; status: 'running' | 'done' | 'error' | 'interrupted'; detail: string; kind?: 'browser' | 'other'; context?: string; attachments?: DeviceAttachment[] }
 export interface ActivityState { steps: WatchActivity[]; usage?: AgentUsage }
 
+/** Live phone/watch status uses the same classification as the activity details. */
+export function liveActivity(steps: WatchActivity[]): string {
+  const step = [...steps].reverse().find(item => item.status === 'running') ?? steps.at(-1);
+  if (!step || step.status === 'done' || step.status === 'interrupted') return 'Thinking…';
+  if (step.kind === 'browser') {
+    const label = step.status === 'error' ? 'Browser action failed' : 'Using browser';
+    return step.context ? `${label} · ${step.context}` : label;
+  }
+  if (/cua_repl/i.test(step.name)) return step.status === 'error' ? 'Computer action failed' : 'Using computer';
+  return step.status === 'error' ? 'Tool failed' : `Using ${step.name.slice(0, 70)}`;
+}
+
 function describe(input: Record<string, unknown>): string {
   // Bound network payloads on the watch; don't copy image/base64 tool results.
   const target = input.command ?? input.cmd ?? input.file_path ?? input.path ?? input.query;

@@ -27,6 +27,35 @@ import { messageQueue } from '../agent/messageQueue';
 let stop: (() => void) | undefined;
 afterEach(() => { stop?.(); vi.restoreAllMocks(); vi.clearAllMocks(); if (fake.root) fs.rmSync(fake.root, { recursive: true, force: true }); });
 
+it('pauses automatic queue delivery after provider failure and permits an explicit recovery send', async () => {
+  fake.root = fs.mkdtempSync(path.join(os.tmpdir(), 'ally-error-recovery-'));
+  messageQueue.configure(path.join(fake.root, 'message-queue.json'));
+  fs.writeFileSync(path.join(fake.root, 'watch-bridge.json'), JSON.stringify({ enabled: true, token: 'synthetic-only', port: 0, sessions: {} }));
+  fs.writeFileSync(path.join(fake.root, 'watch-chats.json'), JSON.stringify([{ id: 'chat', provider: 'codex', sessionId: 'original', title: 'Synthetic', cwd: fake.root, messages: [], updatedAt: 1 }]));
+  fake.load.mockResolvedValue({ cwd: fake.root, messages: [] });
+  fake.activity.mockResolvedValue({ running: false, idle: false, canStart: true, error: 'The previous response failed because the API provider budget was exceeded.' });
+  fake.start.mockResolvedValue('recovery-run');
+  const create = vi.spyOn(http, 'createServer');
+  stop = startWatchBridge(() => ({ defaultCwd: fake.root, permission: 'readonly', codexDesktop: true }));
+  const server = create.mock.results[0].value as http.Server;
+  if (!server.listening) await once(server, 'listening');
+  const base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+  const post = (route: string, body: object) => fetch(base + route, { method: 'POST', headers: { Authorization: 'Bearer synthetic-only', 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  messageQueue.enqueue('codex:original', { id: 'saved', text: 'user follow-up', permission: 'readonly' });
+  await vi.waitFor(() => expect(messageQueue.snapshot('codex:original').items[0]).toMatchObject({ state: 'failed', error: expect.stringContaining('budget') }), { timeout: 3000 });
+  expect(fake.start).not.toHaveBeenCalled(); expect(fake.steer).not.toHaveBeenCalled();
+  // Pending decisions/unknown state must never turn into steering an idle chat.
+  fake.activity.mockResolvedValueOnce({ running: false, idle: false, canStart: false });
+  const blocked = await post('/v1/queue/chat', { action: 'send', id: 'saved', revision: messageQueue.snapshot('codex:original').revision });
+  expect(blocked.ok).toBe(false);
+  expect(fake.start).not.toHaveBeenCalled(); expect(fake.steer).not.toHaveBeenCalled();
+  const sent = await post('/v1/queue/chat', { action: 'send', id: 'saved', revision: messageQueue.snapshot('codex:original').revision });
+  expect(sent.ok).toBe(true);
+  expect(fake.start).toHaveBeenCalledOnce(); expect(fake.steer).not.toHaveBeenCalled();
+  expect(fake.start.mock.calls[0][0]).toMatchObject({ sessionId: 'original', codexDesktop: true, permission: 'readonly', prompt: expect.stringContaining('user follow-up') });
+  expect(messageQueue.snapshot('codex:original').items).toEqual([]);
+}, 8000);
+
 it('publishes partial replies before completion and keeps exact-session routing, retries, continuation and Stop', async () => {
   fake.root = fs.mkdtempSync(path.join(os.tmpdir(), 'ally-live-bridge-'));
   messageQueue.configure(path.join(fake.root, 'message-queue.json'));
@@ -49,6 +78,12 @@ it('publishes partial replies before completion and keeps exact-session routing,
   await vi.waitFor(() => expect(fake.start).toHaveBeenCalledTimes(1));
   expect(await request('/v1/chats/chat')).toMatchObject({ running: true, activeTurnId: accepted.id });
   expect(fake.start.mock.calls[0][0]).toMatchObject({ cwd: fake.root, sessionId: 'original', permission: 'readonly' });
+  emit({ kind: 'tool_start', id: 'browser', name: 'cua_repl.js', input: { title: 'Check browser connection' } });
+  expect(await request(`/v1/turns/${accepted.id}`)).toMatchObject({ activity: 'Using browser · Check browser connection' });
+  emit({ kind: 'tool_update', id: 'browser', input: { title: 'Inspect Instagram' } });
+  expect(await request(`/v1/turns/${accepted.id}`)).toMatchObject({ activity: 'Using browser · Inspect Instagram' });
+  emit({ kind: 'tool_end', id: 'browser', isError: true, output: 'Connection timed out' });
+  expect(await request(`/v1/turns/${accepted.id}`)).toMatchObject({ activity: 'Browser action failed · Inspect Instagram', steps: [expect.objectContaining({ status: 'error', name: 'cua_repl.js' })] });
   emit({ kind: 'text', text: 'Checking…\n{"text":"Hel' });
   expect(await request(`/v1/turns/${accepted.id}`)).toMatchObject({ status: 'thinking', liveText: 'Checking…\n\nHel' });
   expect((await request('/v1/messages', message)).id).toBe(accepted.id);

@@ -71,7 +71,7 @@ it('detects a long running turn whose start is outside the transcript preview', 
 
 it('recovers an exact native running chat even when its rollout mtime is stale after restart', async () => {
   const live = '33333333-3333-3333-3333-333333333333';
-  vi.mocked(readDesktopActivity).mockResolvedValueOnce({ running: true, idle: false, turnId: 'native-live' });
+  vi.mocked(readDesktopActivity).mockResolvedValueOnce({ running: true, idle: false, canStart: false, error: undefined, turnId: 'native-live' });
   await write(`.codex/sessions/rollout-${live}.jsonl`, [
     { type: 'session_meta', payload: { cwd: '/still-working' } }, ev('task_started'),
   ], now - 10 * STALE_TURN_MS);
@@ -83,7 +83,7 @@ it('recovers an exact native running chat even when its rollout mtime is stale a
 it('does not revive stale pending work when its native owner is idle or unavailable', async () => {
   const idle = '44444444-4444-4444-4444-444444444444';
   const unavailable = '55555555-5555-5555-5555-555555555555';
-  vi.mocked(readDesktopActivity).mockResolvedValueOnce({ running: false, idle: true, turnId: 'finished' }).mockRejectedValueOnce(new Error('Desktop restarting'));
+  vi.mocked(readDesktopActivity).mockResolvedValueOnce({ running: false, idle: true, canStart: true, error: undefined, turnId: 'finished' }).mockRejectedValueOnce(new Error('Desktop restarting'));
   await write(`.codex/sessions/rollout-${idle}.jsonl`, [ev('task_started')], now - STALE_TURN_MS - 1);
   await write(`.codex/sessions/rollout-${unavailable}.jsonl`, [ev('task_started')], now - STALE_TURN_MS - 1);
   await write(`.claude/projects/project/${id}.jsonl`, [{ type: 'user', message: { content: 'Still working' } }]);
