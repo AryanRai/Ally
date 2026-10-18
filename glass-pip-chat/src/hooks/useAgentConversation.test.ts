@@ -13,6 +13,23 @@ vi.mock('./useSessionSync', () => ({ useSessionSync: (_chats: unknown, _running:
 afterEach(() => { vi.clearAllMocks(); sync.control = { token: undefined, canStop: false }; });
 
 describe('failed desktop sends', () => {
+  it('selects immediately, shares repeated opens and never returns to an old chat after hydration', async () => {
+    localStorage.clear(); (ChatManager as unknown as { instance?: ChatManager }).instance = undefined;
+    let finish!: (snapshot: unknown) => void;
+    const loadSession = vi.fn(() => new Promise(resolve => { finish = resolve; }));
+    window.pip = { agent: { loadSession } } as any;
+    const { result } = renderHook(() => { const chats = useChats(); return { chats, conversation: useAgentConversation({ chats, robotMode: false }) }; });
+    const session = { provider: 'codex' as const, id: 'original', title: 'Study', createdAt: 10, updatedAt: 20 };
+    let first!: Promise<unknown>, duplicate!: Promise<unknown>;
+    act(() => { first = result.current.conversation.openSession(session); duplicate = result.current.conversation.openSession(session); });
+    expect(result.current.chats.activeChat?.agent?.sessionId).toBe('original');
+    expect(loadSession).toHaveBeenCalledOnce();
+    act(() => { result.current.chats.create(); });
+    const selected = result.current.chats.activeChat!.id;
+    await act(async () => { finish({ revision: 'r', messages: [], sessionId: 'original', cwd: '/work' }); await Promise.all([first, duplicate]); });
+    expect(result.current.chats.activeChat!.id).toBe(selected);
+    expect(result.current.chats.chats.filter(c => c.agent?.sessionId === 'original')).toHaveLength(1);
+  });
   it('returns the failure, saves the original text, releases busy state and allows a retry', async () => {
     localStorage.clear();
     (ChatManager as unknown as { instance?: ChatManager }).instance = undefined;

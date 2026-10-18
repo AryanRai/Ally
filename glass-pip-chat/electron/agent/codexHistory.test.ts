@@ -14,6 +14,23 @@ import { resolveCodexDiscovery } from './codexDiscovery';
 vi.mock('./codexActivity.js', () => ({ readCodexActivity: vi.fn(async () => undefined) }));
 afterEach(() => { closeCodexHistory(); vi.restoreAllMocks(); });
 describe('API history', () => {
+  it('shares duplicate opens and reuses full native history only until its exact file revision changes', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ally-native-cache-'));
+    const file = path.join(root, 'rollout'); fs.writeFileSync(file, 'header');
+    const request = vi.fn(async (method: string) => method === 'thread/read' ? { thread: { id: 'cache-regression', path: file, historyMode: 'paginated', createdAt: 1 } } : { data: [{ id: 'one', status: 'completed', itemsView: 'full', items: [{ type: 'agentMessage', id: 'a', text: 'Kept history' }] }], nextCursor: null });
+    vi.spyOn(CodexRpc, 'connect').mockResolvedValue({ request, close: vi.fn() } as unknown as CodexRpc);
+    try {
+      const [first, duplicate] = await Promise.all([loadCodexChat('cache-regression'), loadCodexChat('cache-regression')]);
+      expect(duplicate.revision).toBe(first.revision);
+      expect(request.mock.calls.filter(([method]) => method === 'thread/turns/list')).toHaveLength(1);
+      expect((await loadCodexChat('cache-regression', first.revision)).unchanged).toBe(true);
+      expect(request.mock.calls.filter(([method]) => method === 'thread/turns/list')).toHaveLength(1);
+      fs.appendFileSync(file, '\nnew event');
+      expect((await loadCodexChat('cache-regression', first.revision)).unchanged).not.toBe(true);
+      expect(request.mock.calls.filter(([method]) => method === 'thread/turns/list')).toHaveLength(2);
+      expect(request).toHaveBeenCalledWith('thread/turns/list', expect.objectContaining({ limit: 20 }), 8000);
+    } finally { fs.rmSync(root, { recursive: true, force: true }); }
+  });
   it('isolates a timed-out Guardian receipt metadata lookup from a foreground history read', async () => {
     let finishHistory!: (value: unknown) => void;
     const history = { request: vi.fn(async (method: string) => method === 'thread/read'

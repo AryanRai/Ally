@@ -33,6 +33,7 @@ export function useAgentConversation({ chats, robotMode, onSentence }: Options) 
   const [liveChats, setLiveChats] = useState<Record<string, Live>>({});
   const busy = useRef(new Set<string>());
   const externalRequests = useRef(new Map<string, string>());
+  const openingSessions = useRef(new Map<string, Promise<void>>());
   const selectedId = chats.activeChat?.id ?? '';
   const selectedRef = useRef(selectedId); selectedRef.current = selectedId;
   const { isTyping, inputStatus, currentResponse, streamingSegments, thinkingText } = liveChats[selectedId] ?? emptyLive;
@@ -240,15 +241,26 @@ export function useAgentConversation({ chats, robotMode, onSentence }: Options) 
   /** Continue an existing Claude Code / Codex session as an Ally chat. */
   const openSession = useCallback(async (session: AgentSessionSummary) => {
     if (!window.pip?.agent) return;
-    const { cwd: sessionCwd, messages, sessionId = session.id, originalSessionId, createdAt } = await window.pip.agent.loadSession(session.provider, session.id);
-    chats.openAgentSession(
-      { provider: session.provider, sessionId, originalSessionId: originalSessionId ?? session.originalSessionId, cwd: sessionCwd ?? session.cwd },
-      session.title,
-      sessionMessages(sessionId, messages),
-      session.createdAt ?? createdAt,
-    );
+    const existing = chats.chats.find(chat => chat.agent?.provider === session.provider && (chat.agent.sessionId === session.id || chat.agent.originalSessionId === session.id));
+    const target = existing ?? chats.openAgentSession({ provider: session.provider, sessionId: session.id, originalSessionId: session.originalSessionId, cwd: session.cwd }, session.title, undefined, session.createdAt);
+    if (existing) chats.select(existing.id);
     // Follow-ups should go to the same agent
     if (parseAgentModel(model)?.provider !== session.provider) setModel(`${AGENT_MODEL_PREFIX[session.provider]}default`);
+    const key = `${session.provider}:${session.id}`;
+    if (openingSessions.current.has(key)) return openingSessions.current.get(key);
+    const loading = window.pip.agent.loadSession(session.provider, session.id).then(snapshot => {
+      const current = chats.getChat(target.id);
+      if (busy.current.has(target.id)) return; // An accepted local send owns its messages; polling catches up after it ends.
+      if (!current?.agent || current.agent.provider !== session.provider || (current.agent.sessionId !== session.id && current.agent.originalSessionId !== session.id)) return;
+      const resolved = snapshot.sessionId ?? session.id;
+      if (current.agent.sessionId !== resolved) chats.setAgent(target.id, { ...current.agent, sessionId: resolved, originalSessionId: snapshot.originalSessionId ?? session.id, cwd: snapshot.cwd ?? current.agent.cwd });
+      if (!snapshot.unchanged) chats.syncAgentSession(target.id, session.provider, resolved, sessionMessages(resolved, snapshot.messages), snapshot.cwd);
+    }).catch(error => {
+      // Keep the selected chat and its saved transcript usable; a later click retries.
+      updateLive(target.id, { inputStatus: `History unavailable · ${error instanceof Error ? error.message : 'retry opening this chat'}` });
+    }).finally(() => { if (openingSessions.current.get(key) === loading) openingSessions.current.delete(key); });
+    openingSessions.current.set(key, loading);
+    return loading;
   }, [chats, isTyping, model, setModel]);
 
   const setFolder = useCallback(async (folder: string) => {

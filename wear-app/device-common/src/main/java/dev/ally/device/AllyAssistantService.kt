@@ -16,12 +16,14 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.combine
 
 class AllyAssistantService : VoiceInteractionService() {
-    override fun onReady() { super.onReady(); current = java.lang.ref.WeakReference(this) }
-    override fun onShutdown() { if (current?.get() === this) current = null; super.onShutdown() }
+    override fun onReady() { super.onReady(); current = java.lang.ref.WeakReference(this); ready.value=true }
+    override fun onShutdown() { if (current?.get() === this) { current = null; ready.value=false }; super.onShutdown() }
+    override fun onDestroy() { if(current?.get() === this) { current=null; ready.value=false }; super.onDestroy() }
     override fun onLaunchVoiceAssistFromKeyguard() {
         startActivity(Intent(this, AssistantUnlockActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
     }
     companion object {
+        val ready = kotlinx.coroutines.flow.MutableStateFlow(false)
         private var current: java.lang.ref.WeakReference<AllyAssistantService>? = null
         fun showUnlocked(screenContext: Boolean = true): Boolean {
             val service = current?.get() ?: return false

@@ -1,5 +1,6 @@
 // Models and existing sessions on disk (listing + rebuilding history for import).
 import fs from 'node:fs';
+import { setImmediate as yieldToIO } from 'node:timers/promises';
 import { internalCodexSource } from './codexDiscovery.js';
 import os from 'node:os';
 import path from 'node:path';
@@ -370,15 +371,33 @@ export function rebuildClaudeHistory(records: any[]): { cwd?: string; messages: 
   return { cwd, messages: b.messages };
 }
 
-export function rebuildCodexHistory(records: any[]): { cwd?: string; messages: AgentHistoryMessage[] } {
+export function rebuildCodexHistory(records: any[]) {
+  const iterator = codexHistoryBuilder(records);
+  let next = iterator.next();
+  while (!next.done) next = iterator.next();
+  return next.value;
+}
+export async function rebuildCodexHistoryAsync(records: any[]) {
+  const iterator = codexHistoryBuilder(records);
+  let next = iterator.next(), count = 0;
+  while (!next.done) {
+    if (++count % 64 === 0) await yieldToIO();
+    next = iterator.next();
+  }
+  return next.value;
+}
+function* codexHistoryBuilder(records: any[]): Generator<void, { cwd?: string; messages: AgentHistoryMessage[] }> {
   const b = new HistoryBuilder();
   let cwd: string | undefined;
   let total = { input_tokens: 0, output_tokens: 0, cached_input_tokens: 0 };
   let baseline = { ...total };
   for (const l of records) {
+    yield;
     const p = l.payload;
     const ts = Date.parse(l.timestamp) || Date.now();
     if (l.type === 'session_meta') { cwd ??= p?.cwd; continue; }
+    if (l.type === 'turn_context' && typeof p?.cwd === 'string') { cwd = p.cwd; continue; }
+    if (l.type === 'event_msg' && p?.type === 'turn_aborted') { b.text('⏹️ Stopped', ts); continue; }
     if (l.type === 'event_msg' && p?.type === 'token_count' && p.info?.total_token_usage) {
       total = p.info.total_token_usage;
       b.usage('turn', {
