@@ -53,6 +53,7 @@ export interface AgentSessionSnapshot {
 }
 
 export type AgentEvent =
+  | { kind: 'accepted'; sessionId: string; turnId?: string }
   | { kind: 'input'; text: string; mode: 'steered' | 'queued'; queuedId?: string }
   | { kind: 'continuation' }
   | { kind: 'session'; sessionId: string }

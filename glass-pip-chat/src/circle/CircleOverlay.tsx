@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import { ArrowUp, Lasso, RectangleHorizontal, RotateCcw, X } from 'lucide-react';
-import { CIRCLE_ACTIONS, type CircleAction, buildCirclePrompt } from './actions';
+import { type CircleAction, buildCirclePrompt } from './actions';
 import { selectionBounds, selectionPanel, type Point, type SelectionTool } from './selection';
 import type { CircleContext, CircleRect } from '../../electron/capture/types';
 
@@ -79,7 +79,7 @@ export default function CircleOverlay() {
   useEffect(() => { const canvas = canvasRef.current; if (canvas) { canvas.width = view.width; canvas.height = view.height; } }, [view, shot]);
 
   const dock = selectionPanel(view, context?.anchor);
-  const panel = selectionPanel(view, undefined, selection, 220);
+  const panel = selectionPanel(view, undefined, selection, 150);
   const button = 'flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-[11px] text-white/65 hover:bg-white/10 hover:text-white disabled:opacity-40';
   return <div className="fixed inset-0 cursor-crosshair select-none overflow-hidden text-white" style={{ fontFamily: 'Geist Variable, sans-serif' }}>
     {shot && <img src={shot} alt="Frozen screen selection" className="pointer-events-none absolute left-0 top-0" style={view} draggable={false} />}
@@ -105,7 +105,6 @@ export default function CircleOverlay() {
         <input ref={inputRef} aria-label="Question about selection" value={typed} onChange={e => setTyped(e.target.value)} disabled={sending} placeholder="Ask about this…" className="min-w-0 flex-1 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-[13px] outline-hidden placeholder:text-white/30 focus:border-white/35" />
         <button type="submit" aria-label="Ask about selection" disabled={sending || !context?.hasChat} className="rounded-xl bg-white p-2 text-black disabled:opacity-40"><ArrowUp className="size-4" /></button>
       </form>
-      <div className="flex flex-wrap gap-1">{CIRCLE_ACTIONS.map(action => <button type="button" key={action.id} disabled={sending || !context?.hasChat} onClick={() => void submit(action)} className={button}>{action.label}</button>)}</div>
       <p className="mt-2 text-[10px] text-white/35">{sending ? 'Returning to your chat…' : 'Ally can draw on this selection when it helps explain.'}</p>
       {error && <p role="alert" className="mt-2 text-xs text-amber-200">{error}</p>}
     </motion.section>}

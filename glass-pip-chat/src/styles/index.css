@@ -1,6 +1,10 @@
 @import 'tailwindcss';
 @import 'tw-animate-css';
 
+/* Equations keep their natural structure without widening the glass pill. */
+.katex-display { max-width: 100%; overflow-x: auto; overflow-y: hidden; padding: .2em 0; }
+.katex { font-size: 1.05em; }
+
 /*
   Perception (prxptn.com) design language, adapted for a glass overlay:
   monochrome neutrals, white-opacity hierarchy, hairline borders, near-square

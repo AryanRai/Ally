@@ -62,7 +62,7 @@ function writeRobotFiles(runId: string, opts: AgentRunOptions, context?: string)
   return { files, promptFile, mcpFile };
 }
 
-function claudeArgs(opts: AgentRunOptions, robot: { promptFile?: string; mcpFile?: string }): string[] {
+export function claudeArgs(opts: AgentRunOptions, robot: { promptFile?: string; mcpFile?: string }): string[] {
   const args = ['-p', '--output-format', 'stream-json', '--verbose', '--include-partial-messages'];
   if (opts.ephemeral) args.push('--no-session-persistence', '--tools', '');
   const mode = opts.permission === 'full' ? 'bypassPermissions' : opts.permission === 'readonly' ? 'plan' : 'acceptEdits';
@@ -74,7 +74,7 @@ function claudeArgs(opts: AgentRunOptions, robot: { promptFile?: string; mcpFile
   // Non-interactive runs can't answer permission prompts: pre-allow Ally's own chat tools (read-only ones for read-only runs)
   if (Object.keys(allyChatsMcpServers(opts)).length) {
     args.push('--allowedTools', opts.permission === 'readonly'
-      ? ['ally_list_chats', 'ally_search_chats', 'ally_read_chat'].map(t => `mcp__ally_chats__${t}`).join(',')
+      ? ['ally_list_chats', 'ally_search_chats', 'ally_read_chat', 'visual_tutor_read', 'visual_tutor_draw'].map(t => `mcp__ally_chats__${t}`).join(',')
       : 'mcp__ally_chats');
   }
   // Images can't ride on a plain-text prompt; send the turn as a stream-json user message

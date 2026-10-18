@@ -9,7 +9,7 @@ export interface TutorMark {
   points: TutorPoint[];
   text?: string;
 }
-export interface TutorStep { id: string; title: string; explanation: string; marks: TutorMark[] }
+export interface TutorStep { id: string; title: string; explanation: string; marks: TutorMark[]; diagram?: { html: string; height: number } }
 export interface TutorBoard {
   id: string;
   chatId: string;

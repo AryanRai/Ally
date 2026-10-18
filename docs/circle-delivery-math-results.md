@@ -1,0 +1,17 @@
+# Circle drawing, message delivery and math rendering
+
+The Circle selection now has one question box instead of the redundant action menu. Every selection keeps the same finite, exact-chat drawing capability through follow-ups and uncertain send errors. Claude readonly chat tools include capability-bound tutor read/draw without enabling forwarding or file writes. Changing chats or explicitly ending the board still revokes it.
+
+Teaching steps can include bounded self-contained HTML/SVG diagrams with local scripts. An opaque-origin sandbox and restrictive CSP block parent/preload access, network, frames, workers, popups, files and form submissions; native navigation is also rejected. Hide diagram unmounts it. This supports interactive controls and diagrams, not unrestricted browser or desktop access. Existing overlay controls and layout remain.
+
+Forwarding previously returned Sent immediately after starting a process, before delivery acceptance. It now waits for native turn acceptance or response activity. Busy destinations receive a durable queued receipt that explicitly says it has not been delivered yet. Unconfirmed delivery reports uncertainty and never automatically resends. Recursive forwarding remains blocked. Synthetic tests verify acceptance, errors, timeout, queued wording and reply relay; no real forwarding/model test message was sent.
+
+Native Codex patches can contain canonical string array indices. These are now accepted with the existing path-safety checks. Invalid patches or revision gaps trigger a coalesced read-only snapshot resync, without replaying turn/start. Connection/start failures still report real errors. This removes the patch failure that could also prematurely revoke drawing context.
+
+Compact and expanded desktop replies render inline and display LaTeX, including `\(...\)` and `\[...\]` from the supplied screenshot. KaTeX styling and bounded horizontal math scrolling are shared; code examples, stored messages and the rest of the UI are preserved. Untrusted KaTeX commands remain disabled. Android rendering is outside this desktop screenshot fix.
+
+Validation: full 534 desktop tests pass (four opt-in profiles skipped); TypeScript, Vite and Electron builds pass. Isolated native Electron QA uses generated grid pixels, temporary userdata and local fixture tools: freehand/rectangle exact crop, typed/default question submission, one-time exact-chat token, deferred drawing, return-to-chat, cancellation, and interactive SVG slider all pass. The iframe cannot access its parent or tutor API and its fetch is denied by CSP. Synthetic preview inspected visually. No microphone, private capture, production settings change or real model send was used.
+
+The new candidate is `Exo/.ally-circle-delivery-math-20261018`; earlier frozen candidates remain intact. Its deployment.json is authoritative for live status. Desktop activation must wait for all running responses/decisions, perception capture and any Circle/tutor window, including hidden boards. Phone deployment retains the earlier connected-device review-limit blocker; watch installation remains explicitly deferred.
+
+Manual checks after desktop activation: on a harmless page, Circle any area, type a question and request a diagram; follow up without reselecting. Check a complex interactive diagram, then end it. Check an existing equation reply in compact and expanded mode. Forward a harmless user-approved message once and distinguish queued, accepted or unconfirmed status; inspect the destination before retrying uncertainty.

@@ -63,6 +63,27 @@ describe('terminal native error recovery', () => {
 });
 
 describe('Codex desktop coordination', () => {
+  it('resynchronizes malformed patches read-only after acceptance without failing or resending', async () => {
+    const { client, broadcast, setState } = desktop(), events: AgentEvent[] = [];
+    runCodexDesktopTurn(opts, event => events.push(event)); await flush();
+    broadcast(active('first'));
+    setState(active('first, recovered', 'completed'));
+    const priorSnapshots = client.snapshot.mock.calls.length;
+    for (const listener of [...client.listeners]) listener({ method: 'thread-stream-state-changed', sourceClientId: 'desktop-owner', version: 11,
+      params: { hostId: 'local', conversationId: 'same-chat', change: { type: 'patches', baseRevision: 2, revision: 3, patches: [{ op: 'replace', path: ['turns', 99], value: {} }] } } });
+    await flush();
+    expect(client.snapshot.mock.calls.length).toBeGreaterThan(priorSnapshots);
+    expect(client.request).toHaveBeenCalledOnce();
+    expect(events.some(event => event.kind === 'accepted')).toBe(true);
+    expect(events.filter(event => event.kind === 'done')).toEqual([expect.objectContaining({ kind: 'done', isError: false })]);
+  });
+  it('handles canonical string array indexes without mutating retained snapshots or accepting unsafe paths', () => {
+    const original = { turns: [{ items: ['old'] }] };
+    expect(applyDesktopPatches(original, [{ op: 'replace', path: ['turns', '0', 'items', '0'], value: 'new' }])).toEqual({ turns: [{ items: ['new'] }] });
+    expect(original.turns[0].items).toEqual(['old']);
+    expect(() => applyDesktopPatches(original, [{ op: 'replace', path: ['turns', '01'], value: {} }])).toThrow();
+    expect(() => applyDesktopPatches(original, [{ op: 'add', path: ['__proto__', 'polluted'], value: true }])).toThrow();
+  });
   it('uses the exact chat, streams once, and finishes once without replay', async () => {
     const { client, broadcast } = desktop(), events: AgentEvent[] = [];
     runCodexDesktopTurn(opts, event => events.push(event)); await flush();

@@ -16,7 +16,9 @@ export function applyDesktopPatches(state: any, patches: any[]): any {
     state = copy(state);
     let parent = state;
     for (const key of patch.path.slice(0, -1)) { parent[key] = copy(parent[key]); parent = parent[key]; }
-    const key = patch.path.at(-1);
+    const rawKey = patch.path.at(-1);
+    // JSON patch paths can encode array indexes as canonical numeric strings.
+    const key = Array.isArray(parent) && typeof rawKey === 'string' && /^(0|[1-9]\d*)$/.test(rawKey) ? Number(rawKey) : rawKey;
     if (Array.isArray(parent)) {
       if (key === 'length' && patch.op === 'replace' && Number.isSafeInteger(patch.value) && patch.value >= 0 && patch.value <= parent.length) parent.length = patch.value;
       else {
@@ -79,6 +81,12 @@ export function runCodexDesktopTurn(opts: AgentRunOptions, emit: (event: AgentEv
     emit({ ...event, sessionId: id, usage: { ...event.usage, durationMs: Date.now() - startedAt } });
   };
   const fail = (error: unknown) => finish({ kind: 'done', isError: true, error: `${error instanceof Error ? error.message : error}${dispatched ? ' Check the same chat in Codex before retrying; your message may already have been accepted.' : ' Your message was not sent.'}` });
+  const refresh = () => {
+    if (refreshing || finished || !client || !owner) return;
+    refreshing = true;
+    // Resynchronize reads only. Never replay turn/start after a patch gap.
+    void client.snapshot(id, owner).catch(fail).finally(() => { refreshing = false; });
+  };
   const interrupt = async () => {
     if (!client || !owner || !turnId || finished || interrupting) return;
     interrupting = true;
@@ -148,12 +156,11 @@ export function runCodexDesktopTurn(opts: AgentRunOptions, emit: (event: AgentEv
           if (message.version !== 11) throw new Error('Unsupported Codex desktop stream version');
           const change = message.params.change;
           if (change?.type === 'snapshot') { state = change.conversationState; revision = change.revision; }
-          else if (change?.type === 'patches' && state && change.baseRevision === revision) { state = applyDesktopPatches(state, change.patches); revision = change.revision; }
-          else if (!refreshing && state) {
-            refreshing = true;
-            void client!.snapshot(id, owner!).catch(fail).finally(() => { refreshing = false; });
-            return;
-          } else return;
+          else if (change?.type === 'patches' && state && change.baseRevision === revision) {
+            try { state = applyDesktopPatches(state, change.patches); revision = change.revision; }
+            catch { refresh(); return; }
+          }
+          else { if (state) refresh(); return; }
           processState();
         } catch (error) { fail(error); }
       });
@@ -167,6 +174,7 @@ export function runCodexDesktopTurn(opts: AgentRunOptions, emit: (event: AgentEv
       const accepted = response.result?.result?.turn?.id;
       if (typeof accepted !== 'string' || (turnId && turnId !== accepted)) throw new Error('Desktop did not confirm the expected turn');
       turnId = accepted;
+      emit({ kind: 'accepted', sessionId: id, turnId });
       if (finished) return;
       emit({ kind: 'tool_end', id: 'ally-desktop-connection', output: 'Connected to the existing chat' });
       if (stopped) { await interrupt(); return; }

@@ -99,6 +99,7 @@ export function runCodexTurn(opts: AgentRunOptions, emit: (event: AgentEvent) =>
         input: [{ type: 'text', text: opts.prompt }, ...(opts.images ?? []).map(file => ({ type: 'localImage', path: file }))],
       });
       turnId = result.turn.id;
+      if (!finished) emit({ kind: 'accepted', sessionId: sessionId!, turnId });
       if (stopped && !finished) await rpc.request('turn/interrupt', { threadId: sessionId, turnId });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
