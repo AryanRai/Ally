@@ -1,6 +1,7 @@
 package dev.ally.device
 
 import android.content.Context
+import android.content.pm.PackageManager
 import dev.ally.device.voice.VoiceRecorder
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -13,25 +14,13 @@ data class AssistantChoice(val id: String, val title: String, val provider: Stri
 data class AssistantEntryState(val status: String, val text: String = "", val recording: Boolean = false,
     val level: Float = 0f, val busy: Boolean = false, val choices: List<AssistantChoice> = emptyList(), val screenNotice: String = "")
 
-/** Foreground endpointing only; a silent activation never transcribes or sends. */
-class AssistantSilence {
-    var heard = false; private set
-    private var voiced = 0f
-    private var lastSpeech = 0f
-    private var previous = 0f
-    fun sample(level: Float, seconds: Float): Boolean {
-        val delta = (seconds - previous).coerceIn(0f, .3f); previous = seconds
-        if (level >= .08f) { voiced += delta; lastSpeech = seconds; if (voiced >= .16f) heard = true }
-        return if (heard) seconds - lastSpeech >= 1.5f else seconds >= 5f
-    }
-}
-
 /** One assistant invocation. Existing chats are never sent to without a choice. */
 internal class AssistantEntry(private val context: Context, private val scope: CoroutineScope, private val host: AssistantHost) {
     val state = MutableStateFlow<AssistantEntryState?>(null)
     var entry = false; private set
     private var recorder: VoiceRecorder? = null
-    private var policy = AssistantSilence()
+    private fun silencePolicy() = if (context.packageManager.hasSystemFeature(PackageManager.FEATURE_WATCH)) AssistantSilence() else AssistantSilence.phone()
+    private var policy = silencePolicy()
     private var automatic = false
     private var job: Job? = null
     private var text = ""
@@ -100,7 +89,7 @@ internal class AssistantEntry(private val context: Context, private val scope: C
     }
     fun start(auto: Boolean = false) {
         if (recorder != null || state.value?.busy == true || text.isNotBlank()) return
-        automatic = auto; policy = AssistantSilence()
+        automatic = auto; policy = silencePolicy()
         val capture = VoiceRecorder(); recorder = capture
         host.prepareVoice(); AssistantVisibility.recording = true
         state.value = AssistantEntryState(if (auto) "Listening…" else "Listening · release to send", recording = true)

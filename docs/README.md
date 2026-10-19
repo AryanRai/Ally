@@ -44,6 +44,7 @@ Setup guides, feature references, and engineering notes for the desktop, Android
 | --- | --- |
 | Device connections, alerts, and consent | [Companion integration](device-companions.md) · [Device live replies](device-live-replies.md) |
 | Android assistant activation | [Activation and routing](assistant-activation-routing.md) · [Assistant binding](chat-open-and-assistant-binding.md) |
+| Phone voice cuts off during a pause | [Phone assistant listening](phone-assistant-listening.md) |
 | Agent monitor and unread activity | [Assistant monitor](assistant-agent-monitor.md) |
 | Home-screen widgets and system tiles | [Widgets and tiles](android-widgets-and-tiles.md) |
 | Watch chat navigation and rich replies | [Watch quick switcher](watch-quick-chats-and-rich-replies.md) |
