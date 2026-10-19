@@ -5,13 +5,20 @@ listening session when Android invokes it, after unlock and with microphone
 permission already granted. It no longer depends on Android forwarding the
 original power-button press or release. Paused voice stays paused.
 
-An activation with no detected speech stops quietly after five seconds without
-transcribing, creating a chat or sending a message. Speech followed by a
-1.5-second pause ends the recording; the maximum is 60 seconds. Dismissing or
-expanding the assistant cancels capture. These thresholds use microphone energy
-and need an on-device check in noisy environments. Later orb holds still record
-until release. A new hardware activation starts another automatic session unless
-an unfinished request needs a decision or retry first.
+On phone, an activation allows eight seconds to begin speaking. After speech
+starts, it waits for four seconds below the sustained-speech threshold before
+finishing, so a normal thinking pause does not split the request. Quieter speech
+can establish an utterance, and a lower continuation threshold retains softer
+sentence endings. Separate short clicks do not accumulate into speech.
+
+Wear OS retains its existing five-second initial wait and 1.5-second endpoint.
+The recording maximum remains 60 seconds on both surfaces. A silent activation
+ends without transcribing, creating a chat, or sending a message. Dismissing or
+expanding the assistant cancels capture; later orb holds still record until
+release. A new hardware activation starts another automatic session unless an
+unfinished request needs a decision or retry first. These are energy thresholds,
+not semantic sentence detection; microphone placement, Bluetooth routing, and
+noisy environments still need a physical check. See [phone listening](phone-assistant-listening.md).
 
 The initial request is transcribed separately from the selected conversation.
 `POST /v1/assistant/route` checks the latest 30 chats per engine, including saved
