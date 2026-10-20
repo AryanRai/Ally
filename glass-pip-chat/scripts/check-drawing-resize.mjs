@@ -1,0 +1,60 @@
+// Native pointer/iframe integration with a synthetic board and isolated data.
+import { app, BrowserWindow } from 'electron';
+import { build } from 'vite';
+import react from '@vitejs/plugin-react';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import assert from 'node:assert/strict';
+const root = process.cwd(), fixture = fs.mkdtempSync(path.join(os.tmpdir(), 'ally-resize-'));
+app.setPath('userData', path.join(fixture, 'data'));
+const html = '<style>svg{width:100%}</style><svg viewBox="0 0 600 260"><rect x="10" y="10" width="580" height="240" fill="#173e38" rx="20"/><text x="60" y="140" fill="white" font-size="30">Synthetic resizable diagram</text></svg><input id="slider" type="range" min="0" max="10" value="7">';
+const board = { id: 'synthetic', chatId: 'synthetic', displayId: 1, bounds: { x: 0, y: 0, width: 1200, height: 900 }, capturedAt: 1, steps: [{ id: 'one', title: 'Resizable diagram', explanation: '', marks: [], diagram: { html, height: 260 }, panel: { x: 100, y: 100, width: 350 } }], sketches: [], selected: 0, following: true, sketching: false, frozen: false, revision: 1 };
+async function run() {
+  fs.symlinkSync(path.join(root, 'node_modules'), path.join(fixture, 'node_modules'), 'junction');
+  fs.writeFileSync(path.join(fixture, 'index.html'), '<div id="root"></div><script type="module" src="./main.tsx"></script>');
+  fs.writeFileSync(path.join(fixture, 'main.tsx'), `
+    import React from 'react';import {createRoot}from'react-dom/client';
+    import Overlay from ${JSON.stringify(path.join(root, 'src/visualTutor/Overlay.tsx').replaceAll('\\', '/'))};
+    const board=${JSON.stringify(board)}; window.interactive=false;
+    window.tutor={overlay:async()=>({board,screenshot:''}),onChanged:callback=>{window.update=callback;return()=>{}},onPillBounds:()=>()=>{},interactive:value=>window.interactive=value,action:async()=>{},sketch:async()=>{}};
+    window.board=board;createRoot(document.getElementById('root')).render(<Overlay/>);
+  `);
+  await build({ configFile: false, root: fixture, plugins: [react()], base: './', logLevel: 'error', build: { outDir: 'out' } });
+  await app.whenReady();
+  const win = new BrowserWindow({ width: 1200, height: 900, useContentSize: true, show: false, webPreferences: { contextIsolation: true, backgroundThrottling: false } });
+  const js = code => win.webContents.executeJavaScript(code);
+  const settle = () => js('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))');
+  const rect = selector => js(`(()=>{const r=document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect();return {left:r.left,top:r.top,width:r.width,height:r.height}})()`);
+  await win.loadFile(path.join(fixture, 'out/index.html')); await new Promise(r=>setTimeout(r,500)); await settle(); win.webContents.focus();
+  win.webContents.debugger.attach('1.3');
+  const mouse = (type, x, y, down = false) => win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type, x, y, button: down || type !== 'mouseMoved' ? 'left' : 'none', buttons: down ? 1 : 0, clickCount: type === 'mouseMoved' ? 0 : 1 });
+  const drag = async (edge, dx, dy) => {
+    const h = await rect('.tutor-resize-' + edge), x = h.left + h.width / 2, y = h.top + h.height / 2;
+    await mouse('mouseMoved', x, y); await settle(); await mouse('mousePressed', x, y, true); await settle();
+    await mouse('mouseMoved', x + dx, y + dy, true); await settle();
+    assert.equal(await js('window.interactive'), true);
+    await mouse('mouseReleased', x + dx, y + dy); await settle();
+  };
+  const before = await rect('.tutor-panel'), frameBefore = await rect('iframe');
+  await drag('se', 260, 200);
+  const after = await rect('.tutor-panel'), frameAfter = await rect('iframe');
+  assert.ok(Math.abs(after.width - before.width - 260) < 1); assert.ok(Math.abs(after.height - before.height - 200) < 1);
+  assert.ok(frameAfter.width > frameBefore.width + 200); assert.ok(frameAfter.height > frameBefore.height + 100);
+  await drag('nw', -50, -40);
+  const northwest = await rect('.tutor-panel');
+  assert.ok(Math.abs(northwest.left - after.left + 50) < 1); assert.ok(Math.abs(northwest.top - after.top + 40) < 1);
+  await drag('e', 40, 0); await drag('s', 0, 30);
+  const resized = await rect('.tutor-panel');
+  await js('update({...board,revision:2})'); await settle();
+  assert.deepEqual(await rect('.tutor-panel'), resized);
+  const frame = win.webContents.mainFrame.frames.find(f => f.url === 'about:srcdoc');
+  assert.equal(await frame.executeJavaScript('document.getElementById("slider").value'), '7');
+  assert.equal(await js('document.querySelector("iframe").getAttribute("sandbox")'), 'allow-scripts');
+  const output = path.resolve(process.argv[2] || fixture); fs.mkdirSync(output, { recursive: true });
+  fs.writeFileSync(path.join(output, 'resize-synthetic.png'), (await win.webContents.capturePage()).toPNG());
+  fs.writeFileSync(path.join(output, 'resize-result.json'), JSON.stringify({ before, after, frameBefore, frameAfter, resized, statePreserved: true }, null, 2));
+  console.log('PASS native corner/edge pointer drags, growing iframe, retained controls/state and sandbox');
+  win.webContents.debugger.detach(); win.destroy(); app.quit();
+}
+void run().catch(error => { console.error(error); app.exit(1); });

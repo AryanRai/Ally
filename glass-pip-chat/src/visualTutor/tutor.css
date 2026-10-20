@@ -40,3 +40,19 @@ button:focus-visible { outline: 2px solid #70f0c0; outline-offset: 2px; }
 
 .tutor-diagram { max-height: min(56vh, 650px); overflow: auto; border: 1px solid #ffffff18; border-radius: 10px; margin: 8px 0; }
 .tutor-diagram-toggle { font-size: 10px; color: #ffffffa6; padding: 5px 8px; }
+.tutor-panel { max-width: calc(100% - 20px); }
+.tutor-panel.is-user-sized { display: flex; flex-direction: column; overflow: hidden; }
+.tutor-panel.is-user-sized > :not(.tutor-diagram) { flex-shrink: 0; }
+.tutor-diagram-fill { display: flex; flex-direction: column; flex: 1 1 0; min-height: 60px; max-height: none; overflow: hidden; }
+.tutor-diagram-fill > button { flex-shrink: 0; align-self: flex-start; }
+.is-resizing iframe { pointer-events: none; }
+.tutor-panel .tutor-resize-handle { position: absolute; z-index: 5; min-width: 0; min-height: 0; padding: 0; border-radius: 0; touch-action: none; user-select: none; }
+.tutor-panel .tutor-resize-handle:hover { background: #70f0c030; }
+.tutor-resize-n, .tutor-resize-s { left: 14px; right: 14px; height: 7px !important; cursor: ns-resize; }
+.tutor-resize-n { top: 0; } .tutor-resize-s { bottom: 0; }
+.tutor-resize-e, .tutor-resize-w { top: 14px; bottom: 14px; width: 7px; height: auto !important; cursor: ew-resize; }
+.tutor-resize-e { right: 0; } .tutor-resize-w { left: 0; }
+.tutor-resize-ne, .tutor-resize-nw, .tutor-resize-se, .tutor-resize-sw { width: 14px; height: 14px !important; }
+.tutor-resize-ne { top: 0; right: 0; cursor: nesw-resize; } .tutor-resize-nw { top: 0; left: 0; cursor: nwse-resize; }
+.tutor-resize-se { bottom: 0; right: 0; cursor: nwse-resize; border-right: 2px solid #ffffff60 !important; border-bottom: 2px solid #ffffff60 !important; }
+.tutor-resize-sw { bottom: 0; left: 0; cursor: nesw-resize; }

@@ -14,6 +14,37 @@ async function mount(initial = board) {
   return { api, changed };
 }
 describe('visual teaching overlay', () => {
+  it('resizes from borders with capture across diagrams, and retains size through live updates', async () => {
+    vi.stubGlobal('PointerEvent', class extends MouseEvent { pointerId = 1; });
+    vi.stubGlobal('innerWidth', 1000); vi.stubGlobal('innerHeight', 800);
+    const withDiagram = { ...board, steps: [{ ...board.steps[0], diagram: { html: '<svg viewBox="0 0 100 100"/>', height: 200 } }] };
+    const { api, changed } = await mount(withDiagram);
+    const panel = screen.getByRole('region', { name: 'Visual tutor controls' });
+    vi.spyOn(panel, 'getBoundingClientRect').mockReturnValue({ left: 100, top: 100, right: 500, bottom: 400, width: 400, height: 300 } as DOMRect);
+    expect(screen.getAllByRole('button', { name: /^Resize drawing/ })).toHaveLength(8);
+    const handle = screen.getByRole('button', { name: 'Resize drawing bottom right' });
+    Object.assign(handle, { setPointerCapture: vi.fn(), releasePointerCapture: vi.fn(), hasPointerCapture: vi.fn().mockReturnValue(true) });
+    fireEvent.pointerDown(handle, { button: 0, clientX: 500, clientY: 400 });
+    fireEvent.pointerLeave(panel);
+    expect(api.interactive).toHaveBeenLastCalledWith(true);
+    fireEvent.pointerMove(handle, { clientX: 750, clientY: 600 });
+    expect(panel).toHaveStyle({ left: '100px', top: '100px', width: '650px', height: '500px' });
+    expect(screen.getByTitle('Diagram: A visual explanation')).toHaveStyle({ height: '100%' });
+    act(() => changed({ ...withDiagram, revision: 2 }));
+    expect(panel).toHaveStyle({ width: '650px', height: '500px' });
+    fireEvent.pointerCancel(handle);
+    expect(panel).not.toHaveClass('is-resizing');
+    expect(api.interactive).toHaveBeenLastCalledWith(false);
+    expect(api.action).not.toHaveBeenCalled(); expect(api.sketch).not.toHaveBeenCalled();
+  });
+  it('resizes with keyboard without navigating the lesson', async () => {
+    const { api } = await mount();
+    const panel = screen.getByRole('region', { name: 'Visual tutor controls' });
+    vi.spyOn(panel, 'getBoundingClientRect').mockReturnValue({ left: 100, top: 100, width: 400, height: 300 } as DOMRect);
+    fireEvent.keyDown(screen.getByRole('button', { name: 'Resize drawing right' }), { key: 'ArrowRight', shiftKey: true });
+    expect(panel).toHaveStyle({ width: '440px', height: '300px' });
+    expect(api.action).not.toHaveBeenCalled();
+  });
   it('drags only the card, keeps mouse capture until release, and clamps it inside the screen', async () => {
     vi.stubGlobal('PointerEvent', class extends MouseEvent { pointerId = 1; });
     vi.stubGlobal('innerWidth', 1000); vi.stubGlobal('innerHeight', 700);

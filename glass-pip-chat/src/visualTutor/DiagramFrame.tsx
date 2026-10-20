@@ -18,17 +18,17 @@ export function diagramDocument(html: string) {
   }
   return `<!doctype html><html><head><meta http-equiv="Content-Security-Policy" content="${DIAGRAM_CSP}"><meta name="viewport" content="width=device-width,initial-scale=1"><style>html{color-scheme:dark;--foreground:rgba(255,255,255,.85);--muted-foreground:rgba(255,255,255,.55);--background:transparent;--border:rgba(255,255,255,.1);--viz-series-1:#8fe0be;--viz-series-2:#f5ca82;--viz-series-3:#c3b4ee;--viz-series-4:#efaaa4;--viz-series-5:#b9cfda;--viz-series-6:#ded6ac}body{margin:0;padding:10px;box-sizing:border-box;font:13px system-ui;color:rgba(255,255,255,.85);background:transparent}svg{max-width:100%;height:auto}button,input,select{font:inherit}*{box-sizing:border-box}</style>${doc.head.innerHTML}</head><body>${doc.body.innerHTML}<script nonce="${nonce}">(()=>{let queued=false;const report=()=>{if(queued)return;queued=true;requestAnimationFrame(()=>{queued=false;parent.postMessage({type:"ally-diagram-size",height:Math.ceil(document.body.getBoundingClientRect().height)},"*")})};new ResizeObserver(report).observe(document.body);window.addEventListener("load",report);report()})()</script></body></html>`;
 }
-export default function DiagramFrame({ diagram, title }: { diagram: NonNullable<TutorStep['diagram']>; title: string }) {
+export default function DiagramFrame({ diagram, title, fill = false }: { diagram: NonNullable<TutorStep['diagram']>; title: string; fill?: boolean }) {
   const [playing, setPlaying] = useState(true);
   const [expanded, setExpanded] = useState(false);
-  return <div className="tutor-diagram">
+  return <div className={`tutor-diagram${fill ? ' tutor-diagram-fill' : ''}`}>
     <button type="button" className="tutor-diagram-toggle" onClick={() => setPlaying(value => !value)}>{playing ? 'Hide diagram' : 'Show diagram'}</button>
-    {playing && <><button type="button" className="tutor-diagram-toggle" onClick={() => setExpanded(value => !value)}>{expanded ? 'Compact diagram' : 'Expand diagram'}</button><FittedDiagram title={`Diagram: ${title}`} html={diagram.html} maxHeight={expanded ? Math.max(320, diagram.height) : Math.min(260, diagram.height)} /></>}
+    {playing && <>{!fill && <button type="button" className="tutor-diagram-toggle" onClick={() => setExpanded(value => !value)}>{expanded ? 'Compact diagram' : 'Expand diagram'}</button>}<FittedDiagram title={`Diagram: ${title}`} html={diagram.html} fill={fill} maxHeight={expanded ? Math.max(320, diagram.height) : Math.min(260, diagram.height)} /></>}
   </div>;
 }
 
 /** The opaque frame may report only its own bounded geometry, never tool requests. */
-export function FittedDiagram({ html, title, maxHeight = 260, className }: { html: string; title: string; maxHeight?: number; className?: string }) {
+export function FittedDiagram({ html, title, maxHeight = 260, className, fill = false }: { html: string; title: string; maxHeight?: number; className?: string; fill?: boolean }) {
   const frame = useRef<HTMLIFrameElement>(null);
   const [measured, setMeasured] = useState<number>();
   const document = useMemo(() => diagramDocument(html), [html]);
@@ -41,5 +41,5 @@ export function FittedDiagram({ html, title, maxHeight = 260, className }: { htm
     window.addEventListener('message', size);
     return () => window.removeEventListener('message', size);
   }, [html]);
-  return <iframe ref={frame} title={title} sandbox="allow-scripts" referrerPolicy="no-referrer" srcDoc={document} className={className} style={{ display: 'block', height: Math.min(maxHeight, measured ?? maxHeight), width: '100%', border: 0, background: 'transparent' }} />;
+  return <iframe ref={frame} title={title} sandbox="allow-scripts" referrerPolicy="no-referrer" srcDoc={document} className={className} style={{ display: 'block', height: fill ? '100%' : Math.min(maxHeight, measured ?? maxHeight), ...(fill ? { flex: '1 1 0', minHeight: 0 } : {}), width: '100%', border: 0, background: 'transparent' }} />;
 }
