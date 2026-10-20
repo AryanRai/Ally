@@ -13,6 +13,7 @@ import { useContextMonitoring } from '../hooks/useContextMonitoring';
 import { useSpeechService } from '../hooks/useSpeechService';
 import { useEditState } from '../hooks/useEditState';
 import { useChats } from '../hooks/useChats';
+import { useChatDrafts } from '../hooks/useChatDrafts';
 import { useAgentConversation } from '../hooks/useAgentConversation';
 import { useChatInteractions } from '../hooks/useChatInteractions';
 import ChatInteractionCard from './chat/ChatInteractionCard';
@@ -80,16 +81,8 @@ export default function GlassChatPiP() {
       : undefined,
   });
 
-  const [drafts, setDrafts] = useState<Record<string, string>>(() => {
-    try { return JSON.parse(localStorage.getItem('ally-chat-drafts') || '{}'); } catch { return {}; }
-  });
   const draftId = chats.activeChat?.id ?? '';
-  const input = drafts[draftId] ?? '';
-  const setInput = (value: string | ((previous: string) => string)) => setDrafts(all => {
-    const next = { ...all, [draftId]: typeof value === 'function' ? value(all[draftId] ?? '') : value };
-    localStorage.setItem('ally-chat-drafts', JSON.stringify(next));
-    return next;
-  });
+  const { input, setInput } = useChatDrafts(draftId);
   // Both sizes edit the same draft, including a send restored after failure.
   const quickInput = input;
   const setQuickInput = setInput;
