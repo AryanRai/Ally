@@ -135,7 +135,7 @@ export class WatchConversations {
     }
     const linked = new Set(this.chats.filter(c => c.provider === provider).map(c => c.sessionId).filter((id): id is string => !!id));
     const savedIds = new Set(this.chats.filter(c => c.provider === provider).map(c => c.id));
-    const all = [...this.chats.filter(c => c.provider === provider && !hiddenConversation(c.provider, c.sessionId ?? c.id)).map(chatSummary), ...external.filter(s => !hiddenConversation(provider, s.id) && !savedIds.has(`${provider}:${s.id}`) && !linked.has(s.id) && !(s.originalSessionId && linked.has(s.originalSessionId))).map(s => ({ id: `${provider}:${s.id}`, provider, sessionId: s.id, title: userText(s.title), cwd: s.cwd ?? '', createdAt: s.createdAt ?? 0, updatedAt: s.updatedAt, unread: unreadState(provider, s.id).unread }))].sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
+    const all = [...this.chats.filter(c => c.provider === provider && !hiddenConversation(c.provider, c.sessionId ?? c.id)).map(chatSummary), ...external.filter(s => !hiddenConversation(provider, s.id) && !savedIds.has(`${provider}:${s.id}`) && !linked.has(s.id) && !(s.originalSessionId && linked.has(s.originalSessionId))).map(s => ({ id: `${provider}:${s.id}`, provider, sessionId: s.id, title: userText(s.title), cwd: s.cwd ?? '', createdAt: s.createdAt ?? 0, updatedAt: s.updatedAt, unread: unreadState(provider, s.id).unread }))].sort((a, b) => b.updatedAt - a.updatedAt || a.id.localeCompare(b.id));
     return { chats: all.slice(offset, offset + 30), nextOffset: all.length > offset + 30 ? offset + 30 : null };
   }
   routingPreview(id: string): string {

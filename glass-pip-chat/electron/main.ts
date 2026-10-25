@@ -12,6 +12,7 @@ import { registerAgentIpc } from './agent/ipc.js';
 import { registerCircleIpc, startCircle } from './capture/circle.js';
 import { registerVisualTutorIpc } from './visualTutor/ipc.js';
 import { startShakeDetection, stopShakeDetection } from './capture/shake.js';
+import { registerSurfaceCoordinator, revealFloatingSurface } from './surface/coordinator.js';
 
 /** Global hotkeys: accelerator → renderer event sent after showing the window. */
 const SHORTCUTS: Array<{ accelerator: string; event?: string; toggleVisibility?: boolean; run?: () => void }> = [
@@ -35,6 +36,7 @@ function registerShortcuts(): void {
         return;
       }
       if (!win.isVisible()) {
+        revealFloatingSurface();
         win.show();
         win.focus();
       }
@@ -64,6 +66,8 @@ registerAgentIpc(getWindow, config => {
 
 app.whenReady().then(async () => {
   await createWindow();
+  const surfaceWindow = getWindow();
+  if (surfaceWindow) registerSurfaceCoordinator(surfaceWindow);
   createTray();
   registerShortcuts();
 });

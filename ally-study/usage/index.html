@@ -1,0 +1,11 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Ally usage</title><style>
+:root{color-scheme:dark;font:13px 'Segoe UI',sans-serif;color:#f3f3f5;background:#171719}*{box-sizing:border-box}body{margin:0;padding:16px}header{display:flex;align-items:center;justify-content:space-between;gap:12px}h1{font-size:17px;margin:0}h2{font-size:15px;margin:0 0 14px}p{color:#aaaab3;line-height:1.5;font-size:12px}button{background:#303035;color:inherit;border:1px solid #48484d;border-radius:8px;padding:7px 13px;cursor:pointer}button:hover{background:#404047}button:focus-visible{outline:2px solid #aaa5ff;outline-offset:3px}button:disabled{opacity:.5;cursor:wait}section{background:#222225;border:1px solid #37373b;border-radius:12px;margin-top:14px;padding:16px}.row{display:flex;justify-content:space-between;gap:12px;margin:9px 0;font-size:12px}.row span{color:#aaaab3}.row strong{font-weight:500;text-align:right}progress{display:block;width:100%;height:6px;accent-color:#aaa5ff;margin:8px 0}.muted{color:#aaaab3;font-size:11px}.empty{margin:0}#status{min-height:18px;margin:10px 0 0}.limit{margin-bottom:15px}.limit p{margin:5px 0}.footnote{margin-bottom:0}
+</style></head><body>
+<header><h1>Provider usage</h1><button id="refresh" type="button">Refresh</button></header>
+<p id="status" role="status" aria-live="polite">Loading usage…</p>
+<section aria-labelledby="codex-title"><h2 id="codex-title">Codex</h2><div id="codex-limits"></div><div id="codex-recorded"></div></section>
+<section aria-labelledby="claude-title"><h2 id="claude-title">Claude</h2><p class="empty">Subscription allowance isn’t available through this connection.</p><div id="claude-recorded"></div></section>
+<p id="since" class="muted"></p><p class="footnote muted">Recorded usage includes only tokens and cost reported by runs completed through Ally. Other apps and unreported usage are excluded. Reported cost is an estimate, not a subscription charge. Codex account allowances are separate from API or gateway credits.</p>
+<script src="/usage/usage.js"></script></body></html>

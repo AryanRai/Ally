@@ -10,7 +10,7 @@ let root: string;
 beforeEach(() => { root = fs.mkdtempSync(path.join(os.tmpdir(), 'ally-watch-chats-')); });
 afterEach(() => fs.rmSync(root, { recursive: true, force: true }));
 describe('watch conversations', () => {
-  it('keeps native creation order after open, completion, refresh and restart', async () => {
+  it('orders by recent activity after open, completion, refresh and restart', async () => {
     const native = [
       {id:'new',provider:'codex' as const,title:'New',createdAt:20,updatedAt:30},
       {id:'old',provider:'codex' as const,title:'Old',createdAt:10,updatedAt:999},
@@ -19,13 +19,13 @@ describe('watch conversations', () => {
     const file=path.join(root,'stable.json');
     let store=new WatchConversations(file,deps,{},root);
     const ids=async()=> (await store.list('codex')).chats.map(c=>c.id);
-    expect(await ids()).toEqual(['codex:new','codex:old']);
+    expect(await ids()).toEqual(['codex:old','codex:new']);
     const old=await store.get('codex:old');
     store.record(old,'Follow-up',{text:'Done',components:[]},{steps:[]},'turn');
     await store.history(old);
-    expect(await ids()).toEqual(['codex:new','codex:old']);
+    expect(await ids()).toEqual(['codex:old','codex:new']);
     store=new WatchConversations(file,deps,{},root);
-    expect(await ids()).toEqual(['codex:new','codex:old']);
+    expect(await ids()).toEqual(['codex:old','codex:new']);
     store.create('codex',root,'fresh');
     expect((await ids())[0]).toBe('fresh');
   });

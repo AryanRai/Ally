@@ -258,7 +258,7 @@ export default function CollapsedHeader({
             <MoreHorizontal />
             {hasClipboard && <span className="absolute right-1 top-1 size-1 animate-pulse rounded-full bg-foreground" />}
           </button>
-          <button type="button" className={iconButton} onClick={onCollapseToggle} disabled={isResizing} title="Expand chat">
+          <button type="button" className={iconButton} onClick={onCollapseToggle} title="Expand chat">
             <Maximize2 />
           </button>
           <button type="button" className={cn(iconButton, 'hover:bg-destructive/20')} onClick={onHide} title="Hide Ally">

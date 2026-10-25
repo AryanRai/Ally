@@ -23,6 +23,8 @@ A floating desktop companion for **Claude Code** and **Codex**, with voice, visu
 
 Ally brings your existing coding agents into a small, always-on-top window. Keep it as a compact glass pill, expand the conversation when you need more room, or continue from your phone or watch. The agents retain their own tools, sessions, working folders, and permissions; Ally handles the interface around them.
 
+The native Study interface now lives in [`ally-study/`](ally-study/). See the [unified notch/pill integration and feature comparison](docs/unified-ally.md) for staged behavior, current parity gaps, and the root build/launch scripts. Native gesture and smoothness validation is still pending.
+
 ## One conversation across your devices
 
 | | What you can do |

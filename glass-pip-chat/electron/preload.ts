@@ -33,7 +33,15 @@ const pipAPI = {
     ipcRenderer.on('focus-input', callback);
     return () => ipcRenderer.removeListener('focus-input', callback);
   },
-  
+  onSurfaceFloat: (callback: (id: number) => void) => {
+    const handler = (_: unknown, id: number) => callback(id);
+    ipcRenderer.on('surface:float', handler);
+    return () => ipcRenderer.removeListener('surface:float', handler);
+  },
+  surfaceReady: (id: number) => ipcRenderer.send('surface:ready', id),
+  surfacePreview: (value: unknown) => ipcRenderer.send('surface:preview', value),
+  nativeSettings: (change?: { key: string; value: string | number | boolean }) => ipcRenderer.invoke('surface:native-settings', change),
+
   // Get platform info
   getPlatform: () => ipcRenderer.invoke('system:get-platform'),
   
@@ -175,6 +183,14 @@ const pipAPI = {
     activity: () => ipcRenderer.invoke('agent:activity'),
     runningSessions: () => ipcRenderer.invoke('agent:runningSessions'),
     listSessions: (provider: 'claude' | 'codex', limit?: number) => ipcRenderer.invoke('agent:listSessions', provider, limit),
+    listSessionsPage: (provider: 'claude' | 'codex', cursor?: string) => ipcRenderer.invoke('agent:listSessionsPage', provider, cursor),
+    getSelection: () => ipcRenderer.invoke('agent:getSelection'),
+    setSelection: (selected: import('./agent/selection').SharedChatSelection | null, version: string) => ipcRenderer.invoke('agent:setSelection', selected, version),
+    onSelection: (callback: (state: import('./agent/selection').SelectionSnapshot) => void) => {
+      const handler = (_: unknown, state: import('./agent/selection').SelectionSnapshot) => callback(state);
+      ipcRenderer.on('agent:selection', handler);
+      return () => { ipcRenderer.removeListener('agent:selection', handler); };
+    },
     loadSession: (provider: 'claude' | 'codex', id: string, revision?: string) => ipcRenderer.invoke('agent:loadSession', provider, id, revision),
     readStates: (keys?: string[]) => ipcRenderer.invoke('agent:readStates', keys),
     markRead: (provider: 'claude' | 'codex', id: string, revision: string) => ipcRenderer.invoke('agent:markRead', provider, id, revision),

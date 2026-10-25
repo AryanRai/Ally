@@ -1,4 +1,5 @@
 import { interruptedSessions, RESUME_PROMPT } from './interrupted.js';
+import { recordProviderUsage } from './providerUsage.js';
 import { completeUnread } from './unread.js';
 // Spawning agent turns and streaming their normalized events.
 import { spawn, ChildProcess } from 'node:child_process';
@@ -160,6 +161,7 @@ export async function startAgentRun(
       if (event.kind === 'done') {
         if (ending) return;
         ending = true;
+        recordProviderUsage(opts.provider, { ...event.usage, costUsd: event.usage?.costUsd ?? event.costUsd });
         if (event.sessionId) sessionId = event.sessionId;
         void (async () => {
           await Promise.allSettled([...pending]);

@@ -25,6 +25,17 @@ export function codexThreadConfig(opts: AgentRunOptions, interactive = false): R
   };
 }
 
+/** Resume must keep the configured model and provider together. Otherwise an old
+ * OpenAI chat can inherit a gateway model name while retaining ChatGPT auth. */
+export async function codexResumeConfig(rpc: CodexRpc, config: Record<string, unknown>): Promise<Record<string, unknown>> {
+  const effective = (await rpc.request('config/read', {})).config;
+  const provider = effective?.model_provider;
+  if (typeof provider !== 'string' || !provider) return config;
+  return { ...config, modelProvider: provider,
+    ...(!config.model && typeof effective.model === 'string' && effective.model ? { model: effective.model } : {}),
+  };
+}
+
 /** Starts asynchronously so stop remains available even during initialization/resume. */
 export function runCodexTurn(opts: AgentRunOptions, emit: (event: AgentEvent) => void, binary?: string, interact?: AgentInteractionHandler, interactionSurface: 'watch' | 'desktop' = 'watch'): { stop: () => void; steer: (text: string, images?: string[]) => Promise<boolean> } {
   let rpc: CodexRpc | undefined;
@@ -77,7 +88,9 @@ export function runCodexTurn(opts: AgentRunOptions, emit: (event: AgentEvent) =>
       if (opts.sessionId && !opts.ephemeral) {
         sessionId = await interactiveCodexSession(rpc, opts.sessionId, config);
         if (stopped) { finish({ kind: 'done' }); return; }
-        await rpc.request('thread/resume', { threadId: sessionId, ...config, excludeTurns: true });
+        const resumeConfig = await codexResumeConfig(rpc, config);
+        if (finished || stopped) { finish({ kind: 'done' }); return; }
+        await rpc.request('thread/resume', { threadId: sessionId, ...resumeConfig, excludeTurns: true });
       } else {
         sessionId = (await rpc.request('thread/start', { ...config, ephemeral: !!opts.ephemeral })).thread.id;
         if (!opts.ephemeral) await rpc.request('thread/name/set', { threadId: sessionId, name: chatTitle(opts.prompt) }).catch(() => { /* Naming must never prevent an authorized send. */ });

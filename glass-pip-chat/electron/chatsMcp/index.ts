@@ -85,7 +85,7 @@ function agentConfig(): AgentConfig {
 
 const load = async (provider: AgentProvider, id: string) => {
   const snap = provider === 'codex' ? await loadCodexChat(id) : loadAgentSession(provider, id);
-  return { messages: snap.messages, cwd: snap.cwd };
+  return { messages: snap.messages, cwd: snap.cwd, title: snap.title };
 };
 
 const index = new ChatIndex({

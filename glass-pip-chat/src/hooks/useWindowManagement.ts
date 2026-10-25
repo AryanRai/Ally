@@ -53,10 +53,16 @@ export function useWindowManagement() {
       });
     });
     const cleanupTheme = pip.onThemeChanged(setTheme);
+    const cleanupSurface = pip.onSurfaceFloat?.(id => {
+      setIsResizing(false);
+      setState(previous => ({ ...previous, collapsed: true }));
+      requestAnimationFrame(() => requestAnimationFrame(() => pip.surfaceReady?.(id)));
+    });
     return () => {
       cleanupResize?.();
       cleanupManual?.();
       cleanupTheme();
+      cleanupSurface?.();
     };
   }, []);
 

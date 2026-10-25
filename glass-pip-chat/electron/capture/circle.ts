@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { getWindow } from '../window.js';
 import { CircleHandoff, circleRegion, type CircleCapture } from './circleHandoff.js';
 import type { CircleAsk, CircleSubmit, CircleContext, CircleSelectionState } from './types.js';
+import { suspendNativeForCapture, restoreNativeAfterCapture } from '../surface/coordinator.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CAPTURE_DIR = path.join(os.tmpdir(), 'ally-captures');
@@ -43,6 +44,7 @@ export async function captureDisplay(display: Electron.Display): Promise<NativeI
 }
 
 function restoreMain(focus: boolean) {
+  if (restoreNativeAfterCapture(focus)) return;
   const main = getMain();
   if (!main) return;
   if (focus || mainWasVisible) {
@@ -76,6 +78,7 @@ export async function startCircle(): Promise<void> {
   opening = true;
   try {
     beforeCapture();
+    await suspendNativeForCapture();
     tutorHandoff.clear();
     const chatId = selectedChatId;
     const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
@@ -88,8 +91,9 @@ export async function startCircle(): Promise<void> {
       anchor: bounds ? { x: bounds.x - display.bounds.x, y: bounds.y - display.bounds.y, width: bounds.width, height: bounds.height } : undefined };
     if (mainWasVisible) {
       main!.hide();
-      await new Promise(resolve => setTimeout(resolve, 150));
     }
+    // Also give the native hide acknowledgement a compositor frame to settle.
+    await new Promise(resolve => setTimeout(resolve, 150));
 
     try {
       shot = { image: await captureDisplay(display), display, capturedAt: Date.now(), chatId };

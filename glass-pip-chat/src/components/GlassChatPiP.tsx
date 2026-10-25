@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '../lib/utils';
 import { ThemeUtils } from '../utils/themeUtils';
 import { useAgentGreeting } from '../hooks/useAgentGreeting';
+import { useNotchPreview } from '../hooks/useNotchPreview';
 import { SettingsManager } from '../utils/settingsManager';
 import type { AppSettings } from '../types/settings';
 import type { Segment } from '../types/chat';
@@ -20,6 +21,7 @@ import ChatInteractionCard from './chat/ChatInteractionCard';
 import { interactionTimeline } from '../lib/interactionTimeline';
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
 import { useExternalSessions } from '../hooks/useExternalSessions';
+import { useSharedChatSelection } from '../hooks/useSharedChatSelection';
 import { AGENT_MODEL_PREFIX } from '../types/agent';
 
 import FlowField, { FlowFieldState } from './FlowField';
@@ -100,6 +102,7 @@ export default function GlassChatPiP() {
 
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const activeChat = chats.activeChat;
+  const selectionError = useSharedChatSelection(activeChat, chats.selectionRestored, conversation.permission, conversation.openSession);
   const messages = activeChat?.messages ?? [];
   const sessionKey = activeChat?.agent?.sessionId ? `${activeChat.agent.provider}:${activeChat.agent.sessionId}` : undefined;
   const decisions = useChatInteractions(sessionKey);
@@ -128,6 +131,15 @@ export default function GlassChatPiP() {
   const tutor = useVisualTutor(activeChat?.id, conversation.send);
   useEffect(() => { void window.pip?.circle?.setChat?.(activeChat?.id, activeChat?.title).catch(() => {}); }, [activeChat?.id, activeChat?.title]);
   const greeting = useAgentGreeting(conversation.provider, conversation.modelName);
+  const lastMessage = messages.at(-1);
+  useNotchPreview(
+    appSettings.notch?.livePreview !== false,
+    activeIsWorking || externalWorking,
+    [...messages].reverse().find(m => m.role === 'user')?.content ?? '',
+    currentResponse || (externalWorking && lastMessage?.role === 'assistant' ? lastMessage.content : ''),
+    activeIsWorking ? workingStatus : externalStatus,
+    appSettings.notch?.greetOnDock === false ? '' : greeting,
+  );
 
   const headerTitleEdit = useEditState({
     initialValue: activeChat?.title || 'Chat',
@@ -455,6 +467,10 @@ export default function GlassChatPiP() {
               externalSessions={external.sessions}
               runningSessions={external.running}
               runningError={external.runningError}
+              discoveryError={external.error || selectionError}
+              hasMoreSessions={external.hasMore}
+              loadingSessions={external.loading}
+              onLoadMoreSessions={() => void external.loadMore()}
               onOpenAgentSession={session => void conversation.openSession(session).then(external.refresh)}
             />
           </div>

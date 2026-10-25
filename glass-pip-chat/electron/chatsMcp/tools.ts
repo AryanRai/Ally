@@ -3,7 +3,7 @@
 // through `registerDeviceTool`.
 import type { AgentHistoryMessage, AgentProvider } from '../agent/types.js';
 import { fail, text, type CallContext, type ToolDef } from './protocol.js';
-import type { ChatIndex, IndexedChat } from './search.js';
+import { chatText, type ChatIndex, type IndexedChat } from './search.js';
 
 export interface SendResult {
   status: 'replied' | 'still_running' | 'queued' | 'unconfirmed' | 'error';
@@ -16,7 +16,7 @@ export interface SendResult {
 
 export interface ToolDeps {
   index: ChatIndex;
-  load(provider: AgentProvider, id: string): Promise<{ messages: AgentHistoryMessage[]; cwd?: string }>;
+  load(provider: AgentProvider, id: string): Promise<{ messages: AgentHistoryMessage[]; cwd?: string; title?: string }>;
   send(target: { provider: AgentProvider; id: string; cwd?: string; title: string }, message: string, opts: { wait: boolean; timeoutMs: number; caller?: string }): Promise<SendResult>;
   open(target: { provider: AgentProvider; id: string; cwd?: string; title: string }): void;
 }
@@ -45,7 +45,16 @@ const clampInt = (v: unknown, def: number, min: number, max: number) => (typeof 
 
 async function findChat(deps: ToolDeps, provider: AgentProvider, id: string): Promise<IndexedChat> {
   await deps.index.refresh();
-  const chat = deps.index.get(provider, id) ?? (await deps.index.refresh(true), deps.index.get(provider, id));
+  let chat = deps.index.get(provider, id) ?? (await deps.index.refresh(true), deps.index.get(provider, id));
+  if (!chat && provider === 'codex') {
+    // Not in thread/list (too old, or paginated session listed under a different ID).
+    // Fall back to thread/read directly — it can fetch any thread by ID.
+    try {
+      const { messages, cwd, title } = await deps.load(provider, id);
+      const raw = chatText(messages);
+      chat = { provider, id, title: title || id.slice(0, 8), cwd, updatedAt: Date.now(), raw, text: raw.toLowerCase() };
+    } catch { /* not found via RPC either — fall through to the error below */ }
+  }
   if (!chat) throw new Error(`No ${provider} chat with id ${id}. Use ally_search_chats or ally_list_chats to get ids.`);
   return chat;
 }

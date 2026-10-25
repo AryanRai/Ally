@@ -30,6 +30,10 @@ export class SettingsManager {
           ui: {
             ...DEFAULT_SETTINGS.ui,
             ...parsed.ui
+          },
+          notch: {
+            ...DEFAULT_SETTINGS.notch!,
+            ...parsed.notch
           }
         };
       }

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { memo, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { CopyIcon, GitBranchIcon, PencilIcon, RefreshCcwIcon, Trash2Icon, CheckIcon } from 'lucide-react';
 import { Message, MessageAction, MessageActions, MessageContent } from '@/components/ai-elements/message';
 import { Reasoning, ReasoningContent, ReasoningTrigger } from '@/components/ai-elements/reasoning';
@@ -125,7 +125,25 @@ interface ChatMessageProps {
 }
 
 /** A saved chat message with hover actions (copy, retry, edit/fork, delete). */
-export default function ChatMessage({ message, sessionWorking = false, onEdit, onFork, onDelete, onRetry }: ChatMessageProps) {
+export default function ChatMessage(props: ChatMessageProps) {
+  const latest = useRef(props);
+  useLayoutEffect(() => { latest.current = props; });
+  // Parent handlers change while typing/streaming. Keep event dispatch current
+  // without making every unchanged tool/reasoning subtree reconcile again.
+  const actions = useMemo(() => ({
+    onEdit: (id: string, content: string) => latest.current.onEdit(id, content),
+    onFork: (id: string, content: string) => latest.current.onFork(id, content),
+    onDelete: (id: string) => latest.current.onDelete(id),
+    onRetry: (id: string) => latest.current.onRetry(id),
+  }), []);
+  const { message } = props;
+  // ChatManager edits content/timestamp in place. Snapshot its fields so the
+  // memo boundary still sees those edits; native metadata is replaced on sync.
+  const snapshot = useMemo(() => ({ ...message }), [message.id, message.role, message.content, message.timestamp, message.metadata]);
+  return <SavedChatMessage message={snapshot} sessionWorking={props.sessionWorking} {...actions} />;
+}
+
+const SavedChatMessage = memo(function SavedChatMessage({ message, sessionWorking = false, onEdit, onFork, onDelete, onRetry }: ChatMessageProps) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(message.content);
   const [copied, setCopied] = useState(false);
@@ -210,4 +228,4 @@ export default function ChatMessage({ message, sessionWorking = false, onEdit, o
       </MessageActions>
     </Message>
   );
-}
+});

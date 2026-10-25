@@ -10,6 +10,15 @@ export interface AppSettings {
   ui: UISettings;
   theme: 'light' | 'dark';
   contextToggleEnabled: boolean;
+  /** Pill ↔ notch behaviour shared by both surfaces. */
+  notch?: NotchSettings;
+}
+
+export interface NotchSettings {
+  /** Mirror the running reply into the docked notch. */
+  livePreview: boolean;
+  /** Show Ally's greeting when the pill docks into the notch. */
+  greetOnDock: boolean;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -22,4 +31,5 @@ export const DEFAULT_SETTINGS: AppSettings = {
   },
   theme: 'dark',
   contextToggleEnabled: true,
+  notch: { livePreview: true, greetOnDock: true },
 };

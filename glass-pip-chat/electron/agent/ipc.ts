@@ -15,7 +15,8 @@ import { listAgentModels, listAgentSessions, loadAgentSession } from './sessions
 import { readAgentMonitor } from './agentMonitor.js';
 import { watchAgentSessions } from './sessionWatch.js';
 import { configureCodexMigrations } from './codexMigration.js';
-import { configureCodexHistory, listCodexChats, loadCodexChat, closeCodexHistory } from './codexHistory.js';
+import { configureCodexHistory, listCodexChats, listCodexChatsPage, loadCodexChat, closeCodexHistory } from './codexHistory.js';
+import { chatSelection, type SharedChatSelection } from './selection.js';
 import { generateGreeting } from './greeting.js';
 import { registerClaudeLoginIpc } from './claudeLogin.js';
 import { desktopInteraction } from './desktopApprovals.js';
@@ -116,6 +117,15 @@ export function registerAgentIpc(getWindow: () => BrowserWindow | null, onConfig
     const win = getWindow();
     if (!win || event.sender !== win.webContents || event.senderFrame !== win.webContents.mainFrame) throw Error('Decisions must come from Ally chat.');
   };
+  const stopSelection = chatSelection.subscribe(state => {
+    const win = getWindow();
+    if (win && !win.isDestroyed()) win.webContents.send('agent:selection', state);
+  });
+  app.on('will-quit', stopSelection);
+  ipcMain.handle('agent:getSelection', event => { fromMain(event); return chatSelection.snapshot(); });
+  ipcMain.handle('agent:setSelection', (event, selected: SharedChatSelection | null, version: string) => {
+    fromMain(event); return chatSelection.set(selected, version, 'desktop');
+  });
   ipcMain.handle('agent:localImage', (event, source: string) => { fromMain(event); return localImage(source); });
   ipcMain.handle('agent:interactionHistory', (event, chatId: string) => {
     fromMain(event);
@@ -155,6 +165,15 @@ export function registerAgentIpc(getWindow: () => BrowserWindow | null, onConfig
   ipcMain.handle('agent:activity', event => { fromMain(event); return readAgentMonitor(); });
   ipcMain.handle('agent:runningSessions', () => listRunningSessions());
   ipcMain.handle('agent:listSessions', (_, provider: AgentProvider, limit?: number) => provider === 'codex' ? listCodexChats(limit) : listAgentSessions(provider, limit));
+  ipcMain.handle('agent:listSessionsPage', async (event, provider: AgentProvider, cursor?: string) => {
+    fromMain(event);
+    if (!['codex', 'claude'].includes(provider) || (cursor !== undefined && (typeof cursor !== 'string' || cursor.length > 16000))) throw Error('Invalid chat page');
+    if (provider === 'codex') return listCodexChatsPage(30, cursor);
+    const offset = cursor === undefined ? 0 : Number(cursor);
+    if (!Number.isSafeInteger(offset) || offset < 0) throw Error('Invalid chat page');
+    const rows = await listAgentSessions(provider, offset + 31);
+    return { sessions: rows.slice(offset, offset + 30), nextCursor: rows.length > offset + 30 ? String(offset + 30) : undefined };
+  });
 
   ipcMain.handle('agent:readStates', (_, keys?: string[]) => discoveryReadStates(Array.isArray(keys) ? keys.filter(key => typeof key === 'string' && /^(codex|claude):[\w-]+$/.test(key)) : []));
   ipcMain.handle('agent:markRead', async (_, provider: AgentProvider, id: string, revision: string) => {

@@ -62,6 +62,12 @@ export interface PipAPI {
 
   // Global hotkey events from the main process
   onShortcut: (callback: (event: 'focus-main-input' | 'show-collapsed-and-focus-quick' | 'toggle-collapse' | 'cycle-size' | 'toggle-context') => void) => () => void;
+  onSurfaceFloat?: (callback: (id: number) => void) => () => void;
+  surfaceReady?: (id: number) => void;
+  /** Mirrors the pill's live reply (or null to clear) and greeting into the docked notch. */
+  /** Reads (or changes one of) the native notch's shared preferences; null when the notch is not connected. */
+  nativeSettings?: (change?: { key: string; value: string | number | boolean }) => Promise<Record<string, unknown> | null>;
+  surfacePreview?: (value:{ preview?: { question: string; answer: string; thinking: boolean; done: boolean } | null; greeting?: string }) => void;
 
   // Robot eyes
   /** Start/stop the global cursor feed (window-relative coordinates) */
@@ -120,6 +126,10 @@ export interface PipAPI {
     activity: () => Promise<ReturnType<typeof import('../../electron/watch/assistantActivity').assistantActivity>>;
     runningSessions: () => Promise<AgentSessionSummary[]>;
     listSessions: (provider: AgentProvider, limit?: number) => Promise<AgentSessionSummary[]>;
+    listSessionsPage: (provider: AgentProvider, cursor?: string) => Promise<{ sessions: AgentSessionSummary[]; nextCursor?: string }>;
+    getSelection: () => Promise<import('../../electron/agent/selection').SelectionSnapshot>;
+    setSelection: (selected: import('../../electron/agent/selection').SharedChatSelection | null, version: string) => Promise<import('../../electron/agent/selection').SelectionSnapshot & { accepted: boolean }>;
+    onSelection: (callback: (state: import('../../electron/agent/selection').SelectionSnapshot) => void) => () => void;
     readStates: (keys?: string[]) => Promise<{ key: string; revision: string; unread: boolean; hidden?: boolean }[]>;
     markRead: (provider: AgentProvider, id: string, revision: string) => Promise<boolean>;
     loadSession: (provider: AgentProvider, id: string, revision?: string) => Promise<import('../../electron/agent/types').AgentSessionSnapshot>;

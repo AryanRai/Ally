@@ -7,6 +7,7 @@ import { AppSettings } from '../types/settings';
 import ShortcutsPanel from './settings/ShortcutsPanel';
 import AgentSettingsSection from './settings/AgentSettingsSection';
 import LookSettingsSection from './settings/LookSettingsSection';
+import NotchSettingsSection from './settings/NotchSettingsSection';
 
 interface SettingsModalProps {
   onMeetingSettings?: () => void;
@@ -505,6 +506,8 @@ export default function SettingsModal({
 
 
               <SpeechSettingsSection />
+
+              <NotchSettingsSection />
 
               <section className="space-y-2">
                 <h3 className="text-sm font-medium">Chat greeting</h3>

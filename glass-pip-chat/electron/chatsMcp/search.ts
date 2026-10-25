@@ -27,7 +27,7 @@ export interface SearchHit {
 
 export interface ChatLoaders {
   list(provider: AgentProvider, limit: number): Promise<AgentSessionSummary[]>;
-  load(provider: AgentProvider, id: string): Promise<{ messages: AgentHistoryMessage[]; cwd?: string }>;
+  load(provider: AgentProvider, id: string): Promise<{ messages: AgentHistoryMessage[]; cwd?: string; title?: string }>;
 }
 
 const MAX_TEXT = 40_000;

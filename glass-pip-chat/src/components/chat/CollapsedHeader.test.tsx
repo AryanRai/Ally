@@ -1,6 +1,7 @@
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import CollapsedHeader from './CollapsedHeader';
+import ExpandedHeader from './ExpandedHeader';
 import CollapsedResponsePreview from './CollapsedResponsePreview';
 import type { Message } from '@/types/chat';
 
@@ -20,6 +21,17 @@ const props = {
 };
 
 describe('collapsed live reader', () => {
+  it('accepts expand/collapse reversal while a native resize is still pending', () => {
+    const toggle = vi.fn();
+    const view = render(<CollapsedHeader {...props} isResizing onCollapseToggle={toggle} />);
+    fireEvent.click(screen.getByTitle('Expand chat'));
+    expect(toggle).toHaveBeenCalledTimes(1);
+    view.unmount();
+    render(<ExpandedHeader {...props} isResizing onCollapseToggle={toggle} activeChat={{ title: 'Saved chat' }} headerTitleEdit={{ isEditing: false }} showContext={false} onContextToggle={() => {}} onContextToggleChange={() => {}} onSettings={() => {}} showSpeechControls={false} onSpeechToggle={() => {}} />);
+    fireEvent.click(screen.getByTitle('Collapse'));
+    expect(toggle).toHaveBeenCalledTimes(2);
+  });
+
   it('keeps context and agent toggles in one small row while history is inside More', () => {
     const screenToggle = vi.fn(), clipboardToggle = vi.fn();
     render(<CollapsedHeader {...props} messages={[user, reply]} screenAutoAttach onScreenAutoAttachToggle={screenToggle} onClipboardAutoAttachToggle={clipboardToggle} />);

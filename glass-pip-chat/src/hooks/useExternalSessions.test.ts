@@ -53,3 +53,25 @@ it('does not start manual or event-driven scans after unmount', async () => {
   await refresh();
   expect(list).toHaveBeenCalledTimes(calls);
 });
+
+it('loads beyond eighty chats with native cursors, keeps older pages on refresh and retries a failed page', async () => {
+  let fail = true;
+  const listSessionsPage = vi.fn(async (provider: 'codex' | 'claude', cursor?: string) => {
+    if (provider === 'claude') return { sessions: [] };
+    const offset = Number(cursor ?? 0);
+    if (offset === 30 && fail) throw Error('Temporary list failure');
+    return { sessions: Array.from({ length: 30 }, (_, i) => row(provider, `s${offset + i}`)), nextCursor: offset < 60 ? String(offset + 30) : undefined };
+  });
+  window.pip = { agent: { listSessionsPage, runningSessions: vi.fn().mockResolvedValue([]), onSessionsChanged: vi.fn(() => vi.fn()) } } as any;
+  const { result } = renderHook(useExternalSessions);
+  await waitFor(() => expect(result.current.sessions).toHaveLength(30));
+  await act(async () => { await result.current.loadMore(); });
+  expect(result.current.error).toContain('Codex'); expect(result.current.sessions).toHaveLength(30);
+  fail = false;
+  await act(async () => { await result.current.loadMore(); });
+  await act(async () => { await result.current.loadMore(); });
+  expect(result.current.sessions).toHaveLength(90); expect(result.current.hasMore).toBe(false);
+  expect(listSessionsPage).toHaveBeenCalledWith('codex', '60');
+  await act(async () => { await result.current.refresh(); });
+  expect(result.current.sessions).toHaveLength(90); expect(result.current.hasMore).toBe(false);
+});
