@@ -2,6 +2,16 @@ import { extractImages, stringifyToolOutput } from './parsers.js';
 import { localImageDataUrl } from './imageFile.js';
 import type { AgentEvent, AgentUsage } from './types.js';
 
+/** Codex relays some backend errors as raw JSON; turn the known ones into a next step. */
+export function codexErrorMessage(raw: string | undefined): string | undefined {
+  if (!raw) return raw;
+  let detail = raw;
+  try { const parsed = JSON.parse(raw); detail = parsed?.error?.message ?? parsed?.detail ?? raw; } catch { /* plain text */ }
+  const unsupported = /The '([^']+)' model is not supported when using Codex with a ChatGPT account/i.exec(detail);
+  if (unsupported) return `This chat uses ${unsupported[1]}, which your ChatGPT account no longer supports. Choose another model for this chat in Codex, then send again. Your message was not answered.`;
+  return detail;
+}
+
 /** Normalizes the documented app-server item stream, without duplicating deltas on completion. */
 export class CodexEventParser {
   private phases = new Map<string, 'commentary' | 'final_answer'>();
@@ -86,10 +96,10 @@ export class CodexEventParser {
     if (method === 'turn/completed') {
       const out: AgentEvent[] = [...this.progress].map(([id, input]) => ({ kind: 'tool_end', id, output: JSON.stringify(input), isError: p.turn?.status !== 'completed' }));
       out.push({ kind: 'done', sessionId: this.sessionId, usage: this.usage,
-        isError: p.turn?.status === 'failed', error: p.turn?.error?.message });
+        isError: p.turn?.status === 'failed', error: codexErrorMessage(p.turn?.error?.message) });
       return out;
     }
-    if (method === 'error' && !p.willRetry) return [{ kind: 'done', sessionId: this.sessionId, isError: true, error: p.error?.message ?? 'Codex turn failed' }];
+    if (method === 'error' && !p.willRetry) return [{ kind: 'done', sessionId: this.sessionId, isError: true, error: codexErrorMessage(p.error?.message) ?? 'Codex turn failed' }];
     return [];
   }
 

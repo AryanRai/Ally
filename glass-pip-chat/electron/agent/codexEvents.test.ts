@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CodexEventParser } from './codexEvents';
+import { CodexEventParser, codexErrorMessage } from './codexEvents';
 import { codexThreadConfig } from './codexRun';
 
 describe('Codex app-server events', () => {
@@ -33,5 +33,13 @@ describe('Codex app-server events', () => {
       sandbox: 'danger-full-access', model: 'chosen-model', developerInstructions: expect.stringMatching(/Browser environment[\s\S]*\n\nrobot$/),
       config: { mcp_servers: { howyouseeme: { url: 'http://perception' }, droidcore: { url: 'http://motion' } } },
     });
+  });
+  it('explains the ChatGPT unsupported-model error instead of showing raw JSON', () => {
+    const raw = JSON.stringify({ detail: "The 'gpt-6.1-sol' model is not supported when using Codex with a ChatGPT account.", error: { type: 'invalid_request_error', code: 'model_not_found', message: "The 'gpt-6.1-sol' model is not supported when using Codex with a ChatGPT account." } });
+    const [done] = new CodexEventParser('t').handle('turn/completed', { threadId: 't', turn: { status: 'failed', error: { message: raw } } });
+    expect(done).toMatchObject({ kind: 'done', isError: true });
+    expect((done as { error: string }).error).toBe('This chat uses gpt-6.1-sol, which your ChatGPT account no longer supports. Choose another model for this chat in Codex, then send again. Your message was not answered.');
+    expect(codexErrorMessage('{"detail":"Rate limited"}')).toBe('Rate limited');
+    expect(codexErrorMessage('plain failure')).toBe('plain failure');
   });
 });
