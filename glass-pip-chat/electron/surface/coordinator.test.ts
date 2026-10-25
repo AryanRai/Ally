@@ -30,7 +30,7 @@ function fixture(visible = false) {
   const hooks = new Map<number, () => void>();
   const contents = { mainFrame: {}, send: vi.fn() };
   const win = Object.assign(new EventEmitter(), {
-    webContents: contents, hide: vi.fn(), showInactive: vi.fn(), isVisible: () => visible, moveTop: vi.fn(), setBounds: vi.fn(), isDestroyed: () => false,
+    webContents: contents, hide: vi.fn(), show: vi.fn(), focus: vi.fn(), restore: vi.fn(), isMinimized: (): boolean => false, showInactive: vi.fn(), isVisible: () => visible, moveTop: vi.fn(), setBounds: vi.fn(), isDestroyed: () => false,
     getNativeWindowHandle: () => Buffer.from([42, 0, 0, 0, 0, 0, 0, 0]),
     getBounds: () => ({ x: 310, y: 82, width: 380, height: 112 }),
     hookWindowMessage: (id:number, run:()=>void) => hooks.set(id, run),
@@ -48,6 +48,49 @@ beforeEach(() => { vi.useFakeTimers(); mocks.point = { x: 500, y: 10 }; });
 afterEach(() => { mocks.app.emit('will-quit'); mocks.ipc.handlers.clear(); mocks.app.removeAllListeners(); mocks.ipc.removeAllListeners(); vi.useRealTimers(); });
 
 describe('native and floating surface coordinator', () => {
+  it('toggles between notch and focused window, waiting for native visibility before hiding', () => {
+    const f = fixture(true); f.connect(); f.socket.write.mockClear();
+    f.coordinator.toggle();
+    expect(f.socket.write).toHaveBeenLastCalledWith('NOTCH\n');
+    expect(f.win.hide).not.toHaveBeenCalled();
+    f.socket.emit('data', 'SHOWN\n');
+    expect(f.win.hide).toHaveBeenCalledOnce();
+    f.coordinator.toggle();
+    expect(f.socket.write).toHaveBeenLastCalledWith('HIDE\n');
+    expect(f.win.show).toHaveBeenCalledOnce();
+    expect(f.win.focus).toHaveBeenCalledOnce();
+    expect(f.contents.send).toHaveBeenLastCalledWith('focus-main-input');
+    expect(f.win.setBounds).not.toHaveBeenCalled();
+  });
+  it('reverses a pending dock without allowing a stale acknowledgement to hide the window', () => {
+    const f = fixture(true); f.connect();
+    f.coordinator.toggle(); f.coordinator.toggle();
+    f.socket.emit('data', 'SHOWN\n');
+    expect(f.win.hide).not.toHaveBeenCalled();
+    expect(f.win.focus).toHaveBeenCalledOnce();
+    f.coordinator.toggle(); f.socket.emit('data', 'SHOWN\n');
+    expect(f.win.hide).toHaveBeenCalledOnce();
+  });
+  it('keeps the window usable without a native peer and restores minimized windows', () => {
+    const f = fixture(); f.win.isMinimized = () => true;
+    f.coordinator.toggle();
+    expect(f.win.restore).toHaveBeenCalledOnce();
+    expect(f.win.show).toHaveBeenCalledOnce();
+    expect(f.win.hide).not.toHaveBeenCalled();
+    f.connect(); expect(f.socket.write).toHaveBeenLastCalledWith('HIDE\n');
+    f.socket.emit('close'); f.coordinator.toggle();
+    expect(f.win.show).toHaveBeenCalledTimes(2);
+    expect(f.win.hide).not.toHaveBeenCalled();
+  });
+  it('does not reveal either surface during a capture', async () => {
+    const f = fixture(); f.connect();
+    const pending = f.coordinator.suspend();
+    f.socket.emit('data', 'HIDDEN\n'); await pending;
+    f.socket.write.mockClear(); f.coordinator.toggle();
+    expect(f.socket.write).not.toHaveBeenCalled();
+    expect(f.win.show).not.toHaveBeenCalled();
+    expect(f.win.hide).not.toHaveBeenCalled();
+  });
   it('requires authentication and rejects extra native peers', () => {
     const f = fixture(); mocks.accept(f.socket); f.socket.emit('data', 'AUTH wrong\n');
     expect(f.socket.destroy).toHaveBeenCalled(); expect(f.win.hide).not.toHaveBeenCalled();

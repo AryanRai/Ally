@@ -11,6 +11,19 @@ export const revealFloatingSurface = () => controller?.float();
 export const suspendNativeForCapture = () => controller?.suspend() ?? Promise.resolve();
 export const restoreNativeAfterCapture = (focus: boolean) => controller?.restore(focus);
 
+const focusFloatingWindow = (win: BrowserWindow) => {
+  if (win.isDestroyed()) return;
+  if (win.isMinimized()) win.restore();
+  win.show(); win.focus();
+  win.webContents.send('focus-main-input');
+};
+
+/** The shortcut always leaves a usable surface, even without the native helper. */
+export function toggleAllySurface(win: BrowserWindow | null | undefined) {
+  if (controller) controller.toggle();
+  else if (win) focusFloatingWindow(win);
+}
+
 /** One warm Electron window and one warm native notch; no rendering or cursor polling loop. */
 export function createSurfaceCoordinator(win: BrowserWindow) {
   const token = randomBytes(32).toString('hex');
@@ -162,6 +175,13 @@ export function createSurfaceCoordinator(win: BrowserWindow) {
   app.once('will-quit', dispose);
   return {
     float,
+    toggle() {
+      if (capturing || win.isDestroyed()) return;
+      if (!peer) { floating = true; focusFloatingWindow(win); return; }
+      if (peer && floating) { dock(); return; }
+      float();
+      focusFloatingWindow(win);
+    },
     async suspend() {
       if (!peer) return;
       transfer++; capturing = true;

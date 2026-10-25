@@ -12,12 +12,12 @@ import { registerAgentIpc } from './agent/ipc.js';
 import { registerCircleIpc, startCircle } from './capture/circle.js';
 import { registerVisualTutorIpc } from './visualTutor/ipc.js';
 import { startShakeDetection, stopShakeDetection } from './capture/shake.js';
-import { registerSurfaceCoordinator, revealFloatingSurface } from './surface/coordinator.js';
+import { registerSurfaceCoordinator, revealFloatingSurface, toggleAllySurface } from './surface/coordinator.js';
 
 /** Global hotkeys: accelerator → renderer event sent after showing the window. */
-const SHORTCUTS: Array<{ accelerator: string; event?: string; toggleVisibility?: boolean; run?: () => void }> = [
+const SHORTCUTS: Array<{ accelerator: string; event?: string; run?: () => void }> = [
   { accelerator: 'CommandOrControl+Shift+Space', run: () => void startCircle() },
-  { accelerator: 'CommandOrControl+Shift+C', toggleVisibility: true, event: 'focus-main-input' },
+  { accelerator: 'CommandOrControl+Shift+C', run: () => toggleAllySurface(getWindow()) },
   { accelerator: 'CommandOrControl+Shift+Q', event: 'show-collapsed-and-focus-quick' },
   { accelerator: 'CommandOrControl+Shift+M', event: 'toggle-collapse' },
   { accelerator: 'CommandOrControl+Shift+S', event: 'cycle-size' },
@@ -26,15 +26,11 @@ const SHORTCUTS: Array<{ accelerator: string; event?: string; toggleVisibility?:
 ];
 
 function registerShortcuts(): void {
-  for (const { accelerator, event, toggleVisibility, run } of SHORTCUTS) {
+  for (const { accelerator, event, run } of SHORTCUTS) {
     const ok = globalShortcut.register(accelerator, () => {
       if (run) return run();
       const win = getWindow();
       if (!win) return;
-      if (toggleVisibility && win.isVisible()) {
-        win.hide();
-        return;
-      }
       if (!win.isVisible()) {
         revealFloatingSurface();
         win.show();

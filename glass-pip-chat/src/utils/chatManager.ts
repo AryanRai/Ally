@@ -133,7 +133,7 @@ export class ChatManager {
             "Hi, I'm Ally. Pick **Claude Code** or **Codex** in the model menu, choose a working folder, and talk to it here.",
             '',
             '• **Agent sessions** (bottom of the sidebar) continue chats you started in Claude Code or Codex',
-            '• **Ctrl+Shift+C** shows or hides me from anywhere',
+            '• **Ctrl+Shift+C** switches between my notch and floating window from anywhere',
             '• Copy something, then hit **Explain** to ask about it',
           ].join('\n'),
           timestamp: now

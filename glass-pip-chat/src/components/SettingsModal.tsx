@@ -529,7 +529,7 @@ export default function SettingsModal({
                 )}>
                   <p>Ally v2.0.0 · Claude Code + Codex frontend</p>
                   <p>Platform: {platform}</p>
-                  <p>Press Ctrl+Shift+C to toggle visibility</p>
+                  <p>Press Ctrl+Shift+C to switch between the notch and floating window</p>
                 </div>
               </div>
             </div>
