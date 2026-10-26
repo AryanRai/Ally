@@ -225,9 +225,14 @@ object ControlBridge {
         manager.createNotificationChannel(NotificationChannel(UNLOCK_CHANNEL, "Ally needs you to unlock", NotificationManager.IMPORTANCE_HIGH))
         val open = PendingIntent.getActivity(context, UNLOCK, Intent(context, ControlUnlockActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         val icon = context.resources.getIdentifier("ic_ally", "drawable", context.packageName).takeIf { it != 0 } ?: android.R.drawable.ic_dialog_info
+        // Backup only: a full-screen alert where Android allows it, otherwise a heads-up notice.
         manager.notify(UNLOCK, Notification.Builder(context, UNLOCK_CHANNEL).setSmallIcon(icon)
-            .setContentTitle("Unlock to let Ally continue").setContentText("Tap, then use your fingerprint, face or PIN. Nothing runs until you do.")
-            .setVisibility(Notification.VISIBILITY_PUBLIC).setCategory(Notification.CATEGORY_REMINDER).setContentIntent(open).setAutoCancel(true).build())
+            .setContentTitle("Unlock to let Ally continue").setContentText("Use your fingerprint, face or PIN. Nothing runs until you do.")
+            .setVisibility(Notification.VISIBILITY_PUBLIC).setCategory(Notification.CATEGORY_CALL).setContentIntent(open)
+            .apply { if (manager.canUseFullScreenIntent()) setFullScreenIntent(open, true) }.setAutoCancel(true).build())
+        // Directly: the bound accessibility service may open the unlock screen, which turns the
+        // display on and shows Android's own fingerprint/face/PIN prompt straight away.
+        runCatching { (AllyControlService.instance ?: context).startActivity(Intent(context, ControlUnlockActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
         try {
             if (withTimeoutOrNull(75_000) { waiter.await() } == null || keyguard.isDeviceLocked)
                 throw IllegalStateException("The phone stayed locked, so Ally didn't continue. Ask again once it's unlocked.")

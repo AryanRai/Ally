@@ -169,15 +169,21 @@ export class PhoneControl {
           view = await this.settledView(transport, signal);
         }
         await transport.check(signal);
+        let image: Awaited<ReturnType<Transport['screenshot']>> | undefined;
+        if (screenshot) {
+          // The image must match the returned UI. Unlock and launch animations settle quickly,
+          // so re-read and retry briefly; a screen that keeps changing (or turns sensitive) is refused.
+          for (let attempt = 0; ; attempt++) {
+            if (attempt) { await pause(500, undefined, { signal }); view = await this.settledView(transport, signal); }
+            image = await transport.screenshot(signal);
+            const after = await transport.view(signal);
+            if (after.revision === view.revision) break;
+            if (attempt >= 2) throw Error('Screen changed during capture; screenshot withheld.');
+          }
+        }
         const sessionEnds = new Date(grant.expiresAt).toISOString();
         const content: ToolResult['content'] = [{ type: 'text', text: JSON.stringify({ requestId, ...view, completedOperations: action.completedOperations, transport: transport.kind, sessionEnds, note: 'Input delivery is confirmed; app outcomes require inspecting the returned screen. Further requests from this chat run without asking until the session ends.' }) }];
-        if (screenshot) {
-          const image = await transport.screenshot(signal);
-          // Refuse the image if the UI changed or became sensitive during capture.
-          const after = await transport.view(signal);
-          if (after.revision !== view.revision) throw Error('Screen changed during capture; screenshot withheld.');
-          content.push({ type: 'image', mimeType: image.mimeType, data: image.data });
-        }
+        if (image) content.push({ type: 'image', mimeType: image.mimeType, data: image.data });
         await transport.check(signal); action.state = 'completed'; action.updatedAt = this.now();
         return { content };
       } finally { clearTimeout(executionExpiry); }
