@@ -85,7 +85,8 @@ class MainActivity : ComponentActivity() {
         if(intent.getBooleanExtra("allyAgentMonitor",false)) { intent.removeExtra("allyAgentMonitor"); window.decorView.post { dev.ally.device.AllyAssistantService.showMonitor() } }
         intent.getStringExtra("openChat")?.let { model.openNotification(it); notificationSequence++; intent.removeExtra("openChat") }
     }
-    override fun onStop() { model.foreground = false; WatchNotifications.foreground = false; if (!dev.ally.device.AssistantVisibility.visible) model.cancelRecording(); model.stopSpeaking(); super.onStop() }
+    override fun onStart() { super.onStart(); AmbientOngoing.show(this) }
+    override fun onStop() { AmbientOngoing.hide(this); model.foreground = false; WatchNotifications.foreground = false; if (!dev.ally.device.AssistantVisibility.visible) model.cancelRecording(); model.stopSpeaking(); super.onStop() }
     private fun pulse(long: Boolean) {
         if (!model.state.value.muted) getSystemService(Vibrator::class.java)?.vibrate(
             VibrationEffect.createOneShot(if (long) 80 else 28, VibrationEffect.DEFAULT_AMPLITUDE))
