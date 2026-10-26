@@ -33,6 +33,11 @@
             <intent-filter><action android:name="android.speech.RecognitionService" /></intent-filter>
         </service>
         <service android:name="dev.ally.device.AllyAssistantSessionService" android:exported="true" android:permission="android.permission.BIND_VOICE_INTERACTION" />
+        <service android:name=".AllyControlService" android:label="@string/control_service_label" android:exported="false" android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter><action android:name="android.accessibilityservice.AccessibilityService" /></intent-filter>
+            <meta-data android:name="android.accessibilityservice" android:resource="@xml/ally_control_service" />
+        </service>
+        <receiver android:name=".ControlStopReceiver" android:exported="false" />
         <service android:name="dev.ally.device.DeviceLinkService" android:exported="false" android:foregroundServiceType="connectedDevice" />
         <receiver android:name="dev.ally.device.DeviceDismissReceiver" android:exported="false" />
         <activity android:name="dev.ally.device.DeviceInboxActivity" android:exported="false" />

@@ -8,7 +8,7 @@ export type PhoneOperation =
   | { type: 'tap'; x: number; y: number }
   | { type: 'swipe'; x: number; y: number; endX: number; endY: number; durationMs: number }
   | { type: 'text'; text: string }
-  | { type: 'key'; key: 'back' | 'home' }
+  | { type: 'key'; key: 'back' | 'home' | 'recents' }
   | { type: 'open_app'; packageName: string };
 export interface PhoneView { revision: string; width: number; height: number; ui: string }
 
@@ -27,7 +27,8 @@ export function createAdbRun(): AdbRun {
 
 const packagePattern = /^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*)+$/;
 const blockedPackage = /(?:permissioncontroller|packageinstaller|systemui|settings|authenticator|password|keychain|bank|wallet|dev\.ally\.)/i;
-export function validateOperations(value: unknown): PhoneOperation[] {
+/** ADB's input tool is basic Latin only; the on-device executor sets text through accessibility and accepts Unicode. */
+export function validateOperations(value: unknown, options: { unicodeText?: boolean } = {}): PhoneOperation[] {
   if (!Array.isArray(value) || value.length > 8) throw Error('Provide at most 8 operations (empty means inspect only).');
   return value.map(item => {
     if (!item || typeof item !== 'object') throw Error('Invalid operation.');
@@ -40,10 +41,11 @@ export function validateOperations(value: unknown): PhoneOperation[] {
         if ([item.x, item.y, item.endX, item.endY].every(v => integer(v)) && integer(item.durationMs, 2000) && item.durationMs >= 100)
           return { type: 'swipe', x: item.x, y: item.y, endX: item.endX, endY: item.endY, durationMs: item.durationMs };
         break;
-      case 'key': if (item.key === 'home' || item.key === 'back') return { type: 'key', key: item.key }; break;
+      case 'key': if (item.key === 'home' || item.key === 'back' || (options.unicodeText && item.key === 'recents')) return { type: 'key', key: item.key }; break;
       case 'text':
         // Android's input tool is not a Unicode IME. No remote shell metacharacters or % substitutions.
         if (typeof item.text === 'string' && /^[A-Za-z0-9 .,\@_+:\-]{1,200}$/.test(item.text)) return { type: 'text', text: item.text };
+        if (options.unicodeText && typeof item.text === 'string' && /^[^\p{C}]{1,500}$/u.test(item.text)) return { type: 'text', text: item.text };
         break;
       case 'open_app':
         if (typeof item.packageName === 'string' && item.packageName.length <= 200 && packagePattern.test(item.packageName) && !blockedPackage.test(item.packageName)) return { type: 'open_app', packageName: item.packageName };
@@ -64,6 +66,30 @@ export function inspectUi(xml: string): string {
   const appNodes = packages.filter(p => p && p !== 'com.android.systemui');
   if (!appNodes.length) throw Error('System or lock screen: continue manually on the phone.');
   return xml.replace(/<node\b[^>]*package="com\.android\.systemui"[^>]*>/g, node => node.replace(/(text|content-desc)="[^"]*"/g, '$1=""'));
+}
+
+/** Shared by ADB and on-device control: content and geometry bind actions to the inspected screen. */
+export function phoneViewFromXml(xml: string): PhoneView {
+  const ui = inspectUi(xml);
+  const bounds = [...xml.matchAll(/\bbounds="\[-?\d+,-?\d+\]\[(\d+),(\d+)\]"/g)];
+  const width = Math.max(0, ...bounds.map(m => Number(m[1]))), height = Math.max(0, ...bounds.map(m => Number(m[2])));
+  if (!width || !height || width > 10000 || height > 10000) throw Error('Cannot determine screen bounds.');
+  return { ui, revision: createHash('sha256').update(ui).digest('hex'), width, height };
+}
+
+/** Refuses coordinates off the inspected screen and taps on SystemUI or Send/Pay/Approve-style controls. */
+export function assertOperationAllowed(operation: PhoneOperation, view: PhoneView) {
+  const within = (x: number, y: number) => x < view.width && y < view.height;
+  if ((operation.type === 'tap' || operation.type === 'swipe') && (!within(operation.x, operation.y) || (operation.type === 'swipe' && !within(operation.endX, operation.endY)))) throw Error('Coordinates outside the inspected screen.');
+  if (operation.type === 'tap' || operation.type === 'swipe') {
+    for (const match of view.ui.matchAll(/<node\b[^>]*>/g)) {
+      const node = match[0], bounds = /bounds="\[(-?\d+),(-?\d+)\]\[(\d+),(\d+)\]"/.exec(node);
+      if (!bounds) continue;
+      const hit = (x: number, y: number) => x >= +bounds[1] && x < +bounds[3] && y >= +bounds[2] && y < +bounds[4];
+      const protectedNode = /package="com\.android\.systemui"/.test(node) || /(?:text|content-desc)="[^"]*\b(?:send|pay|buy|purchase|confirm|approve|allow|delete|remove|submit)\b/i.test(node);
+      if (protectedNode && (hit(operation.x, operation.y) || (operation.type === 'swipe' && hit(operation.endX, operation.endY)))) throw Error('Protected control: complete this action manually on the phone.');
+    }
+  }
 }
 
 export class AdbPhone {
@@ -91,12 +117,7 @@ export class AdbPhone {
       await this.run([...target, 'shell', 'uiautomator', 'dump', file], signal);
       xml = (await this.run([...target, 'exec-out', 'cat', file], signal)).toString();
     } finally { await this.run([...target, 'shell', 'rm', '-f', file]).catch(() => {}); }
-    const ui = inspectUi(xml);
-    const bounds = [...xml.matchAll(/\bbounds="\[\d+,\d+\]\[(\d+),(\d+)\]"/g)];
-    const width = Math.max(0, ...bounds.map(m => Number(m[1]))), height = Math.max(0, ...bounds.map(m => Number(m[2])));
-    if (!width || !height || width > 10000 || height > 10000) throw Error('Cannot determine screen bounds.');
-    // Content and geometry bind actions to the inspected screen, not the approval inbox.
-    return { ui, revision: createHash('sha256').update(ui).digest('hex'), width, height };
+    return phoneViewFromXml(xml);
   }
   async screenshot(serial: string, signal?: AbortSignal) {
     const data = await this.run([...this.target(serial), 'exec-out', 'screencap', '-p'], signal);
@@ -106,23 +127,13 @@ export class AdbPhone {
   async perform(serial: string, operation: PhoneOperation, view: PhoneView, signal?: AbortSignal) {
     // Revalidate at the executor boundary too; no caller can bypass typed validation.
     validateOperations([operation]);
-    const within = (x: number, y: number) => x < view.width && y < view.height;
-    if ((operation.type === 'tap' || operation.type === 'swipe') && (!within(operation.x, operation.y) || (operation.type === 'swipe' && !within(operation.endX, operation.endY)))) throw Error('Coordinates outside the inspected screen.');
-    if (operation.type === 'tap' || operation.type === 'swipe') {
-      for (const match of view.ui.matchAll(/<node\b[^>]*>/g)) {
-        const node = match[0], bounds = /bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"/.exec(node);
-        if (!bounds) continue;
-        const hit = (x: number, y: number) => x >= +bounds[1] && x < +bounds[3] && y >= +bounds[2] && y < +bounds[4];
-        const protectedNode = /package="com\.android\.systemui"/.test(node) || /(?:text|content-desc)="[^"]*\b(?:send|pay|buy|purchase|confirm|approve|allow|delete|remove|submit)\b/i.test(node);
-        if (protectedNode && (hit(operation.x, operation.y) || (operation.type === 'swipe' && hit(operation.endX, operation.endY)))) throw Error('Protected control: complete this action manually on the phone.');
-      }
-    }
+    assertOperationAllowed(operation, view);
     let args: string[];
     switch (operation.type) {
       case 'tap': args = ['input', 'tap', `${operation.x}`, `${operation.y}`]; break;
       case 'swipe': args = ['input', 'swipe', `${operation.x}`, `${operation.y}`, `${operation.endX}`, `${operation.endY}`, `${operation.durationMs}`]; break;
       case 'text': args = ['input', 'text', operation.text.replaceAll(' ', '%s')]; break;
-      case 'key': args = ['input', 'keyevent', operation.key === 'home' ? '3' : '4']; break;
+      case 'key': args = ['input', 'keyevent', operation.key === 'home' ? '3' : operation.key === 'back' ? '4' : '187']; break;
       case 'open_app': args = ['monkey', '-p', operation.packageName, '-c', 'android.intent.category.LAUNCHER', '1']; break;
     }
     const result = (await this.run([...this.target(serial), 'shell', ...args], signal)).toString();

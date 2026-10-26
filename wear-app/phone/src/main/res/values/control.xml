@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="control_service_label">Ally control</string>
+    <string name="control_service_description">Lets an Ally chat read this screen and tap, swipe and type for it, only during a control session you approve. A notification shows while it is active, with Stop. Ally never enters passwords or codes, pays, or presses Send, Delete or Allow for you.</string>
+</resources>

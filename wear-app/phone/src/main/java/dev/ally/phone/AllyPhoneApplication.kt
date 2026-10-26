@@ -6,6 +6,7 @@ import kotlinx.coroutines.*
 
 class AllyPhoneApplication : AssistantApplication() {
     val model: PhoneModel by lazy { PhoneModel(this) }
+    override fun onCreate() { super.onCreate(); ControlBridge.install(this) }
     override val assistantHost: AssistantHost by lazy { object : AssistantHost {
         override val provider get() = model.state.value.provider
         override fun permissionFor(chatId: String) = DeviceLink.prefs(this@AllyPhoneApplication).getString("phonePermission:$chatId", "readonly")!!

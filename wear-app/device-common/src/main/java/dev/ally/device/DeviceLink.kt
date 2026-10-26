@@ -22,6 +22,9 @@ object DeviceLink {
     val interactionErrors = MutableStateFlow<Map<String, String>>(emptyMap())
     private var foregroundActivity = java.lang.ref.WeakReference<Activity>(null)
     internal var service: DeviceLinkService? = null
+    /** Set by the phone app's on-device control executor; calls are answered with control_result. */
+    var controlHandler: ((Context, JSONObject, (JSONObject) -> Unit) -> Unit)? = null
+    fun sendControl(message: JSONObject): Boolean = service?.send(message) == true
     fun prefs(c: Context) = c.getSharedPreferences("ally-watch", Context.MODE_PRIVATE)
     fun kind(c: Context) = if (c.packageName.endsWith(".watch")) "watch" else "phone"
     /** Phone notifications open its full Compose UI; the watch keeps its compact screen. */
@@ -296,7 +299,8 @@ class DeviceLinkService : Service() {
         val request = Request.Builder().url(endpoint.replaceFirst("https://", "wss://") + "/v1/devices/live").header("Authorization", "Bearer ${p.getString("token", "")}").build()
         socket = client.newWebSocket(request, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
-                webSocket.send(JSONObject().put("type", "hello").put("deviceId", id).put("kind", DeviceLink.kind(this@DeviceLinkService)).toString())
+                webSocket.send(JSONObject().put("type", "hello").put("deviceId", id).put("kind", DeviceLink.kind(this@DeviceLinkService))
+                    .put("capabilities", org.json.JSONArray().apply { if (DeviceLink.controlHandler != null) put("on-device-control") }).toString())
             }
             override fun onMessage(webSocket: WebSocket, text: String) { scope.launch {
                 if (socket !== webSocket) return@launch
@@ -305,6 +309,11 @@ class DeviceLinkService : Service() {
                 when (msg.optString("type")) {
                     "interaction", "interaction_closed", "interaction_ack", "interaction_sync" -> { DeviceLink.interactionEvent(this@DeviceLinkService,msg,connectionId); refreshSurfaces() }
                     "authorized_command" -> DeviceLink.executeAuthorized(this@DeviceLinkService,msg.getJSONObject("command"),connectionId)
+                    "control_call" -> {
+                        val handler = DeviceLink.controlHandler
+                        if (handler == null) webSocket.send(JSONObject().put("type", "control_result").put("id", msg.optString("id")).put("ok", false).put("error", "On-device control isn't available on this device.").toString())
+                        else handler(this@DeviceLinkService, msg) { reply -> if (socket === webSocket) webSocket.send(reply.toString()) }
+                    }
                     "ready" -> {
                         backoff = 1000L; DeviceLink.status.value = "Connected"
                         refreshSurfaces()

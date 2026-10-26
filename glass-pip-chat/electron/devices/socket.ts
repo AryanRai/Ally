@@ -17,7 +17,7 @@ export function attachDeviceSocket(server: Server, authorize: (header?: string) 
     if (event.type === 'interaction' && event.request.desktopOnly) return;
     hub.broadcast(event);
   });
-  const sockets = new WebSocketServer({ noServer: true, maxPayload: 32000 });
+  const sockets = new WebSocketServer({ noServer: true, maxPayload: 3_000_000 });
   const upgrade = (request: IncomingMessage, socket: Duplex, head: Buffer) => {
     if (request.url !== '/v1/devices/live') return;
     if (request.headers.origin || !authorize(request.headers.authorization) || sockets.clients.size >= 6) { socket.end('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n'); return; }
@@ -35,13 +35,17 @@ export function attachDeviceSocket(server: Server, authorize: (header?: string) 
     ws.on('message', data => {
       try {
         const m = JSON.parse(data.toString());
+        // Only on-device control results (screen tree / screenshot) may exceed the normal message size.
+        if ((data as Buffer).length > 32000 && m.type !== 'control_result') throw new Error();
         if (!id) {
           if (m.type !== 'hello' || typeof m.deviceId !== 'string') throw new Error();
-          disconnect = hub.connect(m.deviceId, m.kind as DeviceKind, send); id = m.deviceId; clearTimeout(hello);
+          disconnect = hub.connect(m.deviceId, m.kind as DeviceKind, send, Array.isArray(m.capabilities) ? m.capabilities : []); id = m.deviceId; clearTimeout(hello);
           send({ type: 'ready' });
           send({ type: 'interaction_sync', ids: interactions.list().filter(request => !request.desktopOnly).map(request => request.id) });
           for (const request of interactions.list().filter(request => !request.desktopOnly)) send({ type: 'interaction', request });
         } else if (m.type === 'receipt') hub.receipt(id, m);
+        else if (m.type === 'control_result') hub.callResult(id, m);
+        else if (m.type === 'control_revoked') hub.revoked(id, m);
         else if (m.type === 'interaction_answer') {
           try { interactions.answer(String(m.id), { action: m.action, values: m.values }, hub.list().find(d => d.id === id)?.kind || 'device'); send({ type: 'interaction_ack', id: m.id, accepted: true }); }
           catch (error) { send({ type: 'interaction_ack', id: m.id, accepted: false, error: error instanceof Error ? error.message : 'Decision failed.' }); }
