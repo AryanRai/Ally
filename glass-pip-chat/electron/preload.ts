@@ -223,6 +223,7 @@ const pipAPI = {
     appStatus: () => ipcRenderer.invoke('chatsMcp:appStatus'),
     addToApps: () => ipcRenderer.invoke('chatsMcp:addToApps'),
     removeFromApps: () => ipcRenderer.invoke('chatsMcp:removeFromApps'),
+    search: (query: string) => ipcRenderer.invoke('chatsMcp:search', String(query).slice(0, 200)),
     onOpenChat: (callback: (req: { provider: 'claude' | 'codex'; sessionId: string; title: string; cwd?: string }) => void) => {
       const handler = (_: any, req: any) => callback(req);
       ipcRenderer.on('chats:open', handler);

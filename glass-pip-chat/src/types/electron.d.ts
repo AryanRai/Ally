@@ -150,6 +150,8 @@ export interface PipAPI {
     appStatus: () => Promise<{ claude: boolean | null; codex: boolean | null }>;
     addToApps: () => Promise<{ claude: string; codex: string }>;
     removeFromApps: () => Promise<void>;
+    /** Read-only title + transcript search across Claude Code and Codex chats */
+    search: (query: string) => Promise<import('../components/ChatSearch').ChatSearchResult>;
     onOpenChat: (callback: (req: { provider: AgentProvider; sessionId: string; title: string; cwd?: string }) => void) => () => void;
   };
   /** Realtime perception sessions (electron/perception) */

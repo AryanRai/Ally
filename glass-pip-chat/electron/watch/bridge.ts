@@ -38,6 +38,7 @@ import { chatSelection } from '../agent/selection.js';
 import { NATIVE_STUDY_INSTRUCTIONS } from './nativeStudy.js';
 import { readProviderUsage } from '../agent/providerUsage.js';
 import { sharedGreeting } from '../surface/greeting.js';
+import { searchChats } from '../chatsMcp/index.js';
 
 interface BridgeConfig { enabled: boolean; token: string; port: number; sessions: Partial<Record<AgentProvider, string>>; transport?: WatchTransportConfig; cloudTunnel?: CloudTunnelConfig }
 interface Turn extends ActivityState { nativeStudy?: string; resumeToken?: string; waitingExternal?: boolean; chatId: string; id: string; requestId: string; provider: AgentProvider; permission: AgentPermission; status: 'thinking' | 'done' | 'error'; activity: string; transcript: string; liveText?: string; reply?: WatchReply; error?: string; runId?: string; startedAt: number; uploads?: DeviceAttachment[]; submission?: string }
@@ -351,6 +352,9 @@ export function startWatchBridge(getConfig: () => AgentConfig): (() => void) | u
       }
       if (req.method === 'GET' && url.pathname === '/v1/usage') {
         send(res, 200, await readProviderUsage(getConfig().codexPath)); return;
+      }
+      if (req.method === 'GET' && url.pathname === '/v1/chat-search') {
+        send(res, 200, await searchChats(url.searchParams.get('q') ?? '')); return;
       }
       if (req.method === 'GET' && url.pathname === '/v1/read-states') {
         send(res, 200, { states: await discoveryReadStates() }); return;

@@ -14,7 +14,7 @@ export default function ShortcutsPanel({ platform }: ShortcutsPanelProps) {
     ['In Ally', [
       ['Reload window', `${mod}+R / F5`], ['Resize window', 'F4'], ['Settings', `${mod}+, / F1`],
       ['New chat', `${mod}+N / F2`], ['Collapse / expand', 'F3'], ['Show / hide chats', 'F6'],
-      ['Hide window', `${mod}+W / Escape`], ['Focus message', '/'], ['Stop reply', `${mod}+.`],
+      ['Hide window', `${mod}+W / Escape`], ['Focus message', '/'], ['Search chats', `${mod}+F`], ['Stop reply', `${mod}+.`],
     ]],
     ['While typing', [['Send', 'Enter'], ['New line', 'Shift+Enter'], ['Recall single-line messages', '↑ / ↓'], ['Clear input', `${mod}+K`]]],
   ] as const;

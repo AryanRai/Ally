@@ -35,6 +35,7 @@ async function api(route:string, body?:unknown) {
 }
 Object.defineProperty(window,'pip',{value:{agent:{readStates:async()=> (await api('read-states')).states}}});
 const session = (chat:Chat):AgentSessionSummary => ({...chat,id:chat.sessionId || chat.id});
+const searchChats = (query:string) => api(`chat-search?q=${encodeURIComponent(query)}`);
 const replyText = (message:{text:string;components?:unknown[]}) => message.components?.length ? JSON.stringify({text:message.text,components:message.components}) : message.text;
 function readStorage<T,>(key:string, fallback:T):T {try {return JSON.parse(sessionStorage.getItem(key) || 'null') ?? fallback;} catch {return fallback;}}
 
@@ -272,7 +273,7 @@ function App() {
     <ChatSidebar chats={[]} activeChat={selected} activeSession={view?{provider:view.chat.provider,id:view.chat.sessionId || view.chat.id}:undefined} onChatSelect={id=>void choose(id)} onChatCreate={()=>void create()}
       onChatDelete={()=>{}} onChatRename={()=>{}} isCollapsed={collapsed} onToggleCollapse={()=>setCollapsed(v=>!v)}
       theme="dark" platform="win32" externalSessions={sessions} runningSessions={running.map(session)}
-      onOpenAgentSession={s=>{const chat=chats.find(c=>c.provider===s.provider && (c.sessionId===s.id || c.id===s.id));void choose(chat?.id || `${s.provider}:${s.id}`);}}/>
+      onOpenAgentSession={s=>{const chat=chats.find(c=>c.provider===s.provider && (c.sessionId===s.id || c.id===s.id));void choose(chat?.id || `${s.provider}:${s.id}`);}} onSearchChats={searchChats}/>
     <main onDragOver={event=>{if(event.dataTransfer.types.includes('Files'))event.preventDefault();}} onDropCapture={event=>{if(event.dataTransfer.files.length){event.preventDefault();event.stopPropagation();attach(event.dataTransfer.files);}}}>
       <header><strong>Ally</strong><span className="title" title="This chat stays selected when the notch collapses">{view?.chat.title || 'Chats'}</span>
         <select aria-label="Engine for new chats" value={provider} onChange={e=>setProvider(e.target.value as Provider)}><option value="codex">Codex</option><option value="claude">Claude</option></select>

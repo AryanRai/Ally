@@ -124,8 +124,8 @@ test('speech wrapper quotes model text and bounds individual speech chunks',()=>
 });
 
 test('proxy allows only explicit chat routes',()=>{
-  for(const [method,route] of [['GET','/v1/chats'],['GET','/v1/greeting'],['POST','/v1/messages'],['POST','/v1/turns/t/approvals/a'],['POST','/v1/chats/a/stop'],['POST','/v1/attachments'],['GET','/v1/attachments/'+'a'.repeat(64)]])assert.equal(allowedBridgeRoute(method,route),true);
-  for(const [method,route] of [['DELETE','/v1/chats/a'],['POST','/v1/settings'],['GET','/v1/chats/a/anything'],['GET','/v1/attachments/../../private']])assert.equal(allowedBridgeRoute(method,route),false);
+  for(const [method,route] of [['GET','/v1/chats'],['GET','/v1/greeting'],['GET','/v1/chat-search'],['POST','/v1/messages'],['POST','/v1/turns/t/approvals/a'],['POST','/v1/chats/a/stop'],['POST','/v1/attachments'],['GET','/v1/attachments/'+'a'.repeat(64)]])assert.equal(allowedBridgeRoute(method,route),true);
+  for(const [method,route] of [['DELETE','/v1/chats/a'],['POST','/v1/settings'],['POST','/v1/chat-search'],['GET','/v1/chats/a/anything'],['GET','/v1/attachments/../../private']])assert.equal(allowedBridgeRoute(method,route),false);
 });
 async function serverFixture(t,fetchImpl) {
   const f=fixture(t,fetchImpl);const handler=createNotchHandler({...f,capability:'browser-capability',fetchImpl});

@@ -1,7 +1,8 @@
 import { useDiscoveryReadStates } from '@/hooks/useUnreadChats';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
-import { ChevronRight, Folder, LoaderCircle, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Pencil, Play, Square, SquarePen, Trash2 } from 'lucide-react';
+import { ChevronRight, Folder, LoaderCircle, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Pencil, Play, Search, Square, SquarePen, Trash2 } from 'lucide-react';
+import ChatSearch, { desktopSearchChats, hasDesktopSearch, type ChatSearchHit, type SearchChats } from '@/components/ChatSearch';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -40,6 +41,8 @@ interface ChatSidebarProps {
   onLoadMoreSessions?: () => void;
   /** Continue an existing Claude Code / Codex session as a chat */
   onOpenAgentSession?: (session: AgentSessionSummary) => void;
+  /** Title + transcript search; defaults to the desktop window's chat index */
+  onSearchChats?: SearchChats;
 }
 
 type Entry =
@@ -279,6 +282,7 @@ export default function ChatSidebar({
   loadingSessions = false,
   onLoadMoreSessions,
   onOpenAgentSession,
+  onSearchChats,
   homeCwd,
   runningChatId,
   workingStatus = 'Working…',
@@ -322,6 +326,33 @@ export default function ChatSidebar({
     });
   };
 
+  const search = onSearchChats ?? (hasDesktopSearch() ? desktopSearchChats : undefined);
+  const [searching, setSearching] = useState(false);
+  const [focusRequest, setFocusRequest] = useState(0);
+  const latest = useRef({ chats, externalSessions, isCollapsed, onToggleCollapse, onChatSelect, onOpenAgentSession });
+  latest.current = { chats, externalSessions, isCollapsed, onToggleCollapse, onChatSelect, onOpenAgentSession };
+  const requestSearch = useCallback(() => {
+    if (latest.current.isCollapsed) latest.current.onToggleCollapse();
+    setFocusRequest(n => n + 1);
+  }, []);
+  const searchFocused = useCallback(() => setFocusRequest(0), []);
+  // Same path as clicking a row: a linked Ally chat is selected, anything else is opened as a session
+  const openHit = useCallback((hit: ChatSearchHit) => {
+    const { chats: saved, externalSessions: sessions, onChatSelect: select, onOpenAgentSession: openSession } = latest.current;
+    const linked = saved.find(c => c.agent?.provider === hit.provider && (c.agent.sessionId === hit.id || c.agent.originalSessionId === hit.id));
+    if (linked) return select(linked.id);
+    openSession?.(sessions.find(s => s.provider === hit.provider && (s.id === hit.id || s.originalSessionId === hit.id))
+      ?? { provider: hit.provider, id: hit.id, title: hit.title, cwd: hit.folder, updatedAt: hit.updatedAt });
+  }, []);
+  useEffect(() => {
+    if (!search) return;
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'f') { e.preventDefault(); requestSearch(); }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [search, requestSearch]);
+
   const railButton = 'grid size-8 place-items-center rounded-md text-foreground/60 transition-colors hover:bg-white/[0.07] hover:text-foreground';
 
   return (
@@ -348,11 +379,17 @@ export default function ChatSidebar({
           <SquarePen className="size-4 shrink-0" />
           {!isCollapsed && 'New chat'}
         </button>
+        {isCollapsed && search && (
+          <button type="button" onClick={requestSearch} className={railButton} title="Search chats (Ctrl+F)" aria-label="Search chats">
+            <Search className="size-4" />
+          </button>
+        )}
       </div>
 
       {!isCollapsed && (
         <>
-          <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2 scrollbar-thin">
+          {search && <ChatSearch search={search} onOpen={openHit} onActiveChange={setSearching} focusRequest={focusRequest} onFocused={searchFocused} />}
+          <div className={cn('min-h-0 flex-1 overflow-y-auto px-2 pb-2 scrollbar-thin', searching && 'hidden')}>
             <section aria-label="Running chats" className="pb-3">
               <h2 className="px-2.5 pb-1 pt-3 text-[11px] font-medium uppercase tracking-wider text-foreground/50">Running · {running.length}</h2>
               {running.map(entry => quickRow(entry, true))}

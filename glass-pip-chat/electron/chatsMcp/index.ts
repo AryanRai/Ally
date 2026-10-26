@@ -21,7 +21,7 @@ import { startAgentRun } from '../agent/runner.js';
 import { listAgentSessions, loadAgentSession } from '../agent/sessions.js';
 import type { AgentConfig, AgentProvider } from '../agent/types.js';
 import { handleRpc, type CallContext, type ToolDef, type ToolResult } from './protocol.js';
-import { ChatIndex } from './search.js';
+import { ChatIndex, type SearchHit } from './search.js';
 import { chatTools, SERVER_INSTRUCTIONS, type SendResult } from './tools.js';
 import { forwarding, serverUrl, setEndpoint, SERVER_NAME } from './registry.js';
 
@@ -92,6 +92,14 @@ const index = new ChatIndex({
   list: async (provider, limit) => (provider === 'codex' ? listCodexChats(limit) : listAgentSessions(provider, limit)),
   load,
 });
+
+/** Sidebar search (renderer IPC and the notch bridge): the index ally_search_chats uses, read-only. */
+export async function searchChats(query: unknown, limit = 20): Promise<{ hits: SearchHit[]; pending: number }> {
+  const q = typeof query === 'string' ? query.slice(0, 200) : '';
+  if (!q.trim()) return { hits: [], pending: 0 };
+  await index.refreshFor(1500);
+  return { hits: index.search(q, { limit: Math.max(1, Math.min(30, Math.floor(limit) || 20)) }), pending: index.pending };
+}
 
 async function send(target: { provider: AgentProvider; id: string; cwd?: string; title: string }, message: string, opts: { wait: boolean; timeoutMs: number; caller?: string }): Promise<SendResult> {
   const key = `${target.provider}:${target.id}`;
@@ -287,6 +295,7 @@ export function registerChatsMcp(getWindow: () => BrowserWindow | null): void {
     tools: tools().map(t => t.name),
     indexed: index.size,
   }));
+  ipcMain.handle('chatsMcp:search', (_e, query: unknown) => searchChats(query));
   ipcMain.handle('chatsMcp:appStatus', () => registrationStatus());
   ipcMain.handle('chatsMcp:addToApps', () => registerInApps());
   ipcMain.handle('chatsMcp:removeFromApps', () => unregisterFromApps());
