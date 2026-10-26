@@ -24,10 +24,16 @@ internal class AssistantEntry(private val context: Context, private val scope: C
     private var automatic = false
     private var job: Job? = null
     private var text = ""
-    private var choices = emptyList<AssistantChoice>()
+    private var picker: AssistantRoutePicker.Picker? = null
     private var selected: String? = null
-    private var suggested: String? = null
-    private class Kept(val text: String, val requestId: String, val choices: List<AssistantChoice>, val selected: String?, val suggested: String?)
+    private var limit = AssistantRoutePicker.PAGE
+    private var query = ""
+    private var hits = emptyList<AssistantChoice>()
+    // Next /v1/chats page per engine; null once that engine has no more.
+    private var offsets = mapOf<String, Int?>()
+    private var lookup: Job? = null
+    private var loadingMore = false
+    private class Kept(val text: String, val requestId: String, val picker: AssistantRoutePicker.Picker?, val selected: String?, val offsets: Map<String, Int?>)
     // Words replaced by a re-record return if nothing new is heard.
     private var kept: Kept? = null
     private var requestId = UUID.randomUUID().toString()
@@ -132,9 +138,9 @@ internal class AssistantEntry(private val context: Context, private val scope: C
     private fun restoreKept(): Boolean {
         val previous = kept?.takeIf { text.isBlank() && recorder == null } ?: return false
         kept = null; entry = true
-        text = previous.text; requestId = previous.requestId; choices = previous.choices; selected = previous.selected; suggested = previous.suggested
+        text = previous.text; requestId = previous.requestId; picker = previous.picker; selected = previous.selected; offsets = previous.offsets
         runCatching { save() }
-        if (choices.isNotEmpty()) showPicker("Nothing new heard · earlier words kept") else fail("Nothing new heard · earlier words kept")
+        if (picker != null) showPicker("Nothing new heard · earlier words kept") else fail("Nothing new heard · earlier words kept")
         return true
     }
     fun finish() {
@@ -161,39 +167,83 @@ internal class AssistantEntry(private val context: Context, private val scope: C
         val recent = scope.async { recentChats() }
         val result = try { withTimeoutOrNull(10000) { request("/v1/assistant/route", JSONObject().put("text", text)) } ?: error("Chat matching timed out · try again") }
             catch (e: Throwable) { recent.cancel(); throw e }
-        val others = withTimeoutOrNull(2500) { recent.await() } ?: emptyList<JSONObject>().also { recent.cancel() }
-        val picker = AssistantRoutePicker.options(result, others, host.provider)
-        choices = picker.choices; selected = picker.suggested; suggested = selected
+        val others = withTimeoutOrNull(2500) { recent.await() } ?: emptyList<Triple<String, List<JSONObject>, Int?>>().also { recent.cancel() }
+        val options = AssistantRoutePicker.options(result, others.flatMap { it.second }, host.provider)
+        picker = options; selected = options.suggested; offsets = others.associate { it.first to it.third }
+        limit = AssistantRoutePicker.PAGE; query = ""; hits = emptyList()
         showPicker(if (result.optBoolean("limited")) "No clear match · pick a chat, then Send" else "Suggested chat · Send or pick another")
     }
     /** Recent chats fill the compact list; failures only shorten it. */
-    private suspend fun recentChats(): List<JSONObject> = coroutineScope {
-        listOf("codex", "claude").map { engine -> async {
+    private suspend fun recentChats(from: Map<String, Int?> = mapOf("codex" to 0, "claude" to 0)): List<Triple<String, List<JSONObject>, Int?>> = coroutineScope {
+        from.filterValues { it != null }.map { (engine, offset) -> async {
             try {
-                request("/v1/chats?provider=$engine").optJSONArray("chats")?.let { a -> (0 until a.length()).map { a.getJSONObject(it) }.take(8) }.orEmpty()
-            } catch (e: CancellationException) { throw e } catch (_: Exception) { emptyList() }
-        } }.awaitAll().flatten()
+                val page = request("/v1/chats?provider=$engine&offset=$offset")
+                Triple(engine, page.optJSONArray("chats")?.let { a -> (0 until a.length()).map { a.getJSONObject(it) } }.orEmpty(), if (page.isNull("nextOffset")) null else page.optInt("nextOffset"))
+            } catch (e: CancellationException) { throw e } catch (_: Exception) { Triple(engine, emptyList<JSONObject>(), offset) }
+        } }.awaitAll()
     }
+    private fun rows() = picker?.let { AssistantRoutePicker.rows(it, limit, query, hits) }.orEmpty()
     private fun showPicker(status: String) {
-        state.value = AssistantEntryState(status, text, choices = choices + AssistantChoice(AssistantRoutePicker.RERECORD, "Try again"), selected = selected)
+        val current = picker ?: return
+        val searching = query.isNotBlank()
+        val more = !searching && (current.chats.size > limit || offsets.values.any { it != null })
+        val controls = (if (more) listOf(AssistantChoice(AssistantRoutePicker.MORE, if (loadingMore) "Loading more chats…" else "More chats")) else emptyList()) +
+            listOf(AssistantChoice(AssistantRoutePicker.SEARCH, if (searching) "Clear search" else "Search chats"), AssistantChoice(AssistantRoutePicker.RERECORD, "Try again"))
+        val shown = rows()
+        state.value = AssistantEntryState(if (searching && shown.isEmpty()) "No chats match “${query.trim()}”" else status, text, choices = shown + controls, selected = selected)
+    }
+    private fun pickerStatus() = if (selected == picker?.suggested) "Suggested chat · Send or pick another" else "Chat changed · tap Send"
+    /** Filters loaded chats at once, then adds desktop search hits. Never sends. */
+    fun search(value: String) {
+        if (picker == null || target != null || state.value?.busy == true) return
+        query = value.take(200); lookup?.cancel()
+        if (query.isBlank()) hits = emptyList()
+        showPicker(pickerStatus())
+        val q = query.trim(); if (q.length < 2) return
+        lookup = scope.launch {
+            delay(300)
+            val found = try { AssistantRoutePicker.hits(request("/v1/chat-search?q=" + java.net.URLEncoder.encode(q, "UTF-8"))) }
+                catch (e: CancellationException) { throw e } catch (_: Exception) { return@launch }
+            if (query.trim() == q && picker != null) { hits = found; showPicker(pickerStatus()) }
+        }
+    }
+    private fun loadMore() {
+        val current = picker ?: return
+        if (loadingMore) return
+        if (current.chats.size > limit) { limit += AssistantRoutePicker.PAGE; showPicker(pickerStatus()); return }
+        loadingMore = true; showPicker(pickerStatus())
+        lookup = scope.launch {
+            try {
+                val pages = recentChats(offsets)
+                picker = picker?.let { p -> pages.fold(p) { acc, page -> AssistantRoutePicker.more(acc, page.second) } }
+                offsets = offsets + pages.associate { it.first to it.third }
+                limit += AssistantRoutePicker.PAGE
+            } finally { loadingMore = false; if (picker != null && target == null) showPicker(pickerStatus()) }
+        }
     }
     fun choose(id: String) {
         if(id == AssistantRoutePicker.RERECORD) { if(canReplace()) { resetUnsent(keep = true); entry=true;start(true) };return }
         if (state.value?.busy == true) return
         if (id == "__retry") {
-            if (target == null && selected != null && choices.isNotEmpty()) { showPicker("Check the chat, then Send"); return }
+            if (target == null && selected != null && picker != null) { showPicker("Check the chat, then Send"); return }
             job = scope.launch { try { if (target != null) deliver(target) else route() } catch(e: CancellationException) { throw e } catch(e: Exception) { fail(e.message ?: "Request unavailable") } }; return
         }
         if (id == AssistantRoutePicker.SEND) {
             val pick = selected ?: return
-            val destination = if (pick == AssistantRoutePicker.NEW) null else choices.find { it.id == pick } ?: return
+            val destination = if (pick == AssistantRoutePicker.NEW) null else (picker?.chats.orEmpty() + hits).find { it.id == pick } ?: return
+            lookup?.cancel()
             job = scope.launch { try { deliver(destination) } catch(e: CancellationException) { throw e } catch(e: Exception) { fail(e.message ?: "Message not confirmed") } }
             return
         }
+        if (id == AssistantRoutePicker.MORE) { if (target == null) loadMore(); return }
+        if (id == AssistantRoutePicker.SEARCH) { search(""); return }
         // Selecting a destination never sends; the words wait for Send.
-        if (target != null || choices.none { it.id == id }) return
+        val choice = rows().find { it.id == id } ?: return
+        if (target != null) return
+        // A search hit joins the known chats so Send and later views still find it.
+        picker = picker?.let { p -> if (id == AssistantRoutePicker.NEW || p.chats.any { it.id == id }) p else p.copy(chats = p.chats + choice) }
         selected = id
-        showPicker(if (id == suggested) "Suggested chat · Send or pick another" else "Chat changed · tap Send")
+        showPicker(pickerStatus())
     }
     private suspend fun deliver(selected: AssistantChoice?) {
         state.value = AssistantEntryState("Opening conversation…", text, busy = true)
@@ -222,7 +272,7 @@ internal class AssistantEntry(private val context: Context, private val scope: C
         // Adopting the exact receipt starts existing polling; it never resends words.
         host.acceptTurn(chat.id, acceptedTurn!!)
         prefs.edit().remove("assistantEntryDraft").commit()
-        entry = false; text = ""; choices = emptyList(); this.selected = null; suggested = null; kept = null; target = null; acceptedTurn = null; screen.clear(); screenAttachment = null; submissionText = null; screenNotice = ""; state.value = null
+        entry = false; text = ""; picker = null; this.selected = null; query = ""; hits = emptyList(); lookup?.cancel(); kept = null; target = null; acceptedTurn = null; screen.clear(); screenAttachment = null; submissionText = null; screenNotice = ""; state.value = null
     }
     private fun fail(message: String) {
         state.value = AssistantEntryState(message, text, choices = if (text.isBlank()) emptyList() else (if(canReplace()) listOf(AssistantChoice("__rerecord","Try again")) else emptyList()) + listOf(AssistantChoice("__retry", "Retry")))
@@ -231,8 +281,9 @@ internal class AssistantEntry(private val context: Context, private val scope: C
     private fun resetUnsent(keep: Boolean = false) {
         check(canReplace())
         job?.cancel();job=null;cancelCapture()
-        kept = if (keep && text.isNotBlank()) Kept(text, requestId, choices, selected, suggested) else null
-        text="";choices=emptyList();selected=null;suggested=null;screen.clear();screenAttachment=null;screenNotice=""
+        kept = if (keep && text.isNotBlank()) Kept(text, requestId, picker, selected, offsets) else null
+        lookup?.cancel();loadingMore=false
+        text="";picker=null;selected=null;query="";hits=emptyList();limit=AssistantRoutePicker.PAGE;screen.clear();screenAttachment=null;screenNotice=""
         requestId=UUID.randomUUID().toString();state.value=null
         // Kept words stay saved until a new transcript replaces them.
         if (kept == null) prefs.edit().remove("assistantEntryDraft").commit()

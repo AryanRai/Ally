@@ -77,7 +77,7 @@ private class AllyAssistantSession(context: android.content.Context) : VoiceInte
         hold.abort()
         startAssistantActivity(DeviceLink.inboxIntent(context).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
         hide()
-    }).also { sheet = it }
+    }, { entry.search(it) }).also { sheet = it }
     private var screenToken = 0L
     private var screenJob: Job? = null
     override fun onPrepareShow(args: Bundle?, showFlags: Int) {

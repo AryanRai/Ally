@@ -32,7 +32,12 @@ It cannot run tools, choose permissions or resume a conversation.
   pre-selected: the top routed chat, or "New <engine> chat" for a clearly
   independent topic. Below it are the other routed matches and the most recent
   Codex/Claude chats from `GET /v1/chats` (at most five chats plus New chat),
-  then Try again.
+  then More chats, Search chats and Try again.
+- More chats shows five more rows. After the loaded chats run out, it fetches the
+  next `/v1/chats` page for each engine. Search chats opens a small field: typing
+  filters the loaded chats at once and adds results from the desktop's read-only
+  `GET /v1/chat-search` after a short pause. If search is unavailable, only the
+  local filter applies. Picking a search result only selects it.
 - Tapping a row only changes the selection. Nothing is sent, and no chat is
   created, until the user taps the fixed "Send to …" button. The usual flow is
   hold → speak → Send; correcting the chat adds one tap.

@@ -18,7 +18,7 @@ import kotlin.math.*
 internal class AssistantSheet(context: Context, private val hold: AssistantHold, private val send: (String) -> Unit,
     private val mode: (String) -> Unit, private val open: () -> Unit, private val dismiss: () -> Unit, private val choose: (String) -> Unit,
     private val selectChat: (String) -> Unit, private val beginMonitor: () -> Boolean,
-    private val reviewPending: () -> Unit = open) : FrameLayout(context) {
+    private val reviewPending: () -> Unit = open, private val search: (String) -> Unit = {}) : FrameLayout(context) {
     private val round = resources.configuration.isScreenRound
     private val muted = Color.rgb(155,158,169)
     private val motion get() = ValueAnimator.areAnimatorsEnabled() && !DeviceLink.prefs(context).getBoolean(if(round) "look.reducedMotion" else "phone.look.reducedMotion", false)
@@ -35,6 +35,9 @@ internal class AssistantSheet(context: Context, private val hold: AssistantHold,
     private val routeScroll = ScrollView(context)
     private var shownChoices = emptyList<AssistantChoice>() to (null as String?)
     private val routeSend = label("Send", if(round) 12f else 15f, Color.rgb(12,12,13))
+    private val routeSearch = EditText(context)
+    private var searchOpen = false
+    private var syncingSearch = false
     private val activityToggle = label("Agents · checking…", 11f, muted)
     private val activityRows = LinearLayout(context).apply { orientation=LinearLayout.VERTICAL }
     private val activityScroll = ScrollView(context)
@@ -141,6 +144,19 @@ internal class AssistantSheet(context: Context, private val hold: AssistantHold,
         routeSend.background=background(Color.rgb(244,244,245),if(round) 18 else 22)
         routeSend.setOnClickListener { choose(AssistantRoutePicker.SEND) }
         panel.addView(routeSend,LinearLayout.LayoutParams(-1,dp(if(round) 36 else 44)).apply { topMargin=dp(4) })
+        routeSearch.apply {
+            hint="Search chats"; contentDescription="Search chats"; textSize=if(round) 12f else 14f; setTextColor(Color.WHITE); setHintTextColor(Color.rgb(146,149,161))
+            setSingleLine(); inputType=InputType.TYPE_CLASS_TEXT; imeOptions=EditorInfo.IME_ACTION_SEARCH; visibility=GONE
+            setPadding(dp(10),0,dp(10),0); background=background(Color.argb(20,255,255,255),12,Color.argb(40,255,255,255))
+            val font=resources.getIdentifier("geist_regular","font",context.packageName); if(font!=0) typeface=resources.getFont(font)
+            addTextChangedListener(object: android.text.TextWatcher {
+                override fun beforeTextChanged(t: CharSequence?, a: Int, b: Int, c: Int) {}
+                override fun onTextChanged(t: CharSequence?, a: Int, b: Int, c: Int) {}
+                override fun afterTextChanged(t: android.text.Editable?) { if(!syncingSearch) search(t.toString()) }
+            })
+            setOnEditorActionListener { v,action,_ -> if(action==EditorInfo.IME_ACTION_SEARCH) { hideKeyboard(v); true } else false }
+        }
+        panel.addView(routeSearch,LinearLayout.LayoutParams(-1,dp(if(round) 34 else 40)).apply { topMargin=dp(4) })
         routeScroll.addView(routeOptions); routeScroll.visibility=GONE
         panel.addView(routeScroll,LinearLayout.LayoutParams(-1,dp(if(round) 84 else 156)))
         modes.gravity=Gravity.CENTER; modes.visibility=GONE
@@ -195,7 +211,7 @@ internal class AssistantSheet(context: Context, private val hold: AssistantHold,
                     contentDescription=if(picked) "$name, selected" else name
                     isClickable=true; isFocusable=true
                     background=background(Color.argb(if(picked) 46 else 16,if(picked) 180 else 255,if(picked) 199 else 255,255),12,if(picked) Color.argb(90,180,199,255) else 0)
-                    setOnClickListener { choose(choice.id) }
+                    setOnClickListener { if(choice.id==AssistantRoutePicker.SEARCH) toggleSearch(); choose(choice.id) }
                 },LinearLayout.LayoutParams(-1,dp(if(round) 34 else 40)).apply { topMargin=dp(3) })
             }
         }
@@ -203,6 +219,8 @@ internal class AssistantSheet(context: Context, private val hold: AssistantHold,
         routeSend.text=destination?.let { "Send to ${if(it.id==AssistantRoutePicker.NEW) it.title.replaceFirstChar { c -> c.lowercase() } else it.title}" } ?: "Send"
         routeSend.contentDescription=routeSend.text
         routeSend.visibility=if(destination==null || activityExpanded) GONE else VISIBLE
+        if(s.choices.none { it.id==AssistantRoutePicker.SEARCH } && searchOpen) { searchOpen=false; setSearch("") }
+        routeSearch.visibility=if(searchOpen && !activityExpanded) VISIBLE else GONE
         routeScroll.visibility=if(s.choices.isEmpty() || activityExpanded) GONE else VISIBLE
         if(round && s.choices.isNotEmpty()) activityToggle.visibility=GONE
         if(firstText==null) { firstText=s.text; hasLiveReply=false }
@@ -216,6 +234,15 @@ internal class AssistantSheet(context: Context, private val hold: AssistantHold,
         modes.visibility=if(s.working&&!s.recording&&s.title!="New request"&&!activityExpanded) VISIBLE else GONE
         queue.alpha=if(s.mode=="queue") 1f else .4f; steer.alpha=if(s.mode=="steer") 1f else .4f
         orb.recording=s.recording; orb.working=s.working; orb.level=s.level; orb.invalidate()
+    }
+    private fun setSearch(value: String) { syncingSearch=true; routeSearch.setText(value); syncingSearch=false }
+    private fun hideKeyboard(v: View) { context.getSystemService(android.view.inputmethod.InputMethodManager::class.java)?.hideSoftInputFromWindow(v.windowToken,0) }
+    /** Search only filters the destination list; the entry clears its query via choose(SEARCH). */
+    private fun toggleSearch() {
+        searchOpen=!searchOpen; setSearch("")
+        routeSearch.visibility=if(searchOpen) VISIBLE else GONE
+        if(searchOpen) { routeSearch.requestFocus(); context.getSystemService(android.view.inputmethod.InputMethodManager::class.java)?.showSoftInput(routeSearch,0) }
+        else hideKeyboard(routeSearch)
     }
     val showingReply get() = replyScroll.visibility == VISIBLE && isShown && reply.text.isNotBlank()
     fun message(text: String) { status.text=text }
