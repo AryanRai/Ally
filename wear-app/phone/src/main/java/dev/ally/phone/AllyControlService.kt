@@ -39,8 +39,24 @@ class AllyControlService : AccessibilityService() {
     override fun onServiceConnected() { instance = this }
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {}
     override fun onInterrupt() {}
-    override fun onUnbind(intent: Intent?): Boolean { instance = null; ControlBridge.end(this, "Ally control was turned off.") ; return super.onUnbind(intent) }
-    override fun onDestroy() { instance = null; super.onDestroy() }
+    override fun onUnbind(intent: Intent?): Boolean { keepAwake(false); instance = null; ControlBridge.end(this, "Ally control was turned off.") ; return super.onUnbind(intent) }
+    override fun onDestroy() { keepAwake(false); instance = null; super.onDestroy() }
+
+    private var awake: android.view.View? = null
+    /**
+     * Holds the screen on during a control session with an invisible, untouchable 1 px overlay
+     * instead of changing the user's timeout setting. It never wakes or unlocks the phone.
+     */
+    fun keepAwake(on: Boolean) {
+        val manager = getSystemService(WindowManager::class.java)
+        if (!on) { awake?.let { runCatching { manager.removeView(it) } }; awake = null; return }
+        if (awake != null) return
+        val view = android.view.View(this)
+        val params = WindowManager.LayoutParams(1, 1, WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON,
+            android.graphics.PixelFormat.TRANSLUCENT).apply { gravity = android.view.Gravity.TOP or android.view.Gravity.START }
+        if (runCatching { manager.addView(view, params) }.isSuccess) awake = view
+    }
 
     fun screenSize(): Pair<Int, Int> = getSystemService(WindowManager::class.java).currentWindowMetrics.bounds.let { it.width() to it.height() }
 
@@ -157,7 +173,7 @@ object ControlBridge {
                 val next = ControlGrant.parse(params.optString("grantId"), params.optString("chatId"), params.optString("title"), params.optLong("expiresAt"), System.currentTimeMillis())
                     ?: throw IllegalArgumentException("Invalid control session.")
                 if (service == null) { promptSetup(context); throw IllegalStateException(SETUP_MESSAGE) }
-                grant = next; showNotice(context, next)
+                grant = next; showNotice(context, next); service.keepAwake(true)
                 handler.removeCallbacks(expire); handler.postDelayed(expire, next.expiresAt - System.currentTimeMillis() + 500)
                 return JSONObject().put("granted", true)
             }
@@ -193,6 +209,7 @@ object ControlBridge {
     fun end(context: Context, reason: String?, notifyDesktop: Boolean = true) {
         val ended = grant ?: return
         grant = null; handler.removeCallbacks(expire)
+        AllyControlService.instance?.keepAwake(false)
         context.getSystemService(NotificationManager::class.java).cancel(NOTICE)
         if (notifyDesktop) DeviceLink.sendControl(JSONObject().put("type", "control_revoked").put("grantId", ended.id).put("reason", reason ?: "Stopped on the phone."))
     }
