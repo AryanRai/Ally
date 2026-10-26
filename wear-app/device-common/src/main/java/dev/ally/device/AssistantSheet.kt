@@ -33,7 +33,8 @@ internal class AssistantSheet(context: Context, private val hold: AssistantHold,
     private val modes = LinearLayout(context)
     private val routeOptions = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
     private val routeScroll = ScrollView(context)
-    private var shownChoices = emptyList<AssistantChoice>()
+    private var shownChoices = emptyList<AssistantChoice>() to (null as String?)
+    private val routeSend = label("Send", if(round) 12f else 15f, Color.rgb(12,12,13))
     private val activityToggle = label("Agents · checking…", 11f, muted)
     private val activityRows = LinearLayout(context).apply { orientation=LinearLayout.VERTICAL }
     private val activityScroll = ScrollView(context)
@@ -134,8 +135,14 @@ internal class AssistantSheet(context: Context, private val hold: AssistantHold,
         panel.addView(activityToggle,LinearLayout.LayoutParams(-1,dp(28)))
         activityScroll.addView(activityRows); activityScroll.visibility=GONE
         panel.addView(activityScroll,LinearLayout.LayoutParams(-1,dp(if(round) 88 else 144)))
+        // Send stays fixed above the compact list so confirming is always one tap.
+        routeSend.gravity=Gravity.CENTER; routeSend.maxLines=1; routeSend.ellipsize=android.text.TextUtils.TruncateAt.END
+        routeSend.setPadding(dp(12),0,dp(12),0); routeSend.isClickable=true; routeSend.isFocusable=true; routeSend.visibility=GONE
+        routeSend.background=background(Color.rgb(244,244,245),if(round) 18 else 22)
+        routeSend.setOnClickListener { choose(AssistantRoutePicker.SEND) }
+        panel.addView(routeSend,LinearLayout.LayoutParams(-1,dp(if(round) 36 else 44)).apply { topMargin=dp(4) })
         routeScroll.addView(routeOptions); routeScroll.visibility=GONE
-        panel.addView(routeScroll,LinearLayout.LayoutParams(-1,dp(if(round) 52 else 176)))
+        panel.addView(routeScroll,LinearLayout.LayoutParams(-1,dp(if(round) 84 else 156)))
         modes.gravity=Gravity.CENTER; modes.visibility=GONE
         queue.gravity=Gravity.CENTER; steer.gravity=Gravity.CENTER
         queue.contentDescription="Queue after current response"; steer.contentDescription="Add guidance to current work"
@@ -178,18 +185,26 @@ internal class AssistantSheet(context: Context, private val hold: AssistantHold,
                 },LinearLayout.LayoutParams(-1,dp(if(round) 42 else 46)).apply { topMargin=dp(2) })
             }
         }
-        if (s.choices != shownChoices) {
-            shownChoices=s.choices; routeOptions.removeAllViews()
+        if (s.choices to s.selected != shownChoices) {
+            shownChoices=s.choices to s.selected; routeOptions.removeAllViews()
             s.choices.forEach { choice ->
-                routeOptions.addView(label(if(choice.id.startsWith("__")) choice.title else "${choice.title} · ${choice.provider}", if(round) 11f else 14f).apply {
-                    setPadding(dp(8),dp(5),dp(8),dp(5)); maxLines=2; ellipsize=android.text.TextUtils.TruncateAt.END
-                    contentDescription=text; isClickable=true; isFocusable=true
-                    background=background(Color.argb(20,255,255,255),12)
+                val picked=choice.id==s.selected
+                val name=if(choice.id.startsWith("__")) choice.title else "${choice.title} · ${choice.provider}"
+                routeOptions.addView(label((if(picked) "✓ " else "")+name, if(round) 11f else 14f, if(picked) Color.WHITE else Color.rgb(212,215,224)).apply {
+                    setPadding(dp(8),0,dp(8),0); maxLines=1; ellipsize=android.text.TextUtils.TruncateAt.END
+                    contentDescription=if(picked) "$name, selected" else name
+                    isClickable=true; isFocusable=true
+                    background=background(Color.argb(if(picked) 46 else 16,if(picked) 180 else 255,if(picked) 199 else 255,255),12,if(picked) Color.argb(90,180,199,255) else 0)
                     setOnClickListener { choose(choice.id) }
-                },LinearLayout.LayoutParams(-1,dp(if(round) 44 else 48)).apply { topMargin=dp(4) })
+                },LinearLayout.LayoutParams(-1,dp(if(round) 34 else 40)).apply { topMargin=dp(3) })
             }
         }
+        val destination=s.choices.find { it.id==s.selected }
+        routeSend.text=destination?.let { "Send to ${if(it.id==AssistantRoutePicker.NEW) it.title.replaceFirstChar { c -> c.lowercase() } else it.title}" } ?: "Send"
+        routeSend.contentDescription=routeSend.text
+        routeSend.visibility=if(destination==null || activityExpanded) GONE else VISIBLE
         routeScroll.visibility=if(s.choices.isEmpty() || activityExpanded) GONE else VISIBLE
+        if(round && s.choices.isNotEmpty()) activityToggle.visibility=GONE
         if(firstText==null) { firstText=s.text; hasLiveReply=false }
         chat.text=s.title; status.text=if(round && s.choices.isNotEmpty() && s.text.isNotBlank()) "“${s.text.take(55)}” · ${s.status}" else s.status
         status.setTextColor(if(s.needsAttention) Color.rgb(234,191,165) else muted)

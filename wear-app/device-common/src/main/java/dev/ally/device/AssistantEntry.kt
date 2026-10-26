@@ -12,7 +12,7 @@ import java.util.UUID
 
 data class AssistantChoice(val id: String, val title: String, val provider: String = "codex")
 data class AssistantEntryState(val status: String, val text: String = "", val recording: Boolean = false,
-    val level: Float = 0f, val busy: Boolean = false, val choices: List<AssistantChoice> = emptyList(), val screenNotice: String = "")
+    val level: Float = 0f, val busy: Boolean = false, val choices: List<AssistantChoice> = emptyList(), val screenNotice: String = "", val selected: String? = null)
 
 /** One assistant invocation. Existing chats are never sent to without a choice. */
 internal class AssistantEntry(private val context: Context, private val scope: CoroutineScope, private val host: AssistantHost) {
@@ -25,6 +25,11 @@ internal class AssistantEntry(private val context: Context, private val scope: C
     private var job: Job? = null
     private var text = ""
     private var choices = emptyList<AssistantChoice>()
+    private var selected: String? = null
+    private var suggested: String? = null
+    private class Kept(val text: String, val requestId: String, val choices: List<AssistantChoice>, val selected: String?, val suggested: String?)
+    // Words replaced by a re-record return if nothing new is heard.
+    private var kept: Kept? = null
     private var requestId = UUID.randomUUID().toString()
     private var target: AssistantChoice? = null
     private var acceptedTurn: String? = null
@@ -78,6 +83,7 @@ internal class AssistantEntry(private val context: Context, private val scope: C
     }
 
     fun activate() {
+        if ((text.isNotBlank() || state.value?.busy == true) && canReplace()) resetUnsent(keep = true)
         // A lost response or unfinished choice retains the original send identity.
         if (text.isNotBlank() || state.value?.busy == true) {
             entry = true
@@ -88,13 +94,15 @@ internal class AssistantEntry(private val context: Context, private val scope: C
         start(true)
     }
     fun start(auto: Boolean = false) {
+        if (text.isNotBlank() && canReplace()) resetUnsent(keep = true)
         if (recorder != null || state.value?.busy == true || text.isNotBlank()) return
         automatic = auto; policy = silencePolicy()
         val capture = VoiceRecorder(); recorder = capture
         host.prepareVoice(); AssistantVisibility.recording = true
         state.value = AssistantEntryState(if (auto) "Listening…" else "Listening · release to send", recording = true)
         try {
-            capture.start(scope, { finish() }, { fail(it); cancelCapture() }, { level, seconds ->
+            capture.start(scope, { if(recorder === capture) finish() }, { if(recorder === capture) { fail(it); cancelCapture() } }, { level, seconds ->
+                if(recorder !== capture) return@start
                 state.value = state.value?.copy(level = level)
                 if (automatic && policy.sample(level, seconds)) { if (policy.heard) finish() else quiet() }
             })
@@ -102,7 +110,10 @@ internal class AssistantEntry(private val context: Context, private val scope: C
     }
     val automaticRecording get() = automatic && recorder != null
     fun release() { if (!automatic) finish() }
-    fun cancelCapture() { recorder?.cancel(); recorder = null; AssistantVisibility.recording = false; if (state.value?.recording == true) state.value = null }
+    fun cancelCapture() {
+        recorder?.cancel(); recorder = null; AssistantVisibility.recording = false
+        if (state.value?.recording == true) { state.value = null; restoreKept() }
+    }
     fun pause() {
         cancelCapture()
         if (target == null && state.value?.busy == true) {
@@ -117,7 +128,15 @@ internal class AssistantEntry(private val context: Context, private val scope: C
         entry = false; state.value = null
         // Pending words stay in private preferences for the next activation.
     }
-    private fun quiet() { cancelCapture(); releaseScreen(); state.value = null }
+    private fun quiet() { cancelCapture(); releaseScreen(); state.value = null; restoreKept() }
+    private fun restoreKept(): Boolean {
+        val previous = kept?.takeIf { text.isBlank() && recorder == null } ?: return false
+        kept = null; entry = true
+        text = previous.text; requestId = previous.requestId; choices = previous.choices; selected = previous.selected; suggested = previous.suggested
+        runCatching { save() }
+        if (choices.isNotEmpty()) showPicker("Nothing new heard · earlier words kept") else fail("Nothing new heard · earlier words kept")
+        return true
+    }
     fun finish() {
         val capture = recorder ?: return; recorder = null
         state.value = AssistantEntryState("Finishing your words…", busy = true)
@@ -126,34 +145,55 @@ internal class AssistantEntry(private val context: Context, private val scope: C
                 val audio = capture.stop()
                 AssistantVisibility.recording = false
                 val transcript = request("/v1/speech/transcribe", audio = audio).optString("text").trim()
-                if (transcript.isBlank()) { releaseScreen(); state.value = null; return@launch }
-                text = transcript; save(); route()
-            } catch (e: CancellationException) { throw e } catch (e: Exception) { fail(e.message ?: "Voice unavailable") }
-            finally { capture.cancel(); AssistantVisibility.recording = false }
+                if (transcript.isBlank()) { releaseScreen(); state.value = null; restoreKept(); return@launch }
+                text = transcript; kept = null; save(); route()
+            } catch (e: CancellationException) { throw e } catch (e: Exception) { if (!restoreKept()) fail(e.message ?: "Voice unavailable") }
+            finally { capture.cancel(); AssistantVisibility.recording = recorder != null }
         }
     }
     fun typed(value: String) {
         if (value.isBlank() || state.value?.busy == true || text.isNotBlank()) return
-        cancelCapture(); text = value.trim(); job = scope.launch { try { save(); route() } catch(e: CancellationException) { throw e } catch(e: Exception) { fail(e.message ?: "Chat matching unavailable") } }
+        cancelCapture(); text = value.trim(); kept = null; job = scope.launch { try { save(); route() } catch(e: CancellationException) { throw e } catch(e: Exception) { fail(e.message ?: "Chat matching unavailable") } }
     }
     private suspend fun route() {
-        state.value = AssistantEntryState("Finding the right conversation…", text, busy = true)
-        val result = request("/v1/assistant/route", JSONObject().put("text", text))
-        choices = (0 until (result.optJSONArray("chats")?.length() ?: 0)).map { i ->
-            val c = result.getJSONArray("chats").getJSONObject(i)
-            AssistantChoice(c.getString("id"), c.getString("title"), c.getString("provider"))
-        }.take(3)
-        if (result.getString("kind") == "new") deliver(null)
-        else state.value = AssistantEntryState(if (result.optBoolean("limited")) "Choose a conversation" else "Related conversations · choose one", text,
-            choices = choices + AssistantChoice("__new", "New chat"))
+        state.value = AssistantEntryState("Finding the right conversation…", text, busy = true,choices=listOf(AssistantChoice("__rerecord","Try again")))
+        // Detached so a slow list never delays the suggestion; it only shortens the list.
+        val recent = scope.async { recentChats() }
+        val result = try { withTimeoutOrNull(10000) { request("/v1/assistant/route", JSONObject().put("text", text)) } ?: error("Chat matching timed out · try again") }
+            catch (e: Throwable) { recent.cancel(); throw e }
+        val others = withTimeoutOrNull(2500) { recent.await() } ?: emptyList<JSONObject>().also { recent.cancel() }
+        val picker = AssistantRoutePicker.options(result, others, host.provider)
+        choices = picker.choices; selected = picker.suggested; suggested = selected
+        showPicker(if (result.optBoolean("limited")) "No clear match · pick a chat, then Send" else "Suggested chat · Send or pick another")
+    }
+    /** Recent chats fill the compact list; failures only shorten it. */
+    private suspend fun recentChats(): List<JSONObject> = coroutineScope {
+        listOf("codex", "claude").map { engine -> async {
+            try {
+                request("/v1/chats?provider=$engine").optJSONArray("chats")?.let { a -> (0 until a.length()).map { a.getJSONObject(it) }.take(8) }.orEmpty()
+            } catch (e: CancellationException) { throw e } catch (_: Exception) { emptyList() }
+        } }.awaitAll().flatten()
+    }
+    private fun showPicker(status: String) {
+        state.value = AssistantEntryState(status, text, choices = choices + AssistantChoice(AssistantRoutePicker.RERECORD, "Try again"), selected = selected)
     }
     fun choose(id: String) {
+        if(id == AssistantRoutePicker.RERECORD) { if(canReplace()) { resetUnsent(keep = true); entry=true;start(true) };return }
         if (state.value?.busy == true) return
         if (id == "__retry") {
+            if (target == null && selected != null && choices.isNotEmpty()) { showPicker("Check the chat, then Send"); return }
             job = scope.launch { try { if (target != null) deliver(target) else route() } catch(e: CancellationException) { throw e } catch(e: Exception) { fail(e.message ?: "Request unavailable") } }; return
         }
-        val selected = if (id == "__new") null else choices.find { it.id == id } ?: return
-        job = scope.launch { try { deliver(selected) } catch(e: CancellationException) { throw e } catch(e: Exception) { fail(e.message ?: "Message not confirmed") } }
+        if (id == AssistantRoutePicker.SEND) {
+            val pick = selected ?: return
+            val destination = if (pick == AssistantRoutePicker.NEW) null else choices.find { it.id == pick } ?: return
+            job = scope.launch { try { deliver(destination) } catch(e: CancellationException) { throw e } catch(e: Exception) { fail(e.message ?: "Message not confirmed") } }
+            return
+        }
+        // Selecting a destination never sends; the words wait for Send.
+        if (target != null || choices.none { it.id == id }) return
+        selected = id
+        showPicker(if (id == suggested) "Suggested chat · Send or pick another" else "Chat changed · tap Send")
     }
     private suspend fun deliver(selected: AssistantChoice?) {
         state.value = AssistantEntryState("Opening conversation…", text, busy = true)
@@ -182,14 +222,24 @@ internal class AssistantEntry(private val context: Context, private val scope: C
         // Adopting the exact receipt starts existing polling; it never resends words.
         host.acceptTurn(chat.id, acceptedTurn!!)
         prefs.edit().remove("assistantEntryDraft").commit()
-        entry = false; text = ""; choices = emptyList(); target = null; acceptedTurn = null; screen.clear(); screenAttachment = null; submissionText = null; screenNotice = ""; state.value = null
+        entry = false; text = ""; choices = emptyList(); this.selected = null; suggested = null; kept = null; target = null; acceptedTurn = null; screen.clear(); screenAttachment = null; submissionText = null; screenNotice = ""; state.value = null
     }
     private fun fail(message: String) {
-        state.value = AssistantEntryState(message, text, choices = if (text.isBlank()) emptyList() else listOf(AssistantChoice("__retry", "Retry")))
+        state.value = AssistantEntryState(message, text, choices = if (text.isBlank()) emptyList() else (if(canReplace()) listOf(AssistantChoice("__rerecord","Try again")) else emptyList()) + listOf(AssistantChoice("__retry", "Retry")))
+    }
+    private fun canReplace() = AssistantEntryPolicy.canReplace(target?.id,submissionText,acceptedTurn,state.value?.busy==true,state.value?.status.orEmpty())
+    private fun resetUnsent(keep: Boolean = false) {
+        check(canReplace())
+        job?.cancel();job=null;cancelCapture()
+        kept = if (keep && text.isNotBlank()) Kept(text, requestId, choices, selected, suggested) else null
+        text="";choices=emptyList();selected=null;suggested=null;screen.clear();screenAttachment=null;screenNotice=""
+        requestId=UUID.randomUUID().toString();state.value=null
+        // Kept words stay saved until a new transcript replaces them.
+        if (kept == null) prefs.edit().remove("assistantEntryDraft").commit()
     }
     fun overlay(base: AssistantSnapshot): AssistantSnapshot = state.value?.let { s ->
         base.copy(title = "New request", status = s.status + if (screenNotice.isNotBlank()) " · $screenNotice" else "", text = s.text, recording = s.recording, working = s.busy,
-            level = s.level, needsAttention = s.choices.isNotEmpty(), readReceipt = null, choices = s.choices)
+            level = s.level, needsAttention = s.choices.isNotEmpty(), readReceipt = null, choices = s.choices, selected = s.selected)
     } ?: base
 
     private suspend fun request(path: String, body: JSONObject? = null, audio: ByteArray? = null, image: ByteArray? = null): JSONObject = withContext(Dispatchers.IO) {
@@ -198,7 +248,8 @@ internal class AssistantEntry(private val context: Context, private val scope: C
         require(url.protocol == "https" || (url.protocol == "http" && url.host in setOf("127.0.0.1", "localhost"))) { "Use an HTTPS bridge" }
         val c = url.openConnection() as HttpURLConnection
         try {
-            c.connectTimeout = 8000; c.readTimeout = if (audio != null) 120000 else 30000; c.instanceFollowRedirects = false
+            val quick = path == "/v1/assistant/route" || path.startsWith("/v1/chats?")
+            c.connectTimeout = if(quick) 4000 else 8000; c.readTimeout = if (audio != null) 120000 else if(quick) 8000 else 30000; c.instanceFollowRedirects = false
             c.setRequestProperty("Authorization", "Bearer ${prefs.getString("token", "")}")
             val payload = image ?: audio ?: body?.toString()?.toByteArray()
             if (image != null) c.setRequestProperty("X-Ally-Filename", "Assistant-screen.png")

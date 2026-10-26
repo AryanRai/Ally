@@ -27,10 +27,19 @@ already held by the bridge; it does not open a writer or submit an agent turn.
 The configured Vertex relevance project/model performs semantic classification.
 It cannot run tools, choose permissions or resume a conversation.
 
-- Clearly independent topics create a new chat using the selected engine.
-- Relevant previous conversations appear as up to three choices, with their
-  engine labels and a New chat option. An existing conversation only receives
-  the words after the user chooses it.
+- After the words are transcribed, the assistant shows a compact confirm-before-send
+  picker (same workflow as the share sheet). The suggested destination is
+  pre-selected: the top routed chat, or "New <engine> chat" for a clearly
+  independent topic. Below it are the other routed matches and the most recent
+  Codex/Claude chats from `GET /v1/chats` (at most five chats plus New chat),
+  then Try again.
+- Tapping a row only changes the selection. Nothing is sent, and no chat is
+  created, until the user taps the fixed "Send to …" button. The usual flow is
+  hold → speak → Send; correcting the chat adds one tap.
+- Re-recording (Try again or another power-button hold) keeps the earlier words
+  and selection. If nothing new is heard, they come back to the picker.
+- The recent-chat lookup is separate from routing and has a 2.5-second limit. A
+  slow or failed lookup only shortens the list.
 - If classification or part of chat listing is unavailable, the words remain
   pending and the assistant offers a conservative chat picker. It does not
   infer that an unavailable search means a new topic.
