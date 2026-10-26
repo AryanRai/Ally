@@ -162,7 +162,7 @@ export class PhoneControl {
           await transport.perform(operation, view, signal);
           action.completedOperations++; delete action.inFlightOperation; action.updatedAt = this.now();
           await pause(250, undefined, { signal });
-          view = await transport.view(signal);
+          view = await this.settledView(transport, signal);
         }
         await transport.check(signal);
         const sessionEnds = new Date(grant.expiresAt).toISOString();
@@ -186,6 +186,17 @@ export class PhoneControl {
       action.updatedAt = this.now();
       return { content: [{ type: 'text', text: JSON.stringify(this.history(requestId)) }], isError: true };
     } finally { clearTimeout(expiry); connection?.removeEventListener('abort', disconnected); parentSignal?.removeEventListener('abort', disconnected); this.busy.delete(deviceId); this.busy.delete(lock); }
+  }
+  /** App launches and Back/Home briefly show only system UI; a real lock or system screen still fails after ~1.5 s. */
+  private async settledView(transport: Transport, signal: AbortSignal): Promise<PhoneView> {
+    for (let attempt = 0; ; attempt++) {
+      try { return await transport.view(signal); }
+      catch (error) {
+        const transient = error instanceof Error && /System or lock screen|Cannot determine screen bounds|screen is unavailable/i.test(error.message);
+        if (!transient || attempt >= 5) throw error;
+        await pause(300, undefined, { signal });
+      }
+    }
   }
   private onlyOnDevicePhone() {
     const phones = this.hub.list().filter(d => d.kind === 'phone' && AccessibilityPhone.supported(this.hub, d.id));

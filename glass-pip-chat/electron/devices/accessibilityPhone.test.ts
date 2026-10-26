@@ -7,6 +7,7 @@ const screen = (extra = '') => `<hierarchy rotation="0"><node text="Notes" resou
 const flush = async () => { for (let i = 0; i < 8; i++) await Promise.resolve(); };
 
 function fixture(options: { enabled?: boolean; xml?: string } = {}) {
+  let onPerform: (() => void) | undefined;
   const hub = new DeviceHub(vi.fn());
   const calls: { method: string; params: any }[] = [];
   const commands: any[] = [];
@@ -20,14 +21,14 @@ function fixture(options: { enabled?: boolean; xml?: string } = {}) {
       if (message.method === 'control.status') reply({ enabled: options.enabled ?? true });
       else if (message.method === 'control.view') reply({ xml, width: 1080, height: 2400 });
       else if (message.method === 'control.screenshot') reply({ mimeType: 'image/jpeg', data: Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 4]).toString('base64'), scale: 1 });
-      else reply({});
+      else { if (message.method === 'control.perform') onPerform?.(); reply({}); }
     });
   });
   const disconnect = hub.connect('phone-one', 'phone', send, ['on-device-control']);
   const adb = { list: vi.fn(async () => []) } as unknown as AdbPhone;
   const control = new PhoneControl(hub, adb);
   const approve = async () => { await flush(); const id = commands.at(-1).id; hub.receipt('phone-one', { id, status: 'approved' }); hub.receipt('phone-one', { id, status: 'done' }); };
-  return { hub, control, calls, commands, approve, disconnect, setXml: (next: string) => { xml = next; } };
+  return { hub, control, calls, commands, approve, disconnect, setXml: (next: string) => { xml = next; }, afterPerform: (run: () => void) => { onPerform = run; } };
 }
 const base = { chatId: 'codex:session-1234', deviceId: 'phone-one', operations: [] as unknown[] };
 
@@ -105,6 +106,26 @@ describe('on-device phone control sessions', () => {
     await expect(f.control.execute({ deviceId: 'phone-one', operations: [], requestId: 'inspect-0010' })).rejects.toThrow('chatId');
     await expect(f.control.execute({ ...base, requestId: 'tap-ctrl-0011', expectedRevision: 'a'.repeat(64), operations: [{ type: 'text', text: 'bad\u0007' }] })).rejects.toThrow('Unsupported operation');
     f.hub.close();
+  });
+
+  it('waits out an app launch animation instead of reporting a lock screen', async () => {
+    vi.useFakeTimers();
+    const f = fixture();
+    const first = f.control.execute({ ...base, requestId: 'inspect-0012' });
+    await vi.advanceTimersByTimeAsync(0); await f.approve(); await vi.advanceTimersByTimeAsync(1000);
+    const revision = JSON.parse(((await first).content[0] as { text: string }).text).revision;
+    const systemOnly = '<hierarchy rotation="0"><node text="" class="android.widget.FrameLayout" package="com.android.systemui" content-desc="" password="false" bounds="[0,0][1080,136]"/></hierarchy>';
+    f.afterPerform(() => f.setXml(systemOnly));
+    const open = f.control.execute({ ...base, requestId: 'open-calc-0013', expectedRevision: revision, operations: [{ type: 'open_app', packageName: 'com.google.android.calculator' }] });
+    await vi.advanceTimersByTimeAsync(400);
+    f.setXml(screen());
+    await vi.advanceTimersByTimeAsync(1500);
+    expect((await open).isError).toBeUndefined();
+    f.afterPerform(() => f.setXml(systemOnly));
+    const locked = f.control.execute({ ...base, requestId: 'open-calc-0014', expectedRevision: revision, operations: [{ type: 'open_app', packageName: 'com.google.android.calculator' }] });
+    await vi.advanceTimersByTimeAsync(4000);
+    expect((await locked).isError).toBe(true);
+    f.hub.close(); vi.useRealTimers();
   });
 
   it('fails pending phone calls when the phone disconnects', async () => {
