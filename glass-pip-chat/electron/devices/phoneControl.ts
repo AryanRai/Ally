@@ -17,6 +17,8 @@ interface Action {
 interface Transport {
   kind: 'adb' | 'on-device';
   check(signal: AbortSignal): Promise<void>;
+  /** Resolves once the phone is unlocked; outside the execution time budget. */
+  ready(signal: AbortSignal): Promise<void>;
   view(signal: AbortSignal): Promise<PhoneView>;
   perform(operation: PhoneOperation, view: PhoneView, signal: AbortSignal): Promise<void>;
   screenshot(signal: AbortSignal): Promise<{ mimeType: 'image/png' | 'image/jpeg'; data: string; scale?: number }>;
@@ -120,16 +122,16 @@ export class PhoneControl {
     };
     let grant = this.activeGrant(deviceId, chatId);
     const transport: Transport = onDevice ? {
-      kind: 'on-device', check: linked,
+      kind: 'on-device', check: linked, ready: s => this.device.ready(grant!, s),
       view: s => this.device.view(grant!, s), perform: (op, view, s) => this.device.perform(grant!, op, view, s), screenshot: s => this.device.screenshot(grant!, s),
     } : {
-      kind: 'adb',
+      kind: 'adb', ready: async () => {},
       check: async s => { await linked(); if (await this.adb.identity(String(serial), s) !== deviceId) throw Error('ADB serial does not match the approved Ally phone.'); },
       view: s => this.adb.view(String(serial), s), perform: (op, view, s) => this.adb.perform(String(serial), op, view, s),
       screenshot: async s => ({ mimeType: 'image/png' as const, data: await this.adb.screenshot(String(serial), s) }),
     };
     // Also bounds approval wait and all subprocesses. Native approvals themselves expire after two minutes.
-    const expiry = setTimeout(() => controller.abort(), 180_000);
+    const expiry = setTimeout(() => controller.abort(), 270_000); // approval (2 min) + unlock wait (90 s) + execution (60 s)
     try {
       await transport.check(signal);
       if (onDevice && !grant && !(await this.device.status(deviceId, signal)).enabled)
@@ -148,6 +150,8 @@ export class PhoneControl {
         else if (AccessibilityPhone.supported(this.hub, deviceId)) await this.device.grant(grant, 'Ally chat', signal).catch(() => {});
         this.grants.set(`${deviceId}|${chatId}`, grant);
       }
+      await transport.ready(signal);
+      await transport.check(signal);
       action.state = 'running'; action.updatedAt = this.now();
       const deadline = this.now() + 60_000;
       const executionExpiry = setTimeout(() => controller.abort(), 60_000);

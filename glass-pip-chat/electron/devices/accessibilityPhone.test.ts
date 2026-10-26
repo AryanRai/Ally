@@ -128,6 +128,30 @@ describe('on-device phone control sessions', () => {
     f.hub.close(); vi.useRealTimers();
   });
 
+  it('waits for the user to unlock before reading or acting, and runs nothing if it stays locked', async () => {
+    vi.useFakeTimers();
+    const f = fixture();
+    const first = f.control.execute({ ...base, requestId: 'inspect-0015' });
+    await vi.advanceTimersByTimeAsync(0); await f.approve(); await vi.advanceTimersByTimeAsync(1000); await first;
+    // Locked: the phone holds control.ready open until the user unlocks.
+    let unlock!: () => void;
+    const original = f.hub.call.bind(f.hub);
+    f.hub.call = ((deviceId: string, method: string, params: Record<string, unknown>, signal?: AbortSignal, timeout?: number) => method === 'control.ready'
+      ? new Promise<Record<string, unknown>>(resolve => { unlock = () => resolve({ ready: true }); }) : original(deviceId, method, params, signal, timeout)) as typeof f.hub.call;
+    const waiting = f.control.execute({ ...base, requestId: 'inspect-0016' });
+    await vi.advanceTimersByTimeAsync(30_000);
+    const viewsBefore = f.calls.filter(c => c.method === 'control.view').length;
+    unlock(); await vi.advanceTimersByTimeAsync(1000);
+    expect((await waiting).isError).toBeUndefined();
+    expect(f.calls.filter(c => c.method === 'control.view').length).toBe(viewsBefore + 1);
+    f.hub.call = ((deviceId: string, method: string, params: Record<string, unknown>, signal?: AbortSignal, timeout?: number) => method === 'control.ready'
+      ? Promise.reject(new Error('The phone stayed locked, so Ally didn’t continue.')) : original(deviceId, method, params, signal, timeout)) as typeof f.hub.call;
+    const locked = await f.control.execute({ ...base, requestId: 'inspect-0017' });
+    expect(locked.isError).toBe(true);
+    expect(JSON.stringify(f.control.history('inspect-0017'))).toContain('stayed locked');
+    f.hub.close(); vi.useRealTimers();
+  });
+
   it('fails pending phone calls when the phone disconnects', async () => {
     const hub = new DeviceHub(vi.fn());
     const disconnect = hub.connect('phone-one', 'phone', vi.fn(), ['on-device-control']);

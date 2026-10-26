@@ -184,6 +184,7 @@ object ControlBridge {
             throw IllegalStateException("No active control session on the phone. Ask again to start one.")
         if (service == null) { promptSetup(context); throw IllegalStateException(SETUP_MESSAGE) }
         return when (method) {
+            "control.ready" -> { awaitUnlocked(context); JSONObject().put("ready", true) }
             "control.view" -> {
                 val (width, height) = service.screenSize()
                 JSONObject().put("xml", withContext(Dispatchers.Default) { service.tree() }).put("width", width).put("height", height)
@@ -202,6 +203,38 @@ object ControlBridge {
             "key" -> service.key(op.getString("key"))
             "open_app" -> service.open(op.getString("packageName"))
             else -> throw IllegalArgumentException("Unsupported operation.")
+        }
+    }
+
+    private const val UNLOCK = 33
+    private const val UNLOCK_CHANNEL = "ally-control-unlock"
+    @Volatile private var unlockWaiter: CompletableDeferred<Unit>? = null
+    fun unlocked() { unlockWaiter?.complete(Unit) }
+
+    /**
+     * A locked phone is never driven. Ask once with a notification; tapping it opens Android's own
+     * unlock prompt. Any genuine unlock (including the side button) lets the request continue.
+     */
+    private suspend fun awaitUnlocked(context: Context) {
+        val keyguard = context.getSystemService(android.app.KeyguardManager::class.java)
+        if (!keyguard.isDeviceLocked) return
+        val waiter = CompletableDeferred<Unit>().also { unlockWaiter = it }
+        val receiver = object : BroadcastReceiver() { override fun onReceive(c: Context, i: Intent) { if (!keyguard.isDeviceLocked) waiter.complete(Unit) } }
+        context.registerReceiver(receiver, android.content.IntentFilter(Intent.ACTION_USER_PRESENT), Context.RECEIVER_NOT_EXPORTED)
+        val manager = context.getSystemService(NotificationManager::class.java)
+        manager.createNotificationChannel(NotificationChannel(UNLOCK_CHANNEL, "Ally needs you to unlock", NotificationManager.IMPORTANCE_HIGH))
+        val open = PendingIntent.getActivity(context, UNLOCK, Intent(context, ControlUnlockActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+        val icon = context.resources.getIdentifier("ic_ally", "drawable", context.packageName).takeIf { it != 0 } ?: android.R.drawable.ic_dialog_info
+        manager.notify(UNLOCK, Notification.Builder(context, UNLOCK_CHANNEL).setSmallIcon(icon)
+            .setContentTitle("Unlock to let Ally continue").setContentText("Tap, then use your fingerprint, face or PIN. Nothing runs until you do.")
+            .setVisibility(Notification.VISIBILITY_PUBLIC).setCategory(Notification.CATEGORY_REMINDER).setContentIntent(open).setAutoCancel(true).build())
+        try {
+            if (withTimeoutOrNull(75_000) { waiter.await() } == null || keyguard.isDeviceLocked)
+                throw IllegalStateException("The phone stayed locked, so Ally didn't continue. Ask again once it's unlocked.")
+        } finally {
+            unlockWaiter = null
+            runCatching { context.unregisterReceiver(receiver) }
+            manager.cancel(UNLOCK)
         }
     }
 

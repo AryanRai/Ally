@@ -18,6 +18,11 @@ export class AccessibilityPhone {
   async grant(grant: ControlGrant, title: string, signal?: AbortSignal) {
     await this.hub.call(grant.deviceId, 'control.grant', { grantId: grant.id, chatId: grant.chatId, title, expiresAt: grant.expiresAt }, signal, 8000);
   }
+  /** Waits while the phone asks the user to unlock (their own fingerprint/face/PIN prompt). */
+  async ready(grant: ControlGrant, signal?: AbortSignal) {
+    try { await this.hub.call(grant.deviceId, 'control.ready', scope(grant), signal, 90_000); }
+    catch (error) { if (!(error instanceof Error && /Unsupported phone control call/.test(error.message))) throw error; }
+  }
   end(grant: ControlGrant) { void this.hub.call(grant.deviceId, 'control.end', { grantId: grant.id }, undefined, 5000).catch(() => {}); }
   async view(grant: ControlGrant, signal?: AbortSignal): Promise<PhoneView> {
     const result = await this.hub.call(grant.deviceId, 'control.view', scope(grant), signal);
