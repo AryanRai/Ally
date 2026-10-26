@@ -56,8 +56,10 @@ import kotlinx.coroutines.launch
 class MainActivity : ComponentActivity() {
     private val model get() = (application as AllyWatchApplication).model
     private var notificationSequence by mutableIntStateOf(0)
+    private val ambient = AmbientController()
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        lifecycle.addObserver(androidx.wear.ambient.AmbientLifecycleObserver(this, ambient))
         // Development provisioning through ADB; release builds ignore launch extras.
         if (BuildConfig.DEBUG) {
             val endpoint = intent.getStringExtra("endpoint")
@@ -71,7 +73,9 @@ class MainActivity : ComponentActivity() {
             }
         }
         setContent { MaterialTheme(colorScheme = MaterialTheme.colorScheme.copy(primary = White, onPrimary = Ink)) {
-            WatchApp(model, ::pulse, { checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED }, notificationSequence)
+            AmbientHost(ambient, model) {
+                WatchApp(model, ::pulse, { checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED }, notificationSequence)
+            }
         } }
     }
     override fun onResume() { super.onResume(); dev.ally.device.DeviceLink.resume(this); model.foreground = true; WatchNotifications.foreground = true; model.refresh(); openRequestChat(intent) }
