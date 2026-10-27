@@ -1,3 +1,4 @@
+param([switch]$StageOnly)
 $ErrorActionPreference='Stop'
 $taskRoot=$PSScriptRoot
 $taskHash=& (Join-Path $taskRoot 'tools\get-ally-source-hash.ps1') -Root $taskRoot
@@ -20,12 +21,17 @@ try {
 } finally {Pop-Location}
 & node.exe (Join-Path $taskRoot 'ally-study\build-ally-notch.mjs')
 if($LASTEXITCODE -ne 0){throw 'Embedded chat build failed.'}
-foreach($taskPatch in @('apply-ally-display.ps1','apply-ally-notch.ps1','apply-ally-surface.ps1','apply-ally-settings.ps1')){
+if(!$StageOnly){foreach($taskPatch in @('apply-ally-display.ps1','apply-ally-notch.ps1','apply-ally-surface.ps1','apply-ally-settings.ps1','apply-ally-study-timeout.ps1','apply-ally-study-selection.ps1','apply-ally-browser-host.ps1','apply-ally-identity.ps1')){
  & powershell.exe -NoProfile -File (Join-Path $taskRoot ('ally-study\'+$taskPatch)) -Install
  if($LASTEXITCODE -ne 0){throw "Native preparation failed: $taskPatch"}
-}
+}}
 if((& (Join-Path $taskRoot 'tools\get-ally-source-hash.ps1') -Root $taskRoot) -ne $taskHash){throw 'Source changed during the build. The candidate is preserved; rebuild before activating.'}
 $taskManifest=@{version=1;desktop=$taskBuildRelative+'\glass-pip-chat';sourceHash=$taskHash;sourceHashVersion=2;builtAt=[DateTime]::UtcNow.ToString('o');nativeRuntimeValidated=$false}
+if($StageOnly){
+ $taskManifest | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $taskBuild 'build-manifest.json')
+ Write-Output ('Staged unified Ally at '+$taskBuild+'. Native files and active manifest are unchanged; install native adapters and activate only when idle.')
+ return
+}
 $taskManifest | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $taskRoot '.local\unified-build.json.staged')
 Move-Item -LiteralPath (Join-Path $taskRoot '.local\unified-build.json.staged') -Destination (Join-Path $taskRoot '.local\unified-build.json') -Force
 Write-Output 'Built unified Ally. No app was launched or restarted.'

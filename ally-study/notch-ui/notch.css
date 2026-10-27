@@ -24,3 +24,26 @@ pre {white-space:pre-wrap;overflow-wrap:anywhere;font-size:11px;max-height:240px
 .approval button {margin:4px}
 .more-chats {align-self:flex-start;font-size:11px;margin:0 8px}
 @media(max-width:600px){.notch-app>nav {position:absolute;z-index:20;background:#111217;height:100%}.notch-app main{margin-left:48px}.hint{display:none}}
+.ally-home{height:100%;display:flex;flex-direction:column;gap:10px;padding:8px 12px 6px;background:#101114;font-size:12px;overflow:hidden}
+.ally-home button,.ally-home summary{cursor:pointer}
+.ally-home button:focus-visible,.ally-home summary:focus-visible{outline:2px solid #93c5fd;outline-offset:2px}
+.ally-home-pill{display:flex;align-items:center;gap:9px;min-height:32px;flex-shrink:0;border:1px solid #ffffff12;border-radius:999px;background:#ffffff06;padding:0 9px}
+.ally-home-brand{width:20px;height:20px;object-fit:contain;image-rendering:pixelated;flex-shrink:0}
+.ally-home-title{min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:left;font-size:11px;color:#d4d4d8}
+.ally-home-state{display:flex;align-items:center;gap:5px;font-size:10px;color:#888b93;white-space:nowrap}
+.ally-home-state:before{content:'';width:4px;height:4px;border-radius:50%;background:#727780}
+.ally-home-state.is-working:before{background:#93c5fd;box-shadow:0 0 6px #93c5fd60}
+.ally-home-menu{position:relative;flex-shrink:0;color:#a1a1aa}
+.ally-home-menu>summary{list-style:none;padding:3px;border-radius:50%}
+.ally-home-menu>summary::-webkit-details-marker{display:none}
+.ally-home-menu>div{position:absolute;top:27px;right:-3px;z-index:20;min-width:155px;padding:5px;background:#202126;border:1px solid #ffffff18;border-radius:10px;box-shadow:0 6px 18px #0006}
+.ally-home-menu button{display:flex;align-items:center;gap:7px;width:100%;padding:7px;font-size:11px;border-radius:6px;text-align:left}
+.ally-home-menu button:hover{background:#ffffff0c;color:white}
+.ally-home-body{flex:1;min-height:0;overflow:auto;overscroll-behavior:contain;user-select:text;scrollbar-width:thin;padding:0 4px}
+.ally-home-question{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;color:#a1a1aa;line-height:1.5;margin-bottom:8px;font-size:11px;white-space:pre-wrap}
+.ally-home-question>span{display:inline-block;margin-right:7px;color:#6b7280;font-size:10px}
+.ally-home-answer{font-size:12px;line-height:1.65;color:#e4e4e7}
+.ally-home-empty{font-size:12px;line-height:1.6;color:#777c87;padding:7px 0}
+.ally-home-error{font-size:10px;line-height:1.5;color:#f1b8a9;margin-top:6px}
+.ally-home-open{display:flex;gap:5px;align-items:center;align-self:flex-end;flex-shrink:0;font-size:10px;color:#9ba9bc;padding:3px 4px}
+.ally-home-open:hover{color:white}

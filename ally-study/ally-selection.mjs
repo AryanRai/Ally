@@ -5,8 +5,8 @@ import {setTimeout as delay} from 'node:timers/promises';
 import {readNativeEvents} from './ally-stream.mjs';
 
 export class AllySelection {
-  constructor({file, configFile, fetchImpl=fetch, pollMs=750}) {
-    this.file=file;this.configFile=configFile;this.fetch=fetchImpl;this.pollMs=pollMs;this.activeTurn=null;
+  constructor({file, configFile, fetchImpl=fetch, pollMs=750, requestTimeoutMs=90000}) {
+    this.file=file;this.configFile=configFile;this.fetch=fetchImpl;this.pollMs=pollMs;this.requestTimeoutMs=requestTimeoutMs;this.activeTurn=null;
     try {this.selected=JSON.parse(fs.readFileSync(file,'utf8'));if(this.selected)this.validate(this.selected);}
     catch(error) {if(error.code!=='ENOENT')throw error;this.selected=null;}
   }
@@ -18,12 +18,20 @@ export class AllySelection {
     const config=JSON.parse(fs.readFileSync(this.configFile,'utf8'));
     if(!config.enabled || !Number.isInteger(config.port) || config.port<1 || config.port>65535 || !config.token)throw Error('Open Ally with its local chat bridge enabled.');
     const binary=Buffer.isBuffer(body);
+    const deadline=new AbortController();
+    const timer=setTimeout(()=>deadline.abort(new DOMException('Ally connection timed out. Open Chat to check the response before retrying.','TimeoutError')),this.requestTimeoutMs);
+    try {
     const response=await this.fetch(`http://127.0.0.1:${config.port}/v1/${route}`,{
       method:body===undefined?'GET':'POST',headers:{Authorization:`Bearer ${config.token}`,'Content-Type':binary?'application/octet-stream':'application/json',...headers},
-      body:body===undefined?undefined:binary?body:JSON.stringify(body),redirect:'error',signal:signal?AbortSignal.any([signal,AbortSignal.timeout(90000)]):AbortSignal.timeout(90000),
+      body:body===undefined?undefined:binary?body:JSON.stringify(body),redirect:'error',signal:signal?AbortSignal.any([signal,deadline.signal]):deadline.signal,
     });
     if (raw && response.ok) return response;
     const value=await response.json();if(!response.ok)throw Object.assign(Error(value.error || `Ally returned ${response.status}`),{status:response.status});return value;
+    } finally {
+      // Only opening an SSE connection has a deadline. The user's stop signal
+      // stays attached to its body; thinking/streaming must not expire at 90 s.
+      clearTimeout(timer);
+    }
   }
   save(selected) {
     fs.mkdirSync(path.dirname(this.file),{recursive:true});
@@ -49,8 +57,9 @@ export class AllySelection {
     this.sharedVersion=shared.version;this.save(shared.selected);
     return {...this.snapshot(),history:shared.accepted?history:undefined,conflict:!shared.accepted};
   }
-  async continue({words,images=[],context,signal,onTurn=()=>{},onText}) {
-    const selected=this.selected && {...this.selected};
+  async continue({words,images=[],context,signal,onTurn=()=>{},onText,target}) {
+    if(target)this.validate(target);
+    const selected=(target ?? this.selected) && {...(target ?? this.selected)};
     if(!selected)throw Error('Choose a chat in Ally first.');
     if(this.continuing)throw Error('The selected chat is already responding. Expand Chat to follow it.');
     this.continuing=true;

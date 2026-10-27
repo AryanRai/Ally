@@ -25,6 +25,144 @@ namespace Ally.Native {
         public static void ShowNoActivate(object host) { if (!suppressed) host.GetType().GetMethod("ShowNoActivate").Invoke(host, null); }
         public static void ShowActivated(object host) { if (!suppressed) host.GetType().GetMethod("ShowActivated").Invoke(host, null); }
 
+        sealed class HomeTarget { public object Host; public Uri Page; }
+        static readonly System.Runtime.CompilerServices.ConditionalWeakTable<object, HomeTarget> homeTargets = new System.Runtime.CompilerServices.ConditionalWeakTable<object, HomeTarget>();
+        static object warmHomeWeb, warmHomeOwner, warmChatWeb, warmChatOwner;
+        static string chatAddress;
+        sealed class SoundRetry { public bool Pending; }
+        static readonly System.Runtime.CompilerServices.ConditionalWeakTable<object, SoundRetry> soundRetries = new System.Runtime.CompilerServices.ConditionalWeakTable<object, SoundRetry>();
+        // Called inside SoundPlayer's existing lock, after its running check.
+        // Its previous thread can still be destroying shared XAudio resources.
+        public static bool CanStartSoundMixer(object player) {
+            var flags = BindingFlags.Instance | BindingFlags.NonPublic;
+            Thread previous = (Thread)player.GetType().GetField("mixThread", flags).GetValue(player);
+            if (previous == null || !previous.IsAlive) return true;
+            SoundRetry retry = soundRetries.GetValue(player, delegate(object key) { return new SoundRetry(); });
+            lock (retry) {
+                if (!retry.Pending) {
+                    retry.Pending = true;
+                    ThreadPool.QueueUserWorkItem(delegate {
+                        try {
+                            bool finished = previous.Join(1000);
+                            lock (retry) retry.Pending = false;
+                            if (finished) player.GetType().GetMethod("StartIfNeeded", flags).Invoke(player, null);
+                        } catch (Exception error) { lock (retry) retry.Pending = false; Log(error); }
+                    });
+                }
+            }
+            return false;
+        }
+        static void DetachWeb(object web) {
+            object parent = web.GetType().GetProperty("Parent").GetValue(web, null);
+            if (parent == null) return;
+            object children = parent.GetType().GetProperty("Children").GetValue(parent, null);
+            children.GetType().GetMethod("Remove").Invoke(children, new object[] { web });
+        }
+        static void WatchVisibility(object owner, string loaded, string unloaded) {
+            foreach (string name in new string[] { "Loaded", "Unloaded" }) {
+                EventInfo change = owner.GetType().GetEvent(name);
+                change.AddEventHandler(owner, Delegate.CreateDelegate(change.EventHandlerType, typeof(Surface).GetMethod(name == "Loaded" ? loaded : unloaded, BindingFlags.Static | BindingFlags.NonPublic)));
+            }
+        }
+        static void NotifyVisibility(object web, bool visible) {
+            if (web == null) return;
+            try {
+                object core = web.GetType().GetProperty("CoreWebView2").GetValue(web, null);
+                if (core != null) core.GetType().GetMethod("ExecuteScriptAsync").Invoke(core, new object[] {
+                    "window.__allySurfaceVisible=" + (visible ? "true" : "false") + ";window.dispatchEvent(new Event('ally-surface-visibility'));"
+                });
+            } catch (Exception error) { Log(error); }
+        }
+        static void HomeLoaded(object sender, object args) { if (Object.ReferenceEquals(sender, warmHomeOwner)) NotifyVisibility(warmHomeWeb, !suppressed); }
+        static void HomeUnloaded(object sender, object args) { if (Object.ReferenceEquals(sender, warmHomeOwner)) NotifyVisibility(warmHomeWeb, false); }
+        static void ChatLoaded(object sender, object args) { if (Object.ReferenceEquals(sender, warmChatOwner)) NotifyVisibility(warmChatWeb, !suppressed); }
+        static void ChatUnloaded(object sender, object args) { if (Object.ReferenceEquals(sender, warmChatOwner)) NotifyVisibility(warmChatWeb, false); }
+        public static object TakeChatWeb() {
+            // A WinUI WebView's compositor belongs to its XAML owner. Moving the
+            // same control between newly constructed Chat views can leave its
+            // controller alive but its surface blank. Drafts live in the page's
+            // durable store, so give each Chat owner its own control.
+            if (warmChatOwner != null) {
+                foreach (string name in new string[] { "GotFocus", "LostFocus" }) {
+                    EventInfo change = warmChatWeb.GetType().GetEvent(name);
+                    MethodInfo handler = warmChatOwner.GetType().GetMethod(name == "GotFocus" ? "AllyGotFocus" : "AllyLostFocus", BindingFlags.Instance | BindingFlags.NonPublic);
+                    change.RemoveEventHandler(warmChatWeb, Delegate.CreateDelegate(change.EventHandlerType, warmChatOwner, handler));
+                }
+            }
+            warmChatOwner = null;
+            if (warmChatWeb != null) {
+                DetachWeb(warmChatWeb);
+                try { warmChatWeb.GetType().GetMethod("Close").Invoke(warmChatWeb, null); } catch (Exception error) { Log(error); }
+            }
+            warmChatWeb = Activator.CreateInstance(Assembly.Load("Microsoft.WinUI").GetType("Microsoft.UI.Xaml.Controls.WebView2", true));
+            chatAddress = null;
+            return warmChatWeb;
+        }
+        public static void BindChatWeb(object owner, object web) {
+            warmChatOwner = owner; warmChatWeb = web;
+            WatchVisibility(owner, "ChatLoaded", "ChatUnloaded");
+            NotifyVisibility(web, true);
+        }
+        public static void NavigateChatWeb(object web, Uri page) {
+            if (chatAddress == page.AbsoluteUri) return;
+            web.GetType().GetProperty("Source").SetValue(web, page, null);
+            chatAddress = page.AbsoluteUri;
+        }
+        // The default Home body is a tiny selected-chat preview; the original
+        // native tab switcher, keyboard ownership and full Chat view stay native.
+        public static void AttachHome(object home, object host) {
+            try {
+                string address = Environment.GetEnvironmentVariable("ALLY_NOTCH_URL");
+                Uri page;
+                if (!Uri.TryCreate(address, UriKind.Absolute, out page) || page.Scheme != "http" || page.Host != "127.0.0.1" || page.AbsolutePath != "/notch/") return;
+                var builder = new UriBuilder(page); builder.Path = "/notch/home.html"; builder.Query = ""; page = builder.Uri;
+                Type webType = home.GetType().BaseType.Assembly.GetType("Microsoft.UI.Xaml.Controls.WebView2", true);
+                object web = warmHomeWeb ?? Activator.CreateInstance(webType);
+                webType.GetProperty("Height").SetValue(web, 238.0, null);
+                PropertyInfo background = webType.GetProperty("DefaultBackgroundColor");
+                if (background != null) {
+                    object color = Activator.CreateInstance(background.PropertyType);
+                    foreach (var channel in new string[] { "A", "R", "G", "B" }) {
+                        byte value = channel == "A" ? (byte)255 : channel == "R" ? (byte)16 : channel == "G" ? (byte)17 : (byte)20;
+                        FieldInfo field = background.PropertyType.GetField(channel);
+                        if (field != null) field.SetValue(color, value);
+                    }
+                    background.SetValue(web, color, null);
+                }
+                HomeTarget target;
+                if (!homeTargets.TryGetValue(web, out target)) {
+                    target = new HomeTarget { Host = host, Page = page }; homeTargets.Add(web, target);
+                    EventInfo message = webType.GetEvent("WebMessageReceived");
+                    message.AddEventHandler(web, Delegate.CreateDelegate(message.EventHandlerType, typeof(Surface).GetMethod("OnHomeWebMessage", BindingFlags.Static | BindingFlags.NonPublic)));
+                    webType.GetProperty("Source").SetValue(web, page, null);
+                } else { target.Host = host; }
+                warmHomeWeb = web; warmHomeOwner = home;
+                DetachWeb(web);
+                WatchVisibility(home, "HomeLoaded", "HomeUnloaded");
+                object rows = home.GetType().GetProperty("RowDefinitions").GetValue(home, null);
+                rows.GetType().GetMethod("Clear").Invoke(rows, null);
+                object children = home.GetType().GetProperty("Children").GetValue(home, null);
+                children.GetType().GetMethod("Clear").Invoke(children, null);
+                children.GetType().GetMethod("Add").Invoke(children, new object[] { web });
+                NotifyVisibility(web, true);
+            } catch (Exception error) { Log(error); }
+        }
+        static void OnHomeWebMessage(object sender, object args) {
+            try {
+                HomeTarget target;
+                if (!homeTargets.TryGetValue(sender, out target)) return;
+                Uri source;
+                string address = (string)args.GetType().GetProperty("Source").GetValue(args, null);
+                if (!Uri.TryCreate(address, UriKind.Absolute, out source) || source.GetLeftPart(UriPartial.Path) != target.Page.GetLeftPart(UriPartial.Path) || source.Query != target.Page.Query) return;
+                string command = (string)args.GetType().GetMethod("TryGetWebMessageAsString").Invoke(args, null);
+                if (command != "ally:chat") return;
+                object services = target.Host.GetType().GetProperty("Services").GetValue(target.Host, null);
+                object presenter = services.GetType().GetProperty("Presenter").GetValue(services, null);
+                object tabs = presenter.GetType().GetProperty("Tabs").GetValue(presenter, null);
+                tabs.GetType().GetMethod("ShowChatForTyping").Invoke(tabs, new object[] { true });
+            } catch (Exception error) { Log(error); }
+        }
+
         static void RefreshBounds() {
             try {
                 object rect = notch.GetType().GetMethod("SurfaceRectPx").Invoke(notch, null);
@@ -41,6 +179,7 @@ namespace Ally.Native {
                 window = (IntPtr)view.GetType().GetProperty("WindowHandle").GetValue(view, null);
                 object host = view.GetType().GetProperty("Window").GetValue(view, null);
                 host.GetType().GetEvent("RawMessage").AddEventHandler(host, rawCallback);
+                AttachStudyCaptions();
                 RefreshBounds();
                 var pipeThread = new Thread(Connect); pipeThread.IsBackground = true; pipeThread.Start();
                 var mouseThread = new Thread(MouseLoop); mouseThread.IsBackground = true; mouseThread.Start();
@@ -61,6 +200,7 @@ namespace Ally.Native {
                         using (var output = new StreamWriter(pipe)) {
                             output.AutoFlush = true;
                             lock (outputLock) { writer = output; output.WriteLine("AUTH " + lines[1]); }
+                            Send("STUDY_BOUND " + (captionCanvas != null ? "1" : "0"));
                             connected = true;
                             string line;
                             while ((line = input.ReadLine()) != null) {
@@ -74,6 +214,14 @@ namespace Ally.Native {
                                     // Latest wins: streaming text replaces any update not yet applied.
                                     pendingPresentation = line;
                                     PostMessage(window, SurfaceMessage, new IntPtr(2), IntPtr.Zero);
+                                }
+                                else if (line.StartsWith("HANDOFF ")) {
+                                    pendingHandoff = line.Substring(8);
+                                    PostMessage(window, SurfaceMessage, new IntPtr(5), IntPtr.Zero);
+                                }
+                                else if (line.StartsWith("STUDY ")) {
+                                    studyQueue.Enqueue(line.Substring(6));
+                                    PostMessage(window, SurfaceMessage, new IntPtr(4), IntPtr.Zero);
                                 }
                                 else if (line.StartsWith("DRAG ")) {
                                     long handle;
@@ -108,20 +256,109 @@ namespace Ally.Native {
             if (message != SurfaceMessage) return;
             if (wparam.ToInt64() == 2) { ApplyPresentation(Interlocked.Exchange(ref pendingPresentation, null)); return; }
             if (wparam.ToInt64() == 3) { string request; while (settingsQueue.TryDequeue(out request)) ApplySettings(request); return; }
+            if (wparam.ToInt64() == 4) { string request; while (studyQueue.TryDequeue(out request)) SubmitStudy(request); return; }
+            if (wparam.ToInt64() == 5) { ApplyHandoff(lparam.ToInt64() == 1); return; }
             try {
                 if (suppressed) {
+                    NotifyVisibility(warmHomeWeb, false); NotifyVisibility(warmChatWeb, false);
                     object host = notch.GetType().GetProperty("Window").GetValue(notch, null);
                     host.GetType().GetMethod("HideWindow", Type.EmptyTypes).Invoke(host, null);
                     Send("HIDDEN");
                 } else {
                     notch.GetType().GetMethod("FollowCursorDisplay").Invoke(notch, null);
                     notch.GetType().GetMethod("Show").Invoke(notch, null);
+                    foreach (object owner in new object[] { warmHomeOwner, warmChatOwner }) {
+                        if (owner == null) continue;
+                        PropertyInfo loaded = owner.GetType().GetProperty("IsLoaded");
+                        if (loaded != null && (bool)loaded.GetValue(owner, null)) NotifyVisibility(Object.ReferenceEquals(owner, warmHomeOwner) ? warmHomeWeb : warmChatWeb, true);
+                    }
                     RefreshBounds();
                     Send("SHOWN");
                 }
             } catch (Exception error) { Log(error); }
         }
         static readonly System.Collections.Concurrent.ConcurrentQueue<string> settingsQueue = new System.Collections.Concurrent.ConcurrentQueue<string>();
+        static readonly System.Collections.Concurrent.ConcurrentQueue<string> studyQueue = new System.Collections.Concurrent.ConcurrentQueue<string>();
+        static object realCompanion, captionCanvas;
+        public static void BindStudy(object companion) { realCompanion = companion; AttachStudyCaptions(); }
+        static object Companion() {
+            if (realCompanion != null) return realCompanion;
+            object services = notch.GetType().GetProperty("Services", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic).GetValue(notch, null);
+            return services.GetType().GetProperty("Companion").GetValue(services, null);
+        }
+        static void AttachStudyCaptions() {
+            try {
+                object companion = Companion();
+                foreach (FieldInfo field in companion.GetType().GetFields(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)) {
+                    if (!field.FieldType.FullName.Contains("ScreenDrawingCanvas")) continue;
+                    object canvas = field.GetValue(companion);
+                    if (canvas == null || Object.ReferenceEquals(canvas, captionCanvas)) continue;
+                    EventInfo caption = canvas.GetType().GetEvent("CaptionChanged");
+                    if (caption != null) { caption.AddEventHandler(canvas, new EventHandler<string>(delegate(object sender, string words) {
+                        words = words ?? "";
+                        if (words.Length <= 1200) Send("STUDY_CAPTION " + Encode(words));
+                    })); captionCanvas = canvas; Send("STUDY_BOUND 1"); }
+                    break;
+                }
+            } catch (Exception error) { Log(error); }
+        }
+        static readonly System.Collections.Concurrent.ConcurrentDictionary<string, double[]> studyDisplays = new System.Collections.Concurrent.ConcurrentDictionary<string, double[]>();
+        static object StudyField(object instance, string name) {
+            return instance.GetType().GetField(name, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic).GetValue(instance);
+        }
+        // Called once when the native turn chooses its drawing frame. Do not follow
+        // the cursor here: it may have moved onto Ally on another display.
+        public static object SelectStudyFrame(object fallback, object turn) {
+            object request = StudyField(StudyField(turn, "CS$<>8__locals1"), "request");
+            string trigger = (string)request.GetType().GetProperty("Trigger").GetValue(request, null);
+            if (trigger == null || !trigger.StartsWith("ally-selection:", StringComparison.Ordinal)) return fallback;
+            double[] bounds;
+            if (!studyDisplays.TryRemove(trigger, out bounds)) throw new IOException("This selection lost its display. Select the area again.");
+            if (bounds.Length == 0) return fallback; // Text-only Study question.
+            object capture = StudyField(turn, "capture");
+            var frames = (System.Collections.IEnumerable)capture.GetType().GetProperty("Frames").GetValue(capture, null);
+            object match = null;
+            foreach (object frame in frames) {
+                object display = frame.GetType().GetProperty("Display").GetValue(frame, null);
+                object rect = display.GetType().GetProperty("BoundsPx").GetValue(display, null);
+                string[] keys = { "X", "Y", "Width", "Height" };
+                bool same = true;
+                for (int i = 0; i < keys.Length; i++) same &= Math.Abs(Convert.ToDouble(rect.GetType().GetProperty(keys[i]).GetValue(rect, null)) - bounds[i]) <= 1;
+                if (same) { if (match != null) throw new IOException("The selected display is ambiguous. Select the area again."); match = frame; }
+            }
+            if (match == null) throw new IOException("The selected display changed. Select the area again.");
+            return match;
+        }
+        static void SubmitStudy(string id) {
+            if (!System.Text.RegularExpressions.Regex.IsMatch(id, "^[a-f0-9-]{36}$")) return;
+            try {
+                string profile = Path.GetFullPath(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", "profile"));
+                string input = Path.Combine(profile, "study-inputs", id + ".input");
+                if (DateTime.UtcNow - File.GetLastWriteTimeUtc(input) > TimeSpan.FromMinutes(2)) throw new IOException("This selection expired. Select the area again.");
+                string accepted = input + ".accepted";
+                File.Move(input, accepted);
+                string[] lines;
+                try { lines = File.ReadAllLines(accepted); } finally { File.Delete(accepted); }
+                if (lines.Length != 3) throw new IOException("Invalid Study input. Select the area again.");
+                string words = Decode(lines[0]), image = Decode(lines[1]);
+                string geometry = Decode(lines[2]);
+                double[] bounds = geometry.Length == 0 ? new double[0] : Array.ConvertAll(geometry.Split(','), value => double.Parse(value, System.Globalization.CultureInfo.InvariantCulture));
+                if ((image.Length > 0 && bounds.Length != 4) || (bounds.Length != 0 && (bounds.Length != 4 || Array.Exists(bounds, value => double.IsNaN(value) || double.IsInfinity(value)) || bounds[2] <= 0 || bounds[3] <= 0))) throw new IOException("Invalid Study display. Select the area again.");
+                if (words.Length == 0 || words.Length > 12000 || (image.Length > 0 && !File.Exists(image))) throw new IOException("This selection expired. Select the area again.");
+                object companion = Companion();
+                MethodInfo submit = null;
+                foreach (MethodInfo method in companion.GetType().GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
+                    if (method.Name == "SubmitTextAsync" && method.GetParameters().Length == 4) submit = method;
+                if (submit == null) throw new IOException("Update Ally Study to use shared selection.");
+                string trigger = "ally-selection:" + id;
+                studyDisplays[trigger] = bounds;
+                System.Threading.Tasks.Task task;
+                try { task = (System.Threading.Tasks.Task)submit.Invoke(companion, new object[] { words, (bool?)true, trigger, image.Length > 0 ? new string[] { image } : new string[0] }); }
+                catch { double[] removed; studyDisplays.TryRemove(trigger, out removed); throw; }
+                Send("STUDY_ACCEPTED " + id);
+                task.ContinueWith(delegate(System.Threading.Tasks.Task completed) { double[] removed; studyDisplays.TryRemove(trigger, out removed); if (completed.IsFaulted) Log(completed.Exception.GetBaseException()); });
+            } catch (Exception error) { Log(error); Send("STUDY_ERROR " + id + " " + Encode(error.GetBaseException().Message)); }
+        }
         // Only preferences shown in Ally's combined Settings; account, onboarding and billing stay native.
         static readonly string[] sharedSettings = {
             "VoiceIdentifier", "SpeechSpeed", "TypedTurnsRespondWithVoice", "AgentAnnouncementsVoiceEnabled",
@@ -169,6 +406,48 @@ namespace Ally.Native {
         }
 
         static string pendingPresentation;
+        static string pendingHandoff;
+        static int handoffRevision;
+        static bool handoffOpenedPeek;
+        static void ApplyHandoff(bool replay) {
+            if (suppressed || notch == null) return;
+            try {
+                string json = Decode(pendingHandoff ?? "");
+                if (json.Length == 0 || json.Length > 1024) return;
+                object services = notch.GetType().GetProperty("Services", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic).GetValue(notch, null);
+                object presenter = services.GetType().GetProperty("Presenter").GetValue(services, null);
+                // Voice, text entry and onboarding retain native presentation priority.
+                foreach (Type contract in presenter.GetType().GetInterfaces()) if (contract.FullName == "HeyClicky.INotchPresenter") {
+                    object current = contract.GetProperty("Presentation").GetValue(presenter, null);
+                    if (json != "null" && current != null && current.GetType().Name != "Idle" &&
+                        (ownPresentation == null || !current.Equals(ownPresentation))) return;
+                }
+                PropertyInfo showing = presenter.GetType().GetProperty("IsShowingNotchAgentPeek");
+                bool open = showing != null && (bool)showing.GetValue(presenter, null);
+                if (json != "null" && !open) {
+                    // Use the native presenter's normal expansion request, never simulated input.
+                    presenter.GetType().GetMethod("OpenNotchAgentPeekOnRequest").Invoke(presenter, null);
+                    handoffOpenedPeek = true;
+                }
+                foreach (object web in new object[] { warmHomeWeb, warmChatWeb }) {
+                    if (web == null) continue;
+                    object core = web.GetType().GetProperty("CoreWebView2").GetValue(web, null);
+                    if (core != null) core.GetType().GetMethod("ExecuteScriptAsync").Invoke(core, new object[] {
+                        "window.__allyHandoff=" + json + ";window.dispatchEvent(new CustomEvent('ally-handoff',{detail:window.__allyHandoff}));"
+                    });
+                }
+                if(json == "null" && handoffOpenedPeek) {
+                    PropertyInfo hovering=presenter.GetType().GetProperty("IsHovering");
+                    if(hovering==null||!(bool)hovering.GetValue(presenter,null))presenter.GetType().GetMethod("DismissNotchAgentPeek").Invoke(presenter,null);
+                    handoffOpenedPeek=false;
+                }
+                int revision=++handoffRevision;
+                // The Home webview can be warming during expansion; replay latest state once.
+                if(json != "null" && !replay) ThreadPool.QueueUserWorkItem(delegate {
+                    Thread.Sleep(350);if(revision==handoffRevision)PostMessage(window,SurfaceMessage,new IntPtr(5),new IntPtr(1));
+                });
+            } catch(Exception error) { Log(error); }
+        }
         static object ownPresentation;
 
         static string Decode(string value) {

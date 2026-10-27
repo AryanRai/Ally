@@ -36,8 +36,35 @@ test('native drawing begins on its first program lines and is never replayed on 
   const complete=first+'circle(20,30,4);\n```';relay.update(complete);relay.finish(complete);
   assert.equal(chunks.join(''),complete);
 });
-test('prose waits for quoting and a restarted drawing cannot mix two programs',()=>{
-  const chunks=[];const relay=nativeProgramRelay(s=>chunks.push(s),spokenProgram);
-  relay.update('A plain answer.');assert.deepEqual(chunks,[]);relay.finish('A plain answer.');assert.match(chunks.join(''),/say\("A plain answer\."\)/);
+test('completed prose speaks before completion and a restarted drawing cannot mix two programs',()=>{
+  const chunks=[];const relay=nativeProgramRelay(s=>chunks.push(s),s=>nativeReplyProgram(s,parse,spokenProgram));
+  relay.update('A plain answer. ');assert.match(chunks.join(''),/say\("A plain answer\."\)/);relay.finish('A plain answer. ');
+  assert.equal((chunks.join('').match(/A plain answer/g)||[]).length,1);
   const drawing=nativeProgramRelay(()=>{},s=>s);drawing.update('```js\nstep(1);\n');assert.throws(()=>drawing.update(''),/restarted/);
+});
+
+test('tutorial blocks and reference-tool commentary stream as one growing program before completion',()=>{
+  const chunks=[],relay=nativeProgramRelay(s=>chunks.push(s),s=>nativeReplyProgram(s,parse,spokenProgram));
+  let response='I checked the native graph reference.\n\n```js\nstep(1); say("First beat");\n';
+  relay.update(response);
+  assert.match(chunks.join(''),/say\("First beat"\)/);
+  assert.ok(chunks.join('').includes('checked'));
+  for(const tail of ['`','`','`','\n\nNext beat:\n```java','script\nstep(2); say("Second beat");\n','```']) {
+    response+=tail;relay.update(response);
+  }
+  assert.ok(chunks.join('').includes('Second beat'));
+  assert.equal((chunks.join('').match(/First beat/g)||[]).length,1);
+  relay.finish(response);
+  assert.equal(chunks.join(''),'```javascript\nstep(0); say("I checked the native graph reference.");\nstep(1); say("First beat");\nstep(0); say("Next beat:");\nstep(2); say("Second beat");\n```');
+});
+
+import {nativeSpeechRate,nativeSpeechConfig} from './ally-stream.mjs';
+test('native speed controls actual synthesis as well as caption timing',()=>{
+ for(const speed of [0.75,1,1.5]) {
+  const c=nativeSpeechConfig('en-AU-Chirp3-HD-Aoede',speed);
+  assert.equal(c.streamingAudioConfig.speakingRate,speed);
+  assert.equal(c.streamingAudioConfig.sampleRateHertz,24000);
+ }
+ for(const invalid of [undefined,null,'0.75',NaN,Infinity]) assert.equal(nativeSpeechRate(invalid),1);
+ assert.equal(nativeSpeechRate(-1),0.25);assert.equal(nativeSpeechRate(9),2);
 });

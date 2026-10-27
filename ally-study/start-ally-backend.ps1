@@ -1,7 +1,7 @@
 $ErrorActionPreference='Stop'
 $taskRuntime=Join-Path $PSScriptRoot 'runtime.json'
 $taskSourceBytes=New-Object IO.MemoryStream
-foreach($taskSourceFile in @('ally-server.mjs','ally-history.mjs','ally-notch.mjs','ally-selection.mjs','ally-native-turn.mjs','ally-stream.mjs','notch-build.json')){
+foreach($taskSourceFile in @('ally-server.mjs','ally-history.mjs','ally-notch.mjs','ally-selection.mjs','ally-native-turn.mjs','ally-stream.mjs','ally-native-conversation.mjs','notch-build.json')){
  $taskBytes=[IO.File]::ReadAllBytes((Join-Path $PSScriptRoot $taskSourceFile))
  $taskSourceBytes.Write($taskBytes,0,$taskBytes.Length)
 }

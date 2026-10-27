@@ -7,10 +7,16 @@ import {PromptInput, PromptInputTextarea, PromptInputFooter, PromptInputSubmit} 
 import {Button} from '@/components/ui/button';
 import {TooltipProvider} from '@/components/ui/tooltip';
 import type {AgentSessionSummary} from '@/types/agent';
+import {DISCOVERY_PROVIDERS,mergeProviderPages,type ProviderPage} from '@/utils/mergeProviderPages';
 import '@fontsource-variable/geist';
 import '@fontsource-variable/geist-mono';
 import '@/styles/index.css';
 import './notch.css';
+import NotchHome from './home';
+import HandoffHalo from '@/components/chat/HandoffHalo';
+import {PendingDecisions} from './decisions';
+import { ChatSurfaceBoundary } from '@/components/chat/ChatSurfaceBoundary';
+import { waitForSurfaceVisible } from './surfaceVisibility';
 
 type Provider = 'codex'|'claude';
 type Permission = 'readonly'|'edit'|'full';
@@ -22,9 +28,11 @@ type Approval = {id:string; title:string; detail:string; fields:{id:string; labe
 type Turn = {id:string; chatId:string; status:string; startedAt?:number; activity?:string; transcript?:string;liveText?:string; reply?:{text:string;components?:unknown[]}; error?:string; approvals?:Approval[]};
 type History = {chat:Chat; messages:Message[]; before:number|null; running:boolean; canStop:boolean; activeTurnId?:string;queue?:{items:{id:string;text:string;state:string;error?:string}[]}};
 const capability = location.hash.slice(1) || sessionStorage.getItem('ally-notch-capability') || '';
+const homePreview = new URLSearchParams(location.search).get('view') === 'preview';
 try {if(capability)sessionStorage.setItem('ally-notch-capability',capability);} catch {}
-history.replaceState(null, '', location.pathname);
+history.replaceState(null, '', location.pathname + (homePreview ? '?view=preview' : ''));
 async function api(route:string, body?:unknown) {
+  if (body === undefined) await waitForSurfaceVisible();
   const response = await fetch(`/notch-api/v1/${route}`, {
     method:body === undefined ? 'GET':'POST', headers:{Authorization:`Bearer ${capability}`,'Content-Type':'application/json'},
     body:body === undefined ? undefined:JSON.stringify(body), signal:AbortSignal.timeout(95000),
@@ -37,7 +45,7 @@ Object.defineProperty(window,'pip',{value:{agent:{readStates:async()=> (await ap
 const session = (chat:Chat):AgentSessionSummary => ({...chat,id:chat.sessionId || chat.id});
 const searchChats = (query:string) => api(`chat-search?q=${encodeURIComponent(query)}`);
 const replyText = (message:{text:string;components?:unknown[]}) => message.components?.length ? JSON.stringify({text:message.text,components:message.components}) : message.text;
-function readStorage<T,>(key:string, fallback:T):T {try {return JSON.parse(sessionStorage.getItem(key) || 'null') ?? fallback;} catch {return fallback;}}
+function readStorage<T,>(key:string, fallback:T):T {try {return JSON.parse(localStorage.getItem(key) || sessionStorage.getItem(key) || 'null') ?? fallback;} catch {return fallback;}}
 
 function AttachmentView({asset}:{asset:Attachment}) {
   const [preview,setPreview]=useState('');
@@ -60,30 +68,15 @@ function AttachmentView({asset}:{asset:Attachment}) {
   return <div className="attachment"><Button size="sm" variant="ghost" onClick={()=>void download()} title={`Download ${asset.name}`}>{preview?<img src={preview} alt={asset.name} style={{maxWidth:180,maxHeight:120}}/>:asset.name}</Button>{error && <small role="alert">{error}</small>}</div>;
 }
 
-function ApprovalCard({approval, turnId, onAnswered, onError}:{approval:Approval; turnId:string;onAnswered:()=>void;onError:(e:Error)=>void}) {
-  const [values,setValues] = useState<Record<string,string>>({});
-  const [busy,setBusy] = useState(false);
-  async function answer(action:string) {
-    setBusy(true);
-    try {await api(`turns/${encodeURIComponent(turnId)}/approvals/${encodeURIComponent(approval.id)}`,{action,values});onAnswered();}
-    catch(e) {onError(e as Error);} finally {setBusy(false);}
-  }
-  return <section className="approval" aria-label={approval.title}>
-    <strong>{approval.title}</strong><pre>{approval.detail}</pre>
-    {approval.fields.map(field=><label key={field.id}>{field.label}
-      {!!field.options.length && <select value={values[field.id] || ''} onChange={e=>setValues(v=>({...v,[field.id]:e.target.value}))}><option value="">Choose…</option>{field.options.map(o=><option key={o.value} value={o.value}>{o.label}</option>)}</select>}
-      {field.freeText && <input type={field.secret?'password':'text'} autoComplete="off" value={values[field.id] || ''} onChange={e=>setValues(v=>({...v,[field.id]:e.target.value}))}/>}
-    </label>)}
-    <div>{approval.actions.map(action=><Button size="sm" key={action.value} disabled={busy || (action.value==='submit' && approval.fields.some(f=>f.required && !values[f.id]?.trim()))} onClick={()=>void answer(action.value)}>{action.label}</Button>)}</div>
-  </section>;
-}
-
 function App() {
   const [chats,setChats] = useState<Chat[]>([]);
   const [running,setRunning] = useState<Chat[]>([]);
   const runningRef=useRef(running);runningRef.current=running;
   const lastHistoryRefresh=useRef(0);
   const [offsets,setOffsets] = useState<Record<Provider,number|null>>({codex:0,claude:0});
+  const discoveryState=useRef({chats,offsets,expanded:{codex:false,claude:false}});
+  discoveryState.current={...discoveryState.current,chats,offsets};
+  const discovering=useRef<Promise<void>|undefined>(undefined);
   const [provider,setProvider] = useState<Provider>('codex');
   const [selected,setSelected] = useState<string|null>(null);
   const selectedRef = useRef(selected); selectedRef.current=selected;
@@ -114,21 +107,22 @@ function App() {
   }
   const permission = permissions[selected || 'new'] || 'readonly';
   const fail=(e:Error)=>setError(e.message);
-  useEffect(()=>{try {sessionStorage.setItem('ally-notch-drafts',JSON.stringify(drafts));} catch {setError('Draft storage is full. Your draft is kept in this window.');}},[drafts]);
-  useEffect(()=>{try {sessionStorage.setItem('ally-notch-permissions',JSON.stringify(permissions));} catch {}},[permissions]);
+  useEffect(()=>{try {localStorage.setItem('ally-notch-drafts',JSON.stringify(drafts));} catch {setError('Draft storage is full. Your draft is kept in this window.');}},[drafts]);
+  useEffect(()=>{try {localStorage.setItem('ally-notch-permissions',JSON.stringify(permissions));} catch {}},[permissions]);
   // Same greeting as the floating pill; refreshed when the model writes a new one.
   useEffect(()=>{let alive=true;let timer:ReturnType<typeof setTimeout>;async function load(){try {const data=await api('greeting');if(alive && data.greeting)setGreeting(data.greeting);}catch{} if(alive)timer=setTimeout(load,60000);}void load();return()=>{alive=false;clearTimeout(timer);};},[]);
   async function discover(more=false) {
-    try {
-      const pages=await Promise.all((['codex','claude'] as const).map(async p=> {
-        const offset=more?offsets[p]:0;
-        if(offset===null) return {chats:[],nextOffset:null};
-        return api(`chats?provider=${p}&offset=${offset}`);
-      }));
-      setChats(old=>[...new Map([...(more?old:[]),...pages.flatMap(p=>p.chats)].map(c=>[c.id,c])).values()]);
-      setOffsets({codex:pages[0].nextOffset,claude:pages[1].nextOffset});
-      setError('');
-    } catch(e) {fail(e as Error);}
+    if(discovering.current)return discovering.current;
+    const pending=Promise.allSettled(DISCOVERY_PROVIDERS.map(async p=> {
+      const offset=more?discoveryState.current.offsets[p]:0;
+      if(offset===null)return undefined;
+      return await api(`chats?provider=${p}&offset=${offset}`) as ProviderPage<Chat>;
+    })).then(pages=>{
+      const old=discoveryState.current,result=mergeProviderPages(old.chats,old.offsets,old.expanded,pages,more);
+      discoveryState.current=result;
+      setChats(result.chats);setOffsets(result.offsets);setError(result.error);
+    }).finally(()=>{if(discovering.current===pending)discovering.current=undefined;});
+    discovering.current=pending;return pending;
   }
   useEffect(()=>{void discover();void api('selection').then(data=>{
     if(data.selected) {
@@ -142,6 +136,7 @@ function App() {
       try {
         const revision=navigation.current;
         const state=await api('selection');
+        if(alive && revision===navigation.current && state.selected) setPermissions(old=>old[state.selected.chatId]===state.selected.permission?old:{...old,[state.selected.chatId]:state.selected.permission});
         if(alive && revision===navigation.current && (state.selected?.chatId || null)!==selectedRef.current) {
           const id=state.selected?.chatId || null;
           selectedRef.current=id;prefetched.current=null;
@@ -269,7 +264,7 @@ function App() {
   const working=turn?.status==='thinking' || view?.running;
   const streamedReply=turn?.reply ?? (turn?.liveText?{text:turn.liveText}:undefined);
   const liveReply=turn?.status==='thinking' && streamedReply && !view?.messages.some(m=>m.role==='assistant' && m.text===streamedReply.text && m.timestamp>=(turn.startedAt || 0));
-  return <TooltipProvider><div className="notch-app">
+  return <TooltipProvider><div className="notch-app"><HandoffHalo/>
     <ChatSidebar chats={[]} activeChat={selected} activeSession={view?{provider:view.chat.provider,id:view.chat.sessionId || view.chat.id}:undefined} onChatSelect={id=>void choose(id)} onChatCreate={()=>void create()}
       onChatDelete={()=>{}} onChatRename={()=>{}} isCollapsed={collapsed} onToggleCollapse={()=>setCollapsed(v=>!v)}
       theme="dark" platform="win32" externalSessions={sessions} runningSessions={running.map(session)}
@@ -279,6 +274,7 @@ function App() {
         <select aria-label="Engine for new chats" value={provider} onChange={e=>setProvider(e.target.value as Provider)}><option value="codex">Codex</option><option value="claude">Claude</option></select>
         <Button size="sm" variant="ghost" disabled={busy} onClick={()=>void discover()}>Refresh</Button>
       </header>
+      <PendingDecisions api={api}/>
       {error && <div role="alert" className="error">{error}<Button size="sm" variant="ghost" onClick={()=>{setError('');void (selected?refreshHistory(selected).catch(fail):discover());}}>Retry</Button></div>}
       <div ref={listRef} className="transcript" onScroll={()=>{const e=listRef.current!;nearBottom.current=e.scrollHeight-e.scrollTop-e.clientHeight<80;}}>
         {loading && <p role="status">Loading conversation…</p>}
@@ -293,7 +289,6 @@ function App() {
         {liveReply && <article className="assistant-message"><AgentReply text={replyText(streamedReply!)} streaming={turn?.status==='thinking'}/></article>}
         {working && <p role="status">{turn?.activity || 'Working…'}</p>}
         {!!view?.queue?.items.length && <details open><summary>Queued · {view.queue.items.length}</summary>{view.queue.items.map(item=><div key={item.id} className="user-message"><p>{item.text}</p><small>{item.state}{item.error?` · ${item.error}`:''}</small></div>)}</details>}
-        {turn?.approvals?.map(approval=><ApprovalCard key={approval.id} approval={approval} turnId={turn.id} onError={fail} onAnswered={()=>setTurn(old=>old?{...old,approvals:old.approvals?.filter(a=>a.id!==approval.id)}:old)}/>)}
       </div>
       {offsets.codex!==null || offsets.claude!==null ? <Button className="more-chats" size="sm" variant="ghost" onClick={()=>void discover(true)}>Load more chats</Button>:null}
       {selected && <footer><div className="composer-meta"><span title={view?.chat.cwd}>{view?.chat.provider || provider} · {view?.chat.cwd?.split(/[\\/]/).pop() || 'Home'}</span>
@@ -305,4 +300,4 @@ function App() {
 }
 // Keep transcript links inside the native host. Display their URL for copying.
 document.addEventListener('click',event=>{const link=(event.target as Element).closest?.('a');if(link && !link.download){event.preventDefault();void navigator.clipboard.writeText(link.href).catch(()=>{});}});
-createRoot(document.getElementById('root')!).render(<App/>);
+createRoot(document.getElementById('root')!).render(<ChatSurfaceBoundary>{homePreview ? <NotchHome api={api}/> : <App/>}</ChatSurfaceBoundary>);

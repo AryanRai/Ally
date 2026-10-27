@@ -1,4 +1,8 @@
 $ErrorActionPreference='Stop'
+& powershell.exe -NoProfile -File (Join-Path $PSScriptRoot 'apply-ally-identity.ps1') -Install
+if($LASTEXITCODE -ne 0){throw 'The Ally branding update failed.'}
+& powershell.exe -NoProfile -File (Join-Path $PSScriptRoot 'apply-ally-browser-host.ps1') -Install
+if($LASTEXITCODE -ne 0){throw 'The browser connection update failed.'}
 & powershell.exe -NoProfile -File (Join-Path $PSScriptRoot 'apply-ally-display.ps1') -Install
 if($LASTEXITCODE -ne 0){throw 'The display update failed.'}
 & powershell.exe -NoProfile -File (Join-Path $PSScriptRoot 'apply-ally-notch.ps1') -Install
@@ -7,6 +11,10 @@ if($LASTEXITCODE -ne 0){throw 'The embedded chat update failed.'}
 if($LASTEXITCODE -ne 0){throw 'The unified surface update failed.'}
 & powershell.exe -NoProfile -File (Join-Path $PSScriptRoot 'apply-ally-settings.ps1') -Install
 if($LASTEXITCODE -ne 0){throw 'The Settings usage update failed.'}
+& powershell.exe -NoProfile -File (Join-Path $PSScriptRoot 'apply-ally-study-timeout.ps1') -Install
+if($LASTEXITCODE -ne 0){throw 'Study timeout preparation failed.'}
+& powershell.exe -NoProfile -File (Join-Path $PSScriptRoot 'apply-ally-study-selection.ps1') -Install
+if($LASTEXITCODE -ne 0){throw 'The Study selection alignment update failed.'}
 & (Join-Path $PSScriptRoot 'start-ally-backend.ps1')
 $taskHealth=Invoke-RestMethod 'http://127.0.0.1:18783/health' -TimeoutSec 3
 if(!$taskHealth.speech){throw 'Own-backend connector is not ready.'}

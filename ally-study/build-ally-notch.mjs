@@ -20,7 +20,8 @@ await build({
   plugins:[react()], resolve:{alias:{'@':path.join(ally,'src')},dedupe:['react','react-dom']},
   define:{global:'globalThis'},
   css:{postcss:{plugins:[tailwind({base:ally})]}},
-  build:{outDir:output,emptyOutDir:true, sourcemap:false,reportCompressedSize:false},
+  build:{outDir:output,emptyOutDir:true, sourcemap:false,reportCompressedSize:false,
+    rollupOptions:{input:{chat:path.join(root,'notch-ui','index.html'),home:path.join(root,'notch-ui','home.html')}}},
 });
 const hash = crypto.createHash('sha256');
 function walk(dir) {for (const entry of fs.readdirSync(dir,{withFileTypes:true}).sort((a,b)=>a.name.localeCompare(b.name))) {

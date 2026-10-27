@@ -23,7 +23,8 @@
     }
   },
   "include": [
-    "main.tsx",
+    "*.tsx",
+    "*.ts",
     "../../glass-pip-chat/src/types/*.d.ts",
     "../../glass-pip-chat/src/vite-env.d.ts"
   ]

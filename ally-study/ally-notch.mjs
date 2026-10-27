@@ -2,6 +2,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const routes = [
+  ['GET', /^\/v1\/interactions$/],
+  ['POST', /^\/v1\/interactions\/[\w-]+\/answer$/],
   ['GET', /^\/v1\/(status|read-states|running|chats|chat-search|usage|greeting)$/],
   ['GET', /^\/v1\/(chats|turns)\/[^/]+$/],
   ['POST', /^\/v1\/(chats|messages|read-state)$/],

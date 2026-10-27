@@ -1,3 +1,5 @@
+import {nativeConversationCode} from './ally-native-conversation.mjs';
+
 // The native turn follows the same Ally agent run over one authenticated stream.
 export async function readNativeEvents(response, {signal, onText = () => {}} = {}) {
   if (!response.body || !response.headers.get('content-type')?.startsWith('text/event-stream')) throw Error('Update Ally desktop to use streaming native replies.');
@@ -39,19 +41,26 @@ export function nativeProgramRelay(delta, program) {
   let emitted = '';
   return {
     update(value) {
-      const next = value.trimStart();
-      if (!/^```(?:javascript|js)[ \t]*\r?\n/i.test(next)) {
-        if (emitted) throw Error('The agent restarted its drawing. Open Chat to continue.');
-        return;
-      }
+      const code=nativeConversationCode(value);
+      if (!code && !emitted) return;
+      const next='```javascript\n'+code;
       if (!next.startsWith(emitted)) throw Error('The agent restarted its drawing. Open Chat to continue.');
       const part = next.slice(emitted.length); if (part) delta(part); emitted = next;
     },
     finish(value) {
-      const final = program(value);
+      const code=nativeConversationCode(value,true);
+      const final = program('```javascript\n'+code+(code.endsWith('\n')?'':'\n')+'```');
       if (!emitted) {delta(final); emitted = final; return;}
       if (final.startsWith(emitted)) delta(final.slice(emitted.length));
       else if (final.trim() !== emitted.trim()) throw Error('The native drawing changed while streaming. Open Chat to continue.');
     },
   };
+}
+
+/** Native captions use this same speed. Invalid inputs must never reach Google. */
+export function nativeSpeechRate(value) {
+  return typeof value === 'number' && Number.isFinite(value) ? Math.max(0.25, Math.min(2, value)) : 1;
+}
+export function nativeSpeechConfig(voice, speed = 1) {
+  return {voice:{name:voice,languageCode:voice.slice(0,5)},streamingAudioConfig:{audioEncoding:'PCM',sampleRateHertz:24000,speakingRate:nativeSpeechRate(speed)}};
 }
