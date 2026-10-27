@@ -31,7 +31,7 @@ The native Study interface now lives in [`ally-study/`](ally-study/). See the [u
 | --- | --- |
 | **Desktop** | Switch between Claude Code and Codex, browse native sessions, follow live activity, and resize the floating window. Reopening restores your selected chat and saved draft. |
 | **Phone** | Continue the same chats, share text and attachments into Ally, review real approval requests, and open the Android assistant or agent monitor. |
-| **Watch** | Hold to talk, browse rich replies and images, switch chats, review supported questions and approvals, and read answers aloud. |
+| **Watch** | Hold to talk, browse rich replies and images, switch chats, review supported questions and approvals, and read answers aloud. Always-on display keeps live agent progress visible past the system's return timer. |
 | **Voice** | Use local transcription or configured Google Cloud streaming speech. Speak over playback to interrupt it; text remains available when voice is offline. |
 | **Circle and draw** | Select a screen region, attach it to your next question, and explore explanations on a movable drawing board with sketch tools and interactive diagrams. |
 | **Stay in control** | Keep drafts per chat, queue follow-ups, steer supported active turns, stop work, and return to older replies without losing the latest response. |
@@ -42,8 +42,18 @@ The native Study interface now lives in [`ally-study/`](ally-study/). See the [u
 - **Useful context:** clipboard and selected-screen attachments, with optional query-time screen attachment controlled by the user.
 - **Activity at a glance:** active, unread, stopped, error, and needs-input states across the desktop and companion surfaces. Phone widgets, Quick Settings, and a Wear tile offer quick entry points.
 - **A consistent look:** coordinated orb, glow, robot, palette, and appearance settings. The compact reader keeps older answers reachable inside a bounded card.
+- **Chat search:** find any conversation by keyword from the sidebar, the notch chat picker, and the assistant's chat selector.
 - **Optional integrations:** cross-chat tools, realtime perception, and robot context can extend the agents through their existing interfaces.
 
+## Bring phone context to your desktop
+
+Opt-in **hold-close handoff** uses nearby Bluetooth plus a deliberate three-second hold to open a local screen-context review. Its on/off preference persists; Android service limits still apply. Review the draft, choose a chat and explicitly Send. Original documents can be attached through Android Share or a system file picker; a screenshot does not transfer the entire file.
+
+Structured context distinguishes observed app/URL/document/media fields from unavailable information. Supported original PDFs can include file details and page count. **Large-file transfers** are chunked and resumable — the desktop bridge and Android client both support restart-safe upload with per-chunk and whole-file SHA-256 integrity (100 MB limit, resume from last acknowledged offset).
+
+**Phone control** via the Ally accessibility service works over any network connection and needs a one-time on-device grant in Android Settings. The optional read-only scrcpy viewer requires ADB and a separate approval. Both require explicit user consent per request.
+
+**Setup and exact limits:** [Device continuity guide](docs/device-continuity.md) · [Remaining features](docs/device-continuity-backlog.md). Android updates and staged desktop changes have separate deployment states; see the guide before assuming a feature is live.
 ## Quick start
 
 For development from source, install a current Node.js LTS release with npm and at least one supported agent: **Claude Code** or **Codex**. Sign in to that agent before using it through Ally.
@@ -74,7 +84,7 @@ Useful desktop shortcuts use **Ctrl** on Windows/Linux and **⌘** on macOS:
 
 | Shortcut | Action |
 | --- | --- |
-| `Ctrl/⌘ + Shift + C` | Show or hide Ally |
+| `Ctrl/⌘ + Shift + C` | Show / hide Ally, or toggle between native notch and floating window |
 | `Ctrl/⌘ + Shift + Q` | Open the compact input |
 | `Ctrl/⌘ + Shift + Space` | Start Circle selection |
 | `Ctrl/⌘ + Shift + M` | Toggle compact / expanded mode |
@@ -144,3 +154,4 @@ Start with the [documentation index](docs/README.md) for setup, daily use, archi
 Ally v2 retired its standalone web build, `ally-remote-service`, Supabase sync, Discord integration, browser extension, and earlier in-app model/tool loop. Current agent work goes through Claude Code or Codex.
 
 A legacy Vercel project still points at the removed service directory. Its build failures are separate from desktop and Android builds. See [the deployment diagnosis](docs/vercel-retired-deployments.md) for the proposed cleanup and its current approval state.
+

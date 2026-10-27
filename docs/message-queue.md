@@ -17,3 +17,10 @@ Ally registers as an Android digital assistant. On Pixel, Android Settings → S
 The service supports invocation from keyguard. A neutral unlock activity requests Android's existing unlock flow before showing chat content; dismissal leaves the phone locked. Hardware assistant invocation starts the supported foreground listening flow after unlock and with microphone permission. Opening the agent monitor does not start recording. See [assistant activation](assistant-activation-routing.md) for the current speech, silence, cancellation, and routing behavior.
 
 After an APK replacement, Android can retain Ally's selected role while its voice-interaction service has no active implementation. Merely checking the role misses this state. Check readiness and, if necessary, reselect None and then Ally through normal Android Settings. Preserve the device's existing power-button preference, pairing, and endpoint; do not rewrite assistant roles or security settings through ADB. See [the binding diagnosis](chat-open-and-assistant-binding.md).
+
+## Forwarded previews (27 October 2026)
+
+Phone/watch queue previews show the actual message after Ally's generated forwarding envelope. Editing and delivery retain the full original text. This prevents distinct forwarded updates from looking identical when the common envelope fills the three-line preview. No content-based deduplication or cancellation is applied: separate intentional updates retain their IDs and order.
+
+The reported screenshot with03 pending entries was checked against persisted desktop authority twice: three unique IDs, each from a separate parent coordination send with distinct body text. App-switch multiplication was not reproduced; Android queue refresh replaces its snapshot rather than appending. Source regression tests and both APK builds pass; coordinated device-access installer must include this preview fix together with the keyboard patch before claiming it live.
+

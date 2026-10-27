@@ -1,10 +1,18 @@
 # Phone control
 
-Ally exposes an Android development adapter through the existing `ally_chats` MCP server. The current Codex or Claude agent plans and operates the phone; there is no second phone model or autonomous background loop. Existing native tools handle notifications, HTTPS links, app launch, alarms and timers first.
+Ally exposes phone control through the existing `ally_chats` MCP server. The current Codex or Claude agent plans and operates the phone; there is no second phone model or autonomous background loop. Existing native tools handle notifications, HTTPS links, app launch, alarms and timers first.
+
+## Connection paths
+
+**Accessibility service (recommended):** No USB or ADB required. Enable the Ally accessibility service once in Android Settings → Accessibility → Ally, or via the Ally phone app under Settings → "Allow Ally to control this phone". The service connects over your existing Wi-Fi or mobile network through the standard Ally device bridge. This path supports all operations listed below including Unicode text input.
+
+**ADB (development):** An alternative path for development use. Requires Android SDK platform-tools, USB debugging or wireless ADB authorized by the owner, and the **debug** Ally companion with Keep connected enabled. Install `adb` so it is reachable at `ANDROID_HOME`, `ANDROID_SDK_ROOT`, or the usual Windows SDK location, or on PATH. Release apps without `run-as` are deliberately unsupported on this path.
+
+Both paths require an explicit per-request user approval on the phone or watch before any operation runs.
 
 ## Setup and scope
 
-Use an Android phone with the updated **debug** Ally companion, Keep connected enabled, and USB debugging or wireless ADB already authorized by the owner. Install Android SDK platform-tools on the desktop (`ANDROID_HOME`, `ANDROID_SDK_ROOT`, or the usual Windows SDK location; otherwise `adb` on PATH). This adapter needs a reachable local ADB transport; the authenticated phone bridge alone does not provide arbitrary UI control across the internet. Release apps without `run-as` are deliberately unsupported.
+Use an Android phone with the updated Ally companion and Keep connected enabled. Install Android SDK platform-tools on the desktop (`ANDROID_HOME`, `ANDROID_SDK_ROOT`, or the usual Windows SDK location; otherwise `adb` on PATH). This adapter needs a reachable local ADB transport; the authenticated phone bridge alone does not provide arbitrary UI control across the internet. Release apps without `run-as` are deliberately unsupported.
 
 The companion writes only its non-secret device UUID to its private `files/phone-control-id`. Desktop `run-as dev.ally.phone cat files/phone-control-id` matches that identity against a currently connected authenticated bridge device. Pairing tokens, app preferences and credentials are never read by this adapter. Multiple USB/Wi-Fi transports can be the same phone; always select an explicit serial and matching deviceId.
 

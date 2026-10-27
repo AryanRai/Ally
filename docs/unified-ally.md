@@ -2,6 +2,8 @@
 
 26 October 2026. This is the implementation and feature inventory, not a claim of completed native runtime QA.
 
+Current implementation and runtime acceptance evidence is tracked in [the parity checklist](unified-ally-parity.md). The tables below describe the original integration inventory; dated checks at the end are historical. Full feature parity is still incomplete.
+
 ## One project
 
 The canonical project is `Active/Exo/Ally`:
