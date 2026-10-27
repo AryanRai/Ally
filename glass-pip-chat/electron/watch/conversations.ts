@@ -1,3 +1,4 @@
+import { codexAccounts } from '../agent/codexAccounts.js';
 import { hiddenConversation, resolveCodexDiscovery } from '../agent/codexDiscovery.js';
 import { unreadState } from '../agent/unread.js';
 import fs from 'node:fs';
@@ -11,7 +12,7 @@ import type { DeviceAttachment, DeviceMedia } from './media.js';
 import { deviceHistoryReply, deviceUserText } from './presentation.js';
 
 export interface WatchMessage extends WatchReply { id: string; role: 'user' | 'assistant'; timestamp: number; steps?: ActivityState['steps']; usage?: AgentUsage; attachments?: DeviceAttachment[]; commentary?: string[] }
-export interface WatchChat { id: string; provider: AgentProvider; title: string; cwd: string; sessionId?: string; createdAt?: number; updatedAt: number; messages: WatchMessage[] }
+export interface WatchChat { codexAccountId?: string; id: string; provider: AgentProvider; title: string; cwd: string; sessionId?: string; createdAt?: number; updatedAt: number; messages: WatchMessage[] }
 interface Dependencies {
   list: (provider: AgentProvider, limit: number) => Promise<AgentSessionSummary[]>;
   load: (provider: AgentProvider, id: string) => Promise<AgentSessionSnapshot>;
@@ -59,7 +60,7 @@ export class WatchConversations {
   create(provider: AgentProvider, cwd: string, id: string = randomUUID()): WatchChat {
     const existing = this.chats.find(c => c.id === id);
     if (existing) return existing;
-    const chat: WatchChat = { id, provider, cwd, title: 'New watch chat', createdAt: Date.now(), updatedAt: Date.now(), messages: [] };
+    const chat: WatchChat = { id, provider, cwd, ...(provider === 'codex' ? { codexAccountId: codexAccounts.route() } : {}), title: 'New watch chat', createdAt: Date.now(), updatedAt: Date.now(), messages: [] };
     this.chats.push(chat); this.save(); return chat;
   }
   async get(id: string): Promise<WatchChat> {
@@ -73,7 +74,7 @@ export class WatchConversations {
     const linked = this.chats.find(c => c.provider === provider && c.sessionId === sessionId);
     if (linked) return linked;
     const messages = watchHistory(snapshot.messages, this.media);
-    const chat: WatchChat = { id, provider, sessionId, cwd: snapshot.cwd ?? '', title: chatTitle(snapshot.title || messages.find(m => m.role === 'user')?.text || `${provider} chat`), createdAt: snapshot.createdAt ?? messages.find(m => m.timestamp > 0)?.timestamp ?? 0, updatedAt: messages.at(-1)?.timestamp || 0, messages };
+    const chat: WatchChat = { id, provider, sessionId, codexAccountId: snapshot.codexAccountId, cwd: snapshot.cwd ?? '', title: chatTitle(snapshot.title || messages.find(m => m.role === 'user')?.text || `${provider} chat`), createdAt: snapshot.createdAt ?? messages.find(m => m.timestamp > 0)?.timestamp ?? 0, updatedAt: messages.at(-1)?.timestamp || 0, messages };
     this.chats.push(chat); this.save(); return chat;
   }
   private async loadLinkedSession(chat: WatchChat): Promise<AgentSessionSnapshot> {

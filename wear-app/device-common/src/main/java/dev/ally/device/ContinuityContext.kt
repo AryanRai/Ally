@@ -10,7 +10,7 @@ internal object ContinuityContext {
     private fun missing(reason:String)=JSONObject().put("status","unavailable").put("reason",reason)
     private fun known(value:Any,source:String)=JSONObject().put("status","available").put("value",value).put("source",source)
     fun envelope(origin:String,appPackage:String?=null,sharedText:String?=null,sourceUri:String?=null,
-        document:JSONObject?=null,screenshot:Boolean=false,intentPage:Int?=null):JSONObject {
+        document:JSONObject?=null,screenshot:Boolean=false,intentPage:Int?=null,media:JSONObject?=null):JSONObject {
         require(origin in listOf("android_share","android_picker","accessibility_snapshot"))
         val url=sharedText?.trim()?.takeIf { it.length<=2048 }?.let { value->
             runCatching { URI(value) }.getOrNull()?.takeIf { it.scheme in listOf("https","http") && !it.host.isNullOrBlank() && it.userInfo==null }?.toString()
@@ -22,8 +22,8 @@ internal object ContinuityContext {
             .put("sourceUri",sourceUri?.takeIf{it.startsWith("content://")&&it.length<=2048}?.let{known(it,"user_granted_local_content_uri").put("scope","originating_phone_only")}?:missing("No readable document URI was supplied"))
             .put("document",document?.let{known(it,"private_copy_of_user_shared_original")}?:missing("No original document attached; screen image is not the document"))
             .put("currentPage",if(intentPage!=null&&intentPage>=1)known(intentPage,"android_share_intent_extra")else missing("Source app did not supply its current page; never inferred from image or filename"))
-            .put("mediaTitle",missing("No supported media-session metadata supplied"))
-            .put("positionMs",missing("No supported playback position supplied"))
+            .put("mediaTitle",media?.optString("title")?.takeIf{it.isNotBlank()}?.let{known(it,"android_media_session")}?:missing("No supported media-session metadata supplied"))
+            .put("positionMs",media?.takeIf{it.has("positionMs")&&it.optLong("positionMs")>=0}?.let{known(it.getLong("positionMs"),"android_media_session")}?:missing("No supported playback position supplied"))
             .put("transcript",missing("No supported transcript supplied"))
             .put("screenImage",if(screenshot)known(true,"opted_in_accessibility_capture")else missing("No screen image captured by this import"))
     }

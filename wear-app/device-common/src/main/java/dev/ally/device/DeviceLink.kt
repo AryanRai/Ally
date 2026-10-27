@@ -363,6 +363,8 @@ class DeviceLinkService : Service() {
                 if (text.length > 32000) return@launch
                 val msg = runCatching { JSONObject(text) }.getOrNull() ?: return@launch
                 when (msg.optString("type")) {
+                    "media_result"->if(MediaContinuation.protocol.value)MediaContinuation.receive(msg)
+                    "acoustic_challenge","acoustic_error"->if(AcousticLink.available)AcousticLink.handler?.invoke(msg)
                     "viewer_offer","viewer_stop"->if(DeviceAccess.protocol.value)DeviceLink.viewerHandler?.invoke(this@DeviceLinkService,msg)
                     "device_access_state" -> if(DeviceAccess.protocol.value)DeviceAccess.receive(this@DeviceLinkService,msg)
                     "tap_target", "tap_review", "tap_feedback", "tap_unavailable", "tap_rejected","tap_session_status" -> DeviceLink.tapHandler?.invoke(this@DeviceLinkService, msg)
@@ -377,6 +379,8 @@ class DeviceLinkService : Service() {
                     }
                     "ready" -> {
                         DeviceAccess.ready(msg.optInt("deviceAccessProtocol")==1)
+                        MediaContinuation.ready(msg.optInt("mediaContinuityProtocol")==1)
+                        AcousticLink.available=msg.optInt("acousticProtocol")==1
                         backoff = 1000L; DeviceLink.status.value = "Connected"
                         if(DeviceLink.kind(this@DeviceLinkService)=="watch")DeviceAccess.reportMaintenance()
                         DeviceLink.tapHandler?.invoke(this@DeviceLinkService, JSONObject().put("type", "tap_connected"))
@@ -406,6 +410,8 @@ class DeviceLinkService : Service() {
         LiveAgentNotifications.clear(this@DeviceLinkService)
         socket = null
         DeviceAccess.disconnected()
+        MediaContinuation.disconnected()
+        AcousticLink.disconnected()
         DeviceLink.viewerHandler?.invoke(this@DeviceLinkService,JSONObject().put("type","viewer_disconnected"))
         DeviceLink.tapHandler?.invoke(this@DeviceLinkService, JSONObject().put("type", "tap_disconnected"))
         SurfaceStatus.failed(this@DeviceLinkService)
@@ -417,5 +423,5 @@ class DeviceLinkService : Service() {
         if(message.optString("type")=="viewer_frame"&&peer.queueSize()>300000)return false
         return peer.send(message.toString())
     }
-    override fun onDestroy() { DeviceAccess.disconnected();DeviceLink.viewerHandler?.invoke(this,JSONObject().put("type","viewer_disconnected"));DeviceLink.tapHandler?.invoke(this, JSONObject().put("type", "tap_disconnected")); LiveAgentNotifications.clear(this);DeviceLink.service = null; scope.cancel(); socket?.cancel(); socket = null; client.dispatcher.executorService.shutdown(); DeviceLink.status.value = "Not connected"; super.onDestroy() }
+    override fun onDestroy() { AcousticLink.disconnected();MediaContinuation.disconnected();DeviceAccess.disconnected();DeviceLink.viewerHandler?.invoke(this,JSONObject().put("type","viewer_disconnected"));DeviceLink.tapHandler?.invoke(this, JSONObject().put("type", "tap_disconnected")); LiveAgentNotifications.clear(this);DeviceLink.service = null; scope.cancel(); socket?.cancel(); socket = null; client.dispatcher.executorService.shutdown(); DeviceLink.status.value = "Not connected"; super.onDestroy() }
 }

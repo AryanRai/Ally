@@ -9,6 +9,8 @@ import path from 'node:path';
 import readline from 'node:readline';
 import { childEnv, isWin, launcherFor, resolveAgentBinary } from './binaries.js';
 import { ClaudeStreamParser, StreamParser } from './parsers.js';
+import { codexAccounts } from './codexAccounts.js';
+import { runCodexTurnCycling } from './codexCycle.js';
 import { runCodexTurn } from './codexRun.js';
 import { runCodexDesktopTurn } from './codexDesktopRun.js';
 import { recoverExactCodexOwner } from './codexOwnerRecovery.js';
@@ -115,6 +117,11 @@ export async function startAgentRun(
   interact?: AgentInteractionHandler,
   interactionSurface: 'watch' | 'desktop' = 'watch',
 ): Promise<string> {
+  if (opts.provider === 'codex') {
+    const codexAccountId = codexAccounts.route(opts.sessionId, opts.codexAccountId);
+    if (opts.sessionId && !opts.ephemeral) codexAccounts.bind(opts.sessionId, codexAccountId);
+    opts = { ...opts, codexAccountId, codexDesktop: codexAccountId === 'default' && opts.codexDesktop };
+  }
   if (opts.resumeToken !== undefined) {
     if (!opts.sessionId || opts.ephemeral) throw Error('Resume needs the original saved chat.');
     opts = { ...opts, prompt: RESUME_PROMPT, images: undefined };
@@ -256,14 +263,18 @@ async function startTrackedRun(
   interact?: AgentInteractionHandler,
   interactionSurface: 'watch' | 'desktop' = 'watch',
 ): Promise<string> {
+  // One attempt on one account; codexCycle moves the same chat to the next account on a usage limit.
+  const startCodex = (o: AgentRunOptions, e: (ev: AgentEvent) => void, bin?: string) => o.codexDesktop && o.sessionId && !o.ephemeral
+    ? runCodexDesktopTurn(o, e, interact, emitFallback => runCodexTurn(o, emitFallback, binOverride, interact, interactionSurface,
+      emitRecovered => runCodexDesktopTurn(o, emitRecovered, interact, undefined, cancelled => recoverExactCodexOwner(o.sessionId!, cancelled))))
+    : runCodexTurn(o, e, bin ?? binOverride, interact, interactionSurface);
   if (opts.provider === 'codex' && opts.codexDesktop && opts.sessionId && !opts.ephemeral) {
     const runId = `run-${Date.now()}-${++runCounter}`;
-    const run = runCodexDesktopTurn(opts, ev => {
+    const run = runCodexTurnCycling(opts, ev => {
       if (ev.kind === 'done') codexRuns.delete(runId);
       if (ev.kind === 'tool_end' && ev.images) ev = { ...ev, images: thumbnails(ev.images) };
       emit(runId, ev);
-    }, interact, emitFallback => runCodexTurn(opts, emitFallback, binOverride, interact, interactionSurface,
-      emitRecovered => runCodexDesktopTurn(opts, emitRecovered, interact, undefined, cancelled => recoverExactCodexOwner(opts.sessionId!, cancelled))));
+    }, (o, e) => startCodex(o, e));
     codexRuns.set(runId, run);
     return runId;
   }
@@ -279,11 +290,11 @@ async function startTrackedRun(
 
   const runId = `run-${Date.now()}-${++runCounter}`;
   if (opts.provider === 'codex') {
-    const run = runCodexTurn(opts, ev => {
+    const run = runCodexTurnCycling(opts, ev => {
       if (ev.kind === 'done') codexRuns.delete(runId);
       if (ev.kind === 'tool_end' && ev.images) ev = { ...ev, images: thumbnails(ev.images) };
       emit(runId, ev);
-    }, bin, interact, interactionSurface);
+    }, (o, e) => startCodex(o, e, bin));
     codexRuns.set(runId, run);
     return runId;
   }

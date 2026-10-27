@@ -158,6 +158,7 @@ internal class PhoneConversation(private val app: Application, private val chatK
     }
     fun voiceError(message: String) { state.update { it.copy(error = message) } }
     fun startRecording() {
+        AcousticProbeService.instance?.cancelForVoice()
         stopSpeaking()
         if (state.value.importingShare || voiceActive || state.value.loading || pendingText != null || inputText != null) return
         if (state.value.selected == null) { voiceError("Choose a conversation before talking."); return }
@@ -423,7 +424,8 @@ internal class PhoneConversation(private val app: Application, private val chatK
                     state.update { it.copy(steps = ChatActivityParser.steps(r), liveAttachments = AttachmentParser.list(r), liveText = r.optString("liveText").take(12000), activity = r.optString("activity", "Working…"), approval = nextApproval) }
                     if (r.optString("status") in setOf("done", "error")) {
                         pulse(true)
-                        turn = null; prefs.edit().remove("phoneTurn").apply()
+                        turn = null
+                        prefs.edit().remove("phoneTurn").apply()
                         // Keep the answer visible even if the separate history read loses the network.
                         val finalReply = r.optJSONObject("reply")?.let(ReplyContentParser::parse)
                         val finalText = finalReply?.text
@@ -438,7 +440,10 @@ internal class PhoneConversation(private val app: Application, private val chatK
                     delay(2000)
                 }
             } catch (e: CancellationException) { throw e } catch (e: Exception) {
-                if (e is BridgeError && e.status == 404) { turn = null; prefs.edit().remove("phoneTurn").apply() }
+                if (e is BridgeError && e.status == 404) {
+                    turn = null
+                    prefs.edit().remove("phoneTurn").apply()
+                }
                 state.update { it.copy(error = e.message ?: "Reconnect to continue") }
             } finally { state.update { it.copy(busy = turn != null, approval = null) } }
         }

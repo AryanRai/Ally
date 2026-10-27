@@ -49,7 +49,8 @@ class ShareToChatActivity : ComponentActivity() {
                 draft=withContext(Dispatchers.IO){store.append(draft,text,sources)}
                 val added=draft.files.filter{it.key !in oldKeys}
                 val contexts=withContext(Dispatchers.IO){added.mapIndexed{i,item->ContinuityContext.envelope(origin,sharedText=text,sourceUri=uris.getOrNull(i)?.toString(),document=DocumentContext.describe(item,store.file(item)),intentPage=if(item.mimeType=="application/pdf")intentPage else null).toString()}}
-                draft=store.addContexts(draft,if(contexts.isEmpty())listOf(ContinuityContext.envelope(origin,sharedText=text).toString())else contexts)
+                val media=MediaContinuation.snapshot?.invoke(this@ShareToChatActivity,null,text)?.takeIf{it.optString("urlSource")=="explicit_android_share"}
+                draft=store.addContexts(draft,if(contexts.isEmpty())listOf(ContinuityContext.envelope(origin,sharedText=text,media=media).toString())else contexts)
                 note="Original files copied into this private draft. Review files and context, choose a chat, then Send."
             }catch(e:Exception){if(e is CancellationException)throw e;note=e.message?:"Could not import original document"}
             finally{busy=false;render();load()}
@@ -209,6 +210,10 @@ class ShareToChatActivity : ComponentActivity() {
         }
         box.addView(textInput(draft.text,"Message (optional)",!busy && pending==null){value->if(value.length<=12000){draft=draft.copy(text=value);store.save(draft)}})
         box.addView(button("Attach original document",!busy&&pending==null&&draft.files.size<6){originalPicker.launch(arrayOf("*/*"))})
+        if(packageName.endsWith(".phone")&&MediaContinuation.review!=null)box.addView(button("Review video continuation on PC",!busy&&pending==null){
+            val media=MediaContinuation.snapshot?.invoke(this,null,draft.text)?:JSONObject().put("reason","Share the original YouTube URL and enter its playback position.")
+            MediaContinuation.review?.invoke(this,media)
+        })
         if(draft.contexts.isNotEmpty()){
             box.addView(button(if(contextDetails)"Hide context details" else "Review context details · ${draft.contexts.size}",!busy){contextDetails=!contextDetails;render()})
             box.addView(label("Screenshots are screen context. Original documents are attached only when you share or choose their files. Missing metadata is marked unavailable.",12f))

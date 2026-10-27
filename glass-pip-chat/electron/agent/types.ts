@@ -20,6 +20,8 @@ export interface AgentRunOptions {
   /** Receipt from the exact stopped session; never a replay of its last input. */
   resumeToken?: string;
   provider: AgentProvider;
+  /** Stable profile; never changes for an existing thread. */
+  codexAccountId?: string;
   prompt: string;
   cwd: string;
   /** Agent session to resume; omit to start a new one */
@@ -39,6 +41,7 @@ export interface AgentRunOptions {
 }
 
 export interface AgentSessionSnapshot {
+  codexAccountId?: string;
   createdAt?: number;
   interrupted?: { token: string; stoppedAt: number };
   canStop?: boolean;
@@ -58,7 +61,7 @@ export type AgentEvent =
   | { kind: 'accepted'; sessionId: string; turnId?: string }
   | { kind: 'input'; text: string; mode: 'steered' | 'queued'; queuedId?: string }
   | { kind: 'continuation' }
-  | { kind: 'session'; sessionId: string }
+  | { kind: 'session'; sessionId: string; codexAccountId?: string }
   | { kind: 'text'; text: string; itemId?: string; phase?: 'commentary' | 'final_answer' }
   | { kind: 'thinking'; text: string }
   | { kind: 'tool_start'; id: string; name: string; input?: Record<string, unknown> }
@@ -66,7 +69,7 @@ export type AgentEvent =
   | { kind: 'tool_update'; id: string; input: Record<string, unknown> }
   /** `images`: data URLs the tool returned (screenshots, image reads) */
   | { kind: 'tool_end'; id: string; output?: string; isError?: boolean; images?: string[] }
-  | { kind: 'done'; delivery?: 'not_sent' | 'uncertain' | 'accepted'; stopped?: boolean; sessionId?: string; isError?: boolean; error?: string; costUsd?: number; usage?: AgentUsage }
+  | { kind: 'done'; delivery?: 'not_sent' | 'uncertain' | 'accepted'; usageLimit?: boolean; stopped?: boolean; sessionId?: string; isError?: boolean; error?: string; costUsd?: number; usage?: AgentUsage }
   | { kind: 'stderr'; text: string };
 
 /** Per-turn totals the CLIs report. */
@@ -106,6 +109,7 @@ export interface AgentModel {
 }
 
 export interface AgentSessionSummary {
+  codexAccountId?: string;
   createdAt?: number;
   originalSessionId?: string;
   provider: AgentProvider;

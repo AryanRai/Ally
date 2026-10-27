@@ -227,7 +227,7 @@ it('continues the selected empty desktop chat and links its first native session
   fake.root=fs.mkdtempSync(path.join(os.tmpdir(),'ally-empty-study-'));
   messageQueue.configure(path.join(fake.root,'queue.json'));
   fs.writeFileSync(path.join(fake.root,'watch-bridge.json'),JSON.stringify({enabled:true,token:'synthetic-only',port:0,sessions:{}}));
-  const selected={chatId:'local-empty',provider:'codex' as const,title:'New local chat',cwd:fake.root,permission:'readonly' as const};
+  const selected={chatId:'local-empty',provider:'codex' as const,codexAccountId:'11111111-1111-1111-1111-111111111111',title:'New local chat',cwd:fake.root,permission:'readonly' as const};
   chatSelection.set(selected,chatSelection.snapshot().version,'desktop');
   let emit!:(event:AgentEvent)=>void;
   fake.start.mockImplementation(async(_options,send)=>{emit=event=>send('run',event);return 'run';});
@@ -240,6 +240,7 @@ it('continues the selected empty desktop chat and links its first native session
   expect(response.status).toBe(202);await vi.waitFor(()=>expect(fake.start).toHaveBeenCalledOnce());
   expect(fake.start.mock.calls[0][0].sessionId).toBeUndefined();
   expect(fake.start.mock.calls[0][0].cwd).toBe(fake.root);
+  expect(fake.start.mock.calls[0][0].codexAccountId).toBe(selected.codexAccountId);
   emit({kind:'session',sessionId:'real-session'});
   expect(chatSelection.snapshot().selected).toMatchObject({...selected,sessionId:'real-session'});
   emit({kind:'text',text:'```javascript\nstep(1);say("Hello");\n```'});emit({kind:'done'});

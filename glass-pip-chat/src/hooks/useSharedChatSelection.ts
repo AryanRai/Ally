@@ -31,7 +31,7 @@ export function useSharedChatSelection(chat: Chat | null, restored: boolean, per
     // real session before the desktop-origin echo guard; do not open a duplicate.
     if(selected?.sessionId && selected.chatId===local?.id && !local.agent?.sessionId && local.agent?.provider===selected.provider && latest.current.linkSession) {
       lastLocal.current=`${selected.provider}:${selected.sessionId}`;
-      latest.current.linkSession(local.id,{...local.agent,sessionId:selected.sessionId,cwd:selected.cwd ?? local.agent.cwd});
+      latest.current.linkSession(local.id,{...local.agent,sessionId:selected.sessionId,codexAccountId:selected.codexAccountId ?? local.agent.codexAccountId,cwd:selected.cwd ?? local.agent.cwd});
       return;
     }
     if (!selected) return;
@@ -45,7 +45,7 @@ export function useSharedChatSelection(chat: Chat | null, restored: boolean, per
     if (selected.sessionId && identity(latest.current.chat) !== `${selected.provider}:${selected.sessionId}`) {
       pendingTarget.current = target;
       pendingSource.current = identity(local);
-      void latest.current.openSession({ provider: selected.provider, id: selected.sessionId, title: selected.title, cwd: selected.cwd, updatedAt: 0 }).catch(e => setError(`Chat sync: ${String(e)}`));
+      void latest.current.openSession({ provider: selected.provider, id: selected.sessionId, title: selected.title, cwd: selected.cwd, codexAccountId: selected.codexAccountId, updatedAt: 0 }).catch(e => setError(`Chat sync: ${String(e)}`));
     }
   };
   useEffect(() => {
@@ -57,21 +57,21 @@ export function useSharedChatSelection(chat: Chat | null, restored: boolean, per
     return () => { alive = false; stop(); };
   }, []);
   const key = identity(chat);
-  const metadata = JSON.stringify([key, chat?.title, chat?.agent?.cwd, permission]);
+  const metadata = JSON.stringify([key, chat?.title, chat?.agent?.cwd, chat?.agent?.codexAccountId, permission]);
   useEffect(() => {
     if (!ready || (pendingTarget.current && pendingTarget.current !== key && pendingSource.current === key) || (key === lastLocal.current && metadata === lastMetadata.current)) return;
     if (pendingTarget.current === key || (pendingTarget.current && pendingSource.current !== key)) pendingTarget.current = undefined;
     lastLocal.current = key;
     lastMetadata.current = metadata;
     const linked = chat?.agent;
-    if (linked && state.current?.selected?.provider === linked.provider && state.current.selected.sessionId === linked.sessionId && state.current.selected.title === chat.title && state.current.selected.cwd === linked.cwd && state.current.selected.permission === permission) return;
+    if (linked && state.current?.selected?.provider === linked.provider && state.current.selected.sessionId === linked.sessionId && state.current.selected.title === chat.title && state.current.selected.cwd === linked.cwd && state.current.selected.codexAccountId === linked.codexAccountId && state.current.selected.permission === permission) return;
     serial.current = serial.current.catch(() => {}).then(async () => {
       if (key !== identity(latest.current.chat) || !state.current) return;
       const current = latest.current.chat, agent = current?.agent;
       const version = state.current.version;
       const result = await window.pip.agent!.setSelection(agent ? {
         chatId: agent.sessionId ? `${agent.provider}:${agent.sessionId}` : current!.id, provider: agent.provider, sessionId: agent.sessionId,
-        title: current!.title, cwd: agent.cwd, permission: latest.current.permission,
+        title: current!.title, cwd: agent.cwd, codexAccountId: agent.codexAccountId, permission: latest.current.permission,
       } : null, version);
       if (state.current.version === version) state.current = result;
       if (!result.accepted && key === identity(latest.current.chat)) receive.current(result, true);

@@ -488,6 +488,9 @@ private fun PhoneSettings(link: String,modifier: Modifier, appearance: ()->Unit)
         SettingRow("shield","Device access","Transport readiness · pair from your watch") {
             context.startActivity(Intent(context,dev.ally.device.DeviceAccessActivity::class.java))
         }
+        SettingRow("play","Video continuation","Continue reviewed YouTube playback on your PC") {
+            context.startActivity(Intent(context,MediaHandoffActivity::class.java))
+        }
         SettingRow("shield","Phone viewer","Review a pending PC screen-sharing request") {
             context.startActivity(Intent(context,PhoneStreamActivity::class.java))
         }

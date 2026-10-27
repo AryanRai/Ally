@@ -63,6 +63,23 @@ export function nativeContext(body,{includeHistory=true}={}) {
     : selectedContext(body);
   if(!clean)return '{}';
   if(clean.length<=30000)return clean;
+  // Keep the editable native scene as one data object: slicing through its JSON
+  // loses ownership/revision and can make follow-up edits guess at stale marks.
+  if(!includeHistory) {
+    const context=JSON.parse(clean), drawing=context.drawing_on_screen;
+    if(typeof drawing==='string') {
+      const marker='Editable native scene (data): ', at=drawing.lastIndexOf(marker);
+      if(at>=0) {
+        try {
+          const scene=JSON.parse(drawing.slice(at+marker.length));
+          if(scene?.version===1 && JSON.stringify(scene).length<=24000) {
+            return JSON.stringify({native_scene:scene,drawing_on_screen:drawing.slice(0,Math.min(at,1200)),
+              screenshot:context.screenshot,front_app:context.front_app,contextTruncated:true});
+          }
+        } catch { /* Never interpret a partial or invalid scene as an editable state. */ }
+      }
+    }
+  }
   return JSON.stringify({contextExcerpt:clean.slice(0,12000)+'\n…\n'+clean.slice(-14000),contextTruncated:true});
 }
 

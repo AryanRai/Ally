@@ -26,7 +26,7 @@ it('requires bridge authorization and rejects browser origins', async () => {
 it('rejects an unpaired device', async () => { const ws = await setup({}); const [error] = await once(ws, 'error'); expect(error.message).toContain('401'); });
 it('coexists with speech upgrade handling and waits for a real decision', async () => {
   const ws = await setup(); const phone = messages(ws); await once(ws, 'open'); ws.send(JSON.stringify({ type: 'hello', deviceId: 'phone-one', kind: 'phone' }));
-  expect((await phone('ready')).deviceAccessProtocol).toBe(1); await phone('interaction_sync');
+  const ready=await phone('ready');expect(ready.deviceAccessProtocol).toBe(1);expect(ready.mediaContinuityProtocol).toBe(1); await phone('interaction_sync');
   const watch = new WebSocket(`ws://127.0.0.1:${(server.address() as any).port}/v1/devices/live`, { headers: { Authorization: 'Bearer paired' } }); clients.push(watch);
   const wearable = messages(watch); await once(watch, 'open'); watch.send(JSON.stringify({ type: 'hello', deviceId: 'watch-one', kind: 'watch' })); await wearable('ready'); await wearable('interaction_sync');
   const result = mocks.tools.get('phone_notify').handler({ title: 'Test', body: 'Synthetic' }, { caller: 'codex:session-1234' });

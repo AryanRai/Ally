@@ -44,6 +44,15 @@ internal object PhysicalTapCapture {
         if (ContextHandoffLauncher.openPending(service)) return false
         val window = allowed(service)
         val appPackage=service.windows.firstOrNull{it.id==window}?.root?.packageName?.toString()
+        if(DeviceLink.prefs(service).getBoolean("media.enabled",false)&&appPackage == "com.google.android.youtube"){
+            val media=NativeMedia.snapshot(service,appPackage,null)
+            if(media!=null){
+                check(stillAllowed()){"Hold cancelled"};beforeReview();check(stillAllowed()){"Hold cancelled"}
+                NativeMedia.install();dev.ally.device.MediaContinuation.review?.invoke(service,media)
+                // Media review is independent of screenshot/chat/control-viewer handoff receipts.
+                return true
+            }
+        }
         val bitmap = suspendCancellableCoroutine<Bitmap> { c ->
             val callback = object : AccessibilityService.TakeScreenshotCallback {
                 override fun onSuccess(result: AccessibilityService.ScreenshotResult) {

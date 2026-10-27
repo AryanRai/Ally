@@ -44,6 +44,7 @@ export interface Chat {
   /** Set when this chat is backed by a Claude Code / Codex session */
   agent?: {
     provider: 'claude' | 'codex';
+    codexAccountId?: string;
     /** Agent session id; unset until the first turn returns one */
     sessionId?: string;
     /** Original exec session retained when Codex history is forked for interactive use. */

@@ -49,6 +49,7 @@ import CircleSelectionControls from './visualTutor/CircleSelectionControls';
 import { meetingReply } from './chat/CollapsedMeetingControls';
 import ExpandedHeader from './chat/ExpandedHeader';
 import ChatInput from './chat/ChatInput';
+import CodexAccountControl from './chat/CodexAccountControl';
 import MessageQueueStack from './chat/MessageQueueStack';
 import ChatMessage, { AgentReply } from './chat/ChatMessage';
 import { Conversation, ConversationContent, ConversationEmptyState, ConversationScrollButton } from '@/components/ai-elements/conversation';
@@ -648,6 +649,15 @@ export default function GlassChatPiP() {
                 <PerceptionBar perception={perception} chat={activeChat} onOpenSession={openMeetingChat} />
                 <MessageQueueStack chatId={activeChat?.agent?.sessionId ? `${activeChat.agent.provider}:${activeChat.agent.sessionId}` : undefined} />
                 <ChatInput
+                  accountControls={conversation.provider === 'codex' && <CodexAccountControl key={activeChat?.id}
+                  accountId={activeChat?.agent?.codexAccountId} hasSession={!!activeChat?.agent?.sessionId}
+                  disabled={activeIsWorking || externalWorking}
+                  onChoose={id => {
+                    if (activeIsWorking || externalWorking) return;
+                    const target = activeChat?.agent?.sessionId ? chats.create() : activeChat ?? chats.create();
+                    chats.setAgent(target.id, { provider: 'codex', codexAccountId: id, cwd: conversation.cwd });
+                    if (activeChat?.agent?.sessionId) chats.rename(target.id, `Handoff from ${activeChat.title}`);
+                  }} />}
                   ref={inputRef}
                   input={input}
                   setInput={setInput}

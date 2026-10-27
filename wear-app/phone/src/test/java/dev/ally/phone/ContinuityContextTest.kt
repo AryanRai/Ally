@@ -9,6 +9,7 @@ import java.nio.file.Files
 import java.io.ByteArrayInputStream
 
 class ContinuityContextTest {
+    @Test fun explicitNativeMediaFieldsKeepAvailabilityAndProvenance(){val c=ContinuityContext.envelope("android_share",sharedText="https://youtu.be/abcdefghijk",media=JSONObject().put("title","Example").put("positionMs",45000));assertEquals("Example",c.getJSONObject("mediaTitle").getString("value"));assertEquals("android_media_session",c.getJSONObject("positionMs").getString("source"));assertEquals("unavailable",c.getJSONObject("transcript").getString("status"))}
     @Test fun screenCaptureDoesNotInventDocumentUrlPageOrMedia() {
         val c=ContinuityContext.envelope("accessibility_snapshot",appPackage="com.example.reader",screenshot=true)
         assertEquals("com.example.reader",c.getJSONObject("activeApp").getString("value"))

@@ -1,3 +1,4 @@
+import CodexAccountSettings from './CodexAccountSettings';
 import { useEffect, useState } from 'react';
 import { FolderOpen, CheckCircle2, XCircle, LoaderCircle } from 'lucide-react';
 import { openClaudeLogin } from '@/lib/claudeLogin';
@@ -47,6 +48,7 @@ export default function AgentSettingsSection({ platform, theme }: AgentSettingsS
 
   return (
     <div className="space-y-3">
+      <CodexAccountSettings />
       <h3 className={cn('text-sm font-medium', heading)}>Agents</h3>
 
       <div className={cn('p-3 rounded-lg border space-y-3', box)}>

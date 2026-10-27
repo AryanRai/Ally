@@ -1,5 +1,13 @@
 /** On-demand signatures from the bundled native engine 1.6 and pieces. */
 export const NATIVE_STUDY_REFERENCES = {
+  editing: {
+    api: `Edit existing native 2D marks; do not cover them or redraw the board. Read "Editable native scene (data)" in current screen context: boardId, revision, groups, objects (m IDs, semanticIds, geometry, bounds, visible/deleted), receipts and results. If absent, this runtime is not upgraded; never invent sceneEdit support. Existing move/moveTo/scale/recolor/restyle/erase commands accept m IDs or arrays, but have no retry guards.
+sceneEdit({boardId,revision,requestId,op,...}) is a drawing command after step()/say(), not a tool call. First bind an unbound scene with op:"bind", revision:0 and a unique lesson boardId; reuse that boardId thereafter. Each successful NEW command increments revision by1; an identical retry uses the SAME requestId and original revision and changes nothing. Conflicting IDs, stale revisions and wrong boards fail in results without changes. Predict revisions only for your own sequential edits; re-read current state each follow-up.
+op:"group",name:"car",ids:["m2","m3",...] makes a stable semantic alias for existing marks, including wheels/arrow/label. IDs may name groups or individual m IDs; nested groups flatten to member marks. Other ops: move {id,dx,dy}; moveTo {id,x,y} uses group bounding-box CENTER; scale {id,k} scales group together; recolor {id,color}; restyle {id,style:{width,size,fill,color,font,dash}}; update {id,patch:{text,at:[x,y],pts:[[x,y],...],r,rx,ry,w,h}} (only fields valid for the exact primitive); hide/show/delete {id}; undo/redo (no id). Delete restores via undo. Geometry uses the mark's local coordinates before its __xf transform. Undo/redo rejects external changes. New edits clear redo. Groups/history persist across native follow-ups; clear/new lesson resets. Limits:64 undo steps,512 receipts,300 objects/24KB readback (truncated:true means don't guess missing geometry). Native 3D retains figure handles; editing currently covers 2D primitives. Do not bind a different chat/board or call startOver for a targeted edit. Check next observed results before claiming success.`,
+    example: `step(1); say("I will move the car and its attached labels together.");
+// Use actual boardId/revision/IDs from current scene state; do not copy these placeholders.
+sceneEdit({boardId:"bridge-lesson-unique",revision:2,requestId:"car-left-1",op:"move",id:"car",dx:-350,dy:0});`,
+  },
   graph: {
     api: `graph(x,y,w,h,{x:[min,max],y:[min,max],ticks:true,grid:true,xLabel,yLabel}) returns g.
 g.plot(fnOrArrayOfXY,{tone,samples,from,to}); g.line([x,y],[x,y],options); g.shift(series,dx,dy,options); g.cross(series,series) returns data [x,y] or null; g.point(x,y,{label,guides:true}); g.at(x,y) returns screen [x,y]. Keep ranges finite and samples <=128.`,
@@ -8,6 +16,14 @@ const lessonGraph=graph(120,180,480,250,{x:[0,6.28],y:[-1.5,1.5],ticks:true,xLab
 const lessonWave=lessonGraph.plot(t=>sin(t),{tone:"blue",samples:64});
 step(2); say("Moving it right delays the signal.");
 lessonGraph.shift(lessonWave,0.8,0,{tone:"orange"});`,
+  },
+  waves: {
+    api: `Interactive waves live in the existing caption-cued Study card, not in the native drawing interpreter. Use ally_chats study_diagram with the current boardId, a stable id, title, cue and preset:"waves" (amplitude/frequency/phase) or preset:"fourier" (square/sawtooth harmonic sums, 1–12 terms). Omit html. No libraries, network or continuous animation loop. Sliders update locally without another model call. Controls are accessible in the diagram; expand it if needed. The tool stages a card; it appears only when its cue is spoken. Do not claim it appeared before then. Reusing an id replaces the card and resets its controls; use a new id for the next teaching step. These are illustrative dimensionless signals, not inferred measurements.`,
+    example: `// First call study_diagram outside this drawing program:
+// {boardId:"<current board>",id:"wave-basics",title:"Explore a wave",cue:"Try changing the phase.",preset:"waves"}
+step(1); say("Try changing the phase.");
+// In a later step, stage a new fourier card with another exact cue.
+step(2); say("Now build a square wave from harmonics.");`,
   },
   timeline: {
     api: `timeline(x,y,width,[{date:numberOrString,label:string}],{slots:'above'|'below'|'alternate',tone}) returns t. t.at(date) returns screen [x,y]; t.slot(index) returns {x,y,w,h,cx,cy}. Leave room for short labels.`,
@@ -49,7 +65,7 @@ cardGraph.plot(t=>sin(t),{tone:"blue",samples:64});`,
 
 export type NativeStudyTopic = keyof typeof NATIVE_STUDY_REFERENCES;
 export function nativeStudyReference(topic: unknown): string {
-  if(typeof topic!=='string'||!Object.hasOwn(NATIVE_STUDY_REFERENCES,topic))throw Error('Choose graph, timeline, scene3d, figure or cards.');
+  if(typeof topic!=='string'||!Object.hasOwn(NATIVE_STUDY_REFERENCES,topic))throw Error('Choose editing, graph, waves, timeline, scene3d, figure or cards.');
   const reference=NATIVE_STUDY_REFERENCES[topic as NativeStudyTopic];
   return `${reference.api}\nExample (adapt to the question and screen dimensions):\n\`\`\`javascript\n${reference.example}\n\`\`\`\nKeep native progressive drawing and step()/say() speech. This reference does not itself display a drawing.`;
 }

@@ -11,6 +11,7 @@ import { text } from '../chatsMcp/protocol.js';
 import { TutorModel, tutorPrompt } from './model.js';
 import { MAX_DIAGRAM_HEIGHT, MAX_DIAGRAM_IMAGES, type TutorAction, type TutorBoard, type TutorCapture } from './types.js';
 import { prepareDiagramImages } from './diagramMedia.js';
+import { studyDiagramContent } from './waveDiagram.js';
 import { restoreFloatingLevel } from '../windowFloating.js';
 import { chatSelection } from '../agent/selection.js';
 import { studyPresentation, submitNativeStudy } from '../surface/coordinator.js';
@@ -113,7 +114,7 @@ export function registerVisualTutorIpc(getMain: () => BrowserWindow | null): voi
     } else if (board.sessionKey !== input.sessionKey) { board.sessionKey = input.sessionKey; model.start(board); }
     if (input.imagePath) selectionImagePath = input.imagePath;
     publish();
-    return `Shared Study board: ${board.id}. For interactive HTML/SVG cards use ally_chats study_diagram with this boardId. cue must exactly match a short say() sentence: the card appears on that spoken caption. Update a stable id incrementally; new id means next step. Start a short spoken beat before building a large diagram. visual_tutor_read includes user sketches. Keep screen annotations in native step()/say(), and actions in agent tools.`;
+    return `Shared Study board: ${board.id}. For interactive HTML/SVG cards use ally_chats study_diagram with this boardId. Built-in preset waves or fourier provides responsive local controls without writing html; native_study_reference(topic: waves) explains it. cue must exactly match a short say() sentence: the card appears on that spoken caption. Update a stable id incrementally; new id means next step. Start a short spoken beat before building a large diagram. visual_tutor_read includes user sketches. Keep screen annotations in native step()/say(), and actions in agent tools.`;
   });
   app.once('will-quit', () => { unregisterStudy(); studyPresentation.off('caption', caption); });
   ipcMain.handle('tutor:study', async (event, id: string, words: unknown) => {
@@ -211,13 +212,14 @@ export function registerVisualTutorIpc(getMain: () => BrowserWindow | null): voi
   registerDeviceTool({ name: 'visual_tutor_read', description: 'Read an explicitly opened Ally visual tutor board, including teaching steps, screenshot time and user sketches. Requires boardId from the user’s visual tutor prompt. No new capture.',
     inputSchema: { type: 'object', properties: { boardId: { type: 'string' } }, required: ['boardId'], additionalProperties: false },
     handler: async args => { model.require(args.boardId); const board = model.get()!; return text(JSON.stringify({ ...board, instructions: tutorPrompt(board) })); } });
-  registerDeviceTool({ name: 'study_diagram', description: 'Stage or update a spacious interactive HTML/SVG Study card with images, charts, custom diagrams and local scripts/controls. Stable id updates progressively; new id adds a step. cue matches a short spoken sentence so the card follows live narration alongside native drawing and agent tools. For local images/page previews pass assets:[{id,path}] with absolute raster paths, and use <img src="ally-image:ID"> in HTML; do not paste base64 into HTML. Images are fitted automatically; original files are unchanged. Isolated card has no network/files/parent/desktop access. Read sketches with visual_tutor_read.',
-    inputSchema: { type: 'object', properties: { boardId: { type: 'string' }, id: { type: 'string', maxLength: 80 }, title: { type: 'string', maxLength: 120 }, cue: { type: 'string', minLength: 4, maxLength: 300 }, html: { type: 'string', maxLength: 160000 }, height: { type: 'integer', minimum: 120, maximum: MAX_DIAGRAM_HEIGHT }, assets: { type: 'array', maxItems: MAX_DIAGRAM_IMAGES, items: { type: 'object', properties: { id: { type: 'string', maxLength: 40 }, path: { type: 'string' } }, required: ['id','path'], additionalProperties: false } } }, required: ['boardId', 'id', 'title', 'cue', 'html'], additionalProperties: false },
+  registerDeviceTool({ name: 'study_diagram', description: 'Stage or update a spacious interactive HTML/SVG Study card with images, charts, custom diagrams and local scripts/controls. Stable id updates progressively; new id adds a step. cue matches a short spoken sentence so the card follows live narration alongside native drawing and agent tools. For interactive wave/phase controls use preset:waves; for harmonic sums use preset:fourier, omitting html. For local images/page previews pass assets:[{id,path}] with absolute raster paths, and use <img src="ally-image:ID"> in HTML; do not paste base64 into HTML. Images are fitted automatically; original files are unchanged. Isolated card has no network/files/parent/desktop access. Read sketches with visual_tutor_read.',
+    inputSchema: { type: 'object', properties: { boardId: { type: 'string' }, id: { type: 'string', maxLength: 80 }, title: { type: 'string', maxLength: 120 }, cue: { type: 'string', minLength: 4, maxLength: 300 }, html: { type: 'string', maxLength: 160000 }, preset: { type: 'string', enum: ['waves', 'fourier'] }, height: { type: 'integer', minimum: 120, maximum: MAX_DIAGRAM_HEIGHT }, assets: { type: 'array', maxItems: MAX_DIAGRAM_IMAGES, items: { type: 'object', properties: { id: { type: 'string', maxLength: 40 }, path: { type: 'string' } }, required: ['id','path'], additionalProperties: false } } }, required: ['boardId', 'id', 'title', 'cue'], oneOf: [{ required: ['html'], not: { required: ['preset'] } }, { required: ['preset'], not: { required: ['html'] } }], additionalProperties: false },
     handler: async args => {
       const board = model.require(args.boardId);
       if (board.presentation !== 'study' || typeof args.cue !== 'string' || args.cue.length < 4 || args.cue.length > 300) throw Error('Use the current Study session and an exact short spoken cue.');
+      const html = studyDiagramContent(args);
       const images = await prepareDiagramImages(args.assets);
-      const next = model.draw(board.id, { id: args.id, title: args.title, explanation: args.cue, marks: [], diagram: { html: args.html, height: args.height, images } });
+      const next = model.draw(board.id, { id: args.id, title: args.title, explanation: args.cue, marks: [], diagram: { html, height: args.height ?? (args.preset ? 620 : undefined), images } });
       revealCue(cues.stage(String(args.id), args.cue)); publish();
       return text('Study card staged. Say its exact cue in the live drawing program to reveal it.', { boardId: next.id, steps: next.steps.length });
     } });

@@ -18,15 +18,24 @@ class PhysicalTapService : Service() {
     companion object {
         const val STOP = "tap.stop"
         const val CALIBRATE_NEAR = "tap.calibrate.near"
+        const val CALIBRATE_FAR = "tap.calibrate.far"
         val status = MutableStateFlow("Hold-close handoff is off")
         val active = MutableStateFlow(false)
         val gestureStatus = MutableStateFlow("Waiting for a close hold")
+        val diagnostic=MutableStateFlow("Waiting for a radio sample")
         private var instance: PhysicalTapService? = null
         fun install() { DeviceLink.tapHandler = { _, message -> instance?.message(message) } }
     }
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val rules = PhysicalTapRules()
     private val hold = ProximityHold()
+    private val approach = CalibratedApproach()
+    private val audioApproach=AudioApproachGate()
+    private var farSamples: List<Int>? = null
+    private var calibrationLabel = ""
+    private var lastCalibrationSample = 0L
+    private val reviewConsent=ReviewSwipeConsent()
+    private var audioAttemptAt=0L
     private var overlay: HoldHandoffOverlay? = null
     private var scanner: BluetoothLeScanner? = null
     private var listening = false
@@ -41,8 +50,16 @@ class PhysicalTapService : Service() {
     private var peerProtocol=0
     private var holdId:String?=null
     private var lastProgressAt=0L
+    private var lastDiagnosticAt=0L
+    private var lastResumeAttempt=0L
     private val prefs get() = DeviceLink.prefs(this)
     private fun clock() = SystemClock.elapsedRealtime()
+    private fun diagnose(stage:String){
+        val now=clock();diagnostic.value=stage
+        if(now-lastDiagnosticAt<1000)return
+        lastDiagnosticAt=now
+        prefs.edit().putString("hold.diagnostic",JSONObject().put("stage",stage).put("at",System.currentTimeMillis()).put("rssi",latestRssi).put("median",rules.medianRssi(now)).put("holdProgress",hold.progress(now)).put("audioActive",AcousticProbeService.active.value).put("audioNear",AcousticProbeService.near(this)).put("audioCalibrated",prefs.getBoolean("acoustic.calibrated",false)).put("waitingAudioDeparture",audioApproach.waitingForDeparture()).put("audioStatus",AcousticProbeService.status.value.take(240)).toString()).apply()
+    }
     private fun gesture(message: String) { gestureStatus.value = message; prefs.edit().putString("tap.lastGesture", message).apply() }
     private fun unlocked() = getSystemService(PowerManager::class.java).isInteractive && !getSystemService(KeyguardManager::class.java).isDeviceLocked
     private fun optedIn() = prefs.getBoolean("hold.enabled", false) && prefs.getBoolean("tap.capture", false)
@@ -66,25 +83,40 @@ class PhysicalTapService : Service() {
             if (rules.target?.beacon != token) return
             val now = clock(); latestRssi = result.rssi
             rules.radio(token, result.rssi, now)
-            if (calibrationUntil > now) { if (calibrationRssi.size < 80) calibrationRssi.add(result.rssi); return }
+            if (calibrationUntil > now) {
+                if(result.rssi in -100..-15 && now-lastCalibrationSample>=200){
+                    lastCalibrationSample=now
+                    if(calibrationRssi.size<80)calibrationRssi.add(result.rssi)
+                    status.value="$calibrationLabel · ${minOf(calibrationRssi.size,15)}/15 readings · ${result.rssi} dBm · keep still"
+                }
+                return
+            }
             // A weak latest reading cancels without waiting for the rolling median.
-            val near = result.rssi >= prefs.getInt("tap.rssi", -55) && rules.near(now, prefs.getInt("tap.rssi", -55))
-            hold.observe(near, now)
-            if (!hold.requiresDeparture() && prefs.getBoolean("hold.awaitDeparture",false)) prefs.edit().putBoolean("hold.awaitDeparture",false).apply()
-            if (!near) cancelAttempt("Moved away · hold cancelled", reset = false)
+            val calibrated=prefs.getBoolean("hold.calibrated2",false)
+            val threshold=prefs.getInt("tap.rssi",-55)
+            val median=rules.medianRssi(now)
+            val near = calibrated && result.rssi >= threshold && rules.near(now, threshold)
+            val far = calibrated && result.rssi <= prefs.getInt("hold.farRssi",-70) && median?.let{it<=prefs.getInt("hold.farRssi",-70)}==true
+            val audio=prefs.getBoolean("acoustic.enabled",false)
+            val radioPresent=result.rssi>=threshold-12&&rules.near(now,threshold-10)
+            val qualified = if(audio)audioApproach.observe(radioPresent,AcousticProbeService.far(this@PhysicalTapService)) else approach.observe(near, far, now)
+            // A silent qualification/backoff is not evidence of actual departure.
+            hold.observe(if(audio)qualified else if (hold.requiresDeparture()) !far else qualified, now)
+            if (!hold.requiresDeparture() && prefs.getBoolean("hold.awaitDeparture",false)&&(!audio||AcousticProbeService.far(this@PhysicalTapService))) prefs.edit().putBoolean("hold.awaitDeparture",false).apply()
+            if (if(audio)!radioPresent else !near) cancelAttempt("Moved away · hold cancelled", reset = false)
         }
     }
     override fun onBind(intent: Intent?): IBinder? = null
     override fun onCreate() {
         super.onCreate(); instance = this
-        if(prefs.getBoolean("hold.awaitDeparture",false))hold.blockUntilDeparture()
+        if(prefs.getBoolean("hold.awaitDeparture",false)){hold.blockUntilDeparture();audioApproach.block()}
         val filter = IntentFilter().apply { addAction(Intent.ACTION_SCREEN_OFF); addAction(Intent.ACTION_SCREEN_ON); addAction(Intent.ACTION_USER_PRESENT) }
         if (Build.VERSION.SDK_INT >= 33) registerReceiver(receiver, filter, RECEIVER_NOT_EXPORTED) else registerReceiver(receiver, filter)
         scope.launch { while (isActive) { tick(); delay(50) } }
     }
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == STOP) { prefs.edit().putBoolean("hold.enabled",false).apply();stopSelf(); return START_NOT_STICKY }
-        if (active.value) { if (intent?.action == CALIBRATE_NEAR) calibrate(); return START_STICKY }
+        if (active.value) { if (intent?.action == CALIBRATE_NEAR || intent?.action == CALIBRATE_FAR) calibrate(intent.action == CALIBRATE_FAR); return START_STICKY }
         val manager = getSystemService(NotificationManager::class.java)
         manager.createNotificationChannel(NotificationChannel("ally-physical-tap", "Hold-close handoff", NotificationManager.IMPORTANCE_LOW).apply { setSound(null, null) })
         val open = PendingIntent.getActivity(this, 51, Intent(this, PhysicalTapSettingsActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
@@ -113,6 +145,8 @@ class PhysicalTapService : Service() {
         } catch (e: Exception) { pause(); status.value = "${e.message?.take(140)}. Use manual screen review." }
     }
     private fun cancelAttempt(reason: String, reset: Boolean = true) {
+        if(reviewConsent.active){hold.blockUntilDeparture();audioApproach.block();prefs.edit().putBoolean("hold.awaitDeparture",true).apply()}
+        reviewConsent.clear()
         if(peerProtocol>=2)holdId?.let{DeviceLink.sendControl(JSONObject().put("type","tap_hold").put("id",it).put("cancel",true))};holdId=null
         val requested = pending != null || reviewJob?.isActive == true
         val inProgress = pending != null || reviewJob?.isActive == true || hold.progress(clock()) > 0f
@@ -123,29 +157,60 @@ class PhysicalTapService : Service() {
         if (requested) renewProof()
     }
     private fun pause() {
-        enabled = false; sendEnabled(); cancelAttempt("Hold cancelled · locked or disconnected"); rules.clear(); lastFeedback = null
+        enabled = false; sendEnabled(); cancelAttempt("Hold cancelled · locked or disconnected"); rules.clear(); approach.reset(); lastFeedback = null
         overlay?.remove(); overlay = null
         try { scanner?.stopScan(scan) } catch (_: SecurityException) { }
         scanner = null; listening = false
     }
     private fun eligible(service: AllyControlService): Boolean = PhysicalTapCapture.holdEligible(service)
     private fun tick() {
-        if (!enabled || !active.value) return
+        if (!active.value) return
         val now = clock()
+        if(!enabled){
+            diagnose("Waiting to resume: "+status.value)
+            if(now-lastResumeAttempt>=1500&&optedIn()&&unlocked()&&DeviceLink.status.value=="Connected"&&AllyControlService.instance!=null){lastResumeAttempt=now;resume()}
+            return
+        }
+        if(prefs.getBoolean("acoustic.enabled",false)&&!prefs.getBoolean("acoustic.calibrated",false)){
+            status.value=AcousticProbeService.readiness(this);diagnose(status.value);overlay?.cancel();hold.cancelProgress();return
+        }
         val service = AllyControlService.instance
-        if (!unlocked() || !optedIn() || DeviceLink.status.value != "Connected" || service == null) { cancelAttempt("Hold cancelled · phone unavailable"); return }
-        if (calibrationUntil > now || PhysicalTapSettingsActivity.visible || !eligible(service)) { cancelAttempt("Open another app to hold-close", reset = false); hold.cancelProgress(); return }
+        if (!unlocked() || !optedIn() || DeviceLink.status.value != "Connected" || service == null) { diagnose("Paused: locked, disconnected or accessibility unavailable");cancelAttempt("Hold cancelled · phone unavailable"); return }
+        if (calibrationUntil > now || PhysicalTapSettingsActivity.visible || !eligible(service)) { diagnose("Paused: calibration/settings/Ally/system screen; open YouTube");cancelAttempt("Open another app to hold-close", reset = false); hold.cancelProgress(); return }
+        if(!prefs.getBoolean("hold.calibrated2",false)){cancelAttempt("Calibrate far and near in Hold-close settings",reset=false);return}
         val progress = hold.progress(now)
         if ((pending != null || reviewJob?.isActive == true) && !hold.stillClose(now)) { cancelAttempt("Moved away or signal lost · hold cancelled"); return }
         if (pending != null || reviewJob?.isActive == true) return
-        if (progress <= 0f) { overlay?.cancel(); return }
+        val audio=prefs.getBoolean("acoustic.enabled",false)
+        if(audio&&!AcousticProbeService.active.value){diagnose("Audio session stopped/expired: explicitly Start it again");overlay?.cancel();return}
+        val coarseRadio=rules.near(now,prefs.getInt("tap.rssi",-55)-10)
+        if(audio&&coarseRadio&&!AcousticProbeService.near(this)&&(audioAttemptAt==0L||now-audioAttemptAt>=8000)){
+            audioAttemptAt=now;AcousticProbeService.instance?.probe()
+        }
+        if (progress <= 0f) { diagnose(if(audio&&audioApproach.waitingForDeparture())"Waiting for a verified FAR chirp before another offer" else if(audio&&coarseRadio)"Checking acoustic proximity: "+AcousticProbeService.status.value else "Waiting for fresh paired-PC radio / approach");overlay?.cancel(); return }
         if(peerProtocol>=2 && now-lastProgressAt>=200){
             val target=rules.target
             if(target!=null){if(holdId==null)holdId=UUID.randomUUID().toString();DeviceLink.sendControl(JSONObject().put("type","tap_hold").put("id",holdId).put("progress",progress).put("target",target.pc).put("beacon",target.beacon).put("nonce",target.nonce));lastProgressAt=now}
         }
-        try { if (overlay == null) overlay = HoldHandoffOverlay(service); overlay!!.show(progress) }
+        // Keep radio qualification/hold silent; only the finite ready suggestion is visible.
+        if(progress<1f){diagnose("Silent hold ${(progress*100).toInt()}%"+(if(audio)"; "+AcousticProbeService.status.value else ""));overlay?.cancel();return}
+        if(prefs.getBoolean("acoustic.enabled",false)&&!AcousticProbeService.near(this)){
+            if(reviewConsent.active){cancelAttempt("Acoustic confirmation expired - move away before trying again");hold.blockUntilDeparture();return}
+            if(!prefs.getBoolean("acoustic.calibrated",false)||!AcousticProbeService.active.value){cancelAttempt("Start and calibrate acoustic confirmation, or turn its requirement off");hold.blockUntilDeparture();return}
+            diagnose("Waiting for fresh NEAR chirp: "+AcousticProbeService.status.value)
+            return
+        }
+        reviewConsent.offer(now)
+        diagnose("Ready: swipe the phone card up to open local review")
+        if(reviewConsent.expired(now)){cancelAttempt("Review offer expired - move away before trying again");return}
+        try { if (overlay == null) overlay = HoldHandoffOverlay(service); overlay!!.show(progress,if(progress>=1f && !reviewConsent.authorized(now)) {{
+            reviewConsent.confirm(clock(),enabled&&optedIn()&&unlocked()&&DeviceLink.status.value=="Connected"&&hold.progress(clock())>=1f&&(!prefs.getBoolean("acoustic.enabled",false)||AcousticProbeService.near(this)))
+        }} else null) }
         catch (_: Exception) { cancelAttempt("Bottom card unavailable · use manual review"); return }
+        if(!reviewConsent.authorized(now))return
         if (!hold.take(now)) return
+        if(audio)audioApproach.block()
+        reviewConsent.clear()
         prefs.edit().putBoolean("hold.awaitDeparture",true).apply()
         val target = rules.target
         if (target == null || now >= target.expires) { cancelAttempt("PC proof expired · try a new hold"); return }
@@ -201,16 +266,38 @@ class PhysicalTapService : Service() {
             "tap_session_status" -> {status.value=m.optString("body").take(300);gesture(status.value)}
         }
     }
-    private fun calibrate() {
+    private fun calibrate(far: Boolean) {
         if (!enabled || clock() < calibrationUntil) return
-        cancelAttempt("Calibrating proximity"); calibrationUntil = clock() + 4000; calibrationRssi.clear()
-        status.value = "Hold the phone near your PC · calibrating for 4 seconds"
+        if(!far && farSamples==null)farSamples=prefs.getString("hold.farSamples",null)?.split(',')?.mapNotNull{it.toIntOrNull()}?.takeIf{it.size>=15}
+        if(!far && farSamples==null){status.value="No far measurement saved. Tap Calibrate far first and wait for 15/15 readings.";return}
+        cancelAttempt("Calibrating proximity"); approach.reset(); calibrationUntil = clock() + 20000; calibrationRssi.clear();lastCalibrationSample=0
+        if(far){farSamples=null;prefs.edit().remove("hold.farSamples").apply()}
+        calibrationLabel=if(far)"Measuring FAR" else "Measuring NEAR"
+        status.value = "$calibrationLabel · 0/15 readings · keep still (up to 20 seconds)"
         scope.launch {
-            delay(4000)
-            if (!enabled || !unlocked()) { status.value = "Calibration cancelled"; return@launch }
-            val value = PhysicalTapRules.proximityCalibration(calibrationRssi)
-            if (value != null) prefs.edit().putInt("tap.rssi", value).apply()
-            status.value = if (value != null) "Nearby signal calibrated ($value dBm)" else "Paired PC signal missing or unstable; calibration unchanged"
+            val started=clock()
+            while(clock()<calibrationUntil && (clock()-started<4000 || calibrationRssi.size<15)){
+                delay(200)
+                if(!enabled||!unlocked()){calibrationUntil=0;status.value="Calibration cancelled · phone locked or disconnected. Retry this step.";return@launch}
+            }
+            calibrationUntil=0
+            if(far){
+                farSamples=calibrationRssi.toList().takeIf{it.size>=15}
+                if(farSamples!=null)prefs.edit().putString("hold.farSamples",farSamples!!.joinToString(",")).apply()
+                status.value=if(farSamples!=null)"Far saved (${farSamples!!.sorted()[farSamples!!.size/2]} dBm). Bring phone beside PC, then tap Calibrate near." else "Only ${calibrationRssi.size}/15 far readings. Paired beacon missing/too sparse; stay in Bluetooth range and retry far."
+            }else{
+                val profile=farSamples?.let{ProximityCalibration.adaptive(calibrationRssi,it)}
+                prefs.edit().putString("hold.nearSamples",calibrationRssi.joinToString(",")).apply()
+                if(profile!=null)prefs.edit().putInt("tap.rssi",profile.near).putInt("hold.farRssi",profile.far).putBoolean("hold.calibrated2",true).putBoolean("hold.adaptiveSwipe",true).apply()
+                val nearMedian=calibrationRssi.sorted().let{it.getOrNull(it.size/2)}
+                val farMedian=farSamples?.sorted()?.let{it.getOrNull(it.size/2)}
+                status.value=when{
+                    profile!=null->"Adaptive approach saved. Move away, approach and hold, then swipe the card to open local review."
+                    calibrationRssi.size<15->"Only ${calibrationRssi.size}/15 near readings. Far saved; retry near beside laptop."
+                    else->"Rise is smaller than signal variation: near $nearMedian dBm, far $farMedian dBm. Retry with phone held still; far saved. Manual review remains available."
+                }
+            }
+            approach.reset();hold.blockUntilDeparture()
         }
     }
     override fun onDestroy() { pause(); active.value = false; instance = null; scope.cancel(); unregisterReceiver(receiver); status.value = "Hold-close handoff is off"; super.onDestroy() }

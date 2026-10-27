@@ -6,6 +6,15 @@ import path from 'node:path';
 import {createRequire} from 'node:module';
 import {nativeImages,nativeContext,nativeSelectionContext,nativeReplyProgram,nativeSelectionInput} from './ally-native-turn.mjs';
 import {AllySelection,spokenProgram} from './ally-selection.mjs';
+
+test('oversized selected context preserves complete native scene ownership and geometry',()=>{
+  const scene={version:1,boardId:'bridge-scene',revision:6,groups:{car:[2,3,4]},objects:[{id:'m2',geometry:{text:'Weight = mg'}}]};
+  const drawing='prior marks '.repeat(3500)+'\nEditable native scene (data): '+JSON.stringify(scene);
+  const context=JSON.parse(nativeContext({turn:{drawing_on_screen:drawing,highlight:{text:'unrelated '.repeat(3000)}}},{includeHistory:false}));
+  assert.deepEqual(context.native_scene,scene);
+  assert.equal(context.contextTruncated,true);
+  assert.ok(context.drawing_on_screen.length<=1200);
+});
 const require=createRequire(new URL('../glass-pip-chat/package.json', import.meta.url));
 const {parse}=require('acorn');
 const pixel=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aWQAAAABJRU5ErkJggg==','base64');

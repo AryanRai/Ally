@@ -22,6 +22,7 @@ export interface AgentSelection {
 }
 
 interface AgentSelectorsProps extends AgentSelection {
+  accountControls?: ReactNode;
   onModel: (id: string) => void;
   onFolder: (folder: string) => void;
   onPickFolder: () => void;
@@ -76,7 +77,7 @@ function Row({ active, children, hint, onSelect }: { active: boolean; children: 
  */
 export default function AgentSelectors({
   provider, model, folder, homeFolder, recentFolders, permission,
-  onModel, onFolder, onPickFolder, onPermission, disabled, prefix,
+  onModel, onFolder, onPickFolder, onPermission, disabled, prefix, accountControls,
 }: AgentSelectorsProps) {
   const [available, setAvailable] = useState<Record<AgentProvider, boolean>>({ claude: true, codex: true });
   const [models, setModels] = useState<AgentModel[]>([]);
@@ -107,6 +108,7 @@ export default function AgentSelectors({
               {AGENT_LABEL[p]}
             </Row>
           ))}
+          {accountControls && <><DropdownMenuSeparator />{accountControls}</>}
         </DropdownMenuContent>
       </DropdownMenu>
       <span className="px-label opacity-50">·</span>

@@ -100,6 +100,16 @@ export interface PipAPI {
     queue: (key: string) => Promise<import('../../electron/agent/messageQueueTypes').QueueSnapshot>;
     queueChange: (key: string, change: import('../../electron/agent/messageQueueTypes').QueueChange) => Promise<import('../../electron/agent/messageQueueTypes').QueueSnapshot>;
     status: () => Promise<Record<AgentProvider, { available: boolean; path: string | null }>>;
+    codexAccounts: {
+      list: () => Promise<import('../../electron/agent/codexAccounts').CodexAccountsSnapshot>;
+      add: (label: string) => Promise<import('../../electron/agent/codexAccounts').CodexAccountsSnapshot>;
+      select: (id: string) => Promise<import('../../electron/agent/codexAccounts').CodexAccountsSnapshot>;
+      remove: (id: string) => Promise<import('../../electron/agent/codexAccounts').CodexAccountsSnapshot>;
+      check: (id: string) => Promise<import('../../electron/agent/codexAccounts').CodexAccountsSnapshot>;
+      autoSwitch: (on: boolean) => Promise<import('../../electron/agent/codexAccounts').CodexAccountsSnapshot>;
+      login: (id: string) => Promise<import('../../electron/agent/codexAccounts').CodexAccountsSnapshot>;
+      cancelLogin: () => Promise<import('../../electron/agent/codexAccounts').CodexAccountsSnapshot>;
+    };
     getConfig: () => Promise<AgentConfig>;
     updateConfig: (patch: Partial<AgentConfig>) => Promise<AgentConfig>;
     listModels: (provider: AgentProvider) => Promise<AgentModel[]>;
@@ -109,6 +119,7 @@ export interface PipAPI {
       prompt: string;
       cwd?: string;
       sessionId?: string;
+      codexAccountId?: string;
       model?: string;
       permission?: AgentPermission;
       /** Robot mode: persona instructions; the HowYouSeeMe MCP URL comes from agent config */

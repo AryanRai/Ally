@@ -19,6 +19,10 @@ try {
  & node.exe 'scripts\build-electron.js'
  if($LASTEXITCODE -ne 0){throw 'Desktop main-process build failed.'}
 } finally {Pop-Location}
+& node.exe (Join-Path $taskRoot 'ally-study\ally-scene-patch.mjs') (Join-Path $taskRoot 'ally-study\client\Assets\Engine\clicky-draw-engine.js') (Join-Path $taskBuild 'native-scene-engine.js')
+if($LASTEXITCODE -ne 0){throw 'Native scene engine staging failed.'}
+& node.exe (Join-Path $taskRoot 'ally-study\ally-scene-patch.mjs') (Join-Path $taskRoot 'ally-study\client\Assets\Engine\clicky-draw-native.js') (Join-Path $taskBuild 'native-scene-shim.js') --native
+if($LASTEXITCODE -ne 0){throw 'Native hidden-scene readback staging failed.'}
 & node.exe (Join-Path $taskRoot 'ally-study\build-ally-notch.mjs')
 if($LASTEXITCODE -ne 0){throw 'Embedded chat build failed.'}
 if(!$StageOnly){foreach($taskPatch in @('apply-ally-display.ps1','apply-ally-notch.ps1','apply-ally-surface.ps1','apply-ally-settings.ps1','apply-ally-study-timeout.ps1','apply-ally-study-selection.ps1','apply-ally-browser-host.ps1','apply-ally-identity.ps1')){

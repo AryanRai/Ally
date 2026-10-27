@@ -18,6 +18,7 @@ import { configureCodexMigrations } from './codexMigration.js';
 import { configureCodexHistory, listCodexChats, listCodexChatsPage, loadCodexChat, closeCodexHistory } from './codexHistory.js';
 import { chatSelection, type SharedChatSelection } from './selection.js';
 import { generateGreeting } from './greeting.js';
+import { registerCodexAccountIpc } from './codexAccountIpc.js';
 import { registerClaudeLoginIpc } from './claudeLogin.js';
 import { desktopInteraction } from './desktopApprovals.js';
 import { startNativeDesktopApprovals } from './nativeDesktopApprovals.js';
@@ -47,6 +48,7 @@ function loadConfig(): AgentConfig {
 /** Registers `agent:*` IPC; `onConfig` sees the config at startup and after every change. */
 export function registerAgentIpc(getWindow: () => BrowserWindow | null, onConfig?: (config: AgentConfig) => void): void {
   let config = loadConfig();
+  registerCodexAccountIpc(getWindow, () => config.codexPath);
   interactions.configure(path.join(app.getPath('userData'), 'chat-interactions.json'));
   const stopInteractionEvents = interactions.subscribe((event) => {
     const win = getWindow(); if (!win || win.isDestroyed()) return;

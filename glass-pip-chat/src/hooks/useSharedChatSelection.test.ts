@@ -100,3 +100,15 @@ it('selects an unlinked local chat requested by Study without creating a session
   act(()=>emit({version:'new',origin:'notch',selected:{chatId:'local-draft',provider:'codex',title:'Draft',permission:'readonly'}}));
   expect(local).toHaveBeenCalledWith('local-draft');expect(open).not.toHaveBeenCalled();
 });
+
+it('publishes the selected account before a native thread exists and updates account-only navigation', async () => {
+  const setSelection = vi.fn(async selected => ({ accepted: true, version: crypto.randomUUID(), origin: 'desktop' as const, selected }));
+  window.pip = { agent: { getSelection: async () => ({ version: 'initial', selected: null, origin: 'desktop' }), setSelection, onSelection: () => () => {} } } as any;
+  const local: Chat = { ...chat('local-empty'), agent: { provider: 'codex', codexAccountId: 'profile-one' } };
+  const open = vi.fn();
+  const { rerender } = renderHook(({ current }) => useSharedChatSelection(current, false, 'readonly', open), { initialProps: { current: local } });
+  await waitFor(() => expect(setSelection).toHaveBeenLastCalledWith(expect.objectContaining({ chatId: 'local-empty', codexAccountId: 'profile-one', sessionId: undefined }), expect.any(String)));
+  rerender({ current: { ...local, agent: { provider: 'codex', codexAccountId: 'profile-two' } } });
+  await waitFor(() => expect(setSelection).toHaveBeenLastCalledWith(expect.objectContaining({ codexAccountId: 'profile-two' }), expect.any(String)));
+  expect(open).not.toHaveBeenCalled();
+});

@@ -1,12 +1,14 @@
 # Run manually from PowerShell. Restarts this project's Ally only; never Codex.
 [CmdletBinding()]
-param()
+param([switch]$Yes)
 $ErrorActionPreference = 'Stop'
 $taskRoot = Split-Path $PSScriptRoot -Parent
 Write-Host 'This builds and restarts Ally desktop and Study when they are idle.'
 Write-Host 'Run after the implementation chats finish. Android installation is handled separately.'
-$taskAnswer = Read-Host 'Type yes to continue'
-if ($taskAnswer.Trim() -ine 'yes') { Write-Host 'Cancelled. Nothing changed.'; return }
+if (!$Yes) {
+ $taskAnswer = Read-Host 'Type yes to continue'
+ if ($taskAnswer.Trim() -ine 'yes') { Write-Host 'Cancelled. Nothing changed.'; return }
+}
 Set-Location -LiteralPath $taskRoot
 $taskPwsh = Join-Path $env:USERPROFILE '.cache/codex-runtimes/codex-primary-runtime/dependencies/native/powershell/pwsh.exe'
 if (!(Test-Path -LiteralPath $taskPwsh)) { throw 'The configured PowerShell runtime is missing.' }

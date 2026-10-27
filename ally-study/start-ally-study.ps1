@@ -15,6 +15,8 @@ if($LASTEXITCODE -ne 0){throw 'The Settings usage update failed.'}
 if($LASTEXITCODE -ne 0){throw 'Study timeout preparation failed.'}
 & powershell.exe -NoProfile -File (Join-Path $PSScriptRoot 'apply-ally-study-selection.ps1') -Install
 if($LASTEXITCODE -ne 0){throw 'The Study selection alignment update failed.'}
+& powershell.exe -NoProfile -File (Join-Path $PSScriptRoot 'apply-ally-scene.ps1') -Install
+if($LASTEXITCODE -ne 0){throw 'Native scene editing preparation failed.'}
 & (Join-Path $PSScriptRoot 'start-ally-backend.ps1')
 $taskHealth=Invoke-RestMethod 'http://127.0.0.1:18783/health' -TimeoutSec 3
 if(!$taskHealth.speech){throw 'Own-backend connector is not ready.'}

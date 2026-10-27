@@ -83,6 +83,7 @@ export function startWatchBridge(getConfig: () => AgentConfig): (() => void) | u
       // Materialise navigation metadata only. A real session starts on the
       // user's first send and its ID is linked back into the selected local chat.
       const draft=conversations.create(selected.provider,selected.cwd || getConfig().defaultCwd,id);
+      if (!draft.sessionId && selected.codexAccountId && selected.provider === 'codex' && draft.codexAccountId !== selected.codexAccountId) { draft.codexAccountId = selected.codexAccountId; conversations.save(); }
       if(draft.title==='New watch chat') {draft.title=selected.title;conversations.save();}
       return draft;
     }
@@ -187,7 +188,7 @@ export function startWatchBridge(getConfig: () => AgentConfig): (() => void) | u
       if (closed || turn.status !== 'thinking') return;
       const runId = await startAgentRun({ provider: turn.provider, cwd: chat.cwd || agent.defaultCwd, permission: turn.permission,
         queueKey: chat.sessionId ? `${chat.provider}:${chat.sessionId}` : chat.id,
-        sessionId: chat.sessionId, resumeToken: turn.resumeToken,
+        sessionId: chat.sessionId, codexAccountId: chat.codexAccountId, resumeToken: turn.resumeToken,
         images: turn.uploads?.filter(a => a.mimeType.startsWith('image/')).map(a => media.file(a)),
         codexDesktop: agent.codexDesktop === true,
         reasoningEffort: turn.nativeStudy !== undefined && turn.provider === 'codex' ? studyReasoning(turn.transcript, turn.nativeStudy) : undefined,

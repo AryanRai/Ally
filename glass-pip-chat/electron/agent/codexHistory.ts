@@ -59,6 +59,7 @@ async function historyRead(rpc: CodexRpc, method: string, params: unknown, lane:
 }
 
 // Background receipt classification must not cancel a foreground chat open.
+// Every account shares one history (codexAccounts.shareCodexHistory), so reads never depend on the account.
 configureDiscoveryReader(async id => (await historyRead(await reader('metadata'), 'thread/read', { threadId: id }, 'metadata')).thread);
 
 export async function listCodexChats(limit = 40): Promise<AgentSessionSummary[]> {
@@ -73,7 +74,7 @@ export async function listCodexChats(limit = 40): Promise<AgentSessionSummary[]>
   return sessions;
 }
 
-export async function listCodexChatsPage(limit = 30, startCursor?: string): Promise<{ sessions: AgentSessionSummary[]; nextCursor?: string }> {
+async function listDefaultCodexChatsPage(limit = 30, startCursor?: string): Promise<{ sessions: AgentSessionSummary[]; nextCursor?: string }> {
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > 80) throw Error('Invalid chat page size');
   const rpc = await reader('list');
   const aliases = codexMigrationAliases();
@@ -103,6 +104,13 @@ export async function listCodexChatsPage(limit = 30, startCursor?: string): Prom
     if (cursor) cursors.add(cursor);
   } while (cursor);
   return { sessions: result };
+}
+
+/** One shared history lists every account's chats once; a chat's account is tracked separately. */
+export async function listCodexChatsPage(limit = 30, cursor?: string): Promise<{ sessions: AgentSessionSummary[]; nextCursor?: string }> {
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 80) throw Error('Invalid chat page size');
+  // Cursors from the earlier per-account directory start again from the shared list.
+  return listDefaultCodexChatsPage(limit, cursor?.startsWith('profiles:') ? undefined : cursor);
 }
 
 const localHistory = new CodexLocalHistory();
