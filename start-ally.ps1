@@ -14,6 +14,7 @@ foreach($taskPort in @([int]$taskBridge.port,18783)){
 }
 & (Join-Path $PSScriptRoot 'tools\complete-ally-migration.ps1') -Root $PSScriptRoot
 $taskExe=Join-Path $PSScriptRoot 'glass-pip-chat\node_modules\electron\dist\electron.exe'
+$env:ALLY_STUDY_ROOT=Join-Path $PSScriptRoot 'ally-study'
 $taskDesktopProcess=Start-Process -FilePath $taskExe -ArgumentList '.' -WorkingDirectory $taskDesktop -WindowStyle Hidden -PassThru
 $taskReady=$false
 for($taskAttempt=0;$taskAttempt -lt 80;$taskAttempt++){
