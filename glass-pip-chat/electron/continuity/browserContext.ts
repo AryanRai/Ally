@@ -1,5 +1,5 @@
 import {randomUUID} from 'node:crypto';
-import {youtubeVideoId, youtubeTimestamp, youtubeContinuationUrl} from './youtubeContext';
+import {youtubeVideoId, youtubeTimestamp, youtubeContinuationUrl} from './youtubeContext.js';
 const unavailable=(reason:string)=>({status:'unavailable' as const,reason});
 const available=(value:unknown,source:string)=>({status:'available' as const,value,source});
 const safeURL=(value:unknown)=>{try{if(typeof value!=='string'||value.length>8000)return;const u=new URL(value);if(['https:','http:'].includes(u.protocol)&&!u.username&&!u.password)return u.href;}catch{}};
