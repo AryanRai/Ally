@@ -147,10 +147,17 @@ private class AllyAssistantSession(context: android.content.Context) : VoiceInte
             startAssistantActivity(Intent(context, AssistantUnlockActivity::class.java))
             hide(); return
         }
+        host.presentationVisible(true)
         window?.window?.apply {
             setLayout(context.resources.displayMetrics.widthPixels - dp(if(context.resources.configuration.isScreenRound) 48 else 24), WindowManager.LayoutParams.WRAP_CONTENT)
             setGravity(Gravity.BOTTOM)
-            attributes=attributes.apply { y=dp(if(context.resources.configuration.isScreenRound) 26 else 18) }
+            attributes=attributes.apply {
+                y=dp(if(context.resources.configuration.isScreenRound) 26 else 18)
+                // A floating WRAP_CONTENT window must fit above the IME too.
+                // adjustResize alone leaves its bottom anchor behind the keyboard.
+                setFitInsetsTypes(WindowInsets.Type.systemBars() or WindowInsets.Type.displayCutout() or WindowInsets.Type.ime())
+                setFitInsetsIgnoringVisibility(false)
+            }
             decorView.elevation=dp(16).toFloat()
             clearFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
             setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
@@ -192,7 +199,8 @@ private class AllyAssistantSession(context: android.content.Context) : VoiceInte
             hide()
         }
     }
-    override fun onHide() { if(Build.VERSION.SDK_INT>=31) blurListener?.let { manager.removeCrossWindowBlurEnabledListener(it) }; blurListener=null; activity.stop(); refreshSelected?.cancel(); entry.pause(); entry.releaseScreen(); screenJob?.cancel(); hold.abort(); observe?.cancel(); if(::sheet.isInitialized) sheet.pause(); AssistantVisibility.visible = false; super.onHide() }
-    override fun onDestroy() { if(Build.VERSION.SDK_INT>=31) blurListener?.let { manager.removeCrossWindowBlurEnabledListener(it) }; blurListener=null; activity.stop(); refreshSelected?.cancel(); entry.cancelCapture(); entry.releaseScreen(); screenJob?.cancel(); hold.abort(); scope.cancel(); if(::sheet.isInitialized) sheet.pause(); AssistantVisibility.visible = false; super.onDestroy() }
+    override fun onHide() { host.presentationVisible(false); if(Build.VERSION.SDK_INT>=31) blurListener?.let { manager.removeCrossWindowBlurEnabledListener(it) }; blurListener=null; activity.stop(); refreshSelected?.cancel(); entry.pause(); entry.releaseScreen(); screenJob?.cancel(); hold.abort(); observe?.cancel(); if(::sheet.isInitialized) sheet.pause(); AssistantVisibility.visible = false; super.onHide() }
+    override fun onDestroy() { host.presentationVisible(false); if(Build.VERSION.SDK_INT>=31) blurListener?.let { manager.removeCrossWindowBlurEnabledListener(it) }; blurListener=null; activity.stop(); refreshSelected?.cancel(); entry.cancelCapture(); entry.releaseScreen(); screenJob?.cancel(); hold.abort(); scope.cancel(); if(::sheet.isInitialized) sheet.pause(); AssistantVisibility.visible = false; super.onDestroy() }
     companion object { val assistantKeys = intArrayOf(KeyEvent.KEYCODE_ASSIST, KeyEvent.KEYCODE_VOICE_ASSIST, KeyEvent.KEYCODE_POWER) }
 }
+

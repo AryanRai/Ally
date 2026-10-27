@@ -14,7 +14,7 @@ internal object AssistantSubmission {
     fun message(provider: String, chatId: String, requestId: String, permission: String, text: String, attachment: String?): JSONObject {
         require(text.isNotBlank() && text.length <= 12000)
         require(attachment == null || attachment.matches(Regex("[a-f0-9]{64}")))
-        return JSONObject().put("provider", provider).put("chatId", chatId).put("requestId", requestId)
+        return JSONObject().put("provider", provider).put("chatId", chatId).put("requestId", requestId).put("executionLocation", "pc")
             .put("permission", permission).put("text", text).put("attachments", JSONArray(listOfNotNull(attachment)))
     }
 }

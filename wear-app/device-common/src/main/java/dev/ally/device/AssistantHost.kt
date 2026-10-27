@@ -12,6 +12,7 @@ interface AssistantHost {
     fun acceptTurn(chatId: String, turnId: String)
     fun openChat(chatId: String)
     fun prepareVoice() {}
+    fun presentationVisible(visible: Boolean) {}
     val snapshots: Flow<AssistantSnapshot>
     fun refresh()
     fun start()

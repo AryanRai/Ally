@@ -8,7 +8,7 @@ data class ReplyCard(
     val progress: Float = 0f, val actions: List<ReplyAction> = emptyList(),
 )
 data class ReplyAction(val label: String, val prompt: String)
-data class ReplyContent(val text: String, val cards: List<ReplyCard>)
+data class ReplyContent(val text: String, val cards: List<ReplyCard>, val commentary: List<String> = emptyList())
 /** Explicit allowlist: backend data never becomes executable code or HTML. */
 object ReplyContentParser {
     fun parse(json: JSONObject): ReplyContent {
@@ -33,6 +33,8 @@ object ReplyContentParser {
                 },
             )
         }
-        return ReplyContent(json.optString("text").take(12000), cards)
+        val commentary = json.optJSONArray("commentary")
+        return ReplyContent(json.optString("text").take(12000), cards,
+            (0 until (commentary?.length() ?: 0)).map { commentary!!.optString(it).take(3200) }.filter { it.isNotBlank() })
     }
 }

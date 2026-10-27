@@ -4,6 +4,7 @@ import org.json.JSONObject
 
 /** Display metadata never creates an approval; only an actual pending request can block. */
 object DeviceAlerts {
+    fun notificationId(item: JSONObject): Int = if(kind(item)=="Reply" && chat(item)!=null) ("ally-response:"+chat(item)).hashCode() else item.optString("id").hashCode()
     private val chatKey = Regex("(codex|claude):[\\w-]{8,100}")
     fun chat(item: JSONObject, knownChats: List<String> = emptyList()): String? {
         item.optString("chatId").takeIf { chatKey.matches(it) }?.let { return it }

@@ -6,9 +6,12 @@ import dev.ally.device.voice.VoiceRecorder
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import org.json.JSONObject
-import java.net.HttpURLConnection
 import java.net.URL
 import java.util.UUID
+import java.util.concurrent.TimeUnit
+import okhttp3.Request
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.RequestBody.Companion.toRequestBody
 
 data class AssistantChoice(val id: String, val title: String, val provider: String = "codex")
 data class AssistantEntryState(val status: String, val text: String = "", val recording: Boolean = false,
@@ -26,6 +29,8 @@ internal class AssistantEntry(private val context: Context, private val scope: C
     private var text = ""
     private var picker: AssistantRoutePicker.Picker? = null
     private var selected: String? = null
+    private var executionLocation: String? = null
+    private var executionOffer = AssistantExecutionDestination.Offer(true, "Your agent runs through Ally on your PC")
     private var limit = AssistantRoutePicker.PAGE
     private var query = ""
     private var hits = emptyList<AssistantChoice>()
@@ -33,7 +38,7 @@ internal class AssistantEntry(private val context: Context, private val scope: C
     private var offsets = mapOf<String, Int?>()
     private var lookup: Job? = null
     private var loadingMore = false
-    private class Kept(val text: String, val requestId: String, val picker: AssistantRoutePicker.Picker?, val selected: String?, val offsets: Map<String, Int?>)
+    private class Kept(val text: String, val requestId: String, val picker: AssistantRoutePicker.Picker?, val selected: String?, val offsets: Map<String, Int?>, val executionLocation: String?, val executionOffer: AssistantExecutionDestination.Offer)
     // Words replaced by a re-record return if nothing new is heard.
     private var kept: Kept? = null
     private var requestId = UUID.randomUUID().toString()
@@ -71,6 +76,9 @@ internal class AssistantEntry(private val context: Context, private val scope: C
                 draft.optJSONObject("target")?.let { c -> target = AssistantChoice(c.getString("id"), c.getString("title"), c.getString("provider")) }
                 permission = draft.optString("permission", "readonly").takeIf { it in setOf("readonly", "edit", "full") } ?: "readonly"
                 acceptedTurn = draft.optString("acceptedTurn").takeIf { it.isNotBlank() }
+                // Older partially submitted drafts already used the PC route. Keep
+                // their exact receipt/retry path rather than asking for a new run.
+                executionLocation = draft.optString("executionLocation").takeIf { it == "pc" } ?: if (target != null || acceptedTurn != null) "pc" else null
                 screenAttachment = draft.optString("screenAttachment").takeIf { it.matches(Regex("[a-f0-9]{64}")) }
                 submissionText = draft.optString("submissionText").takeIf { it.isNotBlank() }
                 screenNotice = if (screenAttachment != null) "Screen attached" else if (draft.optBoolean("hadScreen")) "Screen unavailable · your words are kept" else ""
@@ -80,6 +88,7 @@ internal class AssistantEntry(private val context: Context, private val scope: C
     }
     private fun save() {
         val draft = JSONObject().put("text", text).put("requestId", requestId).put("permission", permission)
+        executionLocation?.let { draft.put("executionLocation", it) }
         target?.let { draft.put("target", JSONObject().put("id", it.id).put("title", it.title).put("provider", it.provider)) }
         acceptedTurn?.let { draft.put("acceptedTurn", it) }
         screenAttachment?.let { draft.put("screenAttachment", it) }
@@ -139,6 +148,7 @@ internal class AssistantEntry(private val context: Context, private val scope: C
         val previous = kept?.takeIf { text.isBlank() && recorder == null } ?: return false
         kept = null; entry = true
         text = previous.text; requestId = previous.requestId; picker = previous.picker; selected = previous.selected; offsets = previous.offsets
+        executionLocation = previous.executionLocation; executionOffer = previous.executionOffer
         runCatching { save() }
         if (picker != null) showPicker("Nothing new heard · earlier words kept") else fail("Nothing new heard · earlier words kept")
         return true
@@ -163,15 +173,19 @@ internal class AssistantEntry(private val context: Context, private val scope: C
     }
     private suspend fun route() {
         state.value = AssistantEntryState("Finding the right conversation…", text, busy = true,choices=listOf(AssistantChoice("__rerecord","Try again")))
-        // Detached so a slow list never delays the suggestion; it only shortens the list.
-        val recent = scope.async { recentChats() }
-        val result = try { withTimeoutOrNull(10000) { request("/v1/assistant/route", JSONObject().put("text", text)) } ?: error("Chat matching timed out · try again") }
-            catch (e: Throwable) { recent.cancel(); throw e }
-        val others = withTimeoutOrNull(2500) { recent.await() } ?: emptyList<Triple<String, List<JSONObject>, Int?>>().also { recent.cancel() }
+        val recovered = AssistantRoutingRecovery.lookup(
+            route = { request("/v1/assistant/route", JSONObject().put("text", text)) }, recent = { recentChats() })
+        val result = recovered.route
+        val others = recovered.pages
         val options = AssistantRoutePicker.options(result, others.flatMap { it.second }, host.provider)
-        picker = options; selected = options.suggested; offsets = others.associate { it.first to it.third }
+        executionOffer = AssistantExecutionDestination.parse(result)
+        if (recovered.fallback) executionOffer = executionOffer.copy(pcReason = "Matching unavailable · your words are kept. Choose PC, then pick a chat manually.")
+        picker = if (recovered.fallback) options.copy(suggested = "") else options
+        selected = if (recovered.fallback) null else options.suggested
+        offsets = if (recovered.fallback && others.isEmpty()) mapOf("codex" to 0, "claude" to 0) else others.associate { it.first to it.third }
         limit = AssistantRoutePicker.PAGE; query = ""; hits = emptyList()
-        showPicker(if (result.optBoolean("limited")) "No clear match · pick a chat, then Send" else "Suggested chat · Send or pick another")
+        showPicker(if (recovered.fallback) "Matching unavailable · words kept. Choose a chat, then Send."
+            else if (result.optBoolean("limited")) "No clear match · pick a chat, then Send" else "Suggested chat · Send or pick another")
     }
     /** Recent chats fill the compact list; failures only shorten it. */
     private suspend fun recentChats(from: Map<String, Int?> = mapOf("codex" to 0, "claude" to 0)): List<Triple<String, List<JSONObject>, Int?>> = coroutineScope {
@@ -183,12 +197,19 @@ internal class AssistantEntry(private val context: Context, private val scope: C
         } }.awaitAll()
     }
     private fun rows() = picker?.let { AssistantRoutePicker.rows(it, limit, query, hits) }.orEmpty()
+    private fun handoffChoices() = if (!context.packageManager.hasSystemFeature(PackageManager.FEATURE_WATCH) && screen.enabled && canReplace())
+        listOf(AssistantChoice("__handoff", "Review phone context on PC")) else emptyList()
     private fun showPicker(status: String) {
         val current = picker ?: return
+        if (executionLocation == null) {
+            state.value = AssistantEntryState((if (executionOffer.pcAvailable) "Suggested: PC" else "Choose where to run") + " · ${executionOffer.pcReason}", text,
+                choices = AssistantExecutionDestination.rows(executionOffer) + handoffChoices() + AssistantChoice(AssistantRoutePicker.RERECORD, "Try again"))
+            return
+        }
         val searching = query.isNotBlank()
         val more = !searching && (current.chats.size > limit || offsets.values.any { it != null })
-        val controls = (if (more) listOf(AssistantChoice(AssistantRoutePicker.MORE, if (loadingMore) "Loading more chats…" else "More chats")) else emptyList()) +
-            listOf(AssistantChoice(AssistantRoutePicker.SEARCH, if (searching) "Clear search" else "Search chats"), AssistantChoice(AssistantRoutePicker.RERECORD, "Try again"))
+        val controls = handoffChoices() + (if (more) listOf(AssistantChoice(AssistantRoutePicker.MORE, if (loadingMore) "Loading more chats…" else "More chats")) else emptyList()) +
+            listOf(AssistantChoice(AssistantRoutePicker.SEARCH, if (searching) "Clear search" else "Search chats"), AssistantChoice(AssistantExecutionDestination.CHANGE, "Execution: PC · change"), AssistantChoice(AssistantRoutePicker.RERECORD, "Try again"))
         val shown = rows()
         state.value = AssistantEntryState(if (searching && shown.isEmpty()) "No chats match “${query.trim()}”" else status, text, choices = shown + controls, selected = selected)
     }
@@ -224,11 +245,57 @@ internal class AssistantEntry(private val context: Context, private val scope: C
     fun choose(id: String) {
         if(id == AssistantRoutePicker.RERECORD) { if(canReplace()) { resetUnsent(keep = true); entry=true;start(true) };return }
         if (state.value?.busy == true) return
+        if (id == "__handoff") {
+            if (handoffChoices().isEmpty()) return
+            lookup?.cancel()
+            job = scope.launch {
+                state.value = AssistantEntryState("Preparing context for review…", text, busy = true)
+                try {
+                    screen.settle()
+                    val image = screen.image()
+                    try {
+                        check(image != null || screen.text().isNotBlank()) { "Screen context is unavailable · your words are kept" }
+                        if (ContextHandoffLauncher.open(context, AssistantSubmission.text(text, screen.text()), image)) {
+                            state.value = state.value?.copy(busy = false)
+                            resetUnsent(); entry = false
+                        }
+                    } finally { image?.fill(0) }
+                } catch (e: CancellationException) { throw e }
+                catch (e: Exception) {
+                    val message = e.message ?: "Context handoff unavailable · your words are kept"
+                    state.value = state.value?.copy(busy = false)
+                    showPicker(message)
+                    state.value = state.value?.copy(status = message)
+                }
+            }
+            return
+        }
+        if (id == AssistantExecutionDestination.PHONE) {
+            if (target == null) state.value = state.value?.copy(status = executionOffer.phoneReason + " · choose PC to continue")
+            return
+        }
+        if (id == AssistantExecutionDestination.PC) {
+            if (target != null || picker == null) return
+            val location = AssistantExecutionDestination.select(id, executionOffer) ?: run {
+                state.value = state.value?.copy(status = executionOffer.pcReason); return
+            }
+            executionLocation = location
+            try { save(); showPicker("Run on PC · choose a chat, then Send") }
+            catch (e: Exception) { executionLocation = null; fail(e.message ?: "Could not keep your choice") }
+            return
+        }
+        if (id == AssistantExecutionDestination.CHANGE) {
+            if (target != null || submissionText != null || acceptedTurn != null) return
+            executionLocation = null
+            try { save(); showPicker("Choose where to run") } catch (e: Exception) { fail(e.message ?: "Could not keep your choice") }
+            return
+        }
         if (id == "__retry") {
             if (target == null && selected != null && picker != null) { showPicker("Check the chat, then Send"); return }
             job = scope.launch { try { if (target != null) deliver(target) else route() } catch(e: CancellationException) { throw e } catch(e: Exception) { fail(e.message ?: "Request unavailable") } }; return
         }
         if (id == AssistantRoutePicker.SEND) {
+            if (executionLocation != "pc") { showPicker("Choose where to run"); return }
             val pick = selected ?: return
             val destination = if (pick == AssistantRoutePicker.NEW) null else (picker?.chats.orEmpty() + hits).find { it.id == pick } ?: return
             lookup?.cancel()
@@ -246,6 +313,7 @@ internal class AssistantEntry(private val context: Context, private val scope: C
         showPicker(pickerStatus())
     }
     private suspend fun deliver(selected: AssistantChoice?) {
+        AssistantExecutionDestination.requirePc(executionLocation)
         state.value = AssistantEntryState("Opening conversation…", text, busy = true)
         if (target == null) {
             target = selected ?: request("/v1/chats", JSONObject().put("provider", host.provider).put("requestId", requestId)).getJSONObject("chat").let {
@@ -272,18 +340,19 @@ internal class AssistantEntry(private val context: Context, private val scope: C
         // Adopting the exact receipt starts existing polling; it never resends words.
         host.acceptTurn(chat.id, acceptedTurn!!)
         prefs.edit().remove("assistantEntryDraft").commit()
-        entry = false; text = ""; picker = null; this.selected = null; query = ""; hits = emptyList(); lookup?.cancel(); kept = null; target = null; acceptedTurn = null; screen.clear(); screenAttachment = null; submissionText = null; screenNotice = ""; state.value = null
+        entry = false; text = ""; picker = null; this.selected = null; executionLocation = null; query = ""; hits = emptyList(); lookup?.cancel(); kept = null; target = null; acceptedTurn = null; screen.clear(); screenAttachment = null; submissionText = null; screenNotice = ""; state.value = null
     }
     private fun fail(message: String) {
-        state.value = AssistantEntryState(message, text, choices = if (text.isBlank()) emptyList() else (if(canReplace()) listOf(AssistantChoice("__rerecord","Try again")) else emptyList()) + listOf(AssistantChoice("__retry", "Retry")))
+        val reason = AssistantRoutingRecovery.message(Exception(message), target != null)
+        state.value = AssistantEntryState(reason, text, choices = if (text.isBlank()) emptyList() else (if(canReplace()) listOf(AssistantChoice("__rerecord","Record again")) else emptyList()) + listOf(AssistantChoice("__retry", "Retry")))
     }
     private fun canReplace() = AssistantEntryPolicy.canReplace(target?.id,submissionText,acceptedTurn,state.value?.busy==true,state.value?.status.orEmpty())
     private fun resetUnsent(keep: Boolean = false) {
         check(canReplace())
         job?.cancel();job=null;cancelCapture()
-        kept = if (keep && text.isNotBlank()) Kept(text, requestId, picker, selected, offsets) else null
+        kept = if (keep && text.isNotBlank()) Kept(text, requestId, picker, selected, offsets, executionLocation, executionOffer) else null
         lookup?.cancel();loadingMore=false
-        text="";picker=null;selected=null;query="";hits=emptyList();limit=AssistantRoutePicker.PAGE;screen.clear();screenAttachment=null;screenNotice=""
+        text="";picker=null;selected=null;executionLocation=null;query="";hits=emptyList();limit=AssistantRoutePicker.PAGE;screen.clear();screenAttachment=null;screenNotice=""
         requestId=UUID.randomUUID().toString();state.value=null
         // Kept words stay saved until a new transcript replaces them.
         if (kept == null) prefs.edit().remove("assistantEntryDraft").commit()
@@ -297,18 +366,17 @@ internal class AssistantEntry(private val context: Context, private val scope: C
         val prefs = DeviceLink.prefs(context)
         val url = URL(prefs.getString("endpoint", "https://ally.prxptn.com")!!.trimEnd('/') + path)
         require(url.protocol == "https" || (url.protocol == "http" && url.host in setOf("127.0.0.1", "localhost"))) { "Use an HTTPS bridge" }
-        val c = url.openConnection() as HttpURLConnection
-        try {
-            val quick = path == "/v1/assistant/route" || path.startsWith("/v1/chats?")
-            c.connectTimeout = if(quick) 4000 else 8000; c.readTimeout = if (audio != null) 120000 else if(quick) 8000 else 30000; c.instanceFollowRedirects = false
-            c.setRequestProperty("Authorization", "Bearer ${prefs.getString("token", "")}")
-            val payload = image ?: audio ?: body?.toString()?.toByteArray()
-            if (image != null) c.setRequestProperty("X-Ally-Filename", "Assistant-screen.png")
-            if (payload != null) { c.requestMethod = "POST"; c.doOutput = true; c.setRequestProperty("Content-Type", if (image != null) "image/png" else if (audio != null) "audio/wav" else "application/json"); c.setFixedLengthStreamingMode(payload.size); c.outputStream.use { it.write(payload) } }
-            val status = c.responseCode
-            val result = runCatching { JSONObject((if (status in 200..299) c.inputStream else c.errorStream)?.bufferedReader()?.use { it.readText() } ?: "{}") }.getOrElse { error("Desktop connection unavailable") }
-            check(status in 200..299) { result.optString("error", "Desktop connection unavailable") }
-            result
-        } finally { c.disconnect() }
+        val quick = path == "/v1/assistant/route" || path.startsWith("/v1/chats?") || path.startsWith("/v1/chat-search?")
+        val client = AssistantHttp.client.newBuilder().connectTimeout(if (quick) 4 else 8, TimeUnit.SECONDS)
+            .readTimeout(if (audio != null) 120 else if (quick) 8 else 30, TimeUnit.SECONDS)
+            .callTimeout(if (audio != null) 130 else if (quick) 10 else 40, TimeUnit.SECONDS).build()
+        val payload = image ?: audio ?: body?.toString()?.toByteArray()
+        val builder = Request.Builder().url(url).header("Authorization", "Bearer ${prefs.getString("token", "")}")
+        if (image != null) builder.header("X-Ally-Filename", "Assistant-screen.png")
+        if (payload != null) builder.post(payload.toRequestBody((if (image != null) "image/png" else if (audio != null) "audio/wav" else "application/json").toMediaType()))
+        val (status, content) = AssistantHttp.execute(client, builder.build())
+        val result = runCatching { JSONObject(content.ifBlank { "{}" }) }.getOrElse { error("Desktop connection unavailable") }
+        check(status in 200..299) { result.optString("error", "Desktop connection unavailable") }
+        result
     }
 }

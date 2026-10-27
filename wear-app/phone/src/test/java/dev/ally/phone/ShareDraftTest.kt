@@ -9,6 +9,24 @@ import java.nio.file.Files
 import java.io.ByteArrayInputStream
 
 class ShareDraftTest {
+    @Test fun bridgeReceiptHoldsFilesUntilConfirmedAndRestoresUnsentDraftAfterRecreation() {
+        val root=Files.createTempDirectory("ally-held-share").toFile()
+        try {
+            val store=ShareDraftStore(root)
+            val draft=store.append(ShareDraft(), "shared", listOf(Triple("a.txt","text/plain") { ByteArrayInputStream(byteArrayOf(1,2,3)) }))
+            store.hold("shared and typed words")
+            assertTrue(store.file(draft.files.single()).exists())
+            assertEquals(ShareDraft(),store.read())
+            val restored=ShareDraftStore(root).settle(true)!!
+            assertEquals("shared and typed words",restored.first)
+            assertEquals(draft.files,restored.second.files)
+            assertEquals(restored.second,store.read())
+            store.hold("retry");store.settle(false)
+            assertFalse(store.file(draft.files.single()).exists())
+            assertNull(store.settle(true))
+        } finally { root.deleteRecursively() }
+    }
+
     @Test fun copiedFilesAndEditedTextSurviveRecreationUntilExplicitDiscard() {
         val root = Files.createTempDirectory("ally-share").toFile()
         try {

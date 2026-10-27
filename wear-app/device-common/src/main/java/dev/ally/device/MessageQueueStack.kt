@@ -93,7 +93,7 @@ fun MessageQueueStack(queue: MessageQueue, changing: Boolean, error: String, onC
                                     })
                             })
                         Column(Modifier.weight(1f)) {
-                            QueueText(item.text.ifBlank { "Shared attachments" },color=color,fontSize=if(compact) 11.sp else 13.sp,maxLines=3,overflow=TextOverflow.Ellipsis)
+                            QueueText(item.previewText.ifBlank { "Shared attachments" },color=color,fontSize=if(compact) 11.sp else 13.sp,maxLines=3,overflow=TextOverflow.Ellipsis)
                             if(item.attachments.isNotEmpty()) QueueText(item.attachments.joinToString(" · "),color=muted,fontSize=10.sp,maxLines=1)
                             if(item.state!="queued" || item.error.isNotBlank()) QueueText(item.error.ifBlank { "Sending…" },color=Color(0xffe5b587),fontSize=10.sp)
                         }

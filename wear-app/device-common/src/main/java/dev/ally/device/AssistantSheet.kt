@@ -166,6 +166,24 @@ internal class AssistantSheet(context: Context, private val hold: AssistantHold,
         modes.addView(queue,LinearLayout.LayoutParams(0,dp(36),1f)); modes.addView(steer,LinearLayout.LayoutParams(0,dp(36),1f))
         panel.addView(modes)
     }
+    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+        // Restore preferred heights on every pass, including keyboard dismissal.
+        // Only scrollable content gives up space; input and actions retain theirs.
+        val scrolls = listOf(replyScroll to dp(if(round) 40 else 118),
+            activityScroll to dp(if(round) 88 else 144), routeScroll to dp(if(round) 84 else 156))
+        scrolls.forEach { (view, height) -> view.layoutParams.height = height }
+        if (!round && MeasureSpec.getMode(heightMeasureSpec) != MeasureSpec.UNSPECIFIED) {
+            val panelWidth = getChildMeasureSpec(widthMeasureSpec, paddingLeft + paddingRight, panel.layoutParams.width)
+            panel.measure(panelWidth, MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED))
+            val visible = scrolls.filter { it.first.visibility != GONE }
+            val preferred = visible.map { it.second }
+            val fixed = panel.measuredHeight - preferred.sum()
+            val fitted = AssistantImeLayout.fit(preferred,
+                (MeasureSpec.getSize(heightMeasureSpec) - paddingTop - paddingBottom - fixed).coerceAtLeast(0))
+            visible.forEachIndexed { index, (view, _) -> view.layoutParams.height = fitted[index] }
+        }
+        super.onMeasure(widthMeasureSpec, heightMeasureSpec)
+    }
     fun reveal() {
         expanding=false; activityExpanded=false; interacted=false; firstText=null; hasLiveReply=false; replyScroll.visibility=GONE; modes.visibility=GONE
         panel.animate().cancel(); panel.alpha=if(motion) 0f else 1f; panel.translationY=if(motion) dp(30).toFloat() else 0f
@@ -175,6 +193,9 @@ internal class AssistantSheet(context: Context, private val hold: AssistantHold,
     fun followChat() { activityExpanded=false; interacted=true; firstText=null; hasLiveReply=false }
     fun openMonitor() { activityExpanded=true; lastSnapshot?.let { render(it,lastActivity) } }
     fun render(s: AssistantSnapshot, agents: AssistantActivityState = lastActivity) {
+        // The assistant window has its own lifecycle, separate from MainActivity.
+        // Only microphone capture holds the display; release/cancel restores AOD.
+        keepScreenOn = s.recording
         approvals.visibility=if(!round && DeviceLink.inbox.value.any { DeviceAlerts.blocking(it) }) VISIBLE else GONE
         lastSnapshot=s; lastActivity=agents
         activityToggle.text="${agents.summary} ${if(activityExpanded) "▴" else "▾"}"
@@ -251,7 +272,7 @@ internal class AssistantSheet(context: Context, private val hold: AssistantHold,
         if(!motion) { done(); return }
         panel.animate().translationY(-dp(26).toFloat()).alpha(0f).setDuration(160).setInterpolator(PathInterpolator(.2f,0f,0f,1f)).withEndAction { done() }.start()
     }
-    fun pause() { panel.animate().cancel(); orb.active=false; hold.abort() }
+    fun pause() { keepScreenOn=false; panel.animate().cancel(); orb.active=false; hold.abort() }
 }
 
 private class SheetIcon(context: Context, private val close: Boolean) : View(context) {

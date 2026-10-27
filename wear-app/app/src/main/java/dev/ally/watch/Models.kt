@@ -45,7 +45,7 @@ data class WatchStep(val id: String, val name: String, val status: String, val d
         }
     }
 }
-data class WatchState(
+data class WatchState(val progress: List<dev.ally.device.LiveProgress> = emptyList(), val progressTurnId: String = "",
     val resumeToken: String? = null,
     val canStop: Boolean = false,
     val queue: dev.ally.device.MessageQueue = dev.ally.device.MessageQueue(),
@@ -66,6 +66,8 @@ data class WatchState(
     val replyAlerts: Boolean = true,
     val look: WatchLook = WatchLook(),
     val permission: String = "readonly",
+    val permissionChanging: Boolean = false,
+    val permissionStatus: String = "",
     val approval: WatchApproval? = null,
     val answeringApproval: Boolean = false,
     val approvalError: String = "",
@@ -130,3 +132,4 @@ object ActivityParser {
 object CardParser {
     fun parse(json: JSONObject): WatchReply = dev.ally.device.ReplyContentParser.parse(json)
 }
+

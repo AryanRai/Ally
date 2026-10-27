@@ -45,6 +45,32 @@ object DeviceInteractions {
     }
     fun canAnswer(item: JSONObject, connected: Boolean, connection: String?, now: Long = System.currentTimeMillis()) =
         connected && !connection.isNullOrBlank() && item.optString("_connection") == connection && pending(listOf(item), now).isNotEmpty()
+    /** Notification actions remain a subset of the real advertised choices. */
+    fun notificationActions(item: JSONObject, now:Long=System.currentTimeMillis()):List<Pair<String,String>> {
+        if(!item.optBoolean("interaction") || !awaiting(item,now) || item.optBoolean("desktopOnly") || item.optBoolean("authorized") || item.optString("deviceAction").isNotBlank()) return emptyList()
+        val fields=item.optJSONArray("fields")
+        val actions=item.optJSONArray("actions") ?: return emptyList()
+        if((fields?.length() ?: 0)>0) {
+            if(fields!!.length()!=1 || fields.getJSONObject(0).optBoolean("secret") || fields.getJSONObject(0).optBoolean("freeText")) return emptyList()
+            val field=fields.getJSONObject(0)
+            val options=field.optJSONArray("options") ?: return emptyList()
+            if(options.length() !in 1..3 || (0 until actions.length()).none{actions.getJSONObject(it).optString("value")=="submit"}) return emptyList()
+            return (0 until options.length()).map{index -> "choice:$index" to options.getJSONObject(index).optString("label").take(40)}
+        }
+        return (0 until actions.length()).mapNotNull { i ->
+            val action=actions.optJSONObject(i) ?: return@mapNotNull null
+            val value=action.optString("value")
+            if(value !in setOf("accept","submit","decline","cancel")) return@mapNotNull null
+            value to action.optString("label",value).take(40)
+        }.take(3)
+    }
+    fun notificationAnswer(item:JSONObject,choice:String,now:Long=System.currentTimeMillis()):Pair<String,Map<String,String>>? {
+        if(notificationActions(item,now).none{it.first==choice})return null
+        if(!choice.startsWith("choice:"))return choice to emptyMap()
+        val field=item.getJSONArray("fields").getJSONObject(0)
+        val option=field.getJSONArray("options").getJSONObject(choice.substringAfter(':').toInt())
+        return "submit" to mapOf(field.getString("id") to option.getString("value"))
+    }
     fun status(item: JSONObject, now: Long = System.currentTimeMillis()): String = when {
         item.optString("interactionState") == "answered" -> "Answered on ${item.optString("answeredOn", "another device") }"
         item.optString("interactionState") == "continue" -> "Approved — continue on this device"

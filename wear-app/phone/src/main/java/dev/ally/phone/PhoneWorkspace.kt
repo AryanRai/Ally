@@ -28,12 +28,18 @@ class PhoneModel(app: Application) : AndroidViewModel(app) {
         })
     }
     private val current get() = workspace.current
+    var foreground = false
+        set(value) { field = value; current.foreground = value; if (!value) current.stopSpeaking() }
+    fun stopSpeaking() = current.stopSpeaking()
     fun select(id: String) {
         if (state.value.recording || state.value.transcribing || state.value.importingShare) return
+        if (state.value.selected?.id == id) return
+        current.stopSpeaking(); current.foreground = false
         if (state.value.selected == null && workspace.selected.isBlank()) {
             prefs.edit().putString("phoneSlot:$id", workspace.selected).commit()
             current.select(id); workspace.alias(id)
         } else workspace.open(id)
+        current.foreground = foreground
         prefs.edit().putStringSet("phoneOpenChats", prefs.getStringSet("phoneOpenChats", emptySet())!! + id).apply()
         prefs.edit().putString("phoneChat", id).apply()
         val target = current

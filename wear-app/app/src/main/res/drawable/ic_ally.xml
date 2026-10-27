@@ -1,5 +1,4 @@
-<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="48dp" android:height="48dp" android:viewportWidth="48" android:viewportHeight="48">
-    <path android:fillColor="#090E14" android:pathData="M24,0a24,24 0,1 0,0 48a24,24 0,1 0,0 -48" />
-    <path android:fillColor="#193B42" android:pathData="M24,6a18,18 0,1 0,0 36a18,18 0,1 0,0 -36" />
-    <path android:fillColor="#85E5CF" android:pathData="M24,13a11,11 0,1 0,0 22a11,11 0,1 0,0 -22" />
+<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="24dp" android:height="24dp" android:viewportWidth="512" android:viewportHeight="512">
+    <!-- The same pixel mascot outline as ally_mascot, with transparent eye cutouts for Android's status-bar tint. -->
+    <path android:fillColor="#FFFFFF" android:fillType="evenOdd" android:pathData="M72,0H348V20H366V254H400V278H420V254H456V232H512V278H492V300H472V326H492V350H456V326H420V348H400V326H366V348H348V420H312V442H292V488H274V512H182V488H164V442H128V420H90V372H72V348H54V326H18V300H36V278H0V232H54V254H72ZM128,116V232H164V116ZM220,116V232H256V116Z"/>
 </vector>

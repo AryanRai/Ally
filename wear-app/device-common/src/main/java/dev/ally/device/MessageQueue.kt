@@ -3,7 +3,17 @@ package dev.ally.device
 import org.json.JSONObject
 import org.json.JSONArray
 
-data class QueuedMessage(val id: String, val text: String, val state: String, val error: String, val attachments: List<String>)
+data class QueuedMessage(val id: String, val text: String, val state: String, val error: String, val attachments: List<String>) {
+    // The routing envelope is useful to the recipient, but hides the actual
+    // content in a three-line queue preview. Never change edit/delivery text.
+    val previewText: String get() {
+        val envelopeEnd = text.indexOf("]\n\n")
+        return if (text.startsWith("[Forwarded by Ally at the user's request") && envelopeEnd >= 0 &&
+            text.substring(0, envelopeEnd).endsWith("Your reply is relayed back to the user; answer here, and ask them anything you need.")) {
+            text.substring(envelopeEnd + 3).ifBlank { text }
+        } else text
+    }
+}
 data class MessageQueue(val chatId: String = "", val revision: Long = 0, val items: List<QueuedMessage> = emptyList()) {
     companion object {
         fun parse(response: JSONObject): MessageQueue? {

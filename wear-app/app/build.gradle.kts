@@ -9,8 +9,8 @@ android {
         applicationId = "dev.ally.watch"
         minSdk = 30
         targetSdk = 36
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 6
+        versionName = "0.1.5"
     }
     buildFeatures { compose = true; buildConfig = true }
     sourceSets["main"].kotlin.srcDir("../device-common/src/main/java")
