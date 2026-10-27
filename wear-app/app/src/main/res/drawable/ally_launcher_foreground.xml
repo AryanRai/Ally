@@ -1,0 +1,3 @@
+<inset xmlns:android="http://schemas.android.com/apk/res/android" android:inset="25%">
+  <bitmap android:src="@drawable/ally_mascot" android:gravity="fill" android:filter="false"/>
+</inset>

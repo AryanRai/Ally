@@ -4,6 +4,17 @@ import CompactMarkdown from './CompactMarkdown';
 import { MessageResponse } from '../ai-elements/message';
 const source = 'C:/Users/buzza/AppData/Local/Temp/portfolio-refresh/portfolio-live.jpg';
 describe('local Markdown previews', () => {
+  it('keeps native chat usable when its partial bridge has no localImage function', async () => {
+    window.pip = { agent: { readStates: vi.fn() } } as any;
+    render(<><p>Conversation remains visible</p><CompactMarkdown>{`![Phone screen](${source})`}</CompactMarkdown></>);
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('Preview unavailable'));
+    expect(screen.getByText('Conversation remains visible')).toBeVisible();
+  });
+  it('contains synchronous bridge failures within the image fallback', async () => {
+    window.pip = { agent: { localImage: () => { throw Error('Bridge disconnected'); } } } as any;
+    render(<CompactMarkdown>{`![Phone screen](${source})`}</CompactMarkdown>);
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('Preview unavailable'));
+  });
   for (const [name, Component] of [['compact', CompactMarkdown], ['expanded', MessageResponse]] as const) {
     it(`loads a Windows image through validated IPC in ${name} chat`, async () => {
       const load = vi.fn().mockResolvedValue('data:image/jpeg;base64,aGVsbG8=');

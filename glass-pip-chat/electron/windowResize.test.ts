@@ -17,6 +17,7 @@ vi.mock('electron', () => ({
     setSize(width: number, height: number) { fixture.width = width; fixture.height = height; fixture.events.get('resize')?.(); }
     setPosition = fixture.position;
     isDestroyed() { return false; }
+    isAlwaysOnTop() { return true; }
   },
   Tray: class {}, Menu: {}, nativeImage: {},
 }));

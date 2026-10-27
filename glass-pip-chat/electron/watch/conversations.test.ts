@@ -1,3 +1,4 @@
+import { codexAccounts } from '../agent/codexAccounts';
 // @vitest-environment node
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs';
@@ -10,7 +11,7 @@ let root: string;
 beforeEach(() => { root = fs.mkdtempSync(path.join(os.tmpdir(), 'ally-watch-chats-')); });
 afterEach(() => fs.rmSync(root, { recursive: true, force: true }));
 describe('watch conversations', () => {
-  it('keeps native creation order after open, completion, refresh and restart', async () => {
+  it('orders by recent activity after open, completion, refresh and restart', async () => {
     const native = [
       {id:'new',provider:'codex' as const,title:'New',createdAt:20,updatedAt:30},
       {id:'old',provider:'codex' as const,title:'Old',createdAt:10,updatedAt:999},
@@ -19,13 +20,13 @@ describe('watch conversations', () => {
     const file=path.join(root,'stable.json');
     let store=new WatchConversations(file,deps,{},root);
     const ids=async()=> (await store.list('codex')).chats.map(c=>c.id);
-    expect(await ids()).toEqual(['codex:new','codex:old']);
+    expect(await ids()).toEqual(['codex:old','codex:new']);
     const old=await store.get('codex:old');
     store.record(old,'Follow-up',{text:'Done',components:[]},{steps:[]},'turn');
     await store.history(old);
-    expect(await ids()).toEqual(['codex:new','codex:old']);
+    expect(await ids()).toEqual(['codex:old','codex:new']);
     store=new WatchConversations(file,deps,{},root);
-    expect(await ids()).toEqual(['codex:new','codex:old']);
+    expect(await ids()).toEqual(['codex:old','codex:new']);
     store.create('codex',root,'fresh');
     expect((await ids())[0]).toBe('fresh');
   });
@@ -157,4 +158,19 @@ it('maps running sessions to existing device identities across providers without
   expect(store.running(sessions, ['device-chat']).chats.map(c => c.id)).toEqual(['device-chat', 'claude:native']);
   expect(store.running([], []).chats).toEqual([]);
   expect(store.running([], ['unsent']).chats.map(c => c.id)).toEqual(['unsent']);
+});
+
+it('retains the new device-chat account across changed defaults and reloads', async () => {
+  const route = vi.spyOn(codexAccounts, 'route').mockReturnValue('profile-one');
+  try {
+    const file = path.join(root, 'profile-chats.json');
+    const deps = { list: vi.fn(async () => []), load: vi.fn() };
+    const store = new WatchConversations(file, deps, {}, root);
+    expect(store.create('codex', root, 'first').codexAccountId).toBe('profile-one');
+    route.mockReturnValue('profile-two');
+    const reloaded = new WatchConversations(file, deps, {}, root);
+    expect(reloaded.create('codex', root, 'first').codexAccountId).toBe('profile-one');
+    expect(reloaded.create('codex', root, 'second').codexAccountId).toBe('profile-two');
+    expect(deps.load).not.toHaveBeenCalled();
+  } finally { route.mockRestore(); }
 });

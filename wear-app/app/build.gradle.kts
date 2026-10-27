@@ -9,8 +9,8 @@ android {
         applicationId = "dev.ally.watch"
         minSdk = 30
         targetSdk = 36
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 6
+        versionName = "0.1.5"
     }
     buildFeatures { compose = true; buildConfig = true }
     sourceSets["main"].kotlin.srcDir("../device-common/src/main/java")
@@ -35,6 +35,8 @@ dependencies {
     implementation("org.commonmark:commonmark:0.24.0")
     implementation("org.commonmark:commonmark-ext-gfm-tables:0.24.0")
     implementation("androidx.wear:wear-remote-interactions:1.1.0")
+    implementation("androidx.wear:wear:1.3.0")
+    implementation("androidx.wear:wear-ongoing:1.0.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20250517")

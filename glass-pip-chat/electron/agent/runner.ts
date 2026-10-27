@@ -1,4 +1,5 @@
 import { interruptedSessions, RESUME_PROMPT } from './interrupted.js';
+import { recordProviderUsage, observeClaudeAllowance } from './providerUsage.js';
 import { completeUnread } from './unread.js';
 // Spawning agent turns and streaming their normalized events.
 import { spawn, ChildProcess } from 'node:child_process';
@@ -8,8 +9,11 @@ import path from 'node:path';
 import readline from 'node:readline';
 import { childEnv, isWin, launcherFor, resolveAgentBinary } from './binaries.js';
 import { ClaudeStreamParser, StreamParser } from './parsers.js';
+import { codexAccounts } from './codexAccounts.js';
+import { runCodexTurnCycling } from './codexCycle.js';
 import { runCodexTurn } from './codexRun.js';
 import { runCodexDesktopTurn } from './codexDesktopRun.js';
+import { recoverExactCodexOwner } from './codexOwnerRecovery.js';
 import { trackRunningSession, finishRunningSession } from './runningSessions.js';
 import { FollowupReceipts, type FollowupIntent, type FollowupMode } from './followups.js';
 import { messageQueue, queuedPrompt, queueUnavailable } from './messageQueue.js';
@@ -17,6 +21,8 @@ import { thumbnails } from './thumbs.js';
 import { claudeResumeLaunch } from './claudeResume.js';
 import { allyChatsMcpServers } from '../chatsMcp/registry.js';
 import type { AgentEvent, AgentRobotContext, AgentRunOptions, AgentInteractionHandler } from './types.js';
+import { validateAccess, type AccessControl, type AccessScope } from './access.js';
+import type { AgentPermission } from './types.js';
 
 interface ActiveRun {
   child: ChildProcess;
@@ -24,8 +30,8 @@ interface ActiveRun {
 }
 
 const runs = new Map<string, ActiveRun>();
-const codexRuns = new Map<string, { stop: () => void; steer?: (text: string, images?: string[]) => Promise<boolean> }>();
-const managedRuns = new Map<string, { key: () => string; stop: () => void; steer: (text: string, requestId: string, intent?: FollowupIntent, images?: string[]) => Promise<FollowupMode> }>();
+const codexRuns = new Map<string, { stop: () => void; steer?: (text: string, images?: string[]) => Promise<boolean> } & AccessControl>();
+const managedRuns = new Map<string, { key: () => string; stop: () => void; setPermission: (permission: AgentPermission) => Promise<AccessScope>; steer: (text: string, requestId: string, intent?: FollowupIntent, images?: string[]) => Promise<FollowupMode> }>();
 let runCounter = 0;
 
 /** MCP servers Robot mode hands the agent, by server name: perception (HowYouSeeMe) and motion (DroidCore). */
@@ -74,7 +80,7 @@ export function claudeArgs(opts: AgentRunOptions, robot: { promptFile?: string; 
   // Non-interactive runs can't answer permission prompts: pre-allow Ally's own chat tools (read-only ones for read-only runs)
   if (Object.keys(allyChatsMcpServers(opts)).length) {
     args.push('--allowedTools', opts.permission === 'readonly'
-      ? ['ally_list_chats', 'ally_search_chats', 'ally_read_chat', 'visual_tutor_read', 'visual_tutor_draw'].map(t => `mcp__ally_chats__${t}`).join(',')
+      ? ['ally_list_chats', 'ally_search_chats', 'ally_read_chat', 'visual_tutor_read', 'visual_tutor_draw', 'study_diagram', 'native_study_reference'].map(t => `mcp__ally_chats__${t}`).join(',')
       : 'mcp__ally_chats');
   }
   // Images can't ride on a plain-text prompt; send the turn as a stream-json user message
@@ -111,6 +117,11 @@ export async function startAgentRun(
   interact?: AgentInteractionHandler,
   interactionSurface: 'watch' | 'desktop' = 'watch',
 ): Promise<string> {
+  if (opts.provider === 'codex') {
+    const codexAccountId = codexAccounts.route(opts.sessionId, opts.codexAccountId);
+    if (opts.sessionId && !opts.ephemeral) codexAccounts.bind(opts.sessionId, codexAccountId);
+    opts = { ...opts, codexAccountId, codexDesktop: codexAccountId === 'default' && opts.codexDesktop };
+  }
   if (opts.resumeToken !== undefined) {
     if (!opts.sessionId || opts.ephemeral) throw Error('Resume needs the original saved chat.');
     opts = { ...opts, prompt: RESUME_PROMPT, images: undefined };
@@ -129,7 +140,7 @@ export async function startAgentRun(
   try { if (!opts.ephemeral) interruptedSessions.starting(queueKey, opts.resumeToken); }
   catch (error) { unregisterQueue(); throw error; }
   const queued = () => messageQueue.snapshot(queueKey).items;
-  const pending = new Set<Promise<FollowupMode>>();
+  const pending = new Set<Promise<unknown>>();
   const receipts = new FollowupReceipts();
   const summary = () => sessionId && !opts.ephemeral ? { provider: opts.provider, id: sessionId, title: opts.prompt.slice(-80), cwd: opts.cwd, updatedAt: Date.now() } : undefined;
   const complete = (event: AgentEvent) => {
@@ -139,7 +150,7 @@ export async function startAgentRun(
     if (event.kind === 'done' && stopped) event = { ...event, stopped: true };
     unregisterQueue();
     if (stopped || (event.kind === 'done' && event.isError)) messageQueue.pause(queueKey, 'Current work stopped. Queued messages are kept; send or cancel them when ready.');
-    if (sessionId && !opts.ephemeral && event.kind === 'done' && !stopped) completeUnread(opts.provider, sessionId, publicId);
+    if (sessionId && !opts.ephemeral && event.kind === 'done' && !stopped && !event.isError) completeUnread(opts.provider, sessionId, publicId);
     managedRuns.delete(publicId);
     finishRunningSession(publicId);
     emit(publicId, event);
@@ -160,6 +171,7 @@ export async function startAgentRun(
       if (event.kind === 'done') {
         if (ending) return;
         ending = true;
+        recordProviderUsage(opts.provider, { ...event.usage, costUsd: event.usage?.costUsd ?? event.costUsd });
         if (event.sessionId) sessionId = event.sessionId;
         void (async () => {
           await Promise.allSettled([...pending]);
@@ -196,6 +208,20 @@ export async function startAgentRun(
   managedRuns.set(publicId, {
     key: () => queueKey,
     stop: () => { stopped = true; if (currentId) stopAgentRun(currentId); },
+    setPermission: async permission => {
+      validateAccess(permission);
+      if (finished || stopped || ending) throw Error('The reply is finishing. Try changing access again.');
+      if (opts.provider === 'codex' && !currentId) throw Error('Still connecting. Try changing access once the reply starts.');
+      const operation = (async () => {
+        const live = currentId ? codexRuns.get(currentId) : undefined;
+        const scope = live?.setPermission ? await live.setPermission(permission) : 'next_message';
+        // Queued follow-ups inherit the explicitly selected access, without replaying input.
+        opts = { ...opts, permission };
+        return scope;
+      })();
+      pending.add(operation);
+      try { return await operation; } finally { pending.delete(operation); }
+    },
     steer: (text, requestId, intent = 'auto', images) => receipts.submit(requestId, text, async () => {
       if (finished || stopped || ending) throw new Error('This response has finished. Send your input as a new message.');
       const operation = (async (): Promise<FollowupMode> => {
@@ -224,6 +250,12 @@ export async function steerAgentRun(runId: string, text: string, requestId: stri
   return run.steer(text, requestId, intent, images);
 }
 
+export async function changeAgentSessionAccess(key: string, permission: AgentPermission): Promise<AccessScope | undefined> {
+  validateAccess(permission);
+  const run = [...managedRuns.values()].find(run => run.key() === key);
+  return run?.setPermission(permission);
+}
+
 async function startTrackedRun(
   opts: AgentRunOptions,
   emit: (runId: string, ev: AgentEvent) => void,
@@ -231,13 +263,18 @@ async function startTrackedRun(
   interact?: AgentInteractionHandler,
   interactionSurface: 'watch' | 'desktop' = 'watch',
 ): Promise<string> {
+  // One attempt on one account; codexCycle moves the same chat to the next account on a usage limit.
+  const startCodex = (o: AgentRunOptions, e: (ev: AgentEvent) => void, bin?: string) => o.codexDesktop && o.sessionId && !o.ephemeral
+    ? runCodexDesktopTurn(o, e, interact, emitFallback => runCodexTurn(o, emitFallback, binOverride, interact, interactionSurface,
+      emitRecovered => runCodexDesktopTurn(o, emitRecovered, interact, undefined, cancelled => recoverExactCodexOwner(o.sessionId!, cancelled))))
+    : runCodexTurn(o, e, bin ?? binOverride, interact, interactionSurface);
   if (opts.provider === 'codex' && opts.codexDesktop && opts.sessionId && !opts.ephemeral) {
     const runId = `run-${Date.now()}-${++runCounter}`;
-    const run = runCodexDesktopTurn(opts, ev => {
+    const run = runCodexTurnCycling(opts, ev => {
       if (ev.kind === 'done') codexRuns.delete(runId);
       if (ev.kind === 'tool_end' && ev.images) ev = { ...ev, images: thumbnails(ev.images) };
       emit(runId, ev);
-    }, interact, emitFallback => runCodexTurn(opts, emitFallback, binOverride, interact, interactionSurface));
+    }, (o, e) => startCodex(o, e));
     codexRuns.set(runId, run);
     return runId;
   }
@@ -253,11 +290,11 @@ async function startTrackedRun(
 
   const runId = `run-${Date.now()}-${++runCounter}`;
   if (opts.provider === 'codex') {
-    const run = runCodexTurn(opts, ev => {
+    const run = runCodexTurnCycling(opts, ev => {
       if (ev.kind === 'done') codexRuns.delete(runId);
       if (ev.kind === 'tool_end' && ev.images) ev = { ...ev, images: thumbnails(ev.images) };
       emit(runId, ev);
-    }, bin, interact, interactionSurface);
+    }, (o, e) => startCodex(o, e, bin));
     codexRuns.set(runId, run);
     return runId;
   }
@@ -301,6 +338,7 @@ async function startTrackedRun(
     if (!trimmed.startsWith('{')) return;
     let obj: unknown;
     try { obj = JSON.parse(trimmed); } catch { return; }
+    observeClaudeAllowance(obj);
     for (const ev of parser.handle(obj)) send(ev);
   });
 

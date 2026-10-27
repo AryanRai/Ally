@@ -1,5 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { forwardDelivery } from './forwardDelivery.js';
+import { usageTool } from './usage.js';
+import { readProviderUsage } from '../agent/providerUsage.js';
 import { listRunningSessions } from '../agent/runningSessions.js';
 import { messageQueue } from '../agent/messageQueue.js';
 // ally-chats: an MCP server inside Ally that lets any agent find, read and
@@ -17,11 +19,11 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import { childEnv, launcherFor, resolveAgentBinary } from '../agent/binaries.js';
 import { listCodexChats, loadCodexChat } from '../agent/codexHistory.js';
-import { startAgentRun } from '../agent/runner.js';
+import { startForwardedRun } from './forwardRun.js';
 import { listAgentSessions, loadAgentSession } from '../agent/sessions.js';
 import type { AgentConfig, AgentProvider } from '../agent/types.js';
 import { handleRpc, type CallContext, type ToolDef, type ToolResult } from './protocol.js';
-import { ChatIndex } from './search.js';
+import { ChatIndex, type SearchHit } from './search.js';
 import { chatTools, SERVER_INSTRUCTIONS, type SendResult } from './tools.js';
 import { forwarding, serverUrl, setEndpoint, SERVER_NAME } from './registry.js';
 
@@ -85,13 +87,21 @@ function agentConfig(): AgentConfig {
 
 const load = async (provider: AgentProvider, id: string) => {
   const snap = provider === 'codex' ? await loadCodexChat(id) : loadAgentSession(provider, id);
-  return { messages: snap.messages, cwd: snap.cwd };
+  return { messages: snap.messages, cwd: snap.cwd, title: snap.title };
 };
 
 const index = new ChatIndex({
   list: async (provider, limit) => (provider === 'codex' ? listCodexChats(limit) : listAgentSessions(provider, limit)),
   load,
 });
+
+/** Sidebar search (renderer IPC and the notch bridge): the index ally_search_chats uses, read-only. */
+export async function searchChats(query: unknown, limit = 20): Promise<{ hits: SearchHit[]; pending: number }> {
+  const q = typeof query === 'string' ? query.slice(0, 200) : '';
+  if (!q.trim()) return { hits: [], pending: 0 };
+  await index.refreshFor(1500);
+  return { hits: index.search(q, { limit: Math.max(1, Math.min(30, Math.floor(limit) || 20)) }), pending: index.pending };
+}
 
 async function send(target: { provider: AgentProvider; id: string; cwd?: string; title: string }, message: string, opts: { wait: boolean; timeoutMs: number; caller?: string }): Promise<SendResult> {
   const key = `${target.provider}:${target.id}`;
@@ -108,9 +118,9 @@ async function send(target: { provider: AgentProvider; id: string; cwd?: string;
   // Another request can arrive while native running-session discovery is pending.
   if (forwarding.has(key)) return { status: 'error', reply: '', error: 'that chat is still answering a forwarded message' };
   forwarding.add(key);
-  return forwardDelivery(emit => startAgentRun({ provider: target.provider, prompt, cwd: target.cwd || cfg.defaultCwd,
+  return forwardDelivery(emit => startForwardedRun({ provider: target.provider, prompt, cwd: target.cwd || cfg.defaultCwd,
     sessionId: target.id, permission: cfg.permission, codexDesktop: cfg.codexDesktop === true },
-    (_runId, event) => emit(event), target.provider === 'claude' ? cfg.claudePath : cfg.codexPath, undefined, 'desktop'),
+    (_runId, event) => emit(event), target.provider === 'claude' ? cfg.claudePath : cfg.codexPath),
     opts.wait, opts.timeoutMs, () => forwarding.delete(key));
 }
 
@@ -125,7 +135,7 @@ function open(target: { provider: AgentProvider; id: string; cwd?: string; title
   for (const cb of openListeners) { try { cb(req); } catch { /* listeners must not break tools */ } }
 }
 
-const tools = () => [...chatTools({ index, load, send, open }), ...deviceTools.values()];
+const tools = () => [...chatTools({ index, load, send, open }), usageTool(() => readProviderUsage(agentConfig().codexPath)), ...deviceTools.values()];
 
 // ---------------------------------------------------------------------------
 // HTTP server
@@ -287,6 +297,7 @@ export function registerChatsMcp(getWindow: () => BrowserWindow | null): void {
     tools: tools().map(t => t.name),
     indexed: index.size,
   }));
+  ipcMain.handle('chatsMcp:search', (_e, query: unknown) => searchChats(query));
   ipcMain.handle('chatsMcp:appStatus', () => registrationStatus());
   ipcMain.handle('chatsMcp:addToApps', () => registerInApps());
   ipcMain.handle('chatsMcp:removeFromApps', () => unregisterFromApps());

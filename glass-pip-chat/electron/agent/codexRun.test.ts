@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { CodexRpc } from './codexRpc';
-import { runCodexTurn, codexThreadConfig } from './codexRun';
+import { runCodexTurn, codexThreadConfig, codexResumeConfig } from './codexRun';
 import type { AgentEvent } from './types';
 import { startUserQuestions } from './userQuestions';
 import { ALLY_BROWSER_INSTRUCTIONS } from './browserContext';
@@ -26,11 +26,74 @@ function server() {
   return rpc;
 }
 describe('Codex turn lifecycle', () => {
+  it('changes access on the existing run without sending input or interrupting', async () => {
+    const rpc = server();
+    const run = runCodexTurn(opts, () => {}); await flush();
+    await expect(run.setPermission!('full')).resolves.toBe('current_reply');
+    expect(rpc.request).toHaveBeenLastCalledWith('thread/settings/update', expect.objectContaining({ threadId: 'thread', sandboxPolicy: { type: 'dangerFullAccess' } }));
+    expect(rpc.request.mock.calls.filter(([method]) => method === 'turn/start')).toHaveLength(1);
+    expect(rpc.request.mock.calls.some(([method]) => method === 'turn/interrupt' || method === 'turn/steer')).toBe(false);
+    rpc.onNotification?.('turn/completed', { threadId: 'thread', turn: { status: 'completed' } });
+  });
+  it('distinguishes unsupported live settings from uncertain delivery', async () => {
+    const rpc = server();
+    const run = runCodexTurn(opts, () => {}); await flush();
+    rpc.request.mockRejectedValueOnce(Error('Method not found'));
+    await expect(run.setPermission!('edit')).resolves.toBe('next_message');
+    rpc.request.mockRejectedValueOnce(Error('Request timed out'));
+    await expect(run.setPermission!('full')).rejects.toThrow('timed out');
+    rpc.onNotification?.('turn/completed', { threadId: 'thread', turn: { status: 'completed' } });
+    await expect(run.setPermission!('full')).rejects.toThrow('finished');
+  });
+  it.each(['low','medium','high'] as const)('uses %s effort for Study and restores medium before releasing the writer', async effort => {
+    const rpc = server(), events: AgentEvent[] = [];
+    rpc.request.mockImplementation(async (method: string) => method === 'turn/start'
+      ? { turn: { id: 'turn' } }
+      : { thread: { id: 'thread' }, reasoningEffort: 'medium' } as any);
+    runCodexTurn({ ...opts, reasoningEffort: effort }, event => events.push(event)); await flush();
+    expect(rpc.request).toHaveBeenCalledWith('turn/start', expect.objectContaining({ effort }));
+    rpc.onNotification?.('turn/completed', { threadId: 'thread', turn: { status: 'completed' } });
+    await flush();
+    expect(rpc.request).toHaveBeenCalledWith('thread/settings/update', { threadId: 'thread', effort: 'medium' }, 3000);
+    expect(rpc.request.mock.invocationCallOrder.at(-1)).toBeLessThan(rpc.close.mock.invocationCallOrder[0]);
+    expect(events.filter(event => event.kind === 'done')).toHaveLength(1);
+  });
+  it('restores Study effort after a failed turn too', async () => {
+    const rpc = server();
+    rpc.request.mockImplementation(async (method: string) => method === 'turn/start'
+      ? { turn: { id: 'turn' } }
+      : { thread: { id: 'thread' }, reasoningEffort: 'high' } as any);
+    runCodexTurn({ ...opts, reasoningEffort: 'low' }, () => {}); await flush();
+    rpc.onNotification?.('turn/completed', { threadId: 'thread', turn: { status: 'failed', error: { message: 'provider failed' } } });
+    await flush();
+    expect(rpc.request).toHaveBeenCalledWith('thread/settings/update', { threadId: 'thread', effort: 'high' }, 3000);
+    expect(rpc.close).toHaveBeenCalledOnce();
+  });
+  it('resumes the exact chat with the gateway default model and provider paired', async () => {
+    const rpc = server();
+    rpc.request.mockResolvedValueOnce({ config: { model: 'gateway-model', model_provider: 'vercel' } } as any);
+    runCodexTurn({ ...opts, sessionId: 'old' }, () => {}); await flush();
+    expect(rpc.request).toHaveBeenCalledWith('thread/resume', expect.objectContaining({ threadId: 'old', model: 'gateway-model', modelProvider: 'vercel' }));
+    expect(rpc.request.mock.calls.some(([method]) => method === 'thread/start' || method === 'thread/fork')).toBe(false);
+    rpc.onNotification?.('turn/completed', { threadId: 'old', turn: { status: 'completed' } });
+  });
+  it('keeps an explicit model while using the configured provider', async () => {
+    const rpc = server();
+    rpc.request.mockResolvedValueOnce({ config: { model: 'gateway-default', model_provider: 'vercel' } } as any);
+    expect(await codexResumeConfig(rpc as unknown as CodexRpc, { model: 'chosen-model' })).toEqual({ model: 'chosen-model', modelProvider: 'vercel' });
+  });
+  it('does not submit when effective provider settings cannot be read', async () => {
+    const rpc = server(); const events: AgentEvent[] = [];
+    rpc.request.mockRejectedValueOnce(new Error('configuration unavailable'));
+    runCodexTurn({ ...opts, sessionId: 'old' }, e => events.push(e)); await flush();
+    expect(rpc.request.mock.calls.map(([method]) => method)).toEqual(['config/read']);
+    expect(lastError(events)).toContain('configuration unavailable');
+  });
   it.each(['desktop', 'watch'] as const)('keeps required forms interactive in Full access on %s', async surface => {
     const rpc = server();
     const interact = vi.fn(async () => ({ action: 'decline', content: null, _meta: null }));
     runCodexTurn({ ...opts, permission: 'full' }, () => {}, undefined, interact, surface); await flush();
-    expect(rpc.request).toHaveBeenCalledWith('thread/start', expect.objectContaining({ approvalPolicy: 'on-request', approvalsReviewer: 'auto_review', sandbox: 'danger-full-access' }));
+    expect(rpc.request).toHaveBeenCalledWith('thread/start', expect.objectContaining({ approvalPolicy: 'on-request', approvalsReviewer: 'user', sandbox: 'danger-full-access' }));
     const request = { threadId: 'thread', turnId: 'turn', mode: 'form', message: 'Allow this upload?' };
     expect(await rpc.onRequest?.('mcpServer/elicitation/request', request, 1)).toMatchObject({ action: 'decline' });
     expect(interact).toHaveBeenCalledOnce();
@@ -65,12 +128,12 @@ describe('Codex turn lifecycle', () => {
   });
   it('reports a writer conflict without submitting or retrying the message', async () => {
     const rpc = server(); const events: AgentEvent[] = [];
-    rpc.request.mockRejectedValueOnce(new Error('thread old already has an active writer'));
+    rpc.request.mockResolvedValueOnce({ config: {} } as any).mockRejectedValueOnce(new Error('thread old already has an active writer'));
     runCodexTurn({ ...opts, sessionId: 'old' }, event => events.push(event)); await flush();
     expect(events.at(-1)).toMatchObject({ kind: 'done', isError: true, error: expect.stringContaining('Your message was not sent') });
     expect(lastError(events)).toContain('Enable Codex desktop connection in Ally Settings');
     expect(rpc.request.mock.calls.some(([method]) => method === 'turn/start')).toBe(false);
-    expect(rpc.request.mock.calls.map(([method]) => method)).toEqual(['thread/resume']);
+    expect(rpc.request.mock.calls.map(([method]) => method)).toEqual(['config/read', 'thread/resume']);
     expect(events.some(event => event.kind === 'tool_start')).toBe(false);
     expect(rpc.close).toHaveBeenCalledOnce();
   });
@@ -81,28 +144,28 @@ describe('Codex turn lifecycle', () => {
       return { thread: { id: 'old' } } as any;
     });
     runCodexTurn({ ...opts, sessionId: 'old' }, event => events.push(event)); await flush();
-    expect(rpc.request.mock.calls.map(([method]) => method)).toEqual(['thread/resume', 'turn/start']);
+    expect(rpc.request.mock.calls.map(([method]) => method)).toEqual(['config/read', 'thread/resume', 'turn/start']);
     expect(rpc.request.mock.calls.filter(([m]) => m === 'turn/start')).toHaveLength(1);
     expect(lastError(events)).toContain('may already have been accepted');
     expect(lastError(events)).not.toContain('Your message was not sent');
   });
   it('explains an unavailable desktop owner without asking to enable an enabled setting', async () => {
     const rpc = server(); const events: AgentEvent[] = [];
-    rpc.request.mockRejectedValueOnce(new Error('Already has an ACTIVE WRITER'));
+    rpc.request.mockResolvedValueOnce({ config: {} } as any).mockRejectedValueOnce(new Error('Already has an ACTIVE WRITER'));
     runCodexTurn({ ...opts, sessionId: 'old', codexDesktop: true }, event => events.push(event)); await flush();
     expect(lastError(events)).toContain('Open the same chat in Codex');
     expect(lastError(events)).toContain('Your message was not sent');
     expect(lastError(events)).not.toContain('Enable');
-    expect(rpc.request.mock.calls.map(([method]) => method)).toEqual(['thread/resume']);
+    expect(rpc.request.mock.calls.map(([method]) => method)).toEqual(['config/read', 'thread/resume']);
   });
   it('never submits if the connection closes while resume is pending', async () => {
     const rpc = server(); const events: AgentEvent[] = [];
     let resumed!: (value: any) => void;
-    rpc.request.mockReturnValueOnce(new Promise(resolve => { resumed = resolve; }));
+    rpc.request.mockResolvedValueOnce({ config: {} } as any).mockReturnValueOnce(new Promise(resolve => { resumed = resolve; }));
     runCodexTurn({ ...opts, sessionId: 'old' }, event => events.push(event)); await flush();
     rpc.onClose?.(new Error('connection lost'));
     resumed({ thread: { id: 'old' } }); await flush();
-    expect(rpc.request.mock.calls.map(([method]) => method)).toEqual(['thread/resume']);
+    expect(rpc.request.mock.calls.map(([method]) => method)).toEqual(['config/read', 'thread/resume']);
     expect(events.filter(event => event.kind === 'done')).toHaveLength(1);
   });
   it('routes watch approvals to the user while preserving the selected sandbox', async () => {
@@ -174,3 +237,22 @@ describe('Codex turn lifecycle', () => {
     expect(events).toHaveLength(1);
   });
 });
+it('recovers exact owner only after rejected resume before submission', async () => {
+ const rpc=server(); const events: AgentEvent[]=[];
+ rpc.request.mockImplementation(async(method:string)=> { if(method==='config/read') return {config:{}} as any; if(method==='thread/resume') throw new Error('thread has an active writer'); return {} as any; });
+ const recovered={stop:vi.fn(),steer:vi.fn(async()=>true)};
+ const recovery=vi.fn((emit:(event:AgentEvent)=>void)=>{emit({kind:'accepted',sessionId:'same-chat',turnId:'single-turn'});return recovered});
+ const run=runCodexTurn({...opts,sessionId:'same-chat',codexDesktop:true,images:['attachment.png']},e=>events.push(e),undefined,undefined,'desktop',recovery);
+ await flush();
+ expect(recovery).toHaveBeenCalledTimes(1);
+ expect(rpc.request.mock.calls.some(([method])=>method==='turn/start'||method==='thread/start'||method==='thread/fork')).toBe(false);
+ expect(events.some(e=>e.kind==='accepted'&&e.sessionId==='same-chat')).toBe(true);
+ expect(await run.steer('extra')).toBe(true);run.stop();expect(recovered.stop).toHaveBeenCalledOnce();
+});
+it('never recovers after turn submission is uncertain', async()=>{
+ const rpc=server();const recovery=vi.fn();
+ rpc.request.mockImplementation(async(method:string)=>{if(method==='config/read')return {config:{}} as any;if(method==='thread/resume')return {thread:{id:'same-chat'}} as any;if(method==='turn/start')throw new Error('active writer');return {} as any;});
+ const events:AgentEvent[]=[];runCodexTurn({...opts,sessionId:'same-chat',codexDesktop:true},e=>events.push(e),undefined,undefined,'desktop',recovery);await flush();
+ expect(recovery).not.toHaveBeenCalled();expect(events.at(-1)).toMatchObject({kind:'done',isError:true,error:expect.stringContaining('may already have been accepted')});
+});
+

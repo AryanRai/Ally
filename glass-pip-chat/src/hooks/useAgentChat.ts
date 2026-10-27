@@ -7,7 +7,7 @@ export interface AgentTurnCallbacks {
   onText: (text: string) => void;
   onThinking: (thinking: string) => void;
   /** Fired as soon as the agent reports its session id (new sessions only) */
-  onSession?: (sessionId: string) => void;
+  onSession?: (sessionId: string, codexAccountId?: string) => void;
   onQueuedInput?: (id: string, text: string) => void;
 }
 
@@ -60,6 +60,7 @@ export function useAgentChat() {
       model: string;
       cwd?: string;
       sessionId?: string;
+      codexAccountId?: string;
       resumeToken?: string;
       robot?: { instructions: string };
       images?: string[];
@@ -121,7 +122,7 @@ export function useAgentChat() {
           case 'session':
             if (ev.sessionId !== sessionId) {
               sessionId = ev.sessionId;
-              cb.onSession?.(ev.sessionId);
+              cb.onSession?.(ev.sessionId, ev.codexAccountId);
             }
             break;
           case 'text':

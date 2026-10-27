@@ -15,6 +15,36 @@ describe('ChatManager', () => {
   beforeEach(() => {
     manager = freshManager();
   });
+  it('archives overflow before freeing native cache and persists navigation without losing local or failed sends', async () => {
+    const linked=manager.openAgentSession({provider:'codex',sessionId:'native'},'Native',[{...message('large'),content:'x'.repeat(40000)}]);
+    const failed=manager.openAgentSession({provider:'codex',sessionId:'failed'},'Failed',[message('unsent')]);
+    manager.setSendFailure(failed.id,{message:'Try again',text:'Unsent words'});
+    const local=manager.createNewChat('Local');manager.addMessage(local.id,message('local-only'));
+    let archived:any;
+    const database={createObjectStore:vi.fn(),close:vi.fn(),transaction:()=>{
+      const tx:any={objectStore:()=>({put:(value:any)=>{archived=value;queueMicrotask(()=>tx.oncomplete?.());}})};return tx;
+    }};
+    vi.stubGlobal('indexedDB',{open:()=>{const request:any={result:database};queueMicrotask(()=>request.onsuccess?.());return request;}});
+    const original=Storage.prototype.setItem;
+    const storage=vi.spyOn(Storage.prototype,'setItem').mockImplementation(function(this:Storage,key,value){
+      if((key==='glass_pip_chats'&&value.length>10000)||(key==='ally-active-chat'&&(this.getItem('glass_pip_chats')?.length||0)>10000))throw new DOMException('Full','QuotaExceededError');
+      original.call(this,key,value);
+    });
+    const log=vi.spyOn(console,'error').mockImplementation(()=>{});
+    try{
+      manager.switchToChat(linked.id);
+      await vi.waitFor(()=>expect(localStorage.getItem('ally-compact-chat-cache')).toBe('true'));
+      expect(JSON.parse(archived.current).chats.find((c:any)=>c.id===linked.id).messages[0].content).toHaveLength(40000);
+      expect(JSON.parse(archived.previous).chats.find((c:any)=>c.id===linked.id).messages[0].content).toHaveLength(40000);
+      const cached=JSON.parse(localStorage.getItem('glass_pip_chats')!);
+      expect(cached.chats.find((c:any)=>c.id===linked.id).messages).toEqual([]);
+      expect(cached.chats.find((c:any)=>c.id===local.id).messages[0].content).toBe('msg local-only');
+      expect(cached.chats.find((c:any)=>c.id===failed.id).messages[0].content).toBe('msg unsent');
+      expect(manager.getChatById(linked.id)?.messages[0].content).toHaveLength(40000);
+      expect(JSON.parse(localStorage.getItem('ally-active-chat')!).id).toBe(linked.id);
+      expect(freshManagerKeepingStorage().getActiveChat()?.id).toBe(linked.id);
+    }finally{storage.mockRestore();log.mockRestore();vi.unstubAllGlobals();}
+  });
   it('retains repeated-question stopped output in order across a long native refresh', () => {
     const history = Array.from({ length: 1000 }, (_, i) => [
       { id: `u${i}`, role: 'user' as const, content: 'Same question', timestamp: i * 2 },

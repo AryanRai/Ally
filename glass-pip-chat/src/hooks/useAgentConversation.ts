@@ -97,19 +97,21 @@ export function useAgentConversation({ chats, robotMode, onSentence }: Options) 
       fullPrompt = `Earlier conversation for context:\n\n${transcript}\n\n---\n\n${prompt}`;
     }
 
-    const link = (id: string) => {
+    let accountId = linked?.codexAccountId;
+    const link = (id: string, profileId?: string) => {
+      accountId = profileId ?? accountId;
       const originalSessionId = linked?.originalSessionId ?? (sessionId && sessionId !== id ? sessionId : undefined);
       sessionId = id;
-      chats.setAgent(chatId, { provider, sessionId: id, originalSessionId, cwd: runCwd });
+      chats.setAgent(chatId, { provider, sessionId: id, originalSessionId, cwd: runCwd, codexAccountId: accountId });
     };
-    if (!linked || linked.cwd !== runCwd) chats.setAgent(chatId, { provider, sessionId, cwd: runCwd });
+    if (!linked || linked.cwd !== runCwd) chats.setAgent(chatId, { provider, sessionId, cwd: runCwd, codexAccountId: linked?.codexAccountId });
 
     updateLive(chatId, { ...emptyLive, isTyping: true });
     spokenUpTo.current[chatId] = 0;
 
     try {
       const result = await agent.runTurn(
-        { provider, model: selectedModel.model, cwd: runCwd, sessionId, prompt: fullPrompt, images, resumeToken, robot: robotMode ? { instructions: ROBOT_INSTRUCTIONS } : undefined },
+        { provider, codexAccountId: linked?.codexAccountId, model: selectedModel.model, cwd: runCwd, sessionId, prompt: fullPrompt, images, resumeToken, robot: robotMode ? { instructions: ROBOT_INSTRUCTIONS } : undefined },
         {
           onSegments: value => updateLive(chatId, { streamingSegments: value }),
           onText: text => {
@@ -125,7 +127,10 @@ export function useAgentConversation({ chats, robotMode, onSentence }: Options) 
       if (result.sessionId && result.sessionId !== sessionId) link(result.sessionId);
       if (result.error) chats.setSendFailure(chatId, { message: result.error, text: failedText });
       if (!result.stopped) speakNewSentences(chatId, result.text, true);
-      if (!result.stopped) window.pip?.notifyReply?.({ id: `reply-${chatId}-${Date.now()}`, chatId, title: result.error ? 'Ally needs attention' : chat.title || 'Ally reply', text: result.error || result.text });
+      const finalSegments = result.segments.filter(s => s.type === 'text' && s.phase === 'final_answer');
+      const replyText = finalSegments.length ? finalSegments.map(s => s.content ?? '').join('\n\n')
+        : result.segments.some(s => s.phase) ? result.segments.filter(s => s.type === 'text' && s.phase !== 'commentary').map(s => s.content ?? '').join('\n\n') : result.text;
+      if (!result.stopped && (result.error || replyText.trim())) window.pip?.notifyReply?.({ id: `reply-${chatId}-${Date.now()}`, kind: result.error ? 'attention' : 'response', chatId, session: sessionId ? { id: sessionId, provider, title: chat.title || 'Ally reply', cwd: runCwd } : undefined, title: result.error ? 'Ally needs attention' : chat.title || 'Ally reply', text: result.error || replyText });
 
       let content = result.text;
       if (result.thinking) content = `<think>${result.thinking}</think>\n\n${content}`;
@@ -246,7 +251,7 @@ export function useAgentConversation({ chats, robotMode, onSentence }: Options) 
   const openSession = useCallback(async (session: AgentSessionSummary) => {
     if (!window.pip?.agent) return;
     const existing = chats.chats.find(chat => chat.agent?.provider === session.provider && (chat.agent.sessionId === session.id || chat.agent.originalSessionId === session.id));
-    const target = existing ?? chats.openAgentSession({ provider: session.provider, sessionId: session.id, originalSessionId: session.originalSessionId, cwd: session.cwd }, session.title, undefined, session.createdAt);
+    const target = existing ?? chats.openAgentSession({ provider: session.provider, sessionId: session.id, originalSessionId: session.originalSessionId, cwd: session.cwd, codexAccountId: session.codexAccountId }, session.title, undefined, session.createdAt);
     if (existing) chats.select(existing.id);
     // Follow-ups should go to the same agent
     if (parseAgentModel(model)?.provider !== session.provider) setModel(`${AGENT_MODEL_PREFIX[session.provider]}default`);
@@ -257,7 +262,7 @@ export function useAgentConversation({ chats, robotMode, onSentence }: Options) 
       if (busy.current.has(target.id)) return; // An accepted local send owns its messages; polling catches up after it ends.
       if (!current?.agent || current.agent.provider !== session.provider || (current.agent.sessionId !== session.id && current.agent.originalSessionId !== session.id)) return;
       const resolved = snapshot.sessionId ?? session.id;
-      if (current.agent.sessionId !== resolved) chats.setAgent(target.id, { ...current.agent, sessionId: resolved, originalSessionId: snapshot.originalSessionId ?? session.id, cwd: snapshot.cwd ?? current.agent.cwd });
+      if (current.agent.sessionId !== resolved || (snapshot.codexAccountId && snapshot.codexAccountId !== current.agent.codexAccountId)) chats.setAgent(target.id, { ...current.agent, codexAccountId: snapshot.codexAccountId ?? current.agent.codexAccountId, sessionId: resolved, originalSessionId: snapshot.originalSessionId ?? session.id, cwd: snapshot.cwd ?? current.agent.cwd });
       if (!snapshot.unchanged) chats.syncAgentSession(target.id, session.provider, resolved, sessionMessages(resolved, snapshot.messages), snapshot.cwd);
     }).catch(error => {
       // Keep the selected chat and its saved transcript usable; a later click retries.
@@ -274,6 +279,7 @@ export function useAgentConversation({ chats, robotMode, onSentence }: Options) 
       // A different folder is a different project, so start a new session there
       chats.setAgent(chats.activeChat.id, {
         provider: linked.provider,
+        codexAccountId: linked.codexAccountId,
         sessionId: linked.cwd === folder ? linked.sessionId : undefined,
         cwd: folder,
       });

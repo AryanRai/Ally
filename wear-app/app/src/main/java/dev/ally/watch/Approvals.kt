@@ -34,7 +34,7 @@ object ApprovalParser {
 }
 
 @Composable
-internal fun ApprovalScreen(request: WatchApproval, sending: Boolean, error: String, submit: (String, Map<String, String>) -> Unit, embedded: Boolean = false) {
+internal fun ApprovalScreen(request: WatchApproval, sending: Boolean, error: String, submit: (String, Map<String, String>) -> Unit, embedded: Boolean = false, access: (() -> Unit)? = null) {
     // Every approval starts unanswered. No recommended option is implicitly granted.
     var values by remember(request.id) { mutableStateOf<Map<String, String>>(emptyMap()) }
     val scroll = key(request.id) { rememberScrollState() }
@@ -58,5 +58,6 @@ internal fun ApprovalScreen(request: WatchApproval, sending: Boolean, error: Str
         request.actions.forEach { action ->
             Button(onClick = { submit(action.value, values) }, enabled = !sending && (action.value != "submit" || ApprovalParser.complete(request, values))) { Text(action.label) }
         }
+        access?.let { open -> Button(onClick = open, enabled = !sending) { Text("Chat access", fontSize = 12.sp) } }
     }
 }

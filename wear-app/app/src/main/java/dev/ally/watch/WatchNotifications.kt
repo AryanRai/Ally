@@ -14,6 +14,9 @@ import android.os.Build
 object WatchNotifications {
     @Volatile var foreground = false
     @Synchronized fun show(context: Context, title: String, text: String, id: String, chat: String) {
+        // The shared authenticated device feed owns completion/approval alerts.
+        // Keep this path only for installations that have not enabled that feed.
+        if(dev.ally.device.DeviceLink.prefs(context).getBoolean("deviceConnected",false) && dev.ally.device.DeviceLink.status.value=="Connected")return
         val prefs = context.getSharedPreferences("ally-watch", 0)
         if (!prefs.getBoolean("replyAlerts", true) || prefs.getBoolean("muted", false)) return
         val seen = prefs.getStringSet("notifiedTurns", emptySet())!!.toMutableSet()

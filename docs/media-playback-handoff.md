@@ -1,0 +1,31 @@
+# Phone video continuation to PC
+
+27 October 2026 implementation checkpoint. This is a direct, user-confirmed playback-link handoff, independent of agent execution and screenshot/chat upload. Deployment evidence is in `.local/media-continuation/validation.json`; code readiness does not prove actual YouTube metadata availability or browser playback.
+
+## User flow
+
+Phone Settings → Video continuation offers a local now-playing opt-in and a button to Android's notification-access settings. The user decides in Android whether to enable **Ally now-playing handoff**. No ADB permission writes, security-setting changes or prompt automation are used. The listener does not inspect, store or forward notification bodies; the opt-in adapter queries active media sessions only during explicit local review/share actions.
+
+With YouTube foreground, bring the phone close, hold, and swipe the finite ready card. When media handoff is opted in, this opens a private secure video review instead of taking a screenshot. Review video identity and position, then explicitly tap **Continue on PC**. The PC opens a canonical YouTube URL with the reviewed timestamp in the default browser, retaining its existing normal login context. Browser/site login, autoplay, age/region, paid/protected-media restrictions still apply. A successful OS browser-launch request is **not** confirmation that playback started. Phone playback is not paused automatically.
+
+The review includes **Refresh current video**, manual original-URL and seconds fields, and **Check previous continuation**. If the app doesn't supply a supported video identity or fresh playback position, those fields remain missing. Share the original YouTube link to Ally, then choose **Review video continuation on PC** and supply its position. Title/image similarity never substitutes for a source ID. A new PC protocol is negotiated before sending any media messages; older PC builds receive none.
+
+## Metadata and guards
+
+The Android adapter reads MediaMetadata title, supported HTTPS media URI or a source YouTube media identifier, PlaybackState position/update time/speed, and duration. It picks a unique supported active session and scopes proximity review to the foreground YouTube package. Playback time is extrapolated only from a valid fresh playing state, bounded by duration. Stale, unavailable and unrelated session values remain unavailable. A shared link receives native position/title only when it matches the native source identity. Explicit shared context can retain native title/position with provenance; missing transcript remains unavailable.
+
+Android notification access is broader than media sessions at the OS permission layer; the app's reader is limited as described. Media data stays local until the user chooses Continue or separately sends a reviewed context draft. No background media upload, microphone, private capture test or extra provider/model loop is added.
+
+PC transport uses the existing authenticated device socket. Watch requests are rejected. HTTPS URLs are restricted to canonical YouTube video identities; credentials, arbitrary hosts and unsupported positions are rejected. Prepare issues a one-use random token bound to device, request ID, exact canonical URL and reviewed position, valid60seconds. Continue requires that token and explicit user-action marker; disconnect/PC lock revoke pending offers. A durable receipt is written **before** opening the browser. Duplicate IDs and restart reconciliation return status instead of launching again. A lost/failed launch result is uncertain; neither phone nor PC automatically replays it. Native pairing secrets and provider credentials are not involved.
+
+Media review doesn't import, clear or send existing shared drafts, launch an agent, or request control/viewer sessions. Screenshot handoff remains available separately and preserves its guards and explicit chosen-chat Send.
+
+## Validation and remaining scope
+
+TypeScript and10focused desktop tests pass (canonicalization, explicit confirmation, device/expiry/lock rejection, durable uncertain receipt/no replay, socket negotiation and existing YouTube helpers). Phone161/watch42JVM tests and both APK assemblies pass; phone lint passes. Phone APK installed and independently hashverified; assistant selected/bound after Android recovered normally. No private native metadata inspection/capture/microphone/model/message or real playback was run in this chat. Physical native metadata, approach and browser playback acceptance still require the user and an activated matching PC build.
+
+This increment does not implement Spotify OAuth/Connect transfer, automatic transcript retrieval, general phone audio routing, or universal video support. Spotify native title detection alone is not a transfer implementation. YouTube's official captions/download APIs require appropriate authorization; no hidden transcript endpoint, credential copying or protected-content bypass is added. Browser playback on the PC uses the PC's ordinary audio output; it isn't a phone-audio stream.
+
+Platform sources: [Android active media sessions and notification-listener authorization](https://developer.android.com/reference/android/media/session/MediaSessionManager), [Android playback position/update state](https://developer.android.com/reference/android/media/session/PlaybackState), [YouTube playback parameters and browser autoplay limits](https://developers.google.com/youtube/player_parameters).
+
+Deployment record: phone APK789fea11cde9d86fa532bba3853043f7db970132aa620b80a89227b0d4f453ec installed and independently verified, assistant bound without settings repair. PC candidate085141-268777b1 source169f0bb3... staged with guard/current-source match; not activated. Prior WindowsPowerShell warning failures are preserved and were not activated; explicit PowerShell7 guarded build succeeded. User consent and physical media acceptance still pending. Spotify official transfer requires OAuth and Premium: [Spotify Transfer Playback](https://developer.spotify.com/documentation/web-api/reference/transfer-a-users-playback). Supported caption API authorization: [YouTube caption implementation](https://developers.google.com/youtube/v3/guides/implementation/captions).

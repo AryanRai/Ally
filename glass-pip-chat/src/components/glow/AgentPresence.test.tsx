@@ -1,0 +1,34 @@
+import { act, cleanup, render } from '@testing-library/react';
+import { afterEach, expect, it, vi } from 'vitest';
+import AgentPresence from './AgentPresence';
+vi.mock('@/lib/look', () => ({ useLook: () => ({ look: { morphToRobot: true, orbStyle: 'energy' }, colors: {} }) }));
+vi.mock('./LiveOrb', () => ({ default: () => <div data-testid="orb" /> }));
+vi.mock('./RobotAvatar', () => ({ default: () => <div data-testid="robot" /> }));
+afterEach(() => { cleanup(); vi.useRealTimers(); });
+it('retains the robot and full fade, then removes invisible layout and restores it immediately', () => {
+  vi.useFakeTimers();
+  const view=render(<AgentPresence size={36} mood="idle" sensing={false} />);
+  const robot=view.getByTestId('robot'), wrapper=robot.parentElement!;
+  expect(wrapper.style.display).toBe('none');
+  view.rerender(<AgentPresence size={36} mood="idle" sensing />);
+  expect(wrapper.style.display).toBe(''); expect(wrapper.style.opacity).toBe('1');
+  view.rerender(<AgentPresence size={36} mood="idle" sensing={false} />);
+  expect(wrapper.style.display).toBe(''); expect(wrapper.style.opacity).toBe('0');
+  act(()=>vi.advanceTimersByTime(499)); expect(wrapper.style.display).toBe('');
+  act(()=>vi.advanceTimersByTime(1)); expect(wrapper.style.display).toBe('none');
+  expect(view.getByTestId('robot')).toBe(robot);
+  view.rerender(<AgentPresence size={36} mood="idle" sensing forceRobot />);
+  expect(wrapper.style.display).toBe(''); expect(wrapper.style.opacity).toBe('1');
+  expect(view.getByTestId('robot')).toBe(robot);
+});
+it('cancels an old hide when a fade reverses and cleans up its timer', () => {
+  vi.useFakeTimers();
+  const view=render(<AgentPresence size={36} mood="idle" sensing />);
+  const wrapper=view.getByTestId('robot').parentElement!;
+  view.rerender(<AgentPresence size={36} mood="idle" sensing={false} />);
+  act(()=>vi.advanceTimersByTime(250));
+  view.rerender(<AgentPresence size={36} mood="idle" sensing />);
+  act(()=>vi.advanceTimersByTime(1000)); expect(wrapper.style.display).toBe('');
+  view.rerender(<AgentPresence size={36} mood="idle" sensing={false} />);
+  view.unmount(); expect(vi.getTimerCount()).toBe(0);
+});

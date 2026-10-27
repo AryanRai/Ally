@@ -1,0 +1,3 @@
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+  <background android:drawable="@color/ally_icon_background"/><foreground android:drawable="@drawable/ally_launcher_foreground"/><monochrome android:drawable="@drawable/ally_launcher_monochrome"/>
+</adaptive-icon>

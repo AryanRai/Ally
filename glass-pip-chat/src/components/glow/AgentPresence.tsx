@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { useLook } from '@/lib/look';
 import { cn } from '@/lib/utils';
 import type { OrbMood } from './EnergyOrb';
@@ -26,6 +27,16 @@ export default function AgentPresence({ size, mood, sensing, robotStatus, pulse,
   const { look, colors } = useLook();
   const robot = forceRobot || (look.morphToRobot && sensing);
   const morph = 'transition-[opacity,transform,filter] duration-500 ease-[cubic-bezier(0.22,1,0.36,1)]';
+  const [robotPainted, setRobotPainted] = useState(robot);
+  useEffect(() => {
+    if (robot) { setRobotPainted(true); return; }
+    // Opacity alone leaves the custom avatar drawing and forcing SVG layout.
+    // Its ResizeObserver pauses frames without losing state when layout is zero.
+    // Retain layout until the existing fade completes, and restore it immediately
+    // if the morph reverses while that fade is still in progress.
+    const timer = setTimeout(() => setRobotPainted(false), 500);
+    return () => clearTimeout(timer);
+  }, [robot]);
 
   return (
     <div className={cn('relative grid place-items-center', className)} style={{ width: size, height: size }}>
@@ -37,7 +48,7 @@ export default function AgentPresence({ size, mood, sensing, robotStatus, pulse,
       </div>
       <div
         className={cn('absolute inset-0 grid place-items-center', morph, !robot && 'pointer-events-none')}
-        style={{ opacity: robot ? 1 : 0, transform: robot ? 'scale(1)' : 'scale(1.6)', filter: robot ? 'none' : 'blur(6px)' }}
+        style={{ display: robot || robotPainted ? undefined : 'none', opacity: robot ? 1 : 0, transform: robot ? 'scale(1)' : 'scale(1.6)', filter: robot ? 'none' : 'blur(6px)' }}
       >
         <RobotAvatar size={Math.round(size * 1.15)} status={robot ? robotStatus ?? (sensing ? 'seeing' : 'idle') : 'idle'} pulse={pulse} trackGlobalCursor={trackGlobalCursor && !!robot} />
       </div>

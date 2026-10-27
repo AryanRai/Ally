@@ -15,12 +15,17 @@ import { listAgentModels, listAgentSessions, loadAgentSession } from './sessions
 import { readAgentMonitor } from './agentMonitor.js';
 import { watchAgentSessions } from './sessionWatch.js';
 import { configureCodexMigrations } from './codexMigration.js';
-import { configureCodexHistory, listCodexChats, loadCodexChat, closeCodexHistory } from './codexHistory.js';
+import { configureCodexHistory, listCodexChats, listCodexChatsPage, loadCodexChat, closeCodexHistory } from './codexHistory.js';
+import { chatSelection, type SharedChatSelection } from './selection.js';
 import { generateGreeting } from './greeting.js';
+import { registerCodexAccountIpc } from './codexAccountIpc.js';
 import { registerClaudeLoginIpc } from './claudeLogin.js';
 import { desktopInteraction } from './desktopApprovals.js';
+import { startNativeDesktopApprovals } from './nativeDesktopApprovals.js';
 import { localImage } from './localImage.js';
 import { startWatchBridge } from '../watch/bridge.js';
+import { liveStudyReplies } from '../watch/liveStudyReply.js';
+import { revealFloatingSurface } from '../surface/coordinator.js';
 import type { AgentConfig, AgentProvider, AgentRunOptions } from './types.js';
 
 const CONFIG_FILE = () => path.join(app.getPath('userData'), 'agent-config.json');
@@ -43,11 +48,14 @@ function loadConfig(): AgentConfig {
 /** Registers `agent:*` IPC; `onConfig` sees the config at startup and after every change. */
 export function registerAgentIpc(getWindow: () => BrowserWindow | null, onConfig?: (config: AgentConfig) => void): void {
   let config = loadConfig();
+  registerCodexAccountIpc(getWindow, () => config.codexPath);
   interactions.configure(path.join(app.getPath('userData'), 'chat-interactions.json'));
   const stopInteractionEvents = interactions.subscribe((event) => {
     const win = getWindow(); if (!win || win.isDestroyed()) return;
     win.webContents.send('agent:interactionsChanged');
-    if (event.type === 'interaction' && event.request.kind === 'question') {
+    if (event.type === 'interaction') {
+      revealFloatingSurface();
+      if (win.isMinimized()) win.restore();
       if (!win.isVisible()) win.show();
       win.flashFrame(true);
     }
@@ -57,8 +65,9 @@ export function registerAgentIpc(getWindow: () => BrowserWindow | null, onConfig
   configureUnread(path.join(app.getPath('userData'), 'chat-read-state.json'));
   messageQueue.configure(path.join(app.getPath('userData'), 'message-queue.json'));
   const stopNativeUnread = startNativeUnread();
+  const stopNativeApprovals = startNativeDesktopApprovals(() => !!config.codexDesktop);
   const stopUnreadTracking = startUnreadTracking();
-  app.on('will-quit', () => { stopNativeUnread(); stopUnreadTracking(); });
+  app.on('will-quit', () => { stopNativeApprovals(); stopNativeUnread(); stopUnreadTracking(); });
   configureCodexMigrations(path.join(app.getPath('userData'), 'codex-migrations.json'));
   configureCodexHistory(config.codexPath);
   onConfig?.(config);
@@ -116,12 +125,22 @@ export function registerAgentIpc(getWindow: () => BrowserWindow | null, onConfig
     const win = getWindow();
     if (!win || event.sender !== win.webContents || event.senderFrame !== win.webContents.mainFrame) throw Error('Decisions must come from Ally chat.');
   };
+  const stopSelection = chatSelection.subscribe(state => {
+    const win = getWindow();
+    if (win && !win.isDestroyed()) win.webContents.send('agent:selection', state);
+  });
+  app.on('will-quit', stopSelection);
+  ipcMain.handle('agent:getSelection', event => { fromMain(event); return chatSelection.snapshot(); });
+  ipcMain.handle('agent:setSelection', (event, selected: SharedChatSelection | null, version: string) => {
+    fromMain(event); return chatSelection.set(selected, version, 'desktop');
+  });
   ipcMain.handle('agent:localImage', (event, source: string) => { fromMain(event); return localImage(source); });
   ipcMain.handle('agent:interactionHistory', (event, chatId: string) => {
     fromMain(event);
     if (typeof chatId !== 'string' || !/^(codex|claude):[\w-]{8,100}$/.test(chatId)) throw Error('Select the original chat');
     return interactions.history(chatId);
   });
+  ipcMain.handle('agent:pendingInteractions', event => { fromMain(event);return interactions.list(); });
   ipcMain.handle('agent:answerInteraction', (event, chatId: string, id: string, answer: import('../watch/approvals').ApprovalAnswer) => {
     fromMain(event);
     const request = interactions.list(chatId).find(request => request.id === id);
@@ -155,6 +174,15 @@ export function registerAgentIpc(getWindow: () => BrowserWindow | null, onConfig
   ipcMain.handle('agent:activity', event => { fromMain(event); return readAgentMonitor(); });
   ipcMain.handle('agent:runningSessions', () => listRunningSessions());
   ipcMain.handle('agent:listSessions', (_, provider: AgentProvider, limit?: number) => provider === 'codex' ? listCodexChats(limit) : listAgentSessions(provider, limit));
+  ipcMain.handle('agent:listSessionsPage', async (event, provider: AgentProvider, cursor?: string) => {
+    fromMain(event);
+    if (!['codex', 'claude'].includes(provider) || (cursor !== undefined && (typeof cursor !== 'string' || cursor.length > 16000))) throw Error('Invalid chat page');
+    if (provider === 'codex') return listCodexChatsPage(30, cursor);
+    const offset = cursor === undefined ? 0 : Number(cursor);
+    if (!Number.isSafeInteger(offset) || offset < 0) throw Error('Invalid chat page');
+    const rows = await listAgentSessions(provider, offset + 31);
+    return { sessions: rows.slice(offset, offset + 30), nextCursor: rows.length > offset + 30 ? String(offset + 30) : undefined };
+  });
 
   ipcMain.handle('agent:readStates', (_, keys?: string[]) => discoveryReadStates(Array.isArray(keys) ? keys.filter(key => typeof key === 'string' && /^(codex|claude):[\w-]+$/.test(key)) : []));
   ipcMain.handle('agent:markRead', async (_, provider: AgentProvider, id: string, revision: string) => {
@@ -164,6 +192,12 @@ export function registerAgentIpc(getWindow: () => BrowserWindow | null, onConfig
     if (accepted && provider === 'codex') acknowledgeNativeUnread(id);
     return accepted;
   });
+  ipcMain.handle('agent:liveStudyReply', (event, key: string) => event.sender === getWindow()?.webContents && typeof key === 'string' ? liveStudyReplies.read(key) : null);
+  const stopLiveStudy = liveStudyReplies.subscribe(reply => {
+    const win = getWindow();
+    if (win && !win.isDestroyed()) win.webContents.send('agent:liveStudyReply', reply);
+  });
+  app.once('will-quit', () => { stopLiveStudy(); liveStudyReplies.close(); });
   ipcMain.handle('agent:loadSession', async (_, provider: AgentProvider, id: string, revision?: string) => {
     const readState = unreadState(provider, id); // Captured before loading: never acknowledge a later unseen reply.
     const snapshot = provider === 'codex' ? await loadCodexChat(id, revision) : await loadAgentSession(provider, id, revision);

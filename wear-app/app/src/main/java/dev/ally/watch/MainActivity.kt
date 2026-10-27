@@ -56,8 +56,10 @@ import kotlinx.coroutines.launch
 class MainActivity : ComponentActivity() {
     private val model get() = (application as AllyWatchApplication).model
     private var notificationSequence by mutableIntStateOf(0)
+    private val ambient = AmbientController()
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        lifecycle.addObserver(androidx.wear.ambient.AmbientLifecycleObserver(this, ambient))
         // Development provisioning through ADB; release builds ignore launch extras.
         if (BuildConfig.DEBUG) {
             val endpoint = intent.getStringExtra("endpoint")
@@ -71,17 +73,25 @@ class MainActivity : ComponentActivity() {
             }
         }
         setContent { MaterialTheme(colorScheme = MaterialTheme.colorScheme.copy(primary = White, onPrimary = Ink)) {
-            WatchApp(model, ::pulse, { checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED }, notificationSequence)
+            // Observe capture outside AmbientHost's lifecycle gate: dimming must
+            // never hide the release target or interrupt an active orb recording.
+            val capture by model.state.collectAsState()
+            SideEffect { window.decorView.keepScreenOn = capture.inputRecording || capture.phase == Phase.RECORDING }
+            DisposableEffect(Unit) { onDispose { window.decorView.keepScreenOn = false } }
+            AmbientHost(ambient, model) {
+                WatchApp(model, ::pulse, { checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED }, notificationSequence)
+            }
         } }
     }
-    override fun onResume() { super.onResume(); dev.ally.device.DeviceLink.resume(this); model.foreground = true; WatchNotifications.foreground = true; model.refresh(); openRequestChat(intent) }
+    override fun onResume() { super.onResume(); (application as AllyWatchApplication).activityVisible = true; dev.ally.device.DeviceLink.resume(this); model.foreground = true; WatchNotifications.foreground = true; model.refresh(); openRequestChat(intent) }
     override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); setIntent(intent); openRequestChat(intent) }
     private fun openRequestChat(intent: Intent) {
         dev.ally.device.SurfaceActions.handle(this,intent) { model.openNotification(it); notificationSequence++ }
         if(intent.getBooleanExtra("allyAgentMonitor",false)) { intent.removeExtra("allyAgentMonitor"); window.decorView.post { dev.ally.device.AllyAssistantService.showMonitor() } }
         intent.getStringExtra("openChat")?.let { model.openNotification(it); notificationSequence++; intent.removeExtra("openChat") }
     }
-    override fun onStop() { model.foreground = false; WatchNotifications.foreground = false; if (!dev.ally.device.AssistantVisibility.visible) model.cancelRecording(); model.stopSpeaking(); super.onStop() }
+    override fun onStart() { super.onStart(); AmbientOngoing.show(this) }
+    override fun onStop() { (application as AllyWatchApplication).activityVisible = false; AmbientOngoing.hide(this); model.foreground = dev.ally.device.AssistantVisibility.visible; WatchNotifications.foreground = false; if (!dev.ally.device.AssistantVisibility.visible) model.cancelRecording(); super.onStop() }
     private fun pulse(long: Boolean) {
         if (!model.state.value.muted) getSystemService(Vibrator::class.java)?.vibrate(
             VibrationEffect.createOneShot(if (long) 80 else 28, VibrationEffect.DEFAULT_AMPLITUDE))
@@ -150,11 +160,11 @@ private fun WatchApp(model: WatchViewModel, pulse: (Boolean) -> Unit, hasMic: ()
             dev.ally.device.MessageQueueStack(state.queue,state.queueChanging,state.queueError,model::queueChange,Modifier.weight(1f),compact=true)
             if(state.queue.items.isEmpty()) Text("Queue is empty",color=Muted,fontSize=12.sp)
         }
-        pendingApproval != null -> ApprovalScreen(pendingApproval, state.answeringApproval, state.approvalError, model::answerApproval)
+        settings -> SettingsScreen(model, state, { settings = false }, { settings = false; openChats() }, { appearance = true })
+        pendingApproval != null -> ApprovalScreen(pendingApproval, state.answeringApproval, state.approvalError, model::answerApproval, access = { settings = true })
         chats -> ChatPicker(model, state, { chats = false }, { chats = false; quickChats = false; scope.launch { pager.scrollToPage(0) } })
         quickChats -> QuickChats(model, state, { quickChats = false }, openChats, { quickChats = false; scope.launch { pager.scrollToPage(0) } })
         appearance -> AppearanceScreen(state.look, model::appearance, { appearance = false })
-        settings -> SettingsScreen(model, state, { settings = false }, { settings = false; openChats() }, { appearance = true })
         textInput -> TextEntry(if(state.turnId != null) "Add input" else "Ask Ally", "What’s on your mind?", { text -> model.send(text); textInput = false }, { textInput = false }, state.turnId != null || state.externalRunning, state.inputMode, model::inputMode, state.chatId)
         else -> Box(Modifier.fillMaxSize().background(Ink)) {
             PresenceGlow(state.inputRecording || state.inputSending || state.phase in setOf(Phase.RECORDING, Phase.UPLOADING, Phase.THINKING), state.look)
@@ -263,6 +273,20 @@ private fun MiniButton(label: String, description: String, action: () -> Unit, e
 }
 
 @Composable
+internal fun ActivityGroup(steps: List<WatchStep>, commentary: List<String>) {
+    if (steps.isEmpty() && commentary.isEmpty()) return
+    var expanded by rememberSaveable { mutableStateOf(false) }
+    Column(Modifier.fillMaxWidth()) {
+        Text("${if(expanded) "⌄" else "›"} Activity · ${steps.size} steps" + if(commentary.isNotEmpty()) " · ${commentary.size} updates" else "",
+            color=Muted,fontSize=11.sp,modifier=Modifier.fillMaxWidth().clickable { expanded=!expanded }.padding(vertical=12.dp))
+        if (expanded) {
+            commentary.forEach { RichReply(it) }
+            steps.forEach { step -> key(step.id) { ActivityRow(step) } }
+        }
+    }
+}
+
+@Composable
 internal fun ActivityRow(step: WatchStep) {
     var expanded by rememberSaveable { mutableStateOf(false) }
     Column(Modifier.fillMaxWidth()) {
@@ -348,6 +372,7 @@ private fun SettingsScreen(model: WatchViewModel, state: WatchState, back: () ->
         Button(onClick = chats) { Text("Choose chat") }
         Button(onClick = { model.cancelRecording(); if(!dev.ally.device.AllyAssistantService.showMonitor()) android.widget.Toast.makeText(deviceContext,"Select Ally as your assistant first",android.widget.Toast.LENGTH_SHORT).show() }) { Text("Agent monitor") }
         Button(onClick = appearance) { Text("Appearance") }
+        Button(onClick = { deviceContext.startActivity(android.content.Intent(deviceContext,dev.ally.device.DeviceAccessActivity::class.java)) }) { Text("Device access") }
         Text("Voice & alerts", color = Muted, fontSize = 12.sp)
         Button(onClick = { deviceContext.startActivity(Intent(deviceContext, DeviceInboxActivity::class.java)) }) { Text("Cards & device connection", fontSize = 11.sp) }
         Text(if (state.liveSpeech) "Google live voice · Orbit. Audio and reply text go to Google." else "Local speech · hold to record", color = Muted, fontSize = 10.sp, textAlign = TextAlign.Center)
@@ -359,8 +384,9 @@ private fun SettingsScreen(model: WatchViewModel, state: WatchState, back: () ->
         Text("Turn the touch bezel to scroll. Enable Touch bezel in the watch’s system settings if needed.", color = Muted, fontSize = 10.sp, textAlign = TextAlign.Center)
         Text("Chat permissions", color = Muted, fontSize = 12.sp)
         listOf("readonly" to "Read only", "edit" to "Edit files", "full" to "Full access").forEach { (value, label) ->
-            Button(onClick = { model.permission(value) }, enabled = !model.busy) { Text((if (state.permission == value) "✓ " else "") + label, fontSize = 12.sp) }
+            Button(onClick = { model.permission(value) }, enabled = !state.permissionChanging && !state.inputRecording && state.phase != Phase.RECORDING && state.chatId != null) { Text((if (state.permission == value) "✓ " else "") + label, fontSize = 12.sp) }
         }
+        if (state.permissionStatus.isNotBlank()) Text(state.permissionStatus, color = Amber, fontSize = 10.sp)
         Text(if (state.permission == "full") {
             if (state.provider == "codex") "Unrestricted files. Eligible requests use automatic review. Required browser confirmations still appear."
             else "Claude bypass mode. Browser security checks still apply."
@@ -384,3 +410,4 @@ internal fun Field(value: String, change: (String) -> Unit, hint: String, secret
         visualTransformation = if (secret) PasswordVisualTransformation() else VisualTransformation.None,
         decorationBox = { inner -> if (value.isEmpty()) Text(hint, color = Muted, fontSize = 12.sp); inner() })
 }
+

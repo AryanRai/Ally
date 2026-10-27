@@ -22,8 +22,12 @@ export function approvalSpec(method: string, p: any): Spec {
     p.additionalPermissions && JSON.stringify(p.additionalPermissions)].filter(Boolean).join('\n\n');
   if (method === 'item/commandExecution/requestApproval' || method === 'item/fileChange/requestApproval') {
     const text = method.includes('fileChange') ? [p.reason, p.grantRoot, p.item && JSON.stringify(p.item)].filter(Boolean).join('\n\n') : detail;
-    // Never offer session-wide approvals or silently create policy amendments.
-    const actions = choices.filter(c => !p.availableDecisions || p.availableDecisions.includes(c.value));
+    // Offer a scope only when the server explicitly supports it. The user,
+    // rather than Ally replaying an earlier answer, grants that scope.
+    const actions = [
+      ...(p.availableDecisions?.includes('acceptForSession') ? [{ value: 'acceptForSession', label: 'Allow for this session' }] : []),
+      ...choices.filter(c => !p.availableDecisions || p.availableDecisions.includes(c.value)),
+    ];
     return { title: method.includes('fileChange') ? 'Allow file changes?' : 'Allow this action?', detail: text, fields: [], actions, cancel: { decision: 'cancel' }, answer: a => ({ decision: a.action }) };
   }
   if (method === 'item/permissions/requestApproval') {
@@ -43,6 +47,28 @@ export function approvalSpec(method: string, p: any): Spec {
   if (!['form', 'openai/form', 'openaiForm'].includes(p.mode)) return unsupported('This form cannot be answered on the watch yet.');
   const schema = p.requestedSchema;
   if (schema?.type !== 'object' || !schema.properties || Object.keys(schema.properties).length > 6) return unsupported('This form cannot be answered on the watch yet.');
+  const metadata = p._meta;
+  const connector = typeof metadata?.connector_id === 'string' ? metadata.connector_id.trim().toLowerCase().split(/[^a-z0-9]+/).filter(Boolean).join('-') : '';
+  const advertised = (Array.isArray(metadata?.persist) ? metadata.persist : [metadata?.persist]).filter((scope: unknown) => scope === 'session' || scope === 'always');
+  const displayedApp = Array.isArray(metadata?.tool_params_display) ? metadata.tool_params_display.find((entry: any) => entry?.name === 'app')?.value : undefined;
+  const app = typeof displayedApp === 'string' && displayedApp.trim() ? displayedApp : metadata?.tool_params?.app;
+  // Match Codex's native Computer Use card, including its conversation scope.
+  // Only an empty approval form is eligible; richer forms retain their fields.
+  if (metadata?.codex_approval_kind === 'mcp_tool_call' && (connector === 'computer-use' || connector.startsWith('computer-use-'))
+    && typeof app === 'string' && app.trim() && advertised.length && !Object.keys(schema.properties).length && !(schema.required?.length)
+    && !metadata.execution_bound && !metadata.browser_auth_challenge_id && !metadata.tool_params?.plan_token && !metadata.tool_params?.confirmation_summary) {
+    return { title: `Allow ChatGPT to use ${app.trim()}?`,
+      detail: [metadata.riskLevel === 'high' ? 'Elevated Risk' : undefined,
+        'Computer Use lets ChatGPT use this app and take screenshots of its contents while working.', metadata.subtitle, p.message].filter(Boolean).join('\n\n'),
+      fields: [], actions: [{ value: 'submit', label: advertised.includes('session') ? 'Allow this conversation' : 'Allow once' },
+        ...(advertised.includes('always') ? [{ value: 'submitAlways', label: 'Always allow' }] : []), { value: 'decline', label: 'Deny' }, cancelAction], cancel: formCancel,
+      answer: answer => {
+        if (answer.action === 'decline' || answer.action === 'cancel') return { action: answer.action, content: null, _meta: null };
+        if (answer.action !== 'submit' && !(answer.action === 'submitAlways' && advertised.includes('always'))) throw Error('Invalid Computer Use approval scope.');
+        const persist = answer.action === 'submitAlways' ? 'always' : advertised.includes('session') ? 'session' : undefined;
+        return { action: 'accept', content: {}, _meta: persist ? { persist } : null };
+      } };
+  }
   const fields: ApprovalField[] = [];
   for (const [id, raw] of Object.entries(schema.properties)) {
     const s = raw as any;
@@ -52,10 +78,19 @@ export function approvalSpec(method: string, p: any): Spec {
     fields.push({ id, label: [s.title || id, s.description].filter(Boolean).join('\n'), required: schema.required?.includes(id) ?? false,
       secret: !!s.writeOnly, options, freeText: s.type === 'string' && !options.length });
   }
+  const persistence = metadata?.codex_approval_kind === 'mcp_tool_call' && !metadata.execution_bound && !metadata.browser_auth_challenge_id && !metadata.tool_params?.plan_token && !metadata.tool_params?.confirmation_summary
+    ? (Array.isArray(metadata.persist) ? metadata.persist : [metadata.persist]).filter((scope: unknown) => scope === 'session' || scope === 'always') : [];
   return { title: 'Approval requested', detail: p.message || p.serverName, fields,
-    actions: [{ value: 'submit', label: fields.length ? 'Confirm choices' : 'Allow once' }, { value: 'decline', label: 'Deny' }, cancelAction], cancel: formCancel,
+    actions: [
+      ...(persistence.includes('session') ? [{ value: 'submitForSession', label: 'Allow for this session' }] : []),
+      { value: 'submit', label: fields.length ? 'Confirm choices' : 'Allow once' },
+      ...(persistence.includes('always') ? [{ value: 'submitAlways', label: 'Always allow' }] : []),
+      { value: 'decline', label: 'Deny' }, cancelAction,
+    ], cancel: formCancel,
     answer: a => {
-      if (a.action !== 'submit') return { action: a.action, content: null, _meta: null };
+      const scope = a.action === 'submitForSession' ? 'session' : a.action === 'submitAlways' ? 'always' : undefined;
+      if (scope && !persistence.includes(scope)) throw Error('This request does not allow persistent approval.');
+      if (a.action !== 'submit' && !scope) return { action: a.action, content: null, _meta: null };
       const content: Record<string, unknown> = {};
       for (const f of fields) {
         const value = a.values?.[f.id]; if (value == null) continue;
@@ -63,7 +98,7 @@ export function approvalSpec(method: string, p: any): Spec {
         if (s.type === 'string' && ((s.minLength != null && value.length < s.minLength) || (s.maxLength != null && value.length > s.maxLength))) throw new Error(`Check ${f.label}`);
         content[f.id] = s.type === 'boolean' ? value === 'true' : value;
       }
-      return { action: 'accept', content, _meta: null };
+      return { action: 'accept', content, _meta: scope ? { persist: scope } : null };
     } };
 }
 
@@ -107,7 +142,7 @@ export class WatchApprovals {
     const entry = this.pending.get(id);
     if (!entry || entry.turnId !== turnId) throw new Error('This approval has expired or was already answered');
     if (!entry.spec.actions.some(a => a.value === answer.action)) throw new Error('Invalid approval action');
-    if (answer.action === 'submit') for (const field of entry.spec.fields) {
+    if (['submit', 'submitForSession', 'submitAlways'].includes(answer.action)) for (const field of entry.spec.fields) {
       const value = answer.values?.[field.id];
       if (value == null && !field.required) continue;
       if (typeof value !== 'string' || value.length > 4000 || (field.required && !value.trim()) || (!field.freeText && !field.options.some(o => o.value === value))) throw new Error(`Choose an answer for ${field.label}`);

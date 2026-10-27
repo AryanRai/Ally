@@ -1,10 +1,10 @@
-import { useState } from 'react';
+import { memo, useState } from 'react';
 import CompactMarkdown from './CompactMarkdown';
 import { compactUserMessage } from '@/lib/compactPresentation';
 import { OriginalMessage } from './WatchReplyContent';
 import { ImageStrip } from './ToolCall';
 
-export default function CompactUserMessage({ content, images }: { content: string; images?: string[] }) {
+export default memo(function CompactUserMessage({ content, images }: { content: string; images?: string[] }) {
   const message = compactUserMessage(content);
   const [expanded, setExpanded] = useState(false);
   const long = message.text.length > 240 || message.text.split('\n').length > 4;
@@ -18,6 +18,6 @@ export default function CompactUserMessage({ content, images }: { content: strin
       <summary className="cursor-pointer">Question details</summary>
       <div className="max-h-28 overflow-y-auto">{message.questions.map((question, index) => <p key={index} className="mt-1 whitespace-pre-wrap">{question}</p>)}</div>
     </details>}
-    {message.original && <OriginalMessage text={message.original} label="Original question reply" />}
+    {message.original && <OriginalMessage text={message.original} label={message.label === 'You' ? 'Request details' : 'Original question reply'} />}
   </div>;
-}
+});

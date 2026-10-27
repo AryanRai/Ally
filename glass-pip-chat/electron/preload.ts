@@ -10,7 +10,7 @@ const pipAPI = {
   close: () => ipcRenderer.send('pip:close'),
   
   // Window resizing
-  resizeWindow: (width: number, height: number) => ipcRenderer.send('window:resize', { width, height }),
+  resizeWindow: (width: number, height: number, mode?: 'collapsed' | 'expanded') => ipcRenderer.send('window:resize', { width, height, mode }),
   getWindowSize: () => ipcRenderer.invoke('window:get-size'),
   captureQueryScreen: () => ipcRenderer.invoke('context:query-screen'),
   onManualResize: (callback: (size: { width: number; height: number }) => void) => {
@@ -33,7 +33,19 @@ const pipAPI = {
     ipcRenderer.on('focus-input', callback);
     return () => ipcRenderer.removeListener('focus-input', callback);
   },
-  
+  onSurfaceFloat: (callback: (id: number) => void) => {
+    const handler = (_: unknown, id: number) => callback(id);
+    ipcRenderer.on('surface:float', handler);
+    return () => ipcRenderer.removeListener('surface:float', handler);
+  },
+  surfaceReady: (id: number) => ipcRenderer.send('surface:ready', id),
+  surfacePreview: (value: unknown) => ipcRenderer.send('surface:preview', value),
+    onHandoff: (callback: (value: import('./devices/handoffPresentation.js').HandoffVisual | null) => void) => {
+      const handler=(_:unknown,value:import('./devices/handoffPresentation.js').HandoffVisual|null)=>callback(value);
+      ipcRenderer.on('surface:handoff',handler);return()=>{ipcRenderer.removeListener('surface:handoff',handler);};
+    },
+  nativeSettings: (change?: { key: string; value: string | number | boolean }) => ipcRenderer.invoke('surface:native-settings', change),
+
   // Get platform info
   getPlatform: () => ipcRenderer.invoke('system:get-platform'),
   
@@ -138,6 +150,7 @@ const pipAPI = {
   },
 
   tutor: {
+    study: (id: string, words: string) => ipcRenderer.invoke('tutor:study', id, words),
     action: (id: string, action: import('./visualTutor/types').TutorAction) => ipcRenderer.invoke('tutor:action', id, action),
     show: (id: string, point?: { x: number; y: number }) => ipcRenderer.invoke('tutor:show', id, point),
     start: (chatId: string, displayId?: number, circleCaptureId?: string) => ipcRenderer.invoke('tutor:start', chatId, displayId, circleCaptureId),
@@ -156,6 +169,16 @@ const pipAPI = {
     queue: (key: string) => ipcRenderer.invoke('agent:queue', key),
     queueChange: (key: string, change: import('./agent/messageQueueTypes.js').QueueChange) => ipcRenderer.invoke('agent:queueChange', key, change),
     status: () => ipcRenderer.invoke('agent:status'),
+    codexAccounts: {
+      list: () => ipcRenderer.invoke('codex-accounts:list'),
+      add: (label: string) => ipcRenderer.invoke('codex-accounts:add', label),
+      select: (id: string) => ipcRenderer.invoke('codex-accounts:select', id),
+      remove: (id: string) => ipcRenderer.invoke('codex-accounts:remove', id),
+      check: (id: string) => ipcRenderer.invoke('codex-accounts:check', id),
+      autoSwitch: (on: boolean) => ipcRenderer.invoke('codex-accounts:autoSwitch', on),
+      login: (id: string) => ipcRenderer.invoke('codex-accounts:login', id),
+      cancelLogin: () => ipcRenderer.invoke('codex-accounts:cancelLogin'),
+    },
     getConfig: () => ipcRenderer.invoke('agent:getConfig'),
     updateConfig: (patch: Record<string, unknown>) => ipcRenderer.invoke('agent:updateConfig', patch),
     listModels: (provider: 'claude' | 'codex') => ipcRenderer.invoke('agent:listModels', provider),
@@ -163,6 +186,7 @@ const pipAPI = {
     send: (opts: Record<string, unknown>) => ipcRenderer.invoke('agent:send', opts),
     localImage: (source: string) => ipcRenderer.invoke('agent:localImage', source),
     interactionHistory: (chatId: string) => ipcRenderer.invoke('agent:interactionHistory', chatId),
+    pendingInteractions: () => ipcRenderer.invoke('agent:pendingInteractions'),
     answerInteraction: (chatId: string, id: string, answer: import('./watch/approvals').ApprovalAnswer) => ipcRenderer.invoke('agent:answerInteraction', chatId, id, answer),
     onInteractionsChanged: (callback: () => void) => {
       const handler = () => callback(); ipcRenderer.on('agent:interactionsChanged', handler);
@@ -175,7 +199,21 @@ const pipAPI = {
     activity: () => ipcRenderer.invoke('agent:activity'),
     runningSessions: () => ipcRenderer.invoke('agent:runningSessions'),
     listSessions: (provider: 'claude' | 'codex', limit?: number) => ipcRenderer.invoke('agent:listSessions', provider, limit),
+    listSessionsPage: (provider: 'claude' | 'codex', cursor?: string) => ipcRenderer.invoke('agent:listSessionsPage', provider, cursor),
+    getSelection: () => ipcRenderer.invoke('agent:getSelection'),
+    setSelection: (selected: import('./agent/selection').SharedChatSelection | null, version: string) => ipcRenderer.invoke('agent:setSelection', selected, version),
+    onSelection: (callback: (state: import('./agent/selection').SelectionSnapshot) => void) => {
+      const handler = (_: unknown, state: import('./agent/selection').SelectionSnapshot) => callback(state);
+      ipcRenderer.on('agent:selection', handler);
+      return () => { ipcRenderer.removeListener('agent:selection', handler); };
+    },
     loadSession: (provider: 'claude' | 'codex', id: string, revision?: string) => ipcRenderer.invoke('agent:loadSession', provider, id, revision),
+    liveStudyReply: (key: string) => ipcRenderer.invoke('agent:liveStudyReply', key),
+    onLiveStudyReply: (callback: (reply: import('./watch/liveStudyReply').LiveStudyReply) => void) => {
+      const handler = (_: unknown, reply: import('./watch/liveStudyReply').LiveStudyReply) => callback(reply);
+      ipcRenderer.on('agent:liveStudyReply', handler);
+      return () => ipcRenderer.removeListener('agent:liveStudyReply', handler);
+    },
     readStates: (keys?: string[]) => ipcRenderer.invoke('agent:readStates', keys),
     markRead: (provider: 'claude' | 'codex', id: string, revision: string) => ipcRenderer.invoke('agent:markRead', provider, id, revision),
     onSessionsChanged: (callback: (provider: 'claude' | 'codex') => void) => {
@@ -207,6 +245,7 @@ const pipAPI = {
     appStatus: () => ipcRenderer.invoke('chatsMcp:appStatus'),
     addToApps: () => ipcRenderer.invoke('chatsMcp:addToApps'),
     removeFromApps: () => ipcRenderer.invoke('chatsMcp:removeFromApps'),
+    search: (query: string) => ipcRenderer.invoke('chatsMcp:search', String(query).slice(0, 200)),
     onOpenChat: (callback: (req: { provider: 'claude' | 'codex'; sessionId: string; title: string; cwd?: string }) => void) => {
       const handler = (_: any, req: any) => callback(req);
       ipcRenderer.on('chats:open', handler);

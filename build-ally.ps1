@@ -1,0 +1,36 @@
+param([switch]$StageOnly)
+$ErrorActionPreference='Stop'
+$taskRoot=$PSScriptRoot
+$taskHash=& (Join-Path $taskRoot 'tools\get-ally-source-hash.ps1') -Root $taskRoot
+$taskBuildRelative='.local\builds\unified-'+[DateTime]::UtcNow.ToString('yyyyMMdd-HHmmss')+'-'+[guid]::NewGuid().ToString('N').Substring(0,8)
+$taskBuild=Join-Path $taskRoot $taskBuildRelative
+$taskDesktop=Join-Path $taskBuild 'glass-pip-chat'
+$taskSource=Join-Path $taskRoot 'glass-pip-chat'
+if(!(Test-Path -LiteralPath (Join-Path $taskSource 'node_modules\electron\dist\electron.exe'))){throw 'Install the Ally desktop dependencies first.'}
+New-Item -ItemType Directory -Path $taskDesktop -Force | Out-Null
+foreach($taskDirectory in @('src','electron','scripts','assets')){Copy-Item -LiteralPath (Join-Path $taskSource $taskDirectory) -Destination $taskDesktop -Recurse}
+Get-ChildItem -LiteralPath $taskSource -File | Where-Object {$_.Name -match '^(package.*\.json|.*\.html|.*config.*\.(ts|js|json))$'} | Copy-Item -Destination $taskDesktop
+New-Item -ItemType Junction -Path (Join-Path $taskDesktop 'node_modules') -Target (Join-Path $taskSource 'node_modules') | Out-Null
+New-Item -ItemType Junction -Path (Join-Path $taskBuild 'speech-service') -Target (Join-Path $taskRoot 'speech-service') | Out-Null
+Push-Location $taskDesktop
+try {
+ & node.exe 'node_modules\vite\bin\vite.js' build
+ if($LASTEXITCODE -ne 0){throw 'Desktop renderer build failed.'}
+ & node.exe 'scripts\build-electron.js'
+ if($LASTEXITCODE -ne 0){throw 'Desktop main-process build failed.'}
+} finally {Pop-Location}
+# The native notch adapter is the private ally-study submodule; public clones build the desktop app only.
+$taskNative=Join-Path $taskRoot 'ally-study\build-native.ps1'
+if(Test-Path -LiteralPath $taskNative){
+ & $taskNative -Root $taskRoot -Build $taskBuild -StageOnly:$StageOnly
+} else {Write-Output 'Private native notch adapter not present; built the desktop app only.'}
+if((& (Join-Path $taskRoot 'tools\get-ally-source-hash.ps1') -Root $taskRoot) -ne $taskHash){throw 'Source changed during the build. The candidate is preserved; rebuild before activating.'}
+$taskManifest=@{version=1;desktop=$taskBuildRelative+'\glass-pip-chat';sourceHash=$taskHash;sourceHashVersion=2;builtAt=[DateTime]::UtcNow.ToString('o');nativeRuntimeValidated=$false}
+if($StageOnly){
+ $taskManifest | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $taskBuild 'build-manifest.json')
+ Write-Output ('Staged unified Ally at '+$taskBuild+'. Native files and active manifest are unchanged; install native adapters and activate only when idle.')
+ return
+}
+$taskManifest | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $taskRoot '.local\unified-build.json.staged')
+Move-Item -LiteralPath (Join-Path $taskRoot '.local\unified-build.json.staged') -Destination (Join-Path $taskRoot '.local\unified-build.json') -Force
+Write-Output 'Built unified Ally. No app was launched or restarted.'

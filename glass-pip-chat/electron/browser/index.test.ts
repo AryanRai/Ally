@@ -1,0 +1,67 @@
+// @vitest-environment node
+import { expect, it, vi } from 'vitest';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+const fixture=vi.hoisted(()=>({activity:vi.fn(async()=>({running:true,turnId:'turn-one'})),tools:new Map<string,any>(),open:vi.fn(async()=>({tabId:'fixture',revision:'v1',url:'https://example.com'})),action:vi.fn(async()=>({tabId:'fixture',revision:'v2'})),request:vi.fn(async(_profile:string,_command:Record<string,unknown>)=>({tabId:12,url:'https://example.com'}))}));
+vi.mock('../agent/codexDesktop.js',()=>({readDesktopActivity:fixture.activity}));
+vi.mock('electron',()=>({app:{whenReady:()=>Promise.resolve(),getAppPath:()=>'/ally',getPath:()=>os.tmpdir(),once:()=>{}},nativeImage:{}}));
+const consent=vi.hoisted(()=>({request:vi.fn()}));
+vi.mock('../devices/interactions.js',()=>({interactions:{request:consent.request}}));
+vi.mock('../chatsMcp/index.js',()=>({registerDeviceTool:(tool:any)=>{fixture.tools.set(tool.name,tool);return()=>{};}}));
+vi.mock('./chrome.js',()=>({ChromeBridge:class {listen=async()=>{};list=()=>[{profileId:'profile'}];request=fixture.request;close=()=>{};}}));
+vi.mock('./inApp.js',()=>({InAppBrowser:class {open=fixture.open;action=fixture.action;list=()=>[];close=()=>{};}}));
+import {registerBrowserTools} from './index';
+it('MCP uses explicit backends and originating chat, consumes revisions and deduplicates actions',async()=>{
+ registerBrowserTools(); const tool=fixture.tools.get('browser_control'),ctx={caller:'codex:fixture'};
+ const call=(args:any)=>tool.handler(args,ctx);
+ await expect(call({backend:'ally',operation:'open',url:'https://example.com',chatId:'codex:someone-else',requestId:'open-0001'})).rejects.toThrow('calling chat');
+ const opening={backend:'ally',operation:'open',url:'https://example.com',requestId:'open-0001'};
+ await Promise.all([call(opening),call(opening)]); expect(fixture.open).toHaveBeenCalledTimes(1);
+ await expect(call({...opening,url:'https://different.com'})).rejects.toThrow('different action');
+ await expect(call({backend:'ally',operation:'click',tabId:'fixture',ref:'e0',revision:'old',requestId:'click-001'})).rejects.toThrow('current revision');
+ const action={backend:'ally',operation:'click',tabId:'fixture',ref:'e0',revision:'v1',requestId:'click-002'};
+ await Promise.all([call(action),call(action)]); expect(fixture.action).toHaveBeenCalledTimes(1);
+ await expect(call({...action,requestId:'click-003'})).rejects.toThrow('current revision');
+ await expect(call({backend:'chrome',operation:'tabs'})).rejects.toThrow('profileId');
+ await call({backend:'chrome',profileId:'profile',operation:'tabs',owner:'forged',javascript:'forged'});
+ expect(fixture.request.mock.calls[0][1]).toMatchObject({operation:'tabs',groupTitle:'Ally'});
+ expect(fixture.request.mock.calls[0][1]).not.toHaveProperty('javascript');
+ expect(fixture.request.mock.calls[0][1].owner).not.toBe('forged');
+ expect(fixture.request.mock.calls[0][1].task).toMatch(new RegExp('^'+fixture.request.mock.calls[0][1].owner+'-'));
+ fixture.request.mockResolvedValueOnce({url:'https://example.com'} as any);
+ const snapshot=await call({backend:'chrome',profileId:'profile',operation:'snapshot',tabId:'12'});
+ expect(JSON.parse(snapshot.content[0].text).continuity).toMatchObject({version:1,originalUrl:{status:'available',value:'https://example.com/'},document:{status:'unavailable'}});
+ expect(JSON.parse(snapshot.content[0].text)).toMatchObject({tabId:'12',url:'https://example.com'});
+ const oldTask=fixture.request.mock.calls.at(-1)![1].task;
+ await call({backend:'chrome',profileId:'profile',operation:'tabs'});
+ expect(fixture.request.mock.calls.at(-1)![1].task).toBe(oldTask);
+ fixture.activity.mockResolvedValueOnce({running:true,turnId:'turn-two'});
+ await call({backend:'chrome',profileId:'profile',operation:'tabs'});
+ expect(fixture.request.mock.calls.at(-2)![1]).toEqual({operation:'end',task:oldTask,tidy:false});
+ expect(fixture.request.mock.calls.at(-1)![1].task).not.toBe(oldTask);
+});
+it('registers upload and requires one real approval before dispatch; duplicate IDs never reattach',async()=>{
+ registerBrowserTools();const tool=fixture.tools.get('browser_upload'),control=fixture.tools.get('browser_control'),ctx={caller:'codex:fixture-upload'};
+ expect(tool.inputSchema.required).toContain('paths');
+ const dir=await fs.mkdtemp(path.join(os.tmpdir(),'ally-attachment-qa-'));
+ try {
+  const file=path.join(dir,'photo.txt');await fs.writeFile(file,'own attachment fixture');
+  const snapshot=JSON.parse((await control.handler({backend:'chrome',profileId:'profile',operation:'snapshot',tabId:'12'},ctx)).content[0].text);
+  let approve:(answer:any)=>void=()=>{};consent.request.mockImplementationOnce(()=>new Promise(resolve=>{approve=resolve;}));
+  const args={profileId:'profile',tabId:'12',ref:'e1',url:'https://example.com/',paths:[file],revision:snapshot.revision,requestId:'upload-0001'};
+  const prior=fixture.request.mock.calls.length;
+  const pending=tool.handler(args,ctx);
+  await vi.waitFor(()=>expect(consent.request).toHaveBeenCalledOnce());
+  expect(fixture.request.mock.calls.length).toBe(prior);
+  expect(consent.request.mock.calls[0][0]).toMatchObject({chatId:'codex:fixture-upload',detail:expect.stringContaining('photo.txt')});
+  approve({action:'accept'});await pending;await tool.handler(args,ctx);
+  const uploaded=fixture.request.mock.calls.slice(prior).filter(call=>call[1].operation==='upload');
+  expect(uploaded).toHaveLength(1);expect(uploaded[0][1]).toMatchObject({url:'https://example.com/',ref:'e1'});
+  expect(uploaded[0][1].paths).not.toEqual([file]);
+  const next=JSON.parse((await control.handler({backend:'chrome',profileId:'profile',operation:'snapshot',tabId:'12'},ctx)).content[0].text);
+  consent.request.mockResolvedValueOnce({action:'decline'});
+  await expect(tool.handler({...args,revision:next.revision,requestId:'upload-denied'},ctx)).rejects.toThrow('not approved');
+  expect(fixture.request.mock.calls.filter(call=>call[1].operation==='upload')).toHaveLength(1);
+ }finally{await fs.rm(dir,{recursive:true,force:true});}
+});

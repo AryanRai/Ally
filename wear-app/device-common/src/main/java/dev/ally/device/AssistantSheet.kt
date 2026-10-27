@@ -18,7 +18,7 @@ import kotlin.math.*
 internal class AssistantSheet(context: Context, private val hold: AssistantHold, private val send: (String) -> Unit,
     private val mode: (String) -> Unit, private val open: () -> Unit, private val dismiss: () -> Unit, private val choose: (String) -> Unit,
     private val selectChat: (String) -> Unit, private val beginMonitor: () -> Boolean,
-    private val reviewPending: () -> Unit = open) : FrameLayout(context) {
+    private val reviewPending: () -> Unit = open, private val search: (String) -> Unit = {}) : FrameLayout(context) {
     private val round = resources.configuration.isScreenRound
     private val muted = Color.rgb(155,158,169)
     private val motion get() = ValueAnimator.areAnimatorsEnabled() && !DeviceLink.prefs(context).getBoolean(if(round) "look.reducedMotion" else "phone.look.reducedMotion", false)
@@ -33,7 +33,11 @@ internal class AssistantSheet(context: Context, private val hold: AssistantHold,
     private val modes = LinearLayout(context)
     private val routeOptions = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
     private val routeScroll = ScrollView(context)
-    private var shownChoices = emptyList<AssistantChoice>()
+    private var shownChoices = emptyList<AssistantChoice>() to (null as String?)
+    private val routeSend = label("Send", if(round) 12f else 15f, Color.rgb(12,12,13))
+    private val routeSearch = EditText(context)
+    private var searchOpen = false
+    private var syncingSearch = false
     private val activityToggle = label("Agents · checking…", 11f, muted)
     private val activityRows = LinearLayout(context).apply { orientation=LinearLayout.VERTICAL }
     private val activityScroll = ScrollView(context)
@@ -134,14 +138,51 @@ internal class AssistantSheet(context: Context, private val hold: AssistantHold,
         panel.addView(activityToggle,LinearLayout.LayoutParams(-1,dp(28)))
         activityScroll.addView(activityRows); activityScroll.visibility=GONE
         panel.addView(activityScroll,LinearLayout.LayoutParams(-1,dp(if(round) 88 else 144)))
+        // Send stays fixed above the compact list so confirming is always one tap.
+        routeSend.gravity=Gravity.CENTER; routeSend.maxLines=1; routeSend.ellipsize=android.text.TextUtils.TruncateAt.END
+        routeSend.setPadding(dp(12),0,dp(12),0); routeSend.isClickable=true; routeSend.isFocusable=true; routeSend.visibility=GONE
+        routeSend.background=background(Color.rgb(244,244,245),if(round) 18 else 22)
+        routeSend.setOnClickListener { choose(AssistantRoutePicker.SEND) }
+        panel.addView(routeSend,LinearLayout.LayoutParams(-1,dp(if(round) 36 else 44)).apply { topMargin=dp(4) })
+        routeSearch.apply {
+            hint="Search chats"; contentDescription="Search chats"; textSize=if(round) 12f else 14f; setTextColor(Color.WHITE); setHintTextColor(Color.rgb(146,149,161))
+            setSingleLine(); inputType=InputType.TYPE_CLASS_TEXT; imeOptions=EditorInfo.IME_ACTION_SEARCH; visibility=GONE
+            setPadding(dp(10),0,dp(10),0); background=background(Color.argb(20,255,255,255),12,Color.argb(40,255,255,255))
+            val font=resources.getIdentifier("geist_regular","font",context.packageName); if(font!=0) typeface=resources.getFont(font)
+            addTextChangedListener(object: android.text.TextWatcher {
+                override fun beforeTextChanged(t: CharSequence?, a: Int, b: Int, c: Int) {}
+                override fun onTextChanged(t: CharSequence?, a: Int, b: Int, c: Int) {}
+                override fun afterTextChanged(t: android.text.Editable?) { if(!syncingSearch) search(t.toString()) }
+            })
+            setOnEditorActionListener { v,action,_ -> if(action==EditorInfo.IME_ACTION_SEARCH) { hideKeyboard(v); true } else false }
+        }
+        panel.addView(routeSearch,LinearLayout.LayoutParams(-1,dp(if(round) 34 else 40)).apply { topMargin=dp(4) })
         routeScroll.addView(routeOptions); routeScroll.visibility=GONE
-        panel.addView(routeScroll,LinearLayout.LayoutParams(-1,dp(if(round) 52 else 176)))
+        panel.addView(routeScroll,LinearLayout.LayoutParams(-1,dp(if(round) 84 else 156)))
         modes.gravity=Gravity.CENTER; modes.visibility=GONE
         queue.gravity=Gravity.CENTER; steer.gravity=Gravity.CENTER
         queue.contentDescription="Queue after current response"; steer.contentDescription="Add guidance to current work"
         queue.setOnClickListener { mode("queue") }; steer.setOnClickListener { mode("steer") }
         modes.addView(queue,LinearLayout.LayoutParams(0,dp(36),1f)); modes.addView(steer,LinearLayout.LayoutParams(0,dp(36),1f))
         panel.addView(modes)
+    }
+    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+        // Restore preferred heights on every pass, including keyboard dismissal.
+        // Only scrollable content gives up space; input and actions retain theirs.
+        val scrolls = listOf(replyScroll to dp(if(round) 40 else 118),
+            activityScroll to dp(if(round) 88 else 144), routeScroll to dp(if(round) 84 else 156))
+        scrolls.forEach { (view, height) -> view.layoutParams.height = height }
+        if (!round && MeasureSpec.getMode(heightMeasureSpec) != MeasureSpec.UNSPECIFIED) {
+            val panelWidth = getChildMeasureSpec(widthMeasureSpec, paddingLeft + paddingRight, panel.layoutParams.width)
+            panel.measure(panelWidth, MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED))
+            val visible = scrolls.filter { it.first.visibility != GONE }
+            val preferred = visible.map { it.second }
+            val fixed = panel.measuredHeight - preferred.sum()
+            val fitted = AssistantImeLayout.fit(preferred,
+                (MeasureSpec.getSize(heightMeasureSpec) - paddingTop - paddingBottom - fixed).coerceAtLeast(0))
+            visible.forEachIndexed { index, (view, _) -> view.layoutParams.height = fitted[index] }
+        }
+        super.onMeasure(widthMeasureSpec, heightMeasureSpec)
     }
     fun reveal() {
         expanding=false; activityExpanded=false; interacted=false; firstText=null; hasLiveReply=false; replyScroll.visibility=GONE; modes.visibility=GONE
@@ -152,6 +193,9 @@ internal class AssistantSheet(context: Context, private val hold: AssistantHold,
     fun followChat() { activityExpanded=false; interacted=true; firstText=null; hasLiveReply=false }
     fun openMonitor() { activityExpanded=true; lastSnapshot?.let { render(it,lastActivity) } }
     fun render(s: AssistantSnapshot, agents: AssistantActivityState = lastActivity) {
+        // The assistant window has its own lifecycle, separate from MainActivity.
+        // Only microphone capture holds the display; release/cancel restores AOD.
+        keepScreenOn = s.recording
         approvals.visibility=if(!round && DeviceLink.inbox.value.any { DeviceAlerts.blocking(it) }) VISIBLE else GONE
         lastSnapshot=s; lastActivity=agents
         activityToggle.text="${agents.summary} ${if(activityExpanded) "▴" else "▾"}"
@@ -178,18 +222,28 @@ internal class AssistantSheet(context: Context, private val hold: AssistantHold,
                 },LinearLayout.LayoutParams(-1,dp(if(round) 42 else 46)).apply { topMargin=dp(2) })
             }
         }
-        if (s.choices != shownChoices) {
-            shownChoices=s.choices; routeOptions.removeAllViews()
+        if (s.choices to s.selected != shownChoices) {
+            shownChoices=s.choices to s.selected; routeOptions.removeAllViews()
             s.choices.forEach { choice ->
-                routeOptions.addView(label(if(choice.id.startsWith("__")) choice.title else "${choice.title} · ${choice.provider}", if(round) 11f else 14f).apply {
-                    setPadding(dp(8),dp(5),dp(8),dp(5)); maxLines=2; ellipsize=android.text.TextUtils.TruncateAt.END
-                    contentDescription=text; isClickable=true; isFocusable=true
-                    background=background(Color.argb(20,255,255,255),12)
-                    setOnClickListener { choose(choice.id) }
-                },LinearLayout.LayoutParams(-1,dp(if(round) 44 else 48)).apply { topMargin=dp(4) })
+                val picked=choice.id==s.selected
+                val name=if(choice.id.startsWith("__")) choice.title else "${choice.title} · ${choice.provider}"
+                routeOptions.addView(label((if(picked) "✓ " else "")+name, if(round) 11f else 14f, if(picked) Color.WHITE else Color.rgb(212,215,224)).apply {
+                    setPadding(dp(8),0,dp(8),0); maxLines=1; ellipsize=android.text.TextUtils.TruncateAt.END
+                    contentDescription=if(picked) "$name, selected" else name
+                    isClickable=true; isFocusable=true
+                    background=background(Color.argb(if(picked) 46 else 16,if(picked) 180 else 255,if(picked) 199 else 255,255),12,if(picked) Color.argb(90,180,199,255) else 0)
+                    setOnClickListener { if(choice.id==AssistantRoutePicker.SEARCH) toggleSearch(); choose(choice.id) }
+                },LinearLayout.LayoutParams(-1,dp(if(round) 34 else 40)).apply { topMargin=dp(3) })
             }
         }
+        val destination=s.choices.find { it.id==s.selected }
+        routeSend.text=destination?.let { "Send to ${if(it.id==AssistantRoutePicker.NEW) it.title.replaceFirstChar { c -> c.lowercase() } else it.title}" } ?: "Send"
+        routeSend.contentDescription=routeSend.text
+        routeSend.visibility=if(destination==null || activityExpanded) GONE else VISIBLE
+        if(s.choices.none { it.id==AssistantRoutePicker.SEARCH } && searchOpen) { searchOpen=false; setSearch("") }
+        routeSearch.visibility=if(searchOpen && !activityExpanded) VISIBLE else GONE
         routeScroll.visibility=if(s.choices.isEmpty() || activityExpanded) GONE else VISIBLE
+        if(round && s.choices.isNotEmpty()) activityToggle.visibility=GONE
         if(firstText==null) { firstText=s.text; hasLiveReply=false }
         chat.text=s.title; status.text=if(round && s.choices.isNotEmpty() && s.text.isNotBlank()) "“${s.text.take(55)}” · ${s.status}" else s.status
         status.setTextColor(if(s.needsAttention) Color.rgb(234,191,165) else muted)
@@ -202,6 +256,15 @@ internal class AssistantSheet(context: Context, private val hold: AssistantHold,
         queue.alpha=if(s.mode=="queue") 1f else .4f; steer.alpha=if(s.mode=="steer") 1f else .4f
         orb.recording=s.recording; orb.working=s.working; orb.level=s.level; orb.invalidate()
     }
+    private fun setSearch(value: String) { syncingSearch=true; routeSearch.setText(value); syncingSearch=false }
+    private fun hideKeyboard(v: View) { context.getSystemService(android.view.inputmethod.InputMethodManager::class.java)?.hideSoftInputFromWindow(v.windowToken,0) }
+    /** Search only filters the destination list; the entry clears its query via choose(SEARCH). */
+    private fun toggleSearch() {
+        searchOpen=!searchOpen; setSearch("")
+        routeSearch.visibility=if(searchOpen) VISIBLE else GONE
+        if(searchOpen) { routeSearch.requestFocus(); context.getSystemService(android.view.inputmethod.InputMethodManager::class.java)?.showSoftInput(routeSearch,0) }
+        else hideKeyboard(routeSearch)
+    }
     val showingReply get() = replyScroll.visibility == VISIBLE && isShown && reply.text.isNotBlank()
     fun message(text: String) { status.text=text }
     fun expand(done: () -> Unit) {
@@ -209,7 +272,7 @@ internal class AssistantSheet(context: Context, private val hold: AssistantHold,
         if(!motion) { done(); return }
         panel.animate().translationY(-dp(26).toFloat()).alpha(0f).setDuration(160).setInterpolator(PathInterpolator(.2f,0f,0f,1f)).withEndAction { done() }.start()
     }
-    fun pause() { panel.animate().cancel(); orb.active=false; hold.abort() }
+    fun pause() { keepScreenOn=false; panel.animate().cancel(); orb.active=false; hold.abort() }
 }
 
 private class SheetIcon(context: Context, private val close: Boolean) : View(context) {

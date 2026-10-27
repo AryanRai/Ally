@@ -16,3 +16,7 @@ it('delivers a labeled reply to both devices with its exact provider/session, ne
 it('does not manufacture a native route for a local renderer chat ID', () => {
   expect(replyCard({id:'local',chatId:'renderer-id',title:'Done',text:'Done'},'phone').chatId).toBeUndefined();
 });
+it('labels a failed send as attention and hides internal Study instructions in its title', () => {
+  expect(replyCard({id:'failed',kind:'attention',title:'Ally Study: continue this selected chat as a full agent. Use available tools',text:'Your message was not sent.'},'phone'))
+    .toMatchObject({kind:'attention',title:'Ally chat',body:'Your message was not sent.'});
+});

@@ -76,7 +76,7 @@ export class InteractionBroker {
     if (entry.request.expiresAt <= this.now()) { this.close(id, 'expired'); throw Error('This request expired.'); }
     if (!entry.request.actions.some(a => a.value === answer.action)) throw Error('Invalid decision.');
     if (Object.keys(answer.values ?? {}).some(key => !entry.request.fields.some(field => field.id === key))) throw Error('Unknown question field.');
-    if (answer.action === 'submit') for (const field of entry.request.fields) {
+    if (['submit', 'submitForSession', 'submitAlways'].includes(answer.action)) for (const field of entry.request.fields) {
       const value = answer.values?.[field.id];
       if (value == null && !field.required) continue;
       if (typeof value !== 'string' || value.length > 4000 || (field.required && !value.trim()) || (!field.freeText && !field.options.some(o => o.value === value))) throw Error('Choose an answer for every required question.');

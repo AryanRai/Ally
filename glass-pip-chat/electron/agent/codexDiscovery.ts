@@ -38,8 +38,10 @@ export class CodexDiscovery {
         const file = path.join(dir, entry.name);
         if (entry.isDirectory() && depth > 0) walk(file, depth - 1);
         else if (entry.isFile() && entry.name.endsWith('.jsonl')) {
-          const id = entry.name.match(/[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}/i)?.[0];
-          if (id) files.set(id, [...files.get(id) ?? [], file]);
+          // Compound filenames (e.g. rollout-…-{canonicalId}_{sessionId}.jsonl) carry two UUIDs;
+          // index every one so both the canonical ID and the filename alias resolve.
+          const ids = [...entry.name.matchAll(/[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}/ig)].map(m => m[0]);
+          for (const id of ids) files.set(id, [...(files.get(id) ?? []), file]);
         }
       }
     };

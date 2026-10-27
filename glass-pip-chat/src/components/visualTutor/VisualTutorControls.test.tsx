@@ -5,7 +5,7 @@ import type { useVisualTutor } from '@/hooks/useVisualTutor';
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 function setup(active=false,disabled=false) {
   const circle=vi.fn(); Object.defineProperty(window,'pip',{configurable:true,value:{circle:{start:circle}}});
-  const tutor: ReturnType<typeof useVisualTutor>={board:active ? {id:'board'} as any : null,busy:false,error:'',start:vi.fn(),decorate:text=>text,show:vi.fn(),showAt:vi.fn(),end:vi.fn(),pendingSelection:false,attach:vi.fn(),claimAttachment:()=>({blocked:false}),action:vi.fn(),hide:vi.fn()};
+  const tutor: ReturnType<typeof useVisualTutor>={board:active ? {id:'board'} as any : null,busy:false,error:'',start:vi.fn(),study:vi.fn(),decorate:text=>text,show:vi.fn(),showAt:vi.fn(),end:vi.fn(),pendingSelection:false,attach:vi.fn(),claimAttachment:()=>({blocked:false}),action:vi.fn(),hide:vi.fn()};
   const view = render(<VisualTutorControls tutor={tutor} disabled={disabled}/>); return {tutor,circle,...view};
 }
 it('offers no separate drawing launcher when no lesson is active',()=>{

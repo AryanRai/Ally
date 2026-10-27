@@ -33,6 +33,7 @@ internal class WatchConversation(private val application: Application, initial: 
     private val voice = VoiceRecorder()
     private var liveSpeech: LiveSpeech? = null
     private val speaker = ReplySpeaker(application, viewModelScope) { playing, error -> mutable.update { it.copy(speaking = playing, speechError = error) } }
+    private val progressRead = dev.ally.device.ProgressReadCursor()
     private var work: Job? = null
     fun acceptAssistantTurn(id: String) {
         work?.cancel()
@@ -72,7 +73,13 @@ internal class WatchConversation(private val application: Application, initial: 
     }
     fun autoRead(enabled: Boolean) { prefs.edit().putBoolean("autoRead", enabled).apply(); mutable.update { it.copy(autoRead = enabled) }; if (!enabled) stopSpeaking() }
     fun replyAlerts(enabled: Boolean) { prefs.edit().putBoolean("replyAlerts", enabled).apply(); mutable.update { it.copy(replyAlerts = enabled) } }
-    fun stopSpeaking() = speaker.stop()
+    fun stopSpeaking() { progressRead.stop(mutable.value.progressTurnId); speaker.stop() }
+    private fun progress(result: JSONObject, turn: String) {
+        val rows = dev.ally.device.LiveProgressParser.read(result)
+        mutable.update { it.copy(progress = rows, progressTurnId = turn) }
+        val enabled = foreground && !mutable.value.muted && !mutable.value.inputRecording && mutable.value.phase != Phase.RECORDING && !dev.ally.device.AssistantVisibility.recording
+        progressRead.updates(turn, rows, enabled).forEach { speaker.enqueue(it, endpoint, token, mutable.value.liveSpeech) }
+    }
     fun shouldRequestAlerts(): Boolean {
         if (prefs.getBoolean("askedReplyAlerts", false)) return false
         prefs.edit().putBoolean("askedReplyAlerts", true).apply(); return true
@@ -134,10 +141,19 @@ internal class WatchConversation(private val application: Application, initial: 
     }
     fun provider(value: String) = newChat(value)
     fun permission(value: String) {
-        if (busy || prefs.contains("turn") || inputText != null || value !in setOf("readonly", "edit", "full")) return
+        if (mutable.value.permissionChanging || mutable.value.inputRecording || mutable.value.phase == Phase.RECORDING || value !in setOf("readonly", "edit", "full")) return
         val chat = mutable.value.chatId ?: return
-        prefs.edit().putString("permission:$chat", value).apply()
-        mutable.update { it.copy(permission = value) }
+        mutable.update { it.copy(permissionChanging = true, permissionStatus = "Updating access…") }
+        viewModelScope.launch {
+            try {
+                val result = api.request("/v1/chats/${encoded(chat)}/access", JSONObject().put("permission", value).toString().toByteArray())
+                check(result.getString("permission") == value) { "Access change was not confirmed" }
+                prefs.edit().putString("permission:$chat", value).apply()
+                mutable.update { if (it.chatId == chat) it.copy(permission = value, permissionStatus = result.getString("message")) else it }
+            } catch (e: CancellationException) { throw e }
+            catch (e: Exception) { mutable.update { if (it.chatId == chat) it.copy(permissionStatus = e.message ?: "Access change could not be confirmed") else it } }
+            finally { mutable.update { it.copy(permissionChanging = false) } }
+        }
     }
     fun answerApproval(action: String, values: Map<String, String>) {
         if (approvalWork?.isActive == true) return
@@ -246,6 +262,13 @@ internal class WatchConversation(private val application: Application, initial: 
     private fun applyHistory(result: JSONObject, older: Boolean = false, preserveOlder: Boolean = false) {
         selected(ChatParser.chat(result.getJSONObject("chat")))
         val messages = ChatParser.messages(result)
+        val progressTurn = result.optString("progressTurnId")
+        if (!older && result.optString("activeTurnId").let { it.isBlank() || it == "null" } && (result.optBoolean("running") || progressRead.observed(progressTurn))) {
+            progress(result, progressTurn)
+            if (!result.optBoolean("running") && progressRead.claimFinal(progressTurn) && foreground && mutable.value.autoRead && !mutable.value.muted && progressRead.canRead(progressTurn)) {
+                messages.lastOrNull { it.role == "assistant" }?.let { speaker.enqueue(progressRead.finalText(progressTurn, it.reply.readAloudText()), endpoint, token, mutable.value.liveSpeech) }
+            }
+        }
         if (!older) prefs.edit().putString("history", result.toString()).apply()
         mutable.update { it.copy(resumeToken = if (older) it.resumeToken else result.optJSONObject("interrupted")?.optString("token")?.takeIf { t -> t.isNotBlank() }, canStop = result.optBoolean("canStop"), readReceipt = if (older) it.readReceipt else ChatReadReceipt.parse(result.optJSONObject("readState")), externalRunning = result.optBoolean("running") && result.optString("activeTurnId").let { t -> t.isBlank() || t == "null" }, messages = if (older) (messages + it.messages).distinctBy { m -> m.id } else if (preserveOlder) it.messages.filter { old -> old.id.startsWith("history-") && old.id.substringAfter("history-").toIntOrNull()?.let { n -> n < (messages.firstOrNull()?.id?.substringAfter("history-")?.toIntOrNull() ?: 0) } == true } + messages else messages,
             historyBefore = if (preserveOlder && it.messages.isNotEmpty()) it.historyBefore else if (result.isNull("before")) null else result.getInt("before")) }
@@ -477,6 +500,7 @@ internal class WatchConversation(private val application: Application, initial: 
             var polls = 0
             while (polls < 240) {
                 val result = reconnectingTurnRead({ mutable.update { it.copy(detail = "Reconnecting… Your task is still on the desktop", approval = null) } }) { api.request("/v1/turns/$id") }
+                progress(result, id)
                 val approval = ApprovalParser.parse(result)
                 dev.ally.device.MessageQueue.parse(result)?.let { q -> if(!mutable.value.queueChanging && (mutable.value.queue.chatId!=q.chatId || q.revision>=mutable.value.queue.revision)) mutable.update { it.copy(queue=q) } }
                 if (approval == null) polls++
@@ -499,10 +523,16 @@ internal class WatchConversation(private val application: Application, initial: 
                         // Native history can lag the final event; do not erase the answer we just received.
                         mutable.update { it.copy(messages = if (it.messages.lastOrNull()?.let { m -> m.role == "assistant" && m.reply.text == reply.text } == true) it.messages.dropLast(1) + it.messages.last().copy(attachments = (it.messages.last().attachments + AttachmentParser.list(result)).distinctBy { a -> a.id }) else it.messages + ChatMessage("$id-assistant", "assistant", reply, ActivityParser.steps(result), ActivityParser.usage(result), AttachmentParser.list(result))) }
                         WatchNotifications.show(getApplication(), "Ally has your answer", json.optString("text"), id, mutable.value.chatId ?: "")
-                        if (foreground && mutable.value.autoRead && !mutable.value.inputRecording && !mutable.value.inputSending) readReply(reply.readAloudText())
+                        if (foreground && mutable.value.autoRead && !mutable.value.muted && !mutable.value.inputRecording && !mutable.value.inputSending && progressRead.canRead(id)) speaker.enqueue(progressRead.finalText(id, reply.readAloudText()), endpoint, token, mutable.value.liveSpeech)
                         return
                     }
                     "error" -> {
+                        if(result.optString("delivery")=="not_sent") {
+                            val base=application.getSharedPreferences("ally-watch",0)
+                            val key="composer:${mutable.value.chatId}"
+                            val restored=result.optString("transcript")
+                            if(restored.isNotBlank()) base.edit().putString(key,restored).commit()
+                        }
                         if (result.optString("error") == "Stopped by you") {
                             lastText = null; lastAudio = null; requestId = null
                             prefs.edit().remove("turn").remove("pendingRequest").remove("pendingText").remove("pendingQueue").apply()
@@ -531,3 +561,5 @@ internal class WatchConversation(private val application: Application, initial: 
     }
     fun close() { voice.cancel(); liveSpeech?.cancel(); speaker.close() }
 }
+
+

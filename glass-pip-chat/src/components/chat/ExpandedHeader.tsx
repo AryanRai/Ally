@@ -146,7 +146,7 @@ export default function ExpandedHeader({
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
-        <Button variant="ghost" size="icon" className={iconButton} onClick={onCollapseToggle} disabled={isResizing} title="Collapse">
+        <Button variant="ghost" size="icon" className={iconButton} onClick={onCollapseToggle} title="Collapse">
           <Minus className="size-3.5" />
         </Button>
         <Button variant="ghost" size="icon" className={cn(iconButton, 'hover:bg-destructive/20')} onClick={onHide} title="Close">

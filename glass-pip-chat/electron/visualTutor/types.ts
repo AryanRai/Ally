@@ -9,10 +9,19 @@ export interface TutorMark {
   points: TutorPoint[];
   text?: string;
 }
-export interface TutorStep { id: string; title: string; explanation: string; marks: TutorMark[]; diagram?: { html: string; height: number }; panel?: { x: number; y: number; width: number; transparent?: boolean } }
+export const MAX_DIAGRAM_IMAGE_UNITS = 4 * 1024 * 1024;
+export const MAX_DIAGRAM_IMAGES = 8;
+export const MAX_DIAGRAM_HEIGHT = 1200;
+export interface TutorStep { id: string; title: string; explanation: string; marks: TutorMark[]; diagram?: { html: string; height: number; images?: Record<string, string> }; panel?: { x: number; y: number; width: number; transparent?: boolean } }
 export interface TutorBoard {
   id: string;
   chatId: string;
+  /** One Study lesson across local pill IDs and the native canonical chat ID. */
+  sessionKey?: string;
+  presentation?: 'study';
+  screenPixels?: { width: number; height: number };
+  /** Physical desktop monitor rectangle, separate from Electron's DIP bounds. */
+  screenBounds?: { x: number; y: number; width: number; height: number };
   displayId: number;
   bounds: { x: number; y: number; width: number; height: number };
   capturedAt: number;
@@ -33,6 +42,7 @@ export interface TutorBoard {
 export interface TutorCapture { board: TutorBoard; imagePath: string; thumbnail: string }
 export type TutorAction = 'previous' | 'next' | 'latest' | 'sketch' | 'undo' | 'freeze' | 'chat' | 'close';
 export interface VisualTutorApi {
+  study: (id: string, words: string) => Promise<void>;
   onPillBounds?: (callback: (bounds: { x: number; y: number; width: number; height: number }) => void) => () => void;
   show: (id: string, point?: TutorPoint) => Promise<void>;
   start: (chatId: string, displayId?: number, circleCaptureId?: string) => Promise<TutorCapture>;

@@ -28,7 +28,12 @@ export default function MarkdownImage({ src, alt, title }: { src?: string; alt?:
   useEffect(() => {
     if (!local || !src) return;
     let disposed = false;
-    window.pip?.agent?.localImage(src).then(url => { if (!disposed) setResult({ source: src, url }); })
+    // Native WebView chat exposes only a subset of Electron's bridge.
+    // Missing capability is an unavailable image, never a failed chat surface.
+    Promise.resolve().then(() => {
+      if (typeof window.pip?.agent?.localImage !== 'function') throw Error('Local preview unavailable in this surface');
+      return window.pip.agent.localImage(src);
+    }).then(url => { if (!disposed) setResult({ source: src, url }); })
       .catch(() => { if (!disposed) setResult({ source: src, failed: true }); });
     return () => { disposed = true; };
   }, [src, local]);

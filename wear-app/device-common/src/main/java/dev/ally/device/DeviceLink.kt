@@ -22,6 +22,14 @@ object DeviceLink {
     val interactionErrors = MutableStateFlow<Map<String, String>>(emptyMap())
     private var foregroundActivity = java.lang.ref.WeakReference<Activity>(null)
     internal var service: DeviceLinkService? = null
+    /** Set by the phone app's on-device control executor; calls are answered with control_result. */
+    var controlHandler: ((Context, JSONObject, (JSONObject) -> Unit) -> Unit)? = null
+    /** Phone-only local handoff adapter; authenticated socket events, no raw capture transport. */
+    var tapHandler: ((Context, JSONObject) -> Unit)? = null
+    var viewerHandler: ((Context,JSONObject)->Unit)?=null
+    /** Large-file transfer status/completion events pushed from the desktop bridge. */
+    var transferHandler: ((Context, JSONObject) -> Unit)? = null
+    fun sendControl(message: JSONObject): Boolean = service?.send(message) == true
     fun prefs(c: Context) = c.getSharedPreferences("ally-watch", Context.MODE_PRIVATE)
     fun kind(c: Context) = if (c.packageName.endsWith(".watch")) "watch" else "phone"
     /** Phone notifications open its full Compose UI; the watch keeps its compact screen. */
@@ -31,7 +39,17 @@ object DeviceLink {
         }
         return Intent(c, DeviceInboxActivity::class.java)
     }
-    fun load(c: Context) { val a = runCatching { JSONArray(prefs(c).getString("deviceInbox", "[]")) }.getOrDefault(JSONArray()); inbox.value = (0 until a.length()).mapNotNull { a.optJSONObject(it) } }
+    fun load(c: Context) {
+        val a = runCatching { JSONArray(prefs(c).getString("deviceInbox", "[]")) }.getOrDefault(JSONArray()); inbox.value = (0 until a.length()).mapNotNull { a.optJSONObject(it) }
+        if (prefs(c).getInt("replyPresentationVersion",0) < 2) {
+            val manager = c.getSystemService(NotificationManager::class.java)
+            // Old posted notifications retain their original icon and raw body after install.
+            // Remove only completion notices; pending decisions and connection status survive.
+            val replyIds = inbox.value.filter { DeviceAlerts.kind(it)=="Reply" }.flatMap { listOf(it.optString("id").hashCode(), DeviceAlerts.notificationId(it)) }.toSet()
+            manager.activeNotifications.filter { it.id in replyIds || it.notification.channelId=="ally-replies" }.forEach { manager.cancel(it.tag,it.id) }
+            prefs(c).edit().putInt("replyPresentationVersion",2).apply()
+        }
+    }
     @Synchronized fun save(c: Context, item: JSONObject) {
         load(c); val all = listOf(item) + inbox.value.filter { it.optString("id") != item.optString("id") }
         val live = all.filter { (it.optBoolean("interaction") && it.optString("interactionState") == "pending" || it.optBoolean("command")) && it.optLong("expiresAt") > System.currentTimeMillis() }
@@ -52,10 +70,10 @@ object DeviceLink {
     @Synchronized fun dismiss(c: Context, id: String) {
         load(c)
         // Swiping a notification never answers or loses a server-held question.
-        if(inbox.value.any { it.optString("id") == id && DeviceAlerts.blocking(it) }) { c.getSystemService(NotificationManager::class.java).cancel(id.hashCode()); return }
+        if(inbox.value.any { it.optString("id") == id && DeviceAlerts.blocking(it) }) { cancelNotification(c,id); return }
+        cancelNotification(c,id)
         inbox.value = inbox.value.filter { it.optString("id") != id }; persist(c)
         receipt(c, id, "dismissed")
-        c.getSystemService(NotificationManager::class.java).cancel(id.hashCode())
     }
     @Synchronized fun receipt(c: Context, id: String, status: String) {
         val data = JSONObject().put("type", "receipt").put("id", id).put("status", status)
@@ -100,6 +118,17 @@ object DeviceLink {
             activity.moveTaskToBack(true); Handler(Looper.getMainLooper()).postDelayed({send()},700)
         } else send()
     }
+    fun answerNotification(c:Context,id:String,action:String,connection:String) {
+        if(c.getSystemService(android.app.KeyguardManager::class.java).isDeviceLocked) return
+        load(c)
+        val item=inbox.value.firstOrNull { it.optString("id")==id } ?: return
+        if(connection!=service?.connectionId || !DeviceInteractions.canAnswer(item,status.value=="Connected",connection) || DeviceInteractions.notificationActions(item).none{it.first==action} || id in interactionSending.value) return
+        val answer=DeviceInteractions.notificationAnswer(item,action) ?: return
+        interactionSending.value += id
+        val sent=service?.send(JSONObject().put("type","interaction_answer").put("id",id).put("action",answer.first).put("values",JSONObject(answer.second)))==true
+        if(!sent){interactionSending.value -= id;interactionErrors.value += id to "Reconnect before answering";return}
+        c.getSystemService(NotificationManager::class.java).cancel(DeviceAlerts.notificationId(item))
+    }
     internal fun interactionEvent(c: Context, message: JSONObject, connection: String) {
         val id = message.optString("id")
         when(message.optString("type")) {
@@ -125,11 +154,14 @@ object DeviceLink {
                     save(c,updated)
                 }
                 interactionSending.value -= id; interactionErrors.value -= id
-                c.getSystemService(NotificationManager::class.java).cancel(id.hashCode())
+                cancelNotification(c,id)
             }
             "interaction_ack" -> {
                 interactionSending.value -= id
-                if(!message.optBoolean("accepted")) interactionErrors.value += id to message.optString("error","Decision not confirmed")
+                if(!message.optBoolean("accepted")) {
+                    interactionErrors.value += id to message.optString("error","Decision not confirmed")
+                    inbox.value.firstOrNull{it.optString("id")==id}?.let{notify(c,it)}
+                }
             }
         }
     }
@@ -153,7 +185,7 @@ object DeviceLink {
         if (!approved) {
             receipt(activity, id, "rejected")
             inbox.value = inbox.value.filter { it.optString("id") != id }; persist(activity)
-            activity.getSystemService(NotificationManager::class.java).cancel(id.hashCode())
+            cancelNotification(activity,id)
             return
         }
         if (inbox.value.none { it.optString("id") == id }) return
@@ -161,7 +193,7 @@ object DeviceLink {
         // Remove before execution: a second tap cannot run the command again.
         if (inbox.value.none { it.optString("id") == id }) return
         inbox.value = inbox.value.filter { it.optString("id") != id }; persist(activity)
-        activity.getSystemService(NotificationManager::class.java).cancel(id.hashCode())
+        cancelNotification(activity,id)
         runCommand(activity,item)
     }
     private fun runCommand(activity: Context, item: JSONObject) {
@@ -172,7 +204,7 @@ object DeviceLink {
         val interaction = inbox.value.firstOrNull { it.optString("id") == id && it.optBoolean("interaction") }
         if(interaction != null) save(activity,JSONObject(interaction.toString()).put("interactionState","answered").put("authorized",false))
         else { inbox.value = inbox.value.filter { it.optString("id") != id }; persist(activity) }
-        activity.getSystemService(NotificationManager::class.java).cancel(id.hashCode())
+        cancelNotification(activity,id)
         try {
             if (quiet(activity) && item.optString("action") in setOf("watch_haptic", "phone_notify")) { receipt(activity, id, "suppressed"); return }
             var handedOff = false
@@ -223,14 +255,23 @@ object DeviceLink {
             receipt(activity, id, if (handedOff) "handed_off" else "done")
         } catch (_: Exception) { receipt(activity, id, "failed"); android.widget.Toast.makeText(activity,"No compatible app could complete this request",android.widget.Toast.LENGTH_LONG).show() }
     }
+    private fun cancelNotification(c: Context,id: String) {
+        val manager=c.getSystemService(NotificationManager::class.java);manager.cancel(id.hashCode())
+        inbox.value.find{it.optString("id")==id}?.let{manager.cancel(DeviceAlerts.notificationId(it))}
+    }
     fun notify(c: Context, item: JSONObject) {
+        val response = DeviceAlerts.kind(item) == "Reply"
+        val responseChat = DeviceAlerts.chat(item)
+        if(response && responseChat != null) LiveAgentNotifications.finished(c,responseChat)
+        if(response && (AssistantVisibility.visible || foregroundActivity.get()?.hasWindowFocus()==true))return
+        if(response && !prefs(c).getBoolean("replyAlerts",true))return
         if (quiet(c)) return
         if (Build.VERSION.SDK_INT >= 33 && c.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) return
         val manager = c.getSystemService(NotificationManager::class.java)
         manager.createNotificationChannel(NotificationChannel("ally-device", "Ally cards and requests", NotificationManager.IMPORTANCE_DEFAULT).apply { enableVibration(true) })
         // Routine cards use the existing quiet channel. Decisions need a visible
         // heads-up category, while still respecting app/OS and legacy channel denial.
-        val approval = kind(c) == "phone" && DeviceAlerts.blocking(item)
+        val approval = DeviceAlerts.blocking(item)
         if (manager.getNotificationChannel("ally-device")?.importance == NotificationManager.IMPORTANCE_NONE) return
         val channel = if (approval) "ally-approvals" else "ally-device"
         if (approval) manager.createNotificationChannel(NotificationChannel(channel, "Ally approval requests", NotificationManager.IMPORTANCE_HIGH).apply { enableVibration(true) })
@@ -240,13 +281,30 @@ object DeviceLink {
         val open = PendingIntent.getActivity(c, id.hashCode(), openIntent.putExtra("id", id), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         val dismiss = PendingIntent.getBroadcast(c, id.hashCode(), Intent(c, DeviceDismissReceiver::class.java).putExtra("id", id), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         val title = if(item.optBoolean("authorized")) "Continue approved action" else if (item.optBoolean("command")) "Approve: ${item.optString("action").replace('_', ' ')}" else "${DeviceAlerts.kind(item)} · ${item.optString("title")}"
-        manager.notify(id.hashCode(), Notification.Builder(c, channel).setSmallIcon(android.R.drawable.ic_dialog_info)
-            .setContentTitle(title.take(80)).setContentText(item.optString("body").take(160)).setStyle(Notification.BigTextStyle().bigText(item.optString("body")))
-            .setCategory(if(item.optBoolean("interaction")) Notification.CATEGORY_MESSAGE else Notification.CATEGORY_STATUS).setGroup(if(chatId.isNotBlank()) "ally-chat:$chatId" else "ally-device").setVisibility(Notification.VISIBILITY_PRIVATE).setOnlyAlertOnce(true)
-            .setContentIntent(open).setDeleteIntent(dismiss).setAutoCancel(true).build())
+        val icon=c.resources.getIdentifier("ic_ally","drawable",c.packageName).takeIf{it!=0} ?: android.R.drawable.ic_dialog_info
+        val builder = Notification.Builder(c, channel).setSmallIcon(icon)
+            .setContentTitle(title.take(80)).setContentText(item.optString("body").take(160)).setStyle(Notification.BigTextStyle().bigText(item.optString("body").take(if(response) 280 else 1200)))
+            .setCategory(if(item.optBoolean("interaction") || response) Notification.CATEGORY_MESSAGE else Notification.CATEGORY_STATUS).setGroup(if(chatId.isNotBlank()) "ally-chat:$chatId" else "ally-device").setVisibility(Notification.VISIBILITY_PRIVATE).setOnlyAlertOnce(!response)
+            .setContentIntent(open).setDeleteIntent(dismiss).setAutoCancel(true)
+        DeviceInteractions.notificationActions(item).forEach { (value,label) ->
+            val connection=item.optString("_connection")
+            val intent=Intent(c,DeviceDecisionReceiver::class.java).setData(android.net.Uri.parse("ally-decision://request/"+android.net.Uri.encode(id)+"/"+android.net.Uri.encode(connection)+"/"+value)).putExtra("id",id).putExtra("decision",value).putExtra("connection",connection)
+            val action=Notification.Action.Builder(null,label,PendingIntent.getBroadcast(c,0,intent,PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE))
+            if(Build.VERSION.SDK_INT>=31)action.setAuthenticationRequired(true)
+            builder.addAction(action.build())
+        }
+        manager.notify(DeviceAlerts.notificationId(item),builder.build())
     }
 }
 
+class DeviceDecisionReceiver : BroadcastReceiver() {
+    override fun onReceive(context:Context,intent:Intent) {
+        val id=intent.getStringExtra("id") ?: return
+        val decision=intent.getStringExtra("decision") ?: return
+        val connection=intent.getStringExtra("connection") ?: return
+        DeviceLink.answerNotification(context,id,decision,connection)
+    }
+}
 class DeviceDismissReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) { intent.getStringExtra("id")?.let { DeviceLink.dismiss(context, it) } }
 }
@@ -278,8 +336,9 @@ class DeviceLinkService : Service() {
         val manager = getSystemService(NotificationManager::class.java)
         manager.createNotificationChannel(NotificationChannel("ally-link", "Ally device connection", NotificationManager.IMPORTANCE_LOW))
         val open = PendingIntent.getActivity(this, 0, DeviceLink.inboxIntent(this, "Settings"), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-        startForeground(23, Notification.Builder(this, "ally-link").setSmallIcon(android.R.drawable.ic_dialog_info).setContentTitle("Ally device connection")
-            .setContentText("Cards and approval requests · tap to manage").setContentIntent(open).setOngoing(true).build())
+        val icon=resources.getIdentifier("ic_ally","drawable",packageName).takeIf{it!=0} ?: android.R.drawable.ic_dialog_info
+        startForeground(23, Notification.Builder(this, "ally-link").setSmallIcon(icon).setContentTitle("Ally connected")
+            .setContentText("Your agent updates").setContentIntent(open).setSound(null).setVibrate(longArrayOf(0)).setOnlyAlertOnce(true).setShowWhen(false).setOngoing(true).build())
         if (socket == null) connect()
         return START_STICKY
     }
@@ -296,17 +355,35 @@ class DeviceLinkService : Service() {
         val request = Request.Builder().url(endpoint.replaceFirst("https://", "wss://") + "/v1/devices/live").header("Authorization", "Bearer ${p.getString("token", "")}").build()
         socket = client.newWebSocket(request, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
-                webSocket.send(JSONObject().put("type", "hello").put("deviceId", id).put("kind", DeviceLink.kind(this@DeviceLinkService)).toString())
+                webSocket.send(JSONObject().put("type", "hello").put("deviceId", id).put("kind", DeviceLink.kind(this@DeviceLinkService))
+                    .put("capabilities", org.json.JSONArray().apply { put("device-access-v1");if(DeviceLink.viewerHandler!=null)put("native-viewer-v1");if (DeviceLink.controlHandler != null) put("on-device-control") }).toString())
             }
             override fun onMessage(webSocket: WebSocket, text: String) { scope.launch {
                 if (socket !== webSocket) return@launch
-                if (text.length > 16000) return@launch
+                if (text.length > 32000) return@launch
                 val msg = runCatching { JSONObject(text) }.getOrNull() ?: return@launch
                 when (msg.optString("type")) {
+                    "media_result"->if(MediaContinuation.protocol.value)MediaContinuation.receive(msg)
+                    "acoustic_challenge","acoustic_error"->if(AcousticLink.available)AcousticLink.handler?.invoke(msg)
+                    "viewer_offer","viewer_stop"->if(DeviceAccess.protocol.value)DeviceLink.viewerHandler?.invoke(this@DeviceLinkService,msg)
+                    "device_access_state" -> if(DeviceAccess.protocol.value)DeviceAccess.receive(this@DeviceLinkService,msg)
+                    "tap_target", "tap_review", "tap_feedback", "tap_unavailable", "tap_rejected","tap_session_status" -> DeviceLink.tapHandler?.invoke(this@DeviceLinkService, msg)
+                    "transfer_complete", "transfer_status" -> DeviceLink.transferHandler?.invoke(this@DeviceLinkService, msg)
+                    "agent_activity" -> msg.optJSONObject("activity")?.let { SurfaceStatus.save(this@DeviceLinkService,it);LiveAgentNotifications.update(this@DeviceLinkService,it) }
                     "interaction", "interaction_closed", "interaction_ack", "interaction_sync" -> { DeviceLink.interactionEvent(this@DeviceLinkService,msg,connectionId); refreshSurfaces() }
                     "authorized_command" -> DeviceLink.executeAuthorized(this@DeviceLinkService,msg.getJSONObject("command"),connectionId)
+                    "control_call" -> {
+                        val handler = DeviceLink.controlHandler
+                        if (handler == null) webSocket.send(JSONObject().put("type", "control_result").put("id", msg.optString("id")).put("ok", false).put("error", "On-device control isn't available on this device.").toString())
+                        else handler(this@DeviceLinkService, msg) { reply -> if (socket === webSocket) webSocket.send(reply.toString()) }
+                    }
                     "ready" -> {
+                        DeviceAccess.ready(msg.optInt("deviceAccessProtocol")==1)
+                        MediaContinuation.ready(msg.optInt("mediaContinuityProtocol")==1)
+                        AcousticLink.available=msg.optInt("acousticProtocol")==1
                         backoff = 1000L; DeviceLink.status.value = "Connected"
+                        if(DeviceLink.kind(this@DeviceLinkService)=="watch")DeviceAccess.reportMaintenance()
+                        DeviceLink.tapHandler?.invoke(this@DeviceLinkService, JSONObject().put("type", "tap_connected"))
                         refreshSurfaces()
                         val queued = JSONArray(p.getString("deviceReceipts", "[]")); for (i in 0 until queued.length()) webSocket.send(queued.getJSONObject(i).toString())
                         p.edit().remove("deviceReceipts").apply()
@@ -330,11 +407,21 @@ class DeviceLinkService : Service() {
     }
     private fun reconnect(ws: WebSocket, code: Int?) { scope.launch {
         if (socket !== ws) return@launch
+        LiveAgentNotifications.clear(this@DeviceLinkService)
         socket = null
+        DeviceAccess.disconnected()
+        MediaContinuation.disconnected()
+        AcousticLink.disconnected()
+        DeviceLink.viewerHandler?.invoke(this@DeviceLinkService,JSONObject().put("type","viewer_disconnected"))
+        DeviceLink.tapHandler?.invoke(this@DeviceLinkService, JSONObject().put("type", "tap_disconnected"))
         SurfaceStatus.failed(this@DeviceLinkService)
         if (code == 401 || code == 403) { DeviceLink.status.value = "Pairing rejected; check token"; DeviceLink.prefs(this@DeviceLinkService).edit().putBoolean("deviceConnected", false).apply(); stopSelf(); return@launch }
         DeviceLink.status.value = "Reconnecting…"; retry?.cancel(); retry = scope.launch { delay(backoff); backoff = (backoff * 2).coerceAtMost(30_000); connect() }
     } }
-    fun send(message: JSONObject): Boolean = socket?.send(message.toString()) == true
-    override fun onDestroy() { DeviceLink.service = null; scope.cancel(); socket?.cancel(); socket = null; client.dispatcher.executorService.shutdown(); DeviceLink.status.value = "Not connected"; super.onDestroy() }
+    fun send(message: JSONObject): Boolean {
+        val peer=socket?:return false
+        if(message.optString("type")=="viewer_frame"&&peer.queueSize()>300000)return false
+        return peer.send(message.toString())
+    }
+    override fun onDestroy() { AcousticLink.disconnected();MediaContinuation.disconnected();DeviceAccess.disconnected();DeviceLink.viewerHandler?.invoke(this,JSONObject().put("type","viewer_disconnected"));DeviceLink.tapHandler?.invoke(this, JSONObject().put("type", "tap_disconnected")); LiveAgentNotifications.clear(this);DeviceLink.service = null; scope.cancel(); socket?.cancel(); socket = null; client.dispatcher.executorService.shutdown(); DeviceLink.status.value = "Not connected"; super.onDestroy() }
 }

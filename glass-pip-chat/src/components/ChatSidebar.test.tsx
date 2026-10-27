@@ -102,7 +102,7 @@ it('shows blue unread dots for linked and native chats without clearing them fro
 });
 
 it('opens recent chats like a folder and reveals every remaining chat only on View more', () => {
-  const chats = Array.from({ length: 12 }, (_, i) => ({ ...chat('codex', `session-${i}`), id: `chat-${i}`, title: `Chat ${i}`, createdAt: i + 1 }));
+  const chats = Array.from({ length: 12 }, (_, i) => ({ ...chat('codex', `session-${i}`), id: `chat-${i}`, title: `Chat ${i}`, createdAt: i + 1, updatedAt: i + 1 }));
   const select = vi.fn();
   const props = { chats, activeChat: null, onChatSelect: select, onChatCreate: vi.fn(), onChatDelete: vi.fn(), onChatRename: vi.fn(), isCollapsed: false, onToggleCollapse: vi.fn(), theme: 'dark' as const, platform: 'win32' };
   const { unmount } = render(<ChatSidebar {...props} />);

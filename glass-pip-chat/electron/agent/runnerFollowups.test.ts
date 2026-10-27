@@ -4,6 +4,8 @@ import { startAgentRun, steerAgentRun, stopAgentRun, stopAllAgentRuns, stopAgent
 import { runCodexTurn } from './codexRun';
 import { messageQueue } from './messageQueue';
 import type { AgentEvent, AgentRunOptions } from './types';
+import { recordProviderUsage } from './providerUsage';
+vi.mock('./providerUsage.js', () => ({ recordProviderUsage: vi.fn() }));
 vi.mock('./codexRun.js', () => ({ runCodexTurn: vi.fn() }));
 vi.mock('./binaries.js', () => ({ resolveAgentBinary: async () => 'codex', isWin: false }));
 vi.mock('./runningSessions.js', () => ({ trackRunningSession: vi.fn(), finishRunningSession: vi.fn() }));
@@ -30,9 +32,15 @@ describe('input during an active response', () => {
     q=await messageQueue.change(key,{action:'edit',id:'one',text:'edited first',revision:q.revision});
     q=await messageQueue.change(key,{action:'cancel',id:'three',revision:q.revision});
     await messageQueue.change(key,{action:'reorder',order:['two','one'],revision:q.revision});
-    turns[0].emit({kind:'done'}); await flush(); expect(turns[1].opts.prompt).toBe('second');
-    turns[1].emit({kind:'done'}); await flush(); expect(turns[2].opts).toMatchObject({prompt:'edited first',images:['one.png']});
-    turns[2].emit({kind:'done'}); await flush(); expect(turns).toHaveLength(3); expect(messageQueue.snapshot(key).items).toEqual([]);
+    turns[0].emit({kind:'done',usage:{inputTokens:10}});
+    turns[0].emit({kind:'done',usage:{inputTokens:10}});
+    await flush(); expect(turns[1].opts.prompt).toBe('second');
+    turns[1].emit({kind:'done',usage:{outputTokens:5}}); await flush(); expect(turns[2].opts).toMatchObject({prompt:'edited first',images:['one.png']});
+    turns[2].emit({kind:'done',costUsd:0.01}); await flush(); expect(turns).toHaveLength(3); expect(messageQueue.snapshot(key).items).toEqual([]);
+    expect(recordProviderUsage).toHaveBeenCalledTimes(3);
+    expect(vi.mocked(recordProviderUsage).mock.calls.map(([provider,usage])=>[provider,usage])).toEqual([
+      ['codex',{inputTokens:10,costUsd:undefined}],['codex',{outputTokens:5,costUsd:undefined}],['codex',{costUsd:0.01}],
+    ]);
   });
   it('waits for Send now delivery to settle before consuming a simultaneous completion', async () => {
     const turns=setup(true), emit=vi.fn(); const id=await startAgentRun(opts,emit); const key=`codex:${opts.sessionId}`;

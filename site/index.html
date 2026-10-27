@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ally — your coding agents, within reach</title>
+  <meta name="description" content="Ally is a floating desktop companion for Claude Code and Codex, with voice, visual explanations, phone control and Wear OS apps.">
+  <meta property="og:title" content="Ally — your coding agents, within reach">
+  <meta property="og:description" content="A floating desktop companion for Claude Code and Codex, with voice, visual explanations, phone control and Wear OS apps.">
+  <meta property="og:image" content="/assets/ally.png">
+  <meta name="theme-color" content="#000000">
+  <link rel="icon" href="/assets/ally.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500&family=Geist+Mono:wght@400&display=swap">
+  <link rel="stylesheet" href="https://api.fontshare.com/v2/css?f[]=tanker@400&display=swap">
+  <link rel="stylesheet" href="/styles.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <canvas class="field" aria-hidden="true"></canvas>
+
+  <header class="nav">
+    <a class="brand" href="#top"><span class="orb orb-sm" aria-hidden="true"></span><span class="wordmark">ALLY</span></a>
+    <nav>
+      <a href="#features">Features</a>
+      <a href="#connect">How it works</a>
+      <a href="#start">Get started</a>
+      <a class="pill-link" href="https://github.com/AryanRai/Ally"><span class="orb orb-xs" aria-hidden="true"></span>GitHub</a>
+    </nav>
+  </header>
+
+  <main id="top">
+    <section class="hero glass" data-scene="0">
+      <h1>Your agents.<br>Your conversations.<br>Within reach.</h1>
+      <p class="label">Claude Code&nbsp;&middot;&nbsp;Codex&nbsp;&middot;&nbsp;Desktop&nbsp;&middot;&nbsp;Phone&nbsp;&middot;&nbsp;Watch</p>
+      <p class="prose">Ally keeps your coding agents in one small glass window on top of everything you do. Ask about whatever is on screen, get answers drawn out on a board, and keep the same chat going on your phone and watch.</p>
+      <p class="prose bright">The agents keep their own tools, sessions, folders and permissions. Ally is the surface around them, and it stays out of the way until you call it.</p>
+      <div class="ctas">
+        <a class="pill-btn primary" href="https://github.com/AryanRai/Ally"><span class="orb orb-xs" aria-hidden="true"></span>View on GitHub</a>
+        <a class="pill-btn" href="#start">Get started</a>
+      </div>
+    </section>
+
+    <section class="rail" aria-label="Ally in use">
+      <div class="rail-pin">
+        <p class="label rail-head"><span class="live"></span><span data-rail-title>The pill, collapsed</span></p>
+        <div class="stage">
+          <canvas class="energy" aria-hidden="true"></canvas>
+          <div class="scenes">
+            <div class="scene is-on" data-scene-view="0">
+              <div class="pill">
+                <span class="orb" aria-hidden="true"></span>
+                <span class="pill-text">Hey, what's on your mind?</span>
+                <kbd>Ctrl Shift C</kbd>
+              </div>
+            </div>
+
+            <div class="scene" data-scene-view="1">
+              <div class="panel">
+                <div class="pill pill-top"><span class="orb orb-sm" aria-hidden="true"></span><span class="pill-text">Ally · web-app</span></div>
+                <p class="bubble-you">Why does this test fail only on CI?</p>
+                <div class="reply">
+                  <p class="status"><span class="dot"></span>Codex · read 3 files</p>
+                  <p>The CI image runs <code>TZ=UTC</code>, so the date parsed in <code>formatDue()</code> lands a day early. Pin the timezone in the test, or format with <code>toISOString()</code>.</p>
+                  <p class="chips"><span>Apply fix</span><span>Explain more</span></p>
+                </div>
+              </div>
+            </div>
+
+            <div class="scene" data-scene-view="2">
+              <div class="panel">
+                <div class="pill pill-top"><span class="orb orb-sm" aria-hidden="true"></span><span class="pill-text">Ally · refactor billing</span></div>
+                <div class="reply">
+                  <p class="status"><span class="dot warn"></span>Account 1 reached its usage limit</p>
+                  <p class="status"><span class="dot"></span>Continuing on account 2 · same chat</p>
+                  <p>…picking up where the last turn stopped. The invoice module is split; next I'm moving the tax rules behind <code>TaxPolicy</code>.</p>
+                </div>
+                <ol class="accounts">
+                  <li class="spent">work@ <span>limit</span></li>
+                  <li class="active">personal@ <span>running</span></li>
+                  <li>side@ <span>ready</span></li>
+                </ol>
+              </div>
+            </div>
+
+            <div class="scene" data-scene-view="3">
+              <div class="phone">
+                <div class="phone-bar"><span class="orb orb-xs" aria-hidden="true"></span>Ally is controlling this phone<b>Stop</b></div>
+                <div class="phone-body">
+                  <p class="phone-step done">Open Settings</p>
+                  <p class="phone-step done">Display → Dark theme</p>
+                  <p class="phone-step now">Turning on Dark theme</p>
+                  <p class="phone-note">Passwords, payments and Send buttons are left to you.</p>
+                </div>
+              </div>
+            </div>
+
+            <div class="scene" data-scene-view="4">
+              <figure class="shot"><img src="/assets/ally-drawing.webp" width="495" height="670" alt="Ally's drawing reader explaining focus distance with a labelled thin-lens diagram"></figure>
+            </div>
+          </div>
+        </div>
+        <div class="captions">
+          <div>
+            <p class="label">What you are seeing</p>
+            <p data-rail-seeing>A glass pill that floats over every app. One shortcut opens it; drag it to the top edge and it docks as a notch.</p>
+          </div>
+          <div>
+            <p class="label">Why it matters</p>
+            <p data-rail-why>Your agents stay one keystroke away without a terminal or browser tab taking over the screen.</p>
+          </div>
+        </div>
+        <ol class="scene-dots" aria-hidden="true"><li class="is-on"></li><li></li><li></li><li></li><li></li></ol>
+      </div>
+    </section>
+
+    <section class="story glass">
+      <section data-scene="0">
+        <p class="label">What exists today</p>
+        <div class="cells">
+          <p>Desktop app on Windows, running Claude Code and Codex side by side</p>
+          <p>Android phone and Wear OS watch apps, connected through an authenticated bridge</p>
+          <p>Several Codex accounts sharing one chat history, switching automatically</p>
+        </div>
+      </section>
+
+      <section id="features" data-scene="1">
+        <p class="label">What it does</p>
+        <div class="items">
+          <article>
+            <h2><span class="tag">desktop</span>Pill and notch</h2>
+            <p>A compact glass pill that expands into a full chat with markdown, math, code and tool activity. Drag it to the top edge to dock into a notch where the running reply shows live.</p>
+          </article>
+          <article>
+            <h2><span class="tag">desktop</span>Circle to ask</h2>
+            <p>Select any region of the screen and ask about it. The crop goes straight to the agent, and the answer comes back beside it.</p>
+          </article>
+          <article>
+            <h2><span class="tag">search</span>Every chat, one place</h2>
+            <p>Search every Claude Code and Codex conversation by keyword, keep drafts per chat, queue follow-ups, and route a question from one chat into another.</p>
+          </article>
+        </div>
+      </section>
+
+      <section data-scene="2">
+        <p class="label">Many accounts, one chat</p>
+        <p class="prose">Sign in to several ChatGPT accounts. When one reaches its usage limit, the same chat carries on with the next — no handoff, no new thread. A message refused before it ran is sent again once; a message that may already have run is never resent.</p>
+      </section>
+
+      <section data-scene="3">
+        <p class="label">Phone and watch</p>
+        <div class="items">
+          <article>
+            <h2><span class="tag">android</span>Phone control, anywhere</h2>
+            <p>Let an agent drive your phone for a session you approve once, over any network, without ADB. The screen stays awake, a locked phone asks for your fingerprint, and Stop is always one tap away.</p>
+          </article>
+          <article>
+            <h2><span class="tag">wear os</span>Watch, always on</h2>
+            <p>Hold to talk, read replies, answer approvals, and keep live agent progress on the always-on screen.</p>
+          </article>
+          <article>
+            <h2><span class="tag">voice</span>Voice that listens back</h2>
+            <p>Local or cloud speech in and out. Speak over a reply to interrupt it; text keeps working when voice is offline.</p>
+          </article>
+        </div>
+      </section>
+
+      <section data-scene="4">
+        <p class="label">Visual explanations</p>
+        <p class="prose">When words aren't enough, the agent draws. Diagrams, steps and interactive sketches open on a sandboxed board beside the chat — resizable, explorable, and saved with the conversation.</p>
+      </section>
+
+      <section id="connect" data-scene="4">
+        <p class="label">How Ally connects</p>
+        <p class="prose">Your PC stays the hub. Phone and watch reach it through an authenticated bridge; Ally talks to the native agents you already use.</p>
+        <figure class="frame"><img src="/assets/architecture.svg" width="960" height="390" alt="Phone and watch connect through an authenticated device bridge to Ally desktop, which connects to Claude Code or Codex, speech, and Codex accounts that share one history."></figure>
+      </section>
+
+      <section data-scene="3">
+        <p class="label">You stay in control</p>
+        <ul class="ticks">
+          <li>Approvals are real requests from the underlying tools, with explicit answers and expiry</li>
+          <li>Phone control asks once per session and uses Android's own unlock prompt</li>
+          <li>Microphone and screen access only on the feature you start</li>
+        </ul>
+      </section>
+
+      <section id="start" data-scene="0">
+        <p class="label">Get started</p>
+        <p class="prose">Install a current Node.js LTS and at least one agent — Claude Code or Codex — and sign in to it.</p>
+        <pre><code>git clone https://github.com/AryanRai/Ally.git
+cd Ally/glass-pip-chat
+npm ci
+npm run dev</code></pre>
+        <p class="prose">Then open <b>Settings → Agents</b>, check the CLI paths, and start a chat. Phone and watch apps are in <a href="https://github.com/AryanRai/Ally/tree/main/wear-app">wear-app</a>.</p>
+        <div class="ctas">
+          <a class="pill-btn primary" href="https://github.com/AryanRai/Ally#readme"><span class="orb orb-xs" aria-hidden="true"></span>Read the docs</a>
+          <a class="pill-btn" href="https://github.com/AryanRai/Ally/tree/main/docs">All guides</a>
+        </div>
+      </section>
+
+      <section data-scene="0">
+        <p class="label">Next</p>
+        <p class="prose">An Ally-native notch: rebuilding the top-edge surface inside Ally itself, with hover expansion, multi-monitor placement and voice and Circle from the notch.</p>
+      </section>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <span class="giant" data-type="ALLY">ALLY</span>
+    <div class="footer-meta">
+      <p class="label">built in sydney</p>
+      <a href="https://aryanrai.github.io/">by Aryan Rai</a>
+      <div class="footer-links">
+        <a href="https://github.com/AryanRai/Ally">GitHub</a>
+        <a href="https://aryanrai.github.io/">Portfolio</a>
+        <a href="https://github.com/AryanRai/Ally/tree/main/docs">Docs</a>
+      </div>
+    </div>
+  </footer>
+</body>
+</html>

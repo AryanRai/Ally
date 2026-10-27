@@ -63,6 +63,6 @@ function DrawingChip({ tutor, disabled }: { tutor: ReturnType<typeof useVisualTu
       if (event.clientX < 0 || event.clientY < 0 || event.clientX > window.innerWidth || event.clientY > window.innerHeight) tutor.showAt({ x: event.screenX, y: event.screenY });
     }}
     onPointerCancel={() => { drag.current = null; suppressClick.current = true; }} onLostPointerCapture={() => { drag.current = null; }} onKeyDown={event => { if (event.key === 'Escape') { drag.current = null; setOpen(false); } }}>
-    <PencilLine className="size-3" />{tutor.busy ? 'Selecting…' : tutor.board?.steps?.length ? `Drawing · ${tutor.board.steps.length}` : 'Selection'}
+    <PencilLine className="size-3" />{tutor.busy ? 'Selecting…' : tutor.board?.steps?.length ? `${tutor.board.presentation === 'study' ? 'Study' : 'Drawing'} · ${tutor.board.steps.length}` : tutor.board?.presentation === 'study' && !tutor.pendingSelection ? 'Study' : 'Selection'}
   </button>{open && createPortal(<div ref={menu} role="dialog" aria-label="Drawing tools" className="fixed z-[1000] max-h-[calc(100vh-24px)] overflow-y-auto rounded-lg border border-white/10 bg-black/60 p-1 text-foreground shadow-xl backdrop-blur-xl" style={position}><VisualTutorControls tutor={tutor} disabled={disabled} /></div>, document.body)}</>;
 }

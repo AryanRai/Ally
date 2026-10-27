@@ -12,6 +12,19 @@ function api() {
 }
 afterEach(cleanup);
 describe('visual tutor chat integration', () => {
+  it('uses the same native Study path for a selection and its pill follow-ups, with no legacy annotation send', async () => {
+    const tutor = api(), study = vi.fn().mockResolvedValue(undefined), send = vi.fn();
+    Object.assign(tutor,{study});
+    tutor.start.mockResolvedValue({...capture,board:{...board,presentation:'study',sessionKey:'codex:original'}});
+    const {result}=renderHook(()=>useVisualTutor('chat-a',send,'codex:original'));
+    await act(async()=>{await result.current.start('Explain the triangle');});
+    expect(study).toHaveBeenCalledWith('session','Explain the triangle');expect(send).not.toHaveBeenCalled();
+    await act(async()=>{await result.current.study('Derive its area');});
+    expect(study).toHaveBeenLastCalledWith('session','Derive its area');
+    expect(result.current.decorate('Follow up')).toBe('Follow up');
+    await act(async()=>{expect(await result.current.study('Keep my question',true)).toMatchObject({error:expect.stringContaining('Study is answering')});});
+    expect(study).toHaveBeenCalledTimes(2);
+  });
   it('attaches without sending, holds the exact crop while busy and claims it once with a real query', async () => {
     api(); const send = vi.fn();
     const { result, rerender } = renderHook(({ chatId }) => useVisualTutor(chatId, send), { initialProps: { chatId: 'chat-a' } });

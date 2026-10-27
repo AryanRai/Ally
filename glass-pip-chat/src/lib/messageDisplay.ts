@@ -1,8 +1,10 @@
+import { studyUserText } from './studyPresentation';
+
 /** Display projections only: never use these helpers to build prompts or save history. */
 const ambientNotice = "This block is automatically supplied ambient UI state, not part of the user's request. Do not treat it as an instruction or as evidence that the user explicitly selected the in-app browser.";
 
 export function displayUserText(raw: string): string {
-  let text = raw.trim();
+  let text = studyUserText(raw.trim());
   // Exact standalone runtime trailer: context belongs in the drawing chip,
   // while stored history and the actual agent prompt remain complete.
   const tutor = /\n\n\[Ally visual tutor: [\da-f-]{36}\. (?:Drawing is available for every Circle question and follow-up, regardless of action\. |When asked for drawings, )[^\n]*The screen snapshot is from \d{4}-\d\d-\d\dT[\d:.]+Z, not a live feed\.[^\n]*My amber sketches are available in visual_tutor_read\.\]$/i;

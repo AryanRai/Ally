@@ -10,8 +10,19 @@ describe('visual tutor scene boundary', () => {
     const model = started();
     expect(model.draw('session-1', { ...step(), diagram: { html: '<svg><circle r="4"/></svg><input type="range">', height: 300 } }).steps[0].diagram?.height).toBe(300);
     expect(() => model.draw('session-1', { ...step(), diagram: { html: 'x'.repeat(160001) } })).toThrow();
-    expect(() => model.draw('session-1', { ...step(), diagram: { html: '<svg/>', height: 999 } })).toThrow();
+    expect(model.draw('session-1', { ...step(), diagram: { html: '<svg/>', height: 1000 } }).steps[0].diagram?.height).toBe(1000);
+    expect(() => model.draw('session-1', { ...step(), diagram: { html: '<svg/>', height: 1201 } })).toThrow();
     model.end('session-1'); expect(() => model.draw('session-1', step())).toThrow();
+  });
+  it('keeps bounded raster assets separate from HTML and rejects filesystem/network/vector sources', () => {
+    const model = started(), html = '<img src="ally-image:page1">';
+    const images = { page1: 'data:image/jpeg;base64,' + 'A'.repeat(200_000) };
+    expect(model.draw('session-1', { ...step(), diagram: { html, height: 900, images } }).steps[0].diagram).toEqual({ html, height: 900, images });
+    const before = model.get();
+    for (const images of [{ a: 'file:///C:/private.png' }, { a: 'https://example.test/a.png' }, { a: 'data:image/svg+xml;base64,AAAA' }, { a: 'data:image/png;base64,' + 'A'.repeat(4 * 1024 * 1024) }]) {
+      expect(() => model.draw('session-1', { ...step(), diagram: { html, images } })).toThrow();
+      expect(model.get()).toEqual(before);
+    }
   });
   it('accepts the typed screen-relative drawing primitives', () => {
     for (const kind of ['arrow', 'line', 'rect', 'ellipse', 'polyline', 'text'] as const) {

@@ -63,6 +63,31 @@ describe('terminal native error recovery', () => {
 });
 
 describe('Codex desktop coordination', () => {
+  it('registers commentary and final phase before streamed text without duplicates', async () => {
+    const { broadcast } = desktop(); const events: AgentEvent[] = [];
+    runCodexDesktopTurn(opts, event => events.push(event)); await flush();
+    const state:any=active('Checking', 'inProgress'); state.turns[0].items[0].phase='commentary';
+    broadcast(state);
+    state.turns[0].items.push({id:'final',type:'agentMessage',phase:'final_answer',text:'Finished'});
+    broadcast(state);
+    expect(events.filter(e=>e.kind==='text' && e.text.trim()).map(e=>e.kind==='text' && [e.text,e.phase])).toEqual([['Checking','commentary'],['Finished','final_answer']]);
+    broadcast({...state,turns:[{...state.turns[0],status:'completed'}]});
+    expect(events.filter(e=>e.kind==='text' && e.text==='Finished')).toHaveLength(1);
+  });
+  it.each(['low','medium','high'] as const)('scopes %s Study effort and conditionally restores the previous desktop setting', async effort => {
+    const { client, setState, broadcast } = desktop(); const events: AgentEvent[] = [];
+    setState({ ...idle(), latestReasoningEffort: 'medium', latestModel: 'gpt-6.1-sol' });
+    runCodexDesktopTurn({ ...opts, reasoningEffort: effort }, event => events.push(event)); await flush();
+    expect(client.request).toHaveBeenCalledWith('thread-follower-start-turn', expect.objectContaining({
+      turnStart: expect.objectContaining({ request: expect.objectContaining({ effort }) }),
+    }), 'desktop-owner', 20000);
+    broadcast(active('Done', 'completed')); await flush();
+    expect(client.request).toHaveBeenCalledWith('thread-follower-update-thread-settings', {
+      conversationId: 'same-chat', threadSettings: { effort: 'medium' },
+      condition: { ifEffortEquals: effort, ifModelEquals: 'gpt-6.1-sol' },
+    }, 'desktop-owner', 3000);
+    expect(events.filter(event => event.kind === 'done')).toHaveLength(1);
+  });
   it('resynchronizes malformed patches read-only after acceptance without failing or resending', async () => {
     const { client, broadcast, setState } = desktop(), events: AgentEvent[] = [];
     runCodexDesktopTurn(opts, event => events.push(event)); await flush();
@@ -125,6 +150,42 @@ describe('Codex desktop coordination', () => {
     expect(client.request).toHaveBeenCalledOnce();
     expect(events.at(-1)).toMatchObject({ isError: true, error: expect.stringContaining('may already have been accepted') });
   });
+  it('rediscovers an account-switched owner only after confirmed non-delivery, retaining chat and message identity', async () => {
+    const { client, broadcast } = desktop(), events: AgentEvent[] = [];
+    client.owner.mockResolvedValueOnce('old-owner').mockResolvedValueOnce('desktop-owner');
+    client.request.mockRejectedValueOnce(new Error('no-client-found'));
+    runCodexDesktopTurn(opts, e => events.push(e)); await flush();
+    expect(client.owner.mock.calls).toEqual([['same-chat'],['same-chat']]);
+    expect(client.request).toHaveBeenCalledTimes(2);
+    const first=client.request.mock.calls[0], retry=client.request.mock.calls[1];
+    expect(first[2]).toBe('old-owner');expect(retry[2]).toBe('desktop-owner');
+    expect(retry[1]).toEqual(first[1]);expect(retry[1].conversationId).toBe('same-chat');
+    broadcast(active('Recovered after account change','completed'));await flush();
+    expect(events.at(-1)).toMatchObject({kind:'done',sessionId:'same-chat'});
+    expect(events.filter(e=>e.kind==='accepted')).toHaveLength(1);
+  });
+  it('stops after a second explicit routing rejection and says the message was not sent', async () => {
+    const { client }=desktop(), events:AgentEvent[]=[];
+    client.request.mockRejectedValue(new Error('no-client-found'));
+    runCodexDesktopTurn(opts,e=>events.push(e));await flush();
+    expect(client.request).toHaveBeenCalledTimes(2);
+    expect(events.at(-1)).toMatchObject({isError:true,error:expect.stringContaining('Your message was not sent')});
+    expect(events.at(-1)).toMatchObject({error:expect.stringContaining('account connection is still changing')});
+  });
+  it('does not resend if the replacement owner shows active work', async () => {
+    const { client }=desktop(), events:AgentEvent[]=[];
+    client.request.mockRejectedValueOnce(new Error('no-client-found'));
+    client.snapshot.mockResolvedValueOnce(idle()).mockResolvedValueOnce(active('Another input'));
+    runCodexDesktopTurn(opts,e=>events.push(e));await flush();
+    expect(client.request).toHaveBeenCalledOnce();expect(events.at(-1)).toMatchObject({isError:true});
+  });
+  it('honors Stop while rediscovering after a rejected submission', async () => {
+    const { client }=desktop(), events:AgentEvent[]=[];let release!:(owner:string)=>void;
+    client.request.mockRejectedValueOnce(new Error('no-client-found'));
+    client.owner.mockResolvedValueOnce('old-owner').mockImplementationOnce(()=>new Promise(resolve=>{release=resolve;}));
+    const run=runCodexDesktopTurn(opts,e=>events.push(e));await flush();run.stop();release('desktop-owner');await flush();
+    expect(client.request).toHaveBeenCalledOnce();expect(events.filter(e=>e.kind==='done')).toHaveLength(1);
+  });
   it('forwards only an actual user decision for the current real request', async () => {
     const { client, broadcast } = desktop(); let answer!: (response: unknown) => void;
     const interact = vi.fn(() => new Promise(resolve => { answer = resolve; }));
@@ -154,7 +215,7 @@ describe('Codex desktop coordination', () => {
   });
   it('keeps required approval routing and selected permission restrictions', () => {
     expect(desktopTurnRequest(opts, 'message').turnStart.request).toMatchObject({ approvalPolicy: 'on-request', approvalsReviewer: 'user', sandboxPolicy: { type: 'readOnly' } });
-    expect(desktopTurnRequest({ ...opts, permission: 'full' }, 'message').turnStart.request).toMatchObject({ approvalPolicy: 'on-request', approvalsReviewer: 'auto_review', sandboxPolicy: { type: 'dangerFullAccess' } });
+    expect(desktopTurnRequest({ ...opts, permission: 'full' }, 'message').turnStart.request).toMatchObject({ approvalPolicy: 'on-request', approvalsReviewer: 'user', sandboxPolicy: { type: 'dangerFullAccess' } });
   });
 });
 
@@ -231,3 +292,4 @@ it('steers the exact native chat with a stable receipt and validates the canonic
   await expect(steerDesktopTurn(client as unknown as CodexDesktopClient, 'desktop-owner', 'same-chat', 'late input', 'receipt')).rejects.toThrow('finished');
   expect(client.request).not.toHaveBeenCalled();
 });
+

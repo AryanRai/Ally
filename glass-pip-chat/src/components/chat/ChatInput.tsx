@@ -1,4 +1,4 @@
-import { Ref, useState } from 'react';
+import { Ref, useState, type ReactNode } from 'react';
 import { Clipboard, ClipboardCopy, Cpu, FolderOpen, Lasso, LoaderCircle, Check, ArrowUp, Play, Square, Eye, ShieldCheck, ShieldAlert } from 'lucide-react';
 import { PromptInput, PromptInputFooter, PromptInputSubmit, PromptInputTextarea } from '@/components/ai-elements/prompt-input';
 import ComposerTools from './ComposerTools';
@@ -14,6 +14,7 @@ import type { AgentPermission, AgentProvider } from '@/types/agent';
 import type { ContextData } from '@/hooks/useContextMonitoring';
 
 interface ChatInputProps {
+  accountControls?: ReactNode;
   ref?: Ref<HTMLTextAreaElement>;
   input: string;
   setInput: (value: string) => void;
@@ -114,6 +115,7 @@ export default function ChatInput({
   robotMode = false,
   onRobotModeToggle,
   agent,
+  accountControls,
 }: ChatInputProps) {
   const [copied, setCopied] = useState(false);
   const { colors } = useLook();
@@ -138,6 +140,7 @@ export default function ChatInput({
         <div className="flex items-center gap-2 px-1">
           <span className={cn('size-1.5 shrink-0', robotMode ? 'bg-destructive' : 'bg-foreground', isTyping && 'animate-pulse')} />
           <AgentSelectors
+            accountControls={accountControls}
             provider={agent.provider}
             model={agent.model}
             folder={agent.folder}

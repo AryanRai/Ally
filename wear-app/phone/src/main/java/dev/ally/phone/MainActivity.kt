@@ -71,7 +71,17 @@ class MainActivity : ComponentActivity() {
         }
     }
     override fun onPause() { if(!dev.ally.device.AssistantVisibility.visible && model.state.value.recording) model.cancelRecording(); super.onPause() }
-    override fun onResume() { super.onResume(); DeviceLink.resume(this) }
+    override fun onResume() {
+        super.onResume(); DeviceLink.resume(this); (application as AllyPhoneApplication).activityVisible = true; model.foreground = true
+        val prefs=DeviceLink.prefs(this)
+        if(android.os.Build.VERSION.SDK_INT>=31 && prefs.getBoolean("hold.enabled",false) && prefs.getBoolean("tap.capture",false) &&
+            checkSelfPermission(Manifest.permission.BLUETOOTH_SCAN)==PackageManager.PERMISSION_GRANTED &&
+            checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT)==PackageManager.PERMISSION_GRANTED) {
+            runCatching { startForegroundService(Intent(this,PhysicalTapService::class.java)) }
+                .onFailure { PhysicalTapService.status.value="Hold-close paused · open its settings to Resume" }
+        }
+    }
+    override fun onStop() { (application as AllyPhoneApplication).activityVisible = false; model.foreground = dev.ally.device.AssistantVisibility.visible; super.onStop() }
     override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); setIntent(intent); acceptDestination(intent) }
     private fun acceptDestination(intent: Intent) {
         dev.ally.device.SurfaceActions.handle(this,intent) { model.select(it); destination="Chat" to ((destination?.second ?: 0)+1) }
@@ -87,8 +97,8 @@ class MainActivity : ComponentActivity() {
             intent.removeExtra("allyAssistant")
         }
         if (intent.action == Intent.ACTION_SEND || intent.action == Intent.ACTION_SEND_MULTIPLE) {
-            model.receiveShare(intent)
-            destination = "Chat" to ((destination?.second ?: 0) + 1)
+            startActivity(Intent(intent).setClass(this, dev.ally.device.ShareToChatActivity::class.java))
+            return
             intent.action = Intent.ACTION_MAIN; intent.removeExtra(Intent.EXTRA_STREAM); intent.removeExtra(Intent.EXTRA_TEXT); intent.clipData = null
         }
         intent.getStringExtra("allyPage")?.takeIf { it=="Inbox" || it=="Settings" || it=="Chat" }?.let {
@@ -100,6 +110,7 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun PhoneApp(model: PhoneModel,destination: Pair<String,Int>?, changeLook: (PhoneLook)->Unit) {
     val state by model.state.collectAsStateWithLifecycle()
+    PhoneRecordingAwake(state.recording)
     val link by DeviceLink.status.collectAsStateWithLifecycle()
     val inbox by DeviceLink.inbox.collectAsStateWithLifecycle()
     val pendingRequests = dev.ally.device.DeviceInteractions.pending(inbox)
@@ -194,6 +205,18 @@ private fun Conversation(state: PhoneState,model: PhoneModel,modifier: Modifier,
     val requests = dev.ally.device.DeviceInteractions.forChat(deviceInbox,state.selected?.id,state.selected?.sessionKey,state.readReceipt?.key)
     val timeline = dev.ally.device.DeviceInteractions.timeline(requests,state.messages,{it.id},{it.timestamp})
     val scroll=rememberLazyListState()
+    val scrollScope = rememberCoroutineScope()
+    var followLatest by remember(state.selected?.id) { mutableStateOf(true) }
+    LaunchedEffect(scroll) {
+        snapshotFlow { scroll.firstVisibleItemIndex to scroll.firstVisibleItemScrollOffset }.collect {
+            if (scroll.isScrollInProgress) followLatest = !scroll.canScrollForward
+        }
+    }
+    val awayFromLatest by remember { derivedStateOf { scroll.canScrollForward } }
+    var lastSeenTail by remember(state.selected?.id) { mutableStateOf<String?>(null) }
+    LaunchedEffect(awayFromLatest, state.messages.lastOrNull()?.id) {
+        if (!awayFromLatest) { lastSeenTail = state.messages.lastOrNull()?.id; followLatest = true }
+    }
     val readerLifecycle = LocalLifecycleOwner.current.lifecycle
     val receipt = state.readReceipt
     val latestReplyId = state.messages.lastOrNull { it.role == "assistant" }?.id
@@ -211,12 +234,11 @@ private fun Conversation(state: PhoneState,model: PhoneModel,modifier: Modifier,
     // Pagination prepends must keep the reader's position; only follow new tail messages.
     var previousChat by remember { mutableStateOf<String?>(null) }
     var previousTail by remember { mutableStateOf<String?>(null) }
-    LaunchedEffect(requests.filter { dev.ally.device.DeviceInteractions.awaiting(it) }.map { it.optString("id") }) { if(requests.any { dev.ally.device.DeviceInteractions.awaiting(it) }) { withFrameNanos { }; scroll.animateScrollToItem((scroll.layoutInfo.totalItemsCount-1).coerceAtLeast(0)) } }
+
     LaunchedEffect(state.selected?.id,state.messages.lastOrNull()?.id,state.busy,state.liveText,state.approval?.optString("id")) {
         val changedChat=previousChat!=state.selected?.id
         val changedTail=previousTail!=state.messages.lastOrNull()?.id
-        val nearBottom=!scroll.canScrollForward || scroll.layoutInfo.visibleItemsInfo.lastOrNull()?.let { it.index==scroll.layoutInfo.totalItemsCount-1 && it.offset+it.size<=scroll.layoutInfo.viewportEndOffset+100 }==true
-        if(changedChat || ((changedTail || state.busy || state.approval!=null) && nearBottom)) scroll.animateScrollToItem((scroll.layoutInfo.totalItemsCount-1).coerceAtLeast(0))
+        if(changedChat || (followLatest && (changedTail || state.busy || state.approval!=null))) { withFrameNanos { }; scroll.scrollToItem((scroll.layoutInfo.totalItemsCount-1).coerceAtLeast(0)) }
         previousChat=state.selected?.id; previousTail=state.messages.lastOrNull()?.id
     }
     Box(modifier.fillMaxWidth()) {
@@ -245,7 +267,8 @@ private fun Conversation(state: PhoneState,model: PhoneModel,modifier: Modifier,
                         Row(verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(6.dp),modifier=Modifier.padding(bottom=10.dp)) {
                             PresenceOrb(Modifier.size(24.dp)); MicroLabel(state.selected?.provider ?: state.provider)
                         }
-                        MessageBody(message.text)
+                        ChatActivity(message.steps, message.commentary)
+                        if (message.text.isNotBlank()) MessageBody(message.text)
                         message.cards.forEachIndexed { index, card -> key(message.id, index) {
                             Spacer(Modifier.height(16.dp))
                             ReplyCardView(card, !state.busy && !state.loading && !state.recording && !state.transcribing, model::send)
@@ -255,12 +278,18 @@ private fun Conversation(state: PhoneState,model: PhoneModel,modifier: Modifier,
                 }
                 }
             }
+            if((state.busy || state.externalRunning) && state.progress.any { it.kind == "commentary" }) item(key="public-progress") { Column(verticalArrangement=Arrangement.spacedBy(10.dp)) {
+                MicroLabel("Progress")
+                state.progress.filter { it.kind == "commentary" }.takeLast(3).forEach { MessageBody(it.text) }
+            } }
+            if(state.speaking) item(key="stop-progress-audio") { TextButton(onClick=model::stopSpeaking) { Text("Stop audio",color=White) } }
+            if(state.speechError.isNotBlank()) item(key="speech-status") { Text(state.speechError,color=Muted,fontSize=12.sp) }
             if(state.liveText.isNotBlank() || state.liveAttachments.isNotEmpty()) item(key="live-reply") { Column {
                 MicroLabel(if(state.busy) "Reply in progress" else "Latest reply",Modifier.padding(bottom=10.dp))
                 MessageBody(state.liveText)
                 AttachmentView(state.liveAttachments)
             } }
-            if(state.busy || state.externalRunning) item(key="activity") { Row(verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(10.dp)) { CircularProgressIndicator(Modifier.size(18.dp),color=Muted,strokeWidth=2.dp); Text(if(state.busy) state.activity else "Thinking · working in another app…",color=Muted,fontSize=12.sp) } }
+            if(state.busy || state.externalRunning) item(key="activity") { Column { ChatActivity(state.steps, emptyList()); Row(verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(10.dp)) { CircularProgressIndicator(Modifier.size(18.dp),color=Muted,strokeWidth=2.dp); Text(if(state.busy) state.activity else "Thinking · working in another app…",color=Muted,fontSize=12.sp) } } }
             if(state.syncStatus.isNotBlank()) item(key="sync-status") { Text(state.syncStatus,color=Muted,fontSize=12.sp) }
             state.approval?.takeIf { approval -> requests.none { it.optString("id") == approval.optString("id") } }?.let { approval -> item(key="approval") { ChatApproval(approval,state.loading,model::answer) } }
             if(state.inputStatus.isNotBlank()) item(key="input-status") { Column {
@@ -271,6 +300,11 @@ private fun Conversation(state: PhoneState,model: PhoneModel,modifier: Modifier,
                 }
             } }
             if(state.error.isNotBlank()) item(key="error") { Column(Modifier.border(1.dp,Warm.copy(alpha=.3f),RoundedCornerShape(8.dp)).padding(16.dp)) { Text(state.error,color=Warm,fontSize=13.sp); TextButton(model::retry,enabled=!state.loading) { Text("Retry connection") }; TextButton(model::dismissInput,enabled=!state.loading) { Text("Dismiss error") } } }
+        }
+        if (awayFromLatest && !state.recording && !state.transcribing) FilledTonalButton(
+            onClick = { followLatest = true; scrollScope.launch { scroll.animateScrollToItem((scroll.layoutInfo.totalItemsCount - 1).coerceAtLeast(0)) } },
+            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom=8.dp)) {
+            Text(if (lastSeenTail != state.messages.lastOrNull()?.id) "↓ New reply · Latest" else "↓ Latest", fontSize=12.sp)
         }
         if(state.recording || state.transcribing) Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(124.dp).background(Ink).padding(horizontal=20.dp,vertical=8.dp)) {
             Text(state.liveTranscript.ifBlank { if(state.transcribing) "Finishing your words…" else "Listening…" },fontSize=12.sp,color=White,maxLines=3,overflow=TextOverflow.Ellipsis,modifier=Modifier.weight(1f))
@@ -290,15 +324,16 @@ private fun Composer(state: PhoneState,draft: String,onDraft: (String)->Unit,mod
             Text(" / ",color=Muted,fontSize=10.sp)
             MicroLabel(state.selected?.cwd?.let(::folderName) ?: "Personal",Modifier.weight(1f))
             Box {
-                TextButton({permissions=true},enabled=!state.busy && !state.recording && !state.transcribing && state.selected!=null,contentPadding=PaddingValues(horizontal=8.dp,vertical=0.dp),modifier=Modifier.height(48.dp)) {
+                TextButton({permissions=true},enabled=!state.permissionChanging && !state.recording && !state.transcribing && state.selected!=null,contentPadding=PaddingValues(horizontal=8.dp,vertical=0.dp),modifier=Modifier.height(48.dp)) {
                     Glyph("shield",Modifier.size(12.dp),if(state.permission=="full") Warm else Muted)
                     MicroLabel(when(state.permission) { "edit" -> "Can edit"; "full" -> "Full access"; else -> "Read only" },Modifier.padding(start=6.dp),if(state.permission=="full") Warm else Muted)
                 }
                 DropdownMenu(permissions,{permissions=false},containerColor=Panel) {
-                    listOf("readonly" to "Read only","edit" to "Edit files","full" to "Full access").forEach { (value,label) -> DropdownMenuItem(text={Text(label)},onClick={model.permission(value);permissions=false}) }
+                    listOf("readonly" to "Read only","edit" to "Edit files","full" to "Full access").forEach { (value,label) -> DropdownMenuItem(text={Text(label)},enabled=!state.permissionChanging,onClick={model.permission(value);permissions=false}) }
                 }
             }
         }
+        if (state.permissionStatus.isNotBlank()) Text(state.permissionStatus, color=Muted, fontSize=12.sp)
         if (state.importingShare) Text("Copying shared content…", color=Muted, fontSize=12.sp)
         if (state.share.text.isNotBlank() || state.share.files.isNotEmpty()) Column(Modifier.fillMaxWidth().heightIn(max=180.dp).verticalScroll(rememberScrollState()),verticalArrangement=Arrangement.spacedBy(4.dp)) {
             Row(verticalAlignment=Alignment.CenterVertically) {
@@ -446,7 +481,19 @@ private fun PhoneSettings(link: String,modifier: Modifier, appearance: ()->Unit)
             PresenceOrb(Modifier.size(42.dp)); Column(Modifier.padding(start=12.dp).weight(1f)) { Text("Your desktop",fontSize=15.sp); Text(link,color=Muted,fontSize=12.sp) }
         }
         PhoneAssistantSetting()
+        SettingRow("shield","Hold-close handoff","Hold near your PC · cancellable bottom card") {
+            context.startActivity(Intent(context,PhysicalTapSettingsActivity::class.java))
+        }
         SettingRow("styles","Styles","Orb, colours, glow & motion",appearance)
+        SettingRow("shield","Device access","Transport readiness · pair from your watch") {
+            context.startActivity(Intent(context,dev.ally.device.DeviceAccessActivity::class.java))
+        }
+        SettingRow("play","Video continuation","Continue reviewed YouTube playback on your PC") {
+            context.startActivity(Intent(context,MediaHandoffActivity::class.java))
+        }
+        SettingRow("shield","Phone viewer","Review a pending PC screen-sharing request") {
+            context.startActivity(Intent(context,PhoneStreamActivity::class.java))
+        }
         HorizontalDivider(color=Line)
         ToggleRow("Touch feedback","Gentle pulses for voice, sends and decisions",haptics) { haptics=it; prefs.edit().putBoolean("phone.haptics",it).apply(); if(it) PhoneHaptics.pulse(context) }
         TextButton({PhoneHaptics.pulse(context,true)},enabled=haptics) { Text("Test touch feedback") }
@@ -520,3 +567,4 @@ internal fun ChatApproval(request: JSONObject, sending: Boolean, answer: (String
 
 @Composable
 private fun PhoneUnreadDot() { Box(Modifier.padding(horizontal=8.dp).size(6.dp).background(Color(0xFF60A5FA), CircleShape).semantics { contentDescription = "Unread reply" }) }
+

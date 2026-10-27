@@ -1,16 +1,18 @@
+import { codexAccounts } from '../agent/codexAccounts.js';
 import { hiddenConversation, resolveCodexDiscovery } from '../agent/codexDiscovery.js';
 import { unreadState } from '../agent/unread.js';
 import fs from 'node:fs';
 import { chatUserText, chatTitle } from '../agent/chatTitle.js';
 import { randomUUID } from 'node:crypto';
 import type { AgentHistoryMessage, AgentProvider, AgentSessionSnapshot, AgentSessionSummary, AgentUsage } from '../agent/types.js';
-import { parseWatchReply, type WatchReply } from './protocol.js';
+import { type WatchReply } from './protocol.js';
 import type { ActivityState } from './activity.js';
 import { browserActivity } from '../agent/browserActivity.js';
 import type { DeviceAttachment, DeviceMedia } from './media.js';
+import { deviceHistoryReply, deviceUserText } from './presentation.js';
 
-export interface WatchMessage extends WatchReply { id: string; role: 'user' | 'assistant'; timestamp: number; steps?: ActivityState['steps']; usage?: AgentUsage; attachments?: DeviceAttachment[] }
-export interface WatchChat { id: string; provider: AgentProvider; title: string; cwd: string; sessionId?: string; createdAt?: number; updatedAt: number; messages: WatchMessage[] }
+export interface WatchMessage extends WatchReply { id: string; role: 'user' | 'assistant'; timestamp: number; steps?: ActivityState['steps']; usage?: AgentUsage; attachments?: DeviceAttachment[]; commentary?: string[] }
+export interface WatchChat { codexAccountId?: string; id: string; provider: AgentProvider; title: string; cwd: string; sessionId?: string; createdAt?: number; updatedAt: number; messages: WatchMessage[] }
 interface Dependencies {
   list: (provider: AgentProvider, limit: number) => Promise<AgentSessionSummary[]>;
   load: (provider: AgentProvider, id: string) => Promise<AgentSessionSnapshot>;
@@ -21,7 +23,7 @@ const userText = chatUserText;
 export function watchHistory(messages: AgentHistoryMessage[], media?: DeviceMedia): WatchMessage[] {
   return messages.map((m, index) => ({
     id: `history-${index}`, role: m.role, timestamp: m.timestamp,
-    ...(m.role === 'user' ? { text: userText(m.content), components: [] } : parseWatchReply(m.content || m.segments?.filter(s => s.type === 'text').map(s => s.content).join('\n') || '')),
+    ...(m.role === 'user' ? { text: deviceUserText(userText(m.content)), components: [] } : deviceHistoryReply(m)),
     usage: m.usage,
     ...(media ? { attachments: [...media.dataUrls(m.images, 'Attached image'),
       ...(m.role === 'assistant' ? media.markdown(m.content) : []),
@@ -58,7 +60,7 @@ export class WatchConversations {
   create(provider: AgentProvider, cwd: string, id: string = randomUUID()): WatchChat {
     const existing = this.chats.find(c => c.id === id);
     if (existing) return existing;
-    const chat: WatchChat = { id, provider, cwd, title: 'New watch chat', createdAt: Date.now(), updatedAt: Date.now(), messages: [] };
+    const chat: WatchChat = { id, provider, cwd, ...(provider === 'codex' ? { codexAccountId: codexAccounts.route() } : {}), title: 'New watch chat', createdAt: Date.now(), updatedAt: Date.now(), messages: [] };
     this.chats.push(chat); this.save(); return chat;
   }
   async get(id: string): Promise<WatchChat> {
@@ -72,7 +74,7 @@ export class WatchConversations {
     const linked = this.chats.find(c => c.provider === provider && c.sessionId === sessionId);
     if (linked) return linked;
     const messages = watchHistory(snapshot.messages, this.media);
-    const chat: WatchChat = { id, provider, sessionId, cwd: snapshot.cwd ?? '', title: snapshot.title || messages.find(m => m.role === 'user')?.text.slice(0, 80) || `${provider} chat`, createdAt: snapshot.createdAt ?? messages.find(m => m.timestamp > 0)?.timestamp ?? 0, updatedAt: messages.at(-1)?.timestamp || 0, messages };
+    const chat: WatchChat = { id, provider, sessionId, codexAccountId: snapshot.codexAccountId, cwd: snapshot.cwd ?? '', title: chatTitle(snapshot.title || messages.find(m => m.role === 'user')?.text || `${provider} chat`), createdAt: snapshot.createdAt ?? messages.find(m => m.timestamp > 0)?.timestamp ?? 0, updatedAt: messages.at(-1)?.timestamp || 0, messages };
     this.chats.push(chat); this.save(); return chat;
   }
   private async loadLinkedSession(chat: WatchChat): Promise<AgentSessionSnapshot> {
@@ -135,7 +137,7 @@ export class WatchConversations {
     }
     const linked = new Set(this.chats.filter(c => c.provider === provider).map(c => c.sessionId).filter((id): id is string => !!id));
     const savedIds = new Set(this.chats.filter(c => c.provider === provider).map(c => c.id));
-    const all = [...this.chats.filter(c => c.provider === provider && !hiddenConversation(c.provider, c.sessionId ?? c.id)).map(chatSummary), ...external.filter(s => !hiddenConversation(provider, s.id) && !savedIds.has(`${provider}:${s.id}`) && !linked.has(s.id) && !(s.originalSessionId && linked.has(s.originalSessionId))).map(s => ({ id: `${provider}:${s.id}`, provider, sessionId: s.id, title: userText(s.title), cwd: s.cwd ?? '', createdAt: s.createdAt ?? 0, updatedAt: s.updatedAt, unread: unreadState(provider, s.id).unread }))].sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
+    const all = [...this.chats.filter(c => c.provider === provider && !hiddenConversation(c.provider, c.sessionId ?? c.id)).map(chatSummary), ...external.filter(s => !hiddenConversation(provider, s.id) && !savedIds.has(`${provider}:${s.id}`) && !linked.has(s.id) && !(s.originalSessionId && linked.has(s.originalSessionId))).map(s => ({ id: `${provider}:${s.id}`, provider, sessionId: s.id, title: userText(s.title), cwd: s.cwd ?? '', createdAt: s.createdAt ?? 0, updatedAt: s.updatedAt, unread: unreadState(provider, s.id).unread }))].sort((a, b) => b.updatedAt - a.updatedAt || a.id.localeCompare(b.id));
     return { chats: all.slice(offset, offset + 30), nextOffset: all.length > offset + 30 ? offset + 30 : null };
   }
   routingPreview(id: string): string {

@@ -39,3 +39,34 @@ Thumbs.db
 
 # Claude
 .claude/
+
+# Private native Study runtime, identity, tool caches and generated assets
+ally-study/client/
+ally-study/profile/
+ally-study/branding-backup/
+ally-study/runtime.json
+ally-study/migration.json
+ally-study/notch-build.json
+ally-study/notch-builds/
+ally-study/notch-dist/
+ally-study/tools/vendor/
+ally-study/tools/mono.cecil/
+ally-study/tools/*.zip
+ally-study/tools/dnfile*/
+ally-study/tools/dncil*/
+ally-study/tools/ordlookup/
+ally-study/tools/pefile*/
+ally-study/tools/pefile.py
+ally-study/tools/peutils.py
+ally-study/signin-backup/
+ally-study/ally-brand-*.json
+ally-study/*-verification.json
+ally-study/ally-signin-sync.json
+ally-study/client-build.json
+ally-study/*.staged
+ally-study/*.ally-staged
+**/__pycache__/
+.local/
+
+# Private: the internal agent ledger (the native notch adapter is the private ally-study submodule).
+docs/agent-collaboration.md

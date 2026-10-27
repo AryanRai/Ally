@@ -4,7 +4,7 @@ import android.app.Application
 import kotlinx.coroutines.flow.Flow
 
 data class AssistantSnapshot(val title: String, val status: String, val text: String = "", val recording: Boolean = false,
-    val working: Boolean = false, val level: Float = 0f, val mode: String = "queue", val needsAttention: Boolean = false, val readReceipt: ChatReadReceipt? = null, val choices: List<AssistantChoice> = emptyList(), val chatId: String? = null)
+    val working: Boolean = false, val level: Float = 0f, val mode: String = "queue", val needsAttention: Boolean = false, val readReceipt: ChatReadReceipt? = null, val choices: List<AssistantChoice> = emptyList(), val chatId: String? = null, val selected: String? = null)
 
 interface AssistantHost {
     val provider: String
@@ -12,6 +12,7 @@ interface AssistantHost {
     fun acceptTurn(chatId: String, turnId: String)
     fun openChat(chatId: String)
     fun prepareVoice() {}
+    fun presentationVisible(visible: Boolean) {}
     val snapshots: Flow<AssistantSnapshot>
     fun refresh()
     fun start()

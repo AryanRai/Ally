@@ -5,7 +5,7 @@ import { loadCodexChat } from '../agent/codexHistory.js';
 import { isManagedSessionRunning } from '../agent/runningSessions.js';
 import type { AgentProvider, AgentSessionSnapshot } from '../agent/types.js';
 import type { ReplyNotice } from '../notifications.js';
-import { parseWatchReply } from '../watch/protocol.js';
+import { deviceHistoryReply, replyPreview } from '../watch/presentation.js';
 
 interface Dependencies {
   states(): ChatReadState[];
@@ -36,7 +36,10 @@ export class UnreadReplyFeed {
         if(!current?.unread || current.revision!==state.revision || snapshot.running || this.deps.busy(provider,id)) continue;
         const reply=snapshot.messages.at(-1);
         if(reply?.role!=='assistant') continue;
-        const text=parseWatchReply(reply.content).text || 'Your response is ready.';
+        const final = deviceHistoryReply(reply);
+        // Commentary alone is never a completed answer.
+        if (!final.text.trim() && !final.components.length) continue;
+        const text=replyPreview(final.text);
         this.deps.send({id:`unread:${state.key}:${state.revision}`,readRevision:state.revision,title:snapshot.title || 'Reply ready',text,
           session:{id,provider,title:snapshot.title || 'Reply ready',cwd:snapshot.cwd || ''}});
         this.seen.set(state.key,state.revision);

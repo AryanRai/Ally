@@ -4,7 +4,8 @@ import type { InteractionBroker } from './interactions.js';
 export type DeviceKind = 'watch' | 'phone';
 export interface DeviceCard { id: string; title: string; body: string; sessionId?: string; at?: string; chatId?: string; provider?: 'codex' | 'claude'; kind?: 'response' | 'attention' | 'note'; createdAt?: number }
 export interface DeviceCommand { id: string; action: string; title: string; body: string; chatId?: string; url?: string; seconds?: number; packageName?: string; hour?: number; minute?: number; expiresAt: number }
-interface Device { kind: DeviceKind; send: (message: unknown) => void; controller: AbortController }
+interface Device { kind: DeviceKind; send: (message: unknown) => void; controller: AbortController; capabilities: string[] }
+interface Call { deviceId: string; timer: ReturnType<typeof setTimeout>; resolve: (value: Record<string, unknown>) => void; reject: (error: Error) => void; cleanup: () => void }
 interface Pending { deviceId: string; approved: boolean; expiresAt: number; cleanup?: () => void; timer: ReturnType<typeof setTimeout>; resolve: (result: { ok: boolean; message: string }) => void }
 
 /** Delivery receipts never imply user approval. Commands are never replayed. */
@@ -13,11 +14,13 @@ export class DeviceHub {
   private cards = new Map<string, { kind: DeviceKind; card: DeviceCard; expires: number; seen: Set<string> }>();
   private pending = new Map<string, Pending>();
   constructor(private dismiss: (id: string) => void, private now = Date.now, private interactions?: InteractionBroker) {}
-  connect(id: string, kind: DeviceKind, send: Device['send']): () => void {
+  private calls = new Map<string, Call>();
+  private revokeListeners = new Set<(deviceId: string, grantId: string, reason: string) => void>();
+  connect(id: string, kind: DeviceKind, send: Device['send'], capabilities: string[] = []): () => void {
     if (!/^[\w-]{8,80}$/.test(id) || !['watch', 'phone'].includes(kind)) throw new Error('Invalid device');
     if (this.devices.has(id)) throw new Error('Device is already connected');
     const controller = new AbortController();
-    this.devices.set(id, { kind, send, controller });
+    this.devices.set(id, { kind, send, controller, capabilities: capabilities.filter(c => typeof c === 'string' && c.length <= 40).slice(0, 10) });
     try { for (const [key, item] of this.cards) {
       if (item.expires < this.now()) this.cards.delete(key);
       else if (item.kind === kind && !item.seen.has(id)) send({ type: 'card', card: item.card });
@@ -26,7 +29,43 @@ export class DeviceHub {
       controller.abort();
       this.devices.delete(id);
       for (const [key, item] of this.pending) if (item.deviceId === id) this.finish(key, false, 'Device disconnected; action was not confirmed.');
+      for (const [key, call] of this.calls) if (call.deviceId === id) this.settle(key, undefined, new Error('Ally phone disconnected.'));
     };
+  }
+  /** A request/response call answered by the device's own executor. Never retried. */
+  call(deviceId: string, method: string, params: Record<string, unknown>, signal?: AbortSignal, timeoutMs = 20_000): Promise<Record<string, unknown>> {
+    const device = this.devices.get(deviceId);
+    if (!device) return Promise.reject(new Error('Ally phone is offline. Enable Keep connected in its Ally settings.'));
+    if (signal?.aborted) return Promise.reject(new Error('Cancelled or expired.'));
+    if (this.calls.size >= 16) return Promise.reject(new Error('Too many pending phone calls.'));
+    const id = randomUUID();
+    return new Promise((resolve, reject) => {
+      const abort = () => this.settle(id, undefined, new Error('Cancelled or expired.'));
+      const timer = setTimeout(() => this.settle(id, undefined, new Error('The phone did not answer in time.')), timeoutMs);
+      this.calls.set(id, { deviceId, timer, resolve, reject, cleanup: () => signal?.removeEventListener('abort', abort) });
+      signal?.addEventListener('abort', abort, { once: true });
+      try { device.send({ type: 'control_call', id, method, params }); } catch { this.settle(id, undefined, new Error('Phone delivery failed.')); }
+    });
+  }
+  callResult(deviceId: string, message: Record<string, unknown>): void {
+    const id = typeof message.id === 'string' ? message.id : '';
+    const call = this.calls.get(id);
+    if (!call || call.deviceId !== deviceId) return;
+    if (message.ok === true) this.settle(id, message.result && typeof message.result === 'object' ? message.result as Record<string, unknown> : {});
+    else this.settle(id, undefined, new Error(typeof message.error === 'string' ? message.error.slice(0, 300) : 'Phone control failed.'));
+  }
+  revoked(deviceId: string, message: Record<string, unknown>): void {
+    if (typeof message.grantId !== 'string') return;
+    const reason = typeof message.reason === 'string' ? message.reason.slice(0, 200) : 'Stopped on the phone.';
+    for (const listener of this.revokeListeners) listener(deviceId, message.grantId, reason);
+  }
+  onRevoked(listener: (deviceId: string, grantId: string, reason: string) => void) { this.revokeListeners.add(listener); return () => { this.revokeListeners.delete(listener); }; }
+  capabilities(id: string) { return this.devices.get(id)?.capabilities ?? []; }
+  sendTo(id:string,message:unknown){try{this.devices.get(id)?.send(message);}catch{/* disconnected */}}
+  private settle(id: string, value?: Record<string, unknown>, error?: Error) {
+    const call = this.calls.get(id); if (!call) return;
+    clearTimeout(call.timer); call.cleanup(); this.calls.delete(id);
+    if (error) call.reject(error); else call.resolve(value ?? {});
   }
   publish(kind: DeviceKind, card: DeviceCard): void {
     if (this.cards.has(card.id)) return;
@@ -89,7 +128,7 @@ export class DeviceHub {
       signal?.addEventListener('abort', abort, { once: true });
       if (this.interactions && command.chatId) {
         void this.interactions.request({ id: command.id, chatId: command.chatId, kind: 'approval', targetDeviceId: deviceId, deviceAction: action, title: command.title, detail: command.body,
-          fields: [], actions: [{ value: 'accept', label: 'Allow once' }, { value: 'decline', label: 'Decline' }], expiresAt: command.expiresAt }, approvalController.signal).then(answer => {
+          fields: [], actions: [{ value: 'accept', label: action === 'phone_control_approve' && typeof args.acceptLabel === 'string' ? args.acceptLabel.slice(0, 24) : 'Allow once' }, { value: 'decline', label: 'Decline' }], expiresAt: command.expiresAt }, approvalController.signal).then(answer => {
           const pending = this.pending.get(command.id);
           if (!pending) return;
           if (answer.action !== 'accept' || command.expiresAt <= this.now() || this.devices.get(deviceId) !== device) {
@@ -107,6 +146,6 @@ export class DeviceHub {
   list() { return [...this.devices].map(([id, d]) => ({ id, kind: d.kind })); }
   connectionSignal(id: string) { return this.devices.get(id)?.controller.signal; }
   broadcast(message: unknown) { for (const device of this.devices.values()) { try { device.send(message); } catch { /* Reconnect resynchronizes pending requests. */ } } }
-  close() { for (const device of this.devices.values()) device.controller.abort(); for (const id of this.pending.keys()) this.finish(id, false, 'Ally stopped.'); this.devices.clear(); }
+  close() { for (const device of this.devices.values()) device.controller.abort(); for (const id of this.pending.keys()) this.finish(id, false, 'Ally stopped.'); for (const id of this.calls.keys()) this.settle(id, undefined, new Error('Ally stopped.')); this.devices.clear(); }
   private finish(id: string, ok: boolean, message: string) { const p = this.pending.get(id); if (!p) return; clearTimeout(p.timer); p.cleanup?.(); this.pending.delete(id); p.resolve({ ok, message }); }
 }

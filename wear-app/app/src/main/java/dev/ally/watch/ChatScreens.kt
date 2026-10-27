@@ -16,6 +16,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.clip
@@ -105,7 +106,12 @@ internal fun HistoryScreen(state: WatchState, send: (String) -> Unit, back: () -
     val timeline = dev.ally.device.DeviceInteractions.timeline(requests,state.messages,{it.id},{it.timestamp})
     val working = state.externalRunning || state.phase in setOf(Phase.THINKING, Phase.UPLOADING)
     val scroll = rememberLazyListState()
-    LaunchedEffect(requests.filter { dev.ally.device.DeviceInteractions.awaiting(it) }.map { it.optString("id") }) { if(requests.any { dev.ally.device.DeviceInteractions.awaiting(it) }) { withFrameNanos { }; scroll.animateScrollToItem((scroll.layoutInfo.totalItemsCount-1).coerceAtLeast(0)) } }
+    val scope = rememberCoroutineScope()
+    var following by remember(state.chatId) { mutableStateOf(true) }
+    val away by remember { derivedStateOf { scroll.canScrollForward } }
+    LaunchedEffect(scroll) { snapshotFlow { scroll.firstVisibleItemIndex to scroll.firstVisibleItemScrollOffset }.collect {
+        if (scroll.isScrollInProgress) following = !scroll.canScrollForward
+    } }
     val readerLifecycle = LocalLifecycleOwner.current.lifecycle
     val receipt = state.readReceipt
     val latestReplyId = state.messages.lastOrNull { it.role == "assistant" }?.id
@@ -120,21 +126,12 @@ internal fun HistoryScreen(state: WatchState, send: (String) -> Unit, back: () -
             }
         }
     }
-    LaunchedEffect(state.chatId, state.readySequence, state.messages.isEmpty()) {
-        if (state.messages.isNotEmpty()) {
-            withFrameNanos { }
-            val headerItems = 1 + (if (state.queue.items.isNotEmpty()) 1 else 0) + (if (state.historyBefore != null) 1 else 0) + (if (state.loadingHistory) 1 else 0) + (if (state.speaking) 1 else 0) + (if (state.speechError.isNotBlank()) 1 else 0)
-            val answer = timeline.indexOfLast { it.message?.role == "assistant" }.takeIf { it >= 0 } ?: timeline.lastIndex
-            scroll.scrollToItem(headerItems + answer)
-        }
+    LaunchedEffect(state.chatId) { following = true; withFrameNanos { }; scroll.scrollToItem((scroll.layoutInfo.totalItemsCount-1).coerceAtLeast(0)) }
+    LaunchedEffect(state.messages.lastOrNull()?.id, state.liveText, state.readySequence) {
+        if (following) { withFrameNanos { }; scroll.scrollToItem((scroll.layoutInfo.totalItemsCount-1).coerceAtLeast(0)) }
     }
-    LaunchedEffect(state.turnId, state.liveText.isNotBlank()) {
-        if (working && state.liveText.isNotBlank()) {
-            withFrameNanos { }
-            scroll.scrollToItem((scroll.layoutInfo.totalItemsCount - 3).coerceAtLeast(0))
-        }
-    }
-    LazyColumn(Modifier.fillMaxSize().bezelScroll(scroll), state = scroll, contentPadding = PaddingValues(horizontal = 25.dp, vertical = 30.dp),
+    Box(Modifier.fillMaxSize()) {
+    LazyColumn(Modifier.fillMaxSize().bezelScroll(scroll), state = scroll, contentPadding = PaddingValues(start=25.dp,end=25.dp,top=30.dp,bottom=70.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item { Text("${state.context.uppercase()} ▾", fontFamily = Mono, color = Muted, fontSize = 9.sp, maxLines = 2,
             modifier = Modifier.fillMaxWidth().clickable(onClick = chats).padding(vertical = 6.dp), textAlign = TextAlign.Center) }
@@ -152,7 +149,7 @@ internal fun HistoryScreen(state: WatchState, send: (String) -> Unit, back: () -
                 if (message.role == "user") Text(message.reply.text, color = White, fontSize = 12.sp, lineHeight = 16.sp,
                     modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(6.dp)).background(Panel).border(1.dp, Hairline, RoundedCornerShape(6.dp)).padding(10.dp))
                 else {
-                    message.steps.forEach { step -> key(message.id, step.id) { ActivityRow(step) } }
+                    ActivityGroup(message.steps, message.reply.commentary)
                     if (message.reply.text.isNotBlank()) RichReply(message.reply.text)
                     message.reply.cards.forEachIndexed { index, card -> key(message.id, index, card) { GeneratedCard(card, send, pulse, !working && !state.loadingHistory && state.phase != Phase.RECORDING) } }
                     AttachmentView(message.attachments, compact = true)
@@ -168,6 +165,13 @@ internal fun HistoryScreen(state: WatchState, send: (String) -> Unit, back: () -
             }
             }
         }
+        if (working && state.progress.any { it.kind == "commentary" }) item(key = "public-progress") {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text("Progress", color = Muted, fontSize = 10.sp)
+                state.progress.filter { it.kind == "commentary" }.takeLast(2).forEach { RichReply(it.text) }
+                if (state.speaking) Button(onClick = stopAudio) { Text("Stop audio", fontSize = 11.sp) }
+            }
+        }
         if (state.liveText.isNotBlank() || state.liveAttachments.isNotEmpty()) item(key = "live-reply") {
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(if (working) "Reply in progress" else "Partial reply", color = Muted, fontSize = 10.sp)
@@ -178,7 +182,7 @@ internal fun HistoryScreen(state: WatchState, send: (String) -> Unit, back: () -
         if (working) item {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (state.transcript.isNotBlank()) Text(state.transcript, color = White, fontSize = 12.sp, modifier = Modifier.fillMaxWidth().background(Panel).padding(10.dp))
-                state.steps.forEach { step -> key(state.turnId, step.id) { ActivityRow(step) } }
+                ActivityGroup(state.steps, emptyList())
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     androidx.wear.compose.material3.CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
                     Text(if (state.externalRunning) "Thinking · working in another app…" else state.detail, color = Muted, fontSize = 11.sp)
@@ -192,5 +196,8 @@ internal fun HistoryScreen(state: WatchState, send: (String) -> Unit, back: () -
             Button(onClick = back) { Text("Talk to Ally") }
         }
         item { Text("‹ Swipe back to talk", color = Muted, fontSize = 9.sp, modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center) }
+    }
+    if (away) Button(onClick={ following=true; scope.launch { scroll.animateScrollToItem((scroll.layoutInfo.totalItemsCount-1).coerceAtLeast(0)) } },
+        modifier=Modifier.align(Alignment.BottomCenter).padding(bottom=12.dp).height(40.dp)) { Text("↓ Latest",fontSize=11.sp) }
     }
 }

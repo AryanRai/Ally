@@ -6,7 +6,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import org.json.JSONObject
 
 data class AssistantAgent(val id: String, val title: String, val provider: String, val status: String,
-    val detail: String, val unread: Boolean, val updatedAt: Long) {
+    val detail: String, val unread: Boolean, val updatedAt: Long, val text: String = "", val sessionId: String = "") {
+    val key get() = if(sessionId.isNotBlank()) "$provider:$sessionId" else id
     val active get() = status == "running" || status == "needs_input"
     val label get() = when(status) { "running" -> "Working"; "needs_input" -> "Needs input"; "unread" -> "Unread"; "completed" -> "Completed"; "stopped" -> "Stopped"; "error" -> "Error"; else -> "Unknown" }
 }
@@ -28,7 +29,7 @@ object AssistantActivityParser {
             val c = array.optJSONObject(i) ?: return@mapNotNull null
             val id = c.optString("id"); val provider = c.optString("provider"); val status = c.optString("status")
             if(id.isBlank() || provider !in setOf("codex", "claude") || status !in setOf("running", "needs_input", "unread", "completed", "stopped", "error")) return@mapNotNull null
-            AssistantAgent(id, c.optString("title", "Conversation").take(160), provider, status, c.optString("detail").take(160), c.optBoolean("unread"), c.optLong("updatedAt"))
+            AssistantAgent(id, c.optString("title", "Conversation").take(160), provider, status, c.optString("detail").take(160), c.optBoolean("unread"), c.optLong("updatedAt"),c.optString("text").takeLast(500),c.optString("sessionId"))
         }.distinctBy { it.id }
         return AssistantActivityState(chats, checked = true)
     }

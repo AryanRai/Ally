@@ -40,3 +40,11 @@ describe('imported agent history', () => {
     expect(result.messages[3].segments?.[0].toolExecution?.parameters).toEqual({ input: patch });
   });
 });
+
+it('never imports analysis-channel messages as public assistant prose',()=>{
+ const history=rebuildCodexHistory([{type:'response_item',payload:{type:'message',role:'user',content:[{type:'input_text',text:'Question'}]}},
+  {type:'response_item',payload:{type:'message',role:'assistant',channel:'analysis',content:[{type:'output_text',text:'Private reasoning'}]}},
+  {type:'response_item',payload:{type:'message',role:'assistant',channel:'final',content:[{type:'output_text',text:'Public answer'}]}}]);
+ expect(history.messages.at(-1)?.content).toBe('Public answer');
+ expect(JSON.stringify(history.messages)).not.toContain('Private reasoning');
+});

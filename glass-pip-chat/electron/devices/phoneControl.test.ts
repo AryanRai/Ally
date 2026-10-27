@@ -58,10 +58,18 @@ describe('phone control consent and lifecycle', () => {
     vi.useFakeTimers(); const f = fixture(); const result = f.control.execute(f.args); await flush(); await vi.advanceTimersByTimeAsync(120001);
     expect((await result).isError).toBe(true); expect(f.adb.view).not.toHaveBeenCalled(); expect(f.adb.perform).not.toHaveBeenCalled(); f.hub.close();
   });
-  it('withholds a screenshot if the UI changes during capture', async () => {
-    const f = fixture(); vi.mocked(f.adb.view).mockResolvedValueOnce({ revision, ui: '<hierarchy/>', width: 100, height: 200 }).mockResolvedValueOnce({ revision: 'changed', ui: '<hierarchy/>', width: 100, height: 200 });
+  it('withholds a screenshot while the UI keeps changing during capture', async () => {
+    const f = fixture(); let n = 0; vi.mocked(f.adb.view).mockImplementation(async () => ({ revision: `r${n++}`, ui: '<hierarchy/>', width: 100, height: 200 }));
     const result = f.control.execute({ ...f.args, screenshot: true }); await flush(); f.receipt('approved'); f.receipt('done');
     const output = await result; expect(output.isError).toBe(true); expect(output.content.every(item => item.type === 'text')).toBe(true); f.hub.close();
+  });
+  it('returns a screenshot with the matching UI once a brief animation settles', async () => {
+    const f = fixture(); vi.mocked(f.adb.view).mockResolvedValueOnce({ revision, ui: '<hierarchy/>', width: 100, height: 200 }).mockResolvedValueOnce({ revision: 'animating', ui: '<hierarchy/>', width: 100, height: 200 })
+      .mockResolvedValue({ revision: 'settled', ui: '<hierarchy settled="1"/>', width: 100, height: 200 });
+    const result = f.control.execute({ ...f.args, screenshot: true }); await flush(); f.receipt('approved'); f.receipt('done');
+    const output = await result; expect(output.isError).toBeUndefined();
+    expect(JSON.parse((output.content[0] as { text: string }).text).revision).toBe('settled');
+    expect(output.content.some(item => item.type === 'image')).toBe(true); f.hub.close();
   });
   it('stops an in-flight operation on disconnect and marks delivery uncertain', async () => {
     const f = fixture(); let started!: () => void; const performing = new Promise<void>(resolve => { started = resolve; });

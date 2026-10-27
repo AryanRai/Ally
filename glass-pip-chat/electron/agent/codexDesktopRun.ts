@@ -1,7 +1,10 @@
 import { randomUUID } from 'node:crypto';
-import { CodexDesktopClient, CodexChatUnownedError, CodexDesktopUnavailableError, desktopTurns, assertDesktopCanStart, steerDesktopTurn } from './codexDesktop.js';
+import { CodexDesktopClient, CodexChatUnownedError, CodexDesktopUnavailableError, desktopTurns, assertDesktopCanStart, steerDesktopTurn, updateDesktopAccess } from './codexDesktop.js';
+import type { AccessControl } from './access.js';
 import { CodexEventParser } from './codexEvents.js';
 import type { AgentEvent, AgentRunOptions, AgentInteractionHandler } from './types.js';
+import { codexApprovalPolicy } from './approvalPolicy.js';
+import { approvalRoutes } from './codexApprovalRoutes.js';
 
 /** Apply the desktop's Immer patches without mutating retained snapshots. */
 export function applyDesktopPatches(state: any, patches: any[]): any {
@@ -43,31 +46,26 @@ export function desktopTurnRequest(opts: AgentRunOptions, messageId: string) {
       request: {
         threadId: opts.sessionId, clientUserMessageId: messageId,
         input: [{ type: 'text', text: opts.prompt, text_elements: [] }, ...(opts.images ?? []).map(path => ({ type: 'localImage', path }))],
-        approvalPolicy: 'on-request', approvalsReviewer: opts.permission === 'full' ? 'auto_review' : 'user', sandboxPolicy,
+        ...codexApprovalPolicy(opts.permission), sandboxPolicy,
         ...(opts.model && opts.model !== 'default' ? { model: opts.model } : {}),
+        ...(opts.reasoningEffort ? { effort: opts.reasoningEffort } : {}),
       },
       context: { inheritThreadSettings: true },
     },
   };
 }
 
-const approvalRoutes: Record<string, { method: string; field: 'decision' | 'response' }> = {
-  'item/commandExecution/requestApproval': { method: 'thread-follower-command-approval-decision', field: 'decision' },
-  'item/fileChange/requestApproval': { method: 'thread-follower-file-approval-decision', field: 'decision' },
-  'item/permissions/requestApproval': { method: 'thread-follower-permissions-request-approval-response', field: 'response' },
-  'item/tool/requestUserInput': { method: 'thread-follower-submit-user-input', field: 'response' },
-  'mcpServer/elicitation/request': { method: 'thread-follower-submit-mcp-server-elicitation-response', field: 'response' },
-};
 
 /** One user turn, through the existing owner. Never retries a submitted message. */
-export function runCodexDesktopTurn(opts: AgentRunOptions, emit: (event: AgentEvent) => void, interact?: AgentInteractionHandler, unowned?: (emit: (event: AgentEvent) => void) => { stop: () => void; steer?: (text: string, images?: string[]) => Promise<boolean> }): { stop: () => void; steer: (text: string, images?: string[]) => Promise<boolean> } {
+export function runCodexDesktopTurn(opts: AgentRunOptions, emit: (event: AgentEvent) => void, interact?: AgentInteractionHandler, unowned?: (emit: (event: AgentEvent) => void) => { stop: () => void; steer?: (text: string, images?: string[]) => Promise<boolean> } & AccessControl, prepareOwner?: (cancelled: () => boolean) => Promise<void>): { stop: () => void; steer: (text: string, images?: string[]) => Promise<boolean> } & AccessControl {
   const id = opts.sessionId!;
-  let fallback: { stop: () => void; steer?: (text: string, images?: string[]) => Promise<boolean> } | undefined;
+  let fallback: ({ stop: () => void; steer?: (text: string, images?: string[]) => Promise<boolean> } & AccessControl) | undefined;
   const messageId = randomUUID();
   const parser = new CodexEventParser(id);
   const startedAt = Date.now();
   let client: CodexDesktopClient | undefined, owner: string | undefined, state: any, revision: number | undefined;
   let dispatched = false, finished = false, stopped = false, turnId: string | undefined, refreshing = false, interrupting = false;
+  let priorEffort: string | null | undefined, priorModel: string | undefined;
   let heartbeat: ReturnType<typeof setInterval> | undefined;
   const texts = new Map<string, string>(), completed = new Set<string>(), started = new Set<string>();
   const approvals = new Map<string | number, AbortController>();
@@ -77,10 +75,20 @@ export function runCodexDesktopTurn(opts: AgentRunOptions, emit: (event: AgentEv
     if (event.kind !== 'done') { emit(event); return; }
     finished = true; clearInterval(heartbeat);
     for (const controller of approvals.values()) controller.abort();
-    client?.close();
-    emit({ ...event, sessionId: id, usage: { ...event.usage, durationMs: Date.now() - startedAt } });
+    const complete = () => {
+      client?.close();
+      emit({ ...event, sessionId: id, usage: { ...event.usage, durationMs: Date.now() - startedAt } });
+    };
+    if (opts.reasoningEffort && dispatched && priorEffort !== undefined && client && owner) {
+      void client.request('thread-follower-update-thread-settings', {
+        conversationId: id, threadSettings: { effort: priorEffort },
+        condition: { ifEffortEquals: opts.reasoningEffort, ...(priorModel ? { ifModelEquals: priorModel } : {}) },
+      }, owner, 3000).catch(() => {
+        emit({ kind: 'stderr', text: 'Study could not restore the previous reasoning setting. Check it in Codex before the next typed reply.' });
+      }).finally(complete);
+    } else complete();
   };
-  const fail = (error: unknown) => finish({ kind: 'done', isError: true, error: `${error instanceof Error ? error.message : error}${dispatched ? ' Check the same chat in Codex before retrying; your message may already have been accepted.' : ' Your message was not sent.'}` });
+  const fail = (error: unknown) => finish({ kind: 'done', delivery: dispatched ? turnId ? 'accepted' : 'uncertain' : 'not_sent', isError: true, error: `${error instanceof Error ? error.message : error}${dispatched ? ' Check the same chat in Codex before retrying; your message may already have been accepted.' : ' Your message was not sent.'}` });
   const refresh = () => {
     if (refreshing || finished || !client || !owner) return;
     refreshing = true;
@@ -105,6 +113,9 @@ export function runCodexDesktopTurn(opts: AgentRunOptions, emit: (event: AgentEv
     for (const item of turn.items ?? []) {
       if (!item.id || completed.has(item.id)) continue;
       if (item.type === 'agentMessage') {
+        // Register phase before emitting deltas. Otherwise every streamed
+        // commentary was permanently recorded as unphased answer text.
+        for (const event of parser.handle('item/started', { threadId: id, item })) finish(event);
         const previous = texts.get(item.id) ?? '', text = item.text ?? '';
         if (text.startsWith(previous) && text.length > previous.length) {
           for (const event of parser.handle('item/agentMessage/delta', { threadId: id, itemId: item.id, delta: text.slice(previous.length) })) finish(event);
@@ -146,6 +157,8 @@ export function runCodexDesktopTurn(opts: AgentRunOptions, emit: (event: AgentEv
     try {
       if (!id || opts.ephemeral) throw new Error('Select an existing Codex desktop chat');
       if (opts.robot) throw new Error('Robot tools require the standard Codex connection; disable the desktop experiment for Robot mode');
+      if (prepareOwner) await prepareOwner(() => stopped || finished);
+      if (stopped || finished) { finish({ kind: 'done' }); return; }
       client = await CodexDesktopClient.connect();
       if (stopped || finished) { client.close(); finish({ kind: 'done' }); return; }
       owner = await client.owner(id);
@@ -166,11 +179,38 @@ export function runCodexDesktopTurn(opts: AgentRunOptions, emit: (event: AgentEv
       });
       state = await client.snapshot(id, owner);
       assertDesktopCanStart(state, id);
+      priorEffort = state.latestReasoningEffort ?? null;
+      priorModel = opts.model && opts.model !== 'default' ? opts.model : state.latestModel;
       if (stopped || finished) { finish({ kind: 'done' }); return; }
       emit({ kind: 'session', sessionId: id });
       emit({ kind: 'tool_start', id: 'ally-desktop-connection', name: 'Codex desktop', input: { detail: 'Continuing the same chat through its desktop connection' } });
       dispatched = true;
-      const response = await client.request('thread-follower-start-turn', desktopTurnRequest(opts, messageId), owner, 20000);
+      let response;
+      try {
+        response = await client.request('thread-follower-start-turn', desktopTurnRequest(opts, messageId), owner, 20000);
+      } catch (error) {
+        // The router explicitly rejected delivery to a vanished client. Unlike
+        // a timeout/disconnect this confirms no owner received this submission.
+        // Account changes can replace the owner between discovery and start.
+        if (!(error instanceof Error) || error.message !== 'no-client-found' || turnId || finished) throw error;
+        dispatched = false;
+        owner = await client.owner(id);
+        state = await client.snapshot(id, owner);
+        assertDesktopCanStart(state, id);
+        priorEffort = state.latestReasoningEffort ?? null;
+        priorModel = opts.model && opts.model !== 'default' ? opts.model : state.latestModel;
+        if (stopped || finished) { finish({ kind: 'done' }); return; }
+        emit({ kind: 'stderr', text: 'Codex connection changed. Reconnected to the same chat.' });
+        dispatched = true;
+        try { response = await client.request('thread-follower-start-turn', desktopTurnRequest(opts, messageId), owner, 20000); }
+        catch (retryError) {
+          if (retryError instanceof Error && retryError.message === 'no-client-found' && !turnId) {
+            dispatched = false;
+            throw new Error('The Codex account connection is still changing. Open this same chat in Codex and try again once it has loaded.');
+          }
+          throw retryError;
+        }
+      }
       const accepted = response.result?.result?.turn?.id;
       if (typeof accepted !== 'string' || (turnId && turnId !== accepted)) throw new Error('Desktop did not confirm the expected turn');
       turnId = accepted;
@@ -194,7 +234,15 @@ export function runCodexDesktopTurn(opts: AgentRunOptions, emit: (event: AgentEv
       } else fail(error);
     }
   })();
-  return { steer: async (text, images) => {
+  return { setPermission: async permission => {
+    if (finished || stopped) throw Error('This reply has finished; choose the access level again for the next message.');
+    if (fallback) {
+      if (!fallback.setPermission) return 'next_message';
+      return fallback.setPermission(permission);
+    }
+    if (!client || !owner || !turnId) throw Error('Still connecting. Try changing access once the reply starts.');
+    return updateDesktopAccess(client, owner, id, permission);
+  }, steer: async (text, images) => {
     if (finished || stopped) throw new Error('This response has finished. Send your input as a new message.');
     if (fallback?.steer) return fallback.steer(text, images);
     if (!client || !owner || !turnId) return false;

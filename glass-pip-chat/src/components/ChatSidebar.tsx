@@ -1,7 +1,8 @@
 import { useDiscoveryReadStates } from '@/hooks/useUnreadChats';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
-import { ChevronRight, Folder, LoaderCircle, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Pencil, Play, Square, SquarePen, Trash2 } from 'lucide-react';
+import { ChevronRight, Folder, LoaderCircle, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Pencil, Play, Search, Square, SquarePen, Trash2 } from 'lucide-react';
+import ChatSearch, { desktopSearchChats, hasDesktopSearch, type ChatSearchHit, type SearchChats } from '@/components/ChatSearch';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -16,6 +17,7 @@ import type { AgentSessionSummary } from '@/types/agent';
 interface ChatSidebarProps {
   chats: Chat[];
   activeChat: string | null;
+  activeSession?: { provider: 'codex' | 'claude'; id: string };
   onChatSelect: (chatId: string) => void;
   onChatCreate: () => void;
   onChatDelete: (chatId: string) => void;
@@ -33,8 +35,14 @@ interface ChatSidebarProps {
   externalSessions?: AgentSessionSummary[];
   runningSessions?: AgentSessionSummary[];
   runningError?: string;
+  discoveryError?: string;
+  hasMoreSessions?: boolean;
+  loadingSessions?: boolean;
+  onLoadMoreSessions?: () => void;
   /** Continue an existing Claude Code / Codex session as a chat */
   onOpenAgentSession?: (session: AgentSessionSummary) => void;
+  /** Title + transcript search; defaults to the desktop window's chat index */
+  onSearchChats?: SearchChats;
 }
 
 type Entry =
@@ -51,9 +59,8 @@ export function recentEntries(entries: Entry[], unreadKeys: ReadonlySet<string>)
     const match=/^(codex|claude):([\w-]+)$/.exec(key);
     return match ? [{kind:'session' as const,session:{provider:match[1] as 'codex'|'claude',id:match[2],title:'Unread conversation',updatedAt:0},updatedAt:0}] : [];
   });
-  const created = (entry: Entry) => entry.kind === 'chat' ? entry.chat.createdAt : entry.session.createdAt ?? 0;
   const identity = (entry: Entry) => entry.kind === 'chat' ? entry.chat.id : `${entry.session.provider}:${entry.session.id}`;
-  return [...entries,...missing].sort((a,b)=>created(b)-created(a) || identity(b).localeCompare(identity(a)));
+  return [...entries,...missing].sort((a,b)=>b.updatedAt-a.updatedAt || identity(a).localeCompare(identity(b)));
 }
 
 interface ProjectGroup {
@@ -107,23 +114,24 @@ export function groupByProject(chats: Chat[], sessions: AgentSessionSummary[], h
   for (const saved of chats) {
     const native = sessions.find(s => s.provider === saved.agent?.provider && (s.id === saved.agent?.sessionId || s.id === saved.agent?.originalSessionId));
     const chat = native?.createdAt ? { ...saved, createdAt: native.createdAt } : saved;
-    add(chat.agent?.cwd, { kind: 'chat', chat, updatedAt: chat.createdAt }, chat.agent?.provider ?? 'unassigned');
+    add(chat.agent?.cwd, { kind: 'chat', chat, updatedAt: Math.max(chat.updatedAt, native?.updatedAt ?? 0) }, chat.agent?.provider ?? 'unassigned');
   }
   for (const session of sessions) {
-    if (!linked.has(`${session.provider}:${session.id}`) && !(session.originalSessionId && linked.has(`${session.provider}:${session.originalSessionId}`))) add(session.cwd, { kind: 'session', session, updatedAt: session.createdAt ?? 0 }, session.provider);
+    if (!linked.has(`${session.provider}:${session.id}`) && !(session.originalSessionId && linked.has(`${session.provider}:${session.originalSessionId}`))) add(session.cwd, { kind: 'session', session, updatedAt: session.updatedAt }, session.provider);
   }
   for (const g of groups.values()) g.entries.sort((a, b) => b.updatedAt - a.updatedAt);
   return [...groups.values()].sort((a, b) => a.provider.localeCompare(b.provider) || b.updatedAt - a.updatedAt);
 }
 
 /** A Claude Code / Codex session not yet opened in Ally; clicking continues it here. */
-function SessionRow({ session, onOpen, unread = false }: { session: AgentSessionSummary; onOpen: () => void; unread?: boolean }) {
+function SessionRow({ session, onOpen, unread = false, active = false }: { session: AgentSessionSummary; onOpen: () => void; unread?: boolean; active?: boolean }) {
   return (
     <button
       type="button"
       onClick={onOpen}
+      aria-current={active ? 'true' : undefined}
       title={`${session.title}\nFrom ${session.provider === 'claude' ? 'Claude Code' : 'Codex'} · click to continue in Ally`}
-      className="flex w-full items-center rounded-md text-left text-foreground/55 transition-colors hover:bg-white/[0.05] hover:text-foreground"
+      className={cn('flex w-full items-center rounded-md text-left transition-colors hover:bg-white/[0.05] hover:text-foreground', active ? 'bg-white/[0.09] text-foreground' : 'text-foreground/55')}
     >
       <span className="min-w-0 flex-1 truncate py-1.5 pl-2.5 pr-1 text-[13px] font-light">{session.title}</span>
       {unread && <UnreadDot />}
@@ -259,6 +267,7 @@ function ChatRow({
 export default function ChatSidebar({
   chats,
   activeChat,
+  activeSession,
   onChatSelect,
   onChatCreate,
   onChatDelete,
@@ -268,7 +277,12 @@ export default function ChatSidebar({
   externalSessions = [],
   runningSessions = [],
   runningError = '',
+  discoveryError = '',
+  hasMoreSessions = false,
+  loadingSessions = false,
+  onLoadMoreSessions,
   onOpenAgentSession,
+  onSearchChats,
   homeCwd,
   runningChatId,
   workingStatus = 'Working…',
@@ -288,7 +302,8 @@ export default function ChatSidebar({
     const item = entry.kind === 'chat' ? entry.chat : entry.session;
     const provider = entry.kind === 'chat' ? entry.chat.agent?.provider : entry.session.provider;
     const cwd = entry.kind === 'chat' ? entry.chat.agent?.cwd : entry.session.cwd;
-    return <button key={`${entry.kind}:${provider}:${item.id}`} type="button" onClick={() => entry.kind === 'chat' ? onChatSelect(entry.chat.id) : onOpenAgentSession?.(entry.session)} className="flex w-full items-start gap-2 rounded-md px-2.5 py-2 text-left hover:bg-white/[0.05]">
+    const active = entry.kind === 'chat' ? entry.chat.id === activeChat : activeSession?.provider === entry.session.provider && activeSession.id === entry.session.id;
+    return <button key={`${entry.kind}:${provider}:${item.id}`} type="button" aria-current={active ? 'true' : undefined} onClick={() => entry.kind === 'chat' ? onChatSelect(entry.chat.id) : onOpenAgentSession?.(entry.session)} className={cn('flex w-full items-start gap-2 rounded-md px-2.5 py-2 text-left hover:bg-white/[0.05]', active && 'bg-white/[0.09]')}>
       {!live && entryUnread(entry) && <UnreadDot />}
       {live && <LoaderCircle aria-hidden="true" className="mt-0.5 size-3 shrink-0 animate-spin text-amber-200/70" />}
       <span className="min-w-0 flex-1"><span className="block truncate text-[13px] text-foreground/85">{item.title || 'Untitled'}</span><span className="block truncate text-[10px] text-foreground/40">{PROVIDER_TAG[provider ?? 'unassigned']}{cwd ? ` · ${folderName(cwd)}` : ''}</span></span>
@@ -310,6 +325,33 @@ export default function ChatSidebar({
       return next;
     });
   };
+
+  const search = onSearchChats ?? (hasDesktopSearch() ? desktopSearchChats : undefined);
+  const [searching, setSearching] = useState(false);
+  const [focusRequest, setFocusRequest] = useState(0);
+  const latest = useRef({ chats, externalSessions, isCollapsed, onToggleCollapse, onChatSelect, onOpenAgentSession });
+  latest.current = { chats, externalSessions, isCollapsed, onToggleCollapse, onChatSelect, onOpenAgentSession };
+  const requestSearch = useCallback(() => {
+    if (latest.current.isCollapsed) latest.current.onToggleCollapse();
+    setFocusRequest(n => n + 1);
+  }, []);
+  const searchFocused = useCallback(() => setFocusRequest(0), []);
+  // Same path as clicking a row: a linked Ally chat is selected, anything else is opened as a session
+  const openHit = useCallback((hit: ChatSearchHit) => {
+    const { chats: saved, externalSessions: sessions, onChatSelect: select, onOpenAgentSession: openSession } = latest.current;
+    const linked = saved.find(c => c.agent?.provider === hit.provider && (c.agent.sessionId === hit.id || c.agent.originalSessionId === hit.id));
+    if (linked) return select(linked.id);
+    openSession?.(sessions.find(s => s.provider === hit.provider && (s.id === hit.id || s.originalSessionId === hit.id))
+      ?? { provider: hit.provider, id: hit.id, title: hit.title, cwd: hit.folder, updatedAt: hit.updatedAt });
+  }, []);
+  useEffect(() => {
+    if (!search) return;
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'f') { e.preventDefault(); requestSearch(); }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [search, requestSearch]);
 
   const railButton = 'grid size-8 place-items-center rounded-md text-foreground/60 transition-colors hover:bg-white/[0.07] hover:text-foreground';
 
@@ -337,11 +379,17 @@ export default function ChatSidebar({
           <SquarePen className="size-4 shrink-0" />
           {!isCollapsed && 'New chat'}
         </button>
+        {isCollapsed && search && (
+          <button type="button" onClick={requestSearch} className={railButton} title="Search chats (Ctrl+F)" aria-label="Search chats">
+            <Search className="size-4" />
+          </button>
+        )}
       </div>
 
       {!isCollapsed && (
         <>
-          <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2 scrollbar-thin">
+          {search && <ChatSearch search={search} onOpen={openHit} onActiveChange={setSearching} focusRequest={focusRequest} onFocused={searchFocused} />}
+          <div className={cn('min-h-0 flex-1 overflow-y-auto px-2 pb-2 scrollbar-thin', searching && 'hidden')}>
             <section aria-label="Running chats" className="pb-3">
               <h2 className="px-2.5 pb-1 pt-3 text-[11px] font-medium uppercase tracking-wider text-foreground/50">Running · {running.length}</h2>
               {running.map(entry => quickRow(entry, true))}
@@ -375,6 +423,7 @@ export default function ChatSidebar({
                 >{showAllRecent ? 'View less' : `View more (${recent.length - ROWS_BEFORE_MORE})`}</button>}
               </div>}
             </section>
+            {discoveryError && <p role="alert" className="px-2.5 py-2 text-xs text-amber-200">{discoveryError}</p>}
             {groups.map((group, index) => {
               const hasRunningChat = group.entries.some(entry => entry.kind === 'chat' && entry.chat.id === runningChatId);
               const closed = collapsedGroups.has(group.key) && !hasRunningChat;
@@ -417,7 +466,7 @@ export default function ChatSidebar({
                             onResume={onResume}
                           />
                         ) : (
-                          <SessionRow unread={unreadKeys.has(`${entry.session.provider}:${entry.session.id}`)}
+                          <SessionRow unread={unreadKeys.has(`${entry.session.provider}:${entry.session.id}`)} active={activeSession?.provider === entry.session.provider && activeSession.id === entry.session.id}
                             key={entry.session.provider + entry.session.id}
                             session={entry.session}
                             onOpen={() => onOpenAgentSession?.(entry.session)}
@@ -443,6 +492,8 @@ export default function ChatSidebar({
                 </div>
               );
             })}
+            {onLoadMoreSessions && (hasMoreSessions || discoveryError) && <button type="button" disabled={loadingSessions} onClick={onLoadMoreSessions}
+              className="w-full rounded-md px-2.5 py-2 text-left text-xs text-foreground/60 hover:bg-white/[0.05]">{loadingSessions ? 'Loading chats…' : discoveryError ? 'Retry loading chats' : 'Load more chats'}</button>}
           </div>
 
         </>

@@ -14,6 +14,10 @@ import { chatTitle, isDeviceProtocolTitle } from './chatTitle.js';
 import { codexTurnsPending } from './sessionActivity.js';
 import type { AgentHistoryMessage, AgentSessionSnapshot, AgentSessionSummary, AgentToolExecution } from './types.js';
 
+/** Strip the \\?\ extended-path prefix Windows sometimes stores in thread.cwd. */
+const normalizeCwd = (cwd: unknown): string | undefined =>
+  typeof cwd === 'string' ? cwd.replace(/^\\\\\?\\/, '') : undefined;
+
 // List timeouts must not close a user's in-flight chat/history read.
 type ReadLane = 'list' | 'history' | 'metadata';
 const connections: Partial<Record<ReadLane, Promise<CodexRpc>>> = {};
@@ -55,19 +59,34 @@ async function historyRead(rpc: CodexRpc, method: string, params: unknown, lane:
 }
 
 // Background receipt classification must not cancel a foreground chat open.
+// Every account shares one history (codexAccounts.shareCodexHistory), so reads never depend on the account.
 configureDiscoveryReader(async id => (await historyRead(await reader('metadata'), 'thread/read', { threadId: id }, 'metadata')).thread);
 
 export async function listCodexChats(limit = 40): Promise<AgentSessionSummary[]> {
+  const sessions: AgentSessionSummary[] = [];
+  const seen = new Set<string>();
+  let cursor: string | undefined;
+  do {
+    const page = await listCodexChatsPage(Math.min(80, limit - sessions.length), cursor);
+    for (const session of page.sessions) if (!seen.has(session.id)) { seen.add(session.id); sessions.push(session); }
+    cursor = page.nextCursor;
+  } while (cursor && sessions.length < limit);
+  return sessions;
+}
+
+async function listDefaultCodexChatsPage(limit = 30, startCursor?: string): Promise<{ sessions: AgentSessionSummary[]; nextCursor?: string }> {
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 80) throw Error('Invalid chat page size');
   const rpc = await reader('list');
   const aliases = codexMigrationAliases();
   const originals = Object.fromEntries(Object.entries(aliases).map(([old, target]) => [target, old]));
   const result: AgentSessionSummary[] = [];
   const seen = new Set<string>();
-  let cursor: string | undefined;
+  let cursor: string | undefined = startCursor;
+  const cursors = new Set<string>(startCursor ? [startCursor] : []);
   do {
     const page = await historyRead(rpc, 'thread/list', {
       // Large native pages can stall the Windows app-server; follow its cursors.
-      limit: Math.min(5, Math.max(1, limit - result.length)), cursor, sortKey: 'created_at',
+      limit: Math.min(5, Math.max(1, limit - result.length)), cursor, sortKey: 'updated_at',
       // Include old exec chats for compatibility, but omit subagent/background threads.
       sourceKinds: ['cli', 'vscode', 'appServer', 'exec'],
     });
@@ -77,12 +96,21 @@ export async function listCodexChats(limit = 40): Promise<AgentSessionSummary[]>
       if (aliases[t.id] || seen.has(t.id)) continue;
       seen.add(t.id);
       result.push({ provider: 'codex', id: t.id, title: chatTitle(t.name || t.preview || 'Codex chat'),
-        cwd: t.cwd, createdAt: (t.createdAt ?? 0) * 1000, updatedAt: t.updatedAt * 1000, originalSessionId: originals[t.id] });
-      if (result.length >= limit) return result;
+        cwd: normalizeCwd(t.cwd), createdAt: (t.createdAt ?? 0) * 1000, updatedAt: t.updatedAt * 1000, originalSessionId: originals[t.id] });
+      if (result.length >= limit) return { sessions: result, nextCursor: page.nextCursor || undefined };
     }
     cursor = page.nextCursor;
+    if (cursor && cursors.has(cursor)) throw Error('Codex returned a repeated chat cursor. Retry loading chats.');
+    if (cursor) cursors.add(cursor);
   } while (cursor);
-  return result;
+  return { sessions: result };
+}
+
+/** One shared history lists every account's chats once; a chat's account is tracked separately. */
+export async function listCodexChatsPage(limit = 30, cursor?: string): Promise<{ sessions: AgentSessionSummary[]; nextCursor?: string }> {
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 80) throw Error('Invalid chat page size');
+  // Cursors from the earlier per-account directory start again from the shared list.
+  return listDefaultCodexChatsPage(limit, cursor?.startsWith('profiles:') ? undefined : cursor);
 }
 
 const localHistory = new CodexLocalHistory();
@@ -147,8 +175,8 @@ async function loadNativeCodexChat(id: string, previousRevision?: string): Promi
   const running = managed || live?.running === true || codexTurnsPending(turns);
   const revision = createHash('sha256').update(JSON.stringify([sessionId, thread.name, thread.cwd, fingerprint ?? turns, running])).digest('hex');
   const identity = { createdAt: (thread.createdAt ?? 0) * 1000, sessionId, title: thread.name ? chatTitle(thread.name) : undefined, ...(sessionId !== id ? { originalSessionId: id } : {}) };
-  if (revision === previousRevision) return { ...identity, cwd: thread.cwd, revision, unchanged: true, messages: [], running };
-  const snapshot = { ...identity, cwd: thread.cwd, revision, running, messages: cached?.snapshot?.revision === revision ? cached.snapshot.messages : await cooperativeCodexHistoryMessages(turns, thread.createdAt * 1000) };
+  if (revision === previousRevision) return { ...identity, cwd: normalizeCwd(thread.cwd), revision, unchanged: true, messages: [], running };
+  const snapshot = { ...identity, cwd: normalizeCwd(thread.cwd), revision, running, messages: cached?.snapshot?.revision === revision ? cached.snapshot.messages : await cooperativeCodexHistoryMessages(turns, thread.createdAt * 1000) };
   if (fingerprint) {
     const after = await fs.stat(thread.path).catch(() => undefined);
     if (after && stat && after.size === stat.size && after.mtimeMs === stat.mtimeMs && after.ctimeMs === stat.ctimeMs) {

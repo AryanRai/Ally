@@ -8,7 +8,7 @@ export interface PipAPI {
   close: () => void;
   
   // Window resizing
-  resizeWindow: (width: number, height: number) => void;
+  resizeWindow: (width: number, height: number, mode?: 'collapsed' | 'expanded') => void;
   getWindowSize: () => Promise<{ width: number; height: number }>;
   captureQueryScreen?: () => Promise<{ path: string; thumbnail: string }>;
   onManualResize?: (callback: (size: { width: number; height: number }) => void) => () => void;
@@ -62,6 +62,13 @@ export interface PipAPI {
 
   // Global hotkey events from the main process
   onShortcut: (callback: (event: 'focus-main-input' | 'show-collapsed-and-focus-quick' | 'toggle-collapse' | 'cycle-size' | 'toggle-context') => void) => () => void;
+  onSurfaceFloat?: (callback: (id: number) => void) => () => void;
+  onHandoff?: (callback: (value: import('../../electron/devices/handoffPresentation').HandoffVisual | null) => void) => () => void;
+  surfaceReady?: (id: number) => void;
+  /** Mirrors the pill's live reply (or null to clear) and greeting into the docked notch. */
+  /** Reads (or changes one of) the native notch's shared preferences; null when the notch is not connected. */
+  nativeSettings?: (change?: { key: string; value: string | number | boolean }) => Promise<Record<string, unknown> | null>;
+  surfacePreview?: (value:{ preview?: { question: string; answer: string; thinking: boolean; done: boolean } | null; greeting?: string }) => void;
 
   // Robot eyes
   /** Start/stop the global cursor feed (window-relative coordinates) */
@@ -86,13 +93,23 @@ export interface PipAPI {
     onAsk: (callback: (ask: import('../../electron/capture/types').CircleAsk) => void) => () => void;
   };
 
-  tutor: Pick<import('../../electron/visualTutor/types').VisualTutorApi, 'start' | 'displays' | 'state' | 'end' | 'show' | 'action' | 'onChanged'>;
+  tutor: Pick<import('../../electron/visualTutor/types').VisualTutorApi, 'start' | 'study' | 'displays' | 'state' | 'end' | 'show' | 'action' | 'onChanged'>;
 
   // Claude Code / Codex agent backends
   agent: {
     queue: (key: string) => Promise<import('../../electron/agent/messageQueueTypes').QueueSnapshot>;
     queueChange: (key: string, change: import('../../electron/agent/messageQueueTypes').QueueChange) => Promise<import('../../electron/agent/messageQueueTypes').QueueSnapshot>;
     status: () => Promise<Record<AgentProvider, { available: boolean; path: string | null }>>;
+    codexAccounts: {
+      list: () => Promise<import('../../electron/agent/codexAccounts').CodexAccountsSnapshot>;
+      add: (label: string) => Promise<import('../../electron/agent/codexAccounts').CodexAccountsSnapshot>;
+      select: (id: string) => Promise<import('../../electron/agent/codexAccounts').CodexAccountsSnapshot>;
+      remove: (id: string) => Promise<import('../../electron/agent/codexAccounts').CodexAccountsSnapshot>;
+      check: (id: string) => Promise<import('../../electron/agent/codexAccounts').CodexAccountsSnapshot>;
+      autoSwitch: (on: boolean) => Promise<import('../../electron/agent/codexAccounts').CodexAccountsSnapshot>;
+      login: (id: string) => Promise<import('../../electron/agent/codexAccounts').CodexAccountsSnapshot>;
+      cancelLogin: () => Promise<import('../../electron/agent/codexAccounts').CodexAccountsSnapshot>;
+    };
     getConfig: () => Promise<AgentConfig>;
     updateConfig: (patch: Partial<AgentConfig>) => Promise<AgentConfig>;
     listModels: (provider: AgentProvider) => Promise<AgentModel[]>;
@@ -102,6 +119,7 @@ export interface PipAPI {
       prompt: string;
       cwd?: string;
       sessionId?: string;
+      codexAccountId?: string;
       model?: string;
       permission?: AgentPermission;
       /** Robot mode: persona instructions; the HowYouSeeMe MCP URL comes from agent config */
@@ -111,6 +129,7 @@ export interface PipAPI {
     }) => Promise<string>;
     localImage: (source: string) => Promise<string>;
     interactionHistory: (chatId: string) => Promise<import('../../electron/devices/interactions').InteractionHistory[]>;
+    pendingInteractions: () => Promise<import('../../electron/devices/interactions').ChatInteraction[]>;
     answerInteraction: (chatId: string, id: string, answer: import('../../electron/watch/approvals').ApprovalAnswer) => Promise<{ accepted: boolean }>;
     onInteractionsChanged: (callback: () => void) => () => void;
     sessionInput: (provider: AgentProvider, sessionId: string, text: string, requestId: string, mode: 'steer' | 'queue') => Promise<'steered' | 'queued'>;
@@ -120,9 +139,15 @@ export interface PipAPI {
     activity: () => Promise<ReturnType<typeof import('../../electron/watch/assistantActivity').assistantActivity>>;
     runningSessions: () => Promise<AgentSessionSummary[]>;
     listSessions: (provider: AgentProvider, limit?: number) => Promise<AgentSessionSummary[]>;
+    listSessionsPage: (provider: AgentProvider, cursor?: string) => Promise<{ sessions: AgentSessionSummary[]; nextCursor?: string }>;
+    getSelection: () => Promise<import('../../electron/agent/selection').SelectionSnapshot>;
+    setSelection: (selected: import('../../electron/agent/selection').SharedChatSelection | null, version: string) => Promise<import('../../electron/agent/selection').SelectionSnapshot & { accepted: boolean }>;
+    onSelection: (callback: (state: import('../../electron/agent/selection').SelectionSnapshot) => void) => () => void;
     readStates: (keys?: string[]) => Promise<{ key: string; revision: string; unread: boolean; hidden?: boolean }[]>;
     markRead: (provider: AgentProvider, id: string, revision: string) => Promise<boolean>;
     loadSession: (provider: AgentProvider, id: string, revision?: string) => Promise<import('../../electron/agent/types').AgentSessionSnapshot>;
+    liveStudyReply?: (key: string) => Promise<import('../../electron/watch/liveStudyReply').LiveStudyReply | null>;
+    onLiveStudyReply?: (callback: (reply: import('../../electron/watch/liveStudyReply').LiveStudyReply) => void) => () => void;
     /** Claude Code sign-in state, verified with a real request */
     claudeAccount: () => Promise<import('../../electron/agent/claudeLogin').ClaudeAccount>;
     claudeLogin: {
@@ -140,6 +165,8 @@ export interface PipAPI {
     appStatus: () => Promise<{ claude: boolean | null; codex: boolean | null }>;
     addToApps: () => Promise<{ claude: string; codex: string }>;
     removeFromApps: () => Promise<void>;
+    /** Read-only title + transcript search across Claude Code and Codex chats */
+    search: (query: string) => Promise<import('../components/ChatSearch').ChatSearchResult>;
     onOpenChat: (callback: (req: { provider: AgentProvider; sessionId: string; title: string; cwd?: string }) => void) => () => void;
   };
   /** Realtime perception sessions (electron/perception) */

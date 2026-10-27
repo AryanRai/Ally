@@ -13,6 +13,7 @@ class ReplyMonitor : Service() {
     private var active: String? = null
     override fun onBind(intent: Intent?): IBinder? = null
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if(dev.ally.device.DeviceLink.prefs(this).getBoolean("deviceConnected",false) && dev.ally.device.DeviceLink.status.value=="Connected") { stopForeground(STOP_FOREGROUND_REMOVE);stopSelf();return START_NOT_STICKY }
         val prefs = getSharedPreferences("ally-watch", 0)
         val turn = intent?.getStringExtra("turn") ?: prefs.getString("turn", null)
         val chat = intent?.getStringExtra("chat") ?: prefs.getString("chatId", "") ?: ""
@@ -29,6 +30,7 @@ class ReplyMonitor : Service() {
                 withTimeout(15 * 60_000L) {
                     var approvalId = ""
                     while (isActive) {
+                        if(dev.ally.device.DeviceLink.status.value=="Connected")return@withTimeout
                         try {
                             val result = api.request("/v1/turns/$turn")
                             val status = result.optString("status")
@@ -56,6 +58,7 @@ class ReplyMonitor : Service() {
     override fun onDestroy() { scope.cancel(); super.onDestroy() }
     companion object {
         fun start(context: Context, turn: String, chat: String): Boolean = runCatching {
+            if(dev.ally.device.DeviceLink.prefs(context).getBoolean("deviceConnected",false) && dev.ally.device.DeviceLink.status.value=="Connected") return true
             context.startForegroundService(Intent(context, ReplyMonitor::class.java).putExtra("turn", turn).putExtra("chat", chat)); true
         }.getOrDefault(false)
     }

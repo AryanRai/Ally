@@ -17,6 +17,7 @@ describe('robot MCP servers', () => {
       const allowed = args[args.indexOf('--allowedTools') + 1].split(',');
       expect(allowed).toContain('mcp__ally_chats__visual_tutor_read');
       expect(allowed).toContain('mcp__ally_chats__visual_tutor_draw');
+      expect(allowed).toContain('mcp__ally_chats__native_study_reference');
       expect(allowed).not.toContain('mcp__ally_chats__ally_send_to_chat');
       expect(args).toContain('plan');
     } finally { setEndpoint(null); }

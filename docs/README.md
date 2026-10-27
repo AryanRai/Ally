@@ -21,6 +21,7 @@ Setup guides, feature references, and engineering notes for the desktop, Android
 | Stop, interruption, and continuation | [Stop and resume](stop-and-resume.md) |
 | Follow-ups during active work | [Shared message queue](message-queue.md) · [Voice and steering](voice-feedback-steering.md) |
 | Real questions and approval requests | [Chat interactions](chat-interactions.md) · [Shared input timeline](question-timeline-and-shared-input.md) |
+| Phone context, original files and hold-close | [Device continuity guide](device-continuity.md) · [Current backlog](device-continuity-backlog.md) |
 | Sharing, images, and attachments | [Device sharing and attachments](device-sharing-and-attachments.md) |
 | Chat ordering, unread state, and activity | [Stable ordering](stable-chat-order.md) · [Unread state](unread-chats.md) · [Running chats](running-chats.md) |
 | Chat opening and Android assistant binding | [Selection and binding](chat-open-and-assistant-binding.md) |
@@ -50,6 +51,7 @@ Setup guides, feature references, and engineering notes for the desktop, Android
 | Watch chat navigation and rich replies | [Watch quick switcher](watch-quick-chats-and-rich-replies.md) |
 | Speech playback and notifications | [Voice and reply alerts](voice-and-notifications.md) · [Watch read-aloud controls](watch-read-aloud.md) |
 | Phone device actions and confirmations | [Phone controls](phone-control.md) |
+| Large-file chunked upload from phone to desktop | [Resumable file transfer](resumable-file-transfer.md) |
 | Local speech model-cache recovery | [Speech cache repair](phone-speech-cache-repair.md) |
 | Phone screen context and internal-session filtering | [Screen-context results](guardian-screen-context-results.md) |
 
@@ -58,7 +60,7 @@ Setup guides, feature references, and engineering notes for the desktop, Android
 - [Cross-chat routing](cross-chat-routing.md): authenticated discovery, reading, and explicitly requested forwarding through the agents’ tools.
 - [Realtime perception](realtime-agent.md): capture sessions, relevance classification, policy gating, and contextual cards.
 - [Desktop and Android integration](main-integration-20261018.md): a dated integration and validation snapshot.
-- [Collaboration scratchpad](agent-collaboration.md): file ownership, active deployment slots, and handoffs. Read it before changing shared code or restarting a live instance.
+- Collaboration scratchpad (`agent-collaboration.md`, kept locally and not published): file ownership, active deployment slots, and handoffs. Read it before changing shared code or restarting a live instance.
 
 ## Reading the engineering reports
 
@@ -67,3 +69,4 @@ Many feature pages record a particular implementation, candidate build, test run
 Use the entry-point guides above for current setup. For a specific deployment, inspect that candidate’s `deployment.json` and current process/port ownership. Preserve historical reports rather than rewriting their past results as though they happened today.
 
 No example, screenshot, build report, or Markdown action substitutes for a real approval request or an observed device result.
+

@@ -1,0 +1,191 @@
+{
+  "mcpServers": {
+    "filesystem": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-filesystem",
+        "C:\\"
+      ],
+      "env": {
+        "FASTMCP_LOG_LEVEL": "ERROR"
+      },
+      "disabled": false,
+      "autoApprove": [
+        "read_file",
+        "list_directory",
+        "write_file",
+        "create_directory",
+        "move_file",
+        "search_files",
+        "get_file_info",
+        "read_multiple_files",
+        "list_allowed_directories"
+      ]
+    },
+    "brave-search": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-brave-search"
+      ],
+      "env": {
+        "BRAVE_API_KEY": "YOUR_BRAVE_API_KEY_HERE"
+      },
+      "disabled": true,
+      "autoApprove": [
+        "brave_web_search"
+      ]
+    },
+    "github": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-github"
+      ],
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "YOUR_GITHUB_TOKEN_HERE"
+      },
+      "disabled": true,
+      "autoApprove": [
+        "search_repositories",
+        "get_file_contents",
+        "create_issue"
+      ]
+    },
+    "postgres": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-postgres"
+      ],
+      "env": {
+        "POSTGRES_CONNECTION_STRING": "postgresql://user:password@localhost:5432/database"
+      },
+      "disabled": true,
+      "autoApprove": [
+        "read_query",
+        "write_query",
+        "list_tables"
+      ]
+    },
+    "memory": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-memory"
+      ],
+      "env": {},
+      "disabled": false,
+      "autoApprove": [
+        "create_memory",
+        "search_memory",
+        "update_memory"
+      ]
+    },
+    "time": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-everything"
+      ],
+      "env": {},
+      "disabled": true,
+      "autoApprove": [
+        "get_current_time",
+        "current_time",
+        "get_timestamp",
+        "convert_time"
+      ]
+    },
+    "terminal-controller": {
+      "command": "uvx",
+      "args": [
+        "terminal_controller"
+      ],
+      "env": {},
+      "disabled": true,
+      "autoApprove": [
+        "execute_command",
+        "get_current_directory",
+        "list_directory",
+        "change_directory",
+        "read_file",
+        "write_file"
+      ]
+    },
+    "comet-bridge": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "perplexity-comet-mcp"
+      ],
+      "env": {
+        "COMET_PORT": "9223"
+      },
+      "disabled": false,
+      "autoApprove": [
+        "comet_connect",
+        "comet_ask",
+        "comet_poll",
+        "comet_stop",
+        "comet_screenshot",
+        "comet_tabs",
+        "comet_mode",
+        "comet_upload"
+      ]
+    },
+    "computer-control": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "computer-control-mcp"
+      ],
+      "env": {},
+      "disabled": false,
+      "autoApprove": [
+        "screenshot",
+        "click",
+        "double_click",
+        "right_click",
+        "move_mouse",
+        "drag",
+        "scroll",
+        "type_text",
+        "key_press",
+        "get_screen_size",
+        "get_cursor_position",
+        "find_on_screen",
+        "get_clipboard",
+        "set_clipboard",
+        "open_application",
+        "close_window",
+        "get_active_window",
+        "list_windows",
+        "focus_window"
+      ]
+    },
+    "spotify": {
+      "command": "C:\\Users\\buzza\\AppData\\Roaming\\Python\\Python312\\Scripts\\spotify-mcp.exe",
+      "args": [],
+      "env": {
+        "SPOTIPY_CLIENT_ID": "099762d8eee7402db00187e946a51f87",
+        "SPOTIPY_CLIENT_SECRET": "038fa897e6ca4552b0e3b05e53e55e4f",
+        "SPOTIPY_REDIRECT_URI": "http://127.0.0.1:8080"
+      },
+      "disabled": false,
+      "autoApprove": [
+        "play_pause_playback",
+        "skip_to_next",
+        "skip_to_previous",
+        "search",
+        "get_current_track",
+        "get_playback_state",
+        "set_volume",
+        "get_playlists",
+        "start_playback",
+        "add_to_queue"
+      ]
+    }
+  }
+}

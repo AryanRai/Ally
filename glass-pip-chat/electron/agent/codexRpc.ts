@@ -1,5 +1,10 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import readline from 'node:readline';
+import { codexProfileEnvironment } from './codexAccounts.js';
+
+export class CodexRpcError extends Error {
+  constructor(message: string, readonly code: number, readonly data?: unknown) { super(message); }
+}
 import { childEnv, launcherFor, resolveAgentBinary } from './binaries.js';
 
 /** A private stdio connection. Browsing uses read/list only; each turn owns its own server. */
@@ -27,7 +32,7 @@ export class CodexRpc {
         if (!pending) return;
         clearTimeout(pending.timer);
         this.pending.delete(msg.id);
-        if (msg.error) pending.reject(new Error(msg.error.message));
+        if (msg.error) pending.reject(new CodexRpcError(msg.error.message, msg.error.code, msg.error.data));
         else pending.resolve(msg.result);
       }
     });
@@ -40,13 +45,13 @@ export class CodexRpc {
   onRequest?: (method: string, params: any, id: string | number) => Promise<unknown>;
   onClose?: (error: Error) => void;
 
-  static async connect(binary?: string): Promise<CodexRpc> {
+  static async connect(binary?: string, codexHome?: string): Promise<CodexRpc> {
     const bin = await resolveAgentBinary('codex', binary);
     if (!bin) throw new Error('Codex CLI not found. Install Codex or set its executable in Settings.');
     const launcher = launcherFor(bin);
     if (launcher.shell) throw new Error('Set the Codex executable path in Settings; app-server requires a direct executable.');
-    const rpc = new CodexRpc(spawn(launcher.command, [...launcher.prefixArgs, 'app-server'], {
-      env: childEnv(), windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'],
+    const rpc = new CodexRpc(spawn(launcher.command, [...launcher.prefixArgs, 'app-server', ...(codexHome ? ['-c', 'cli_auth_credentials_store="file"'] : [])], {
+      env: codexHome ? codexProfileEnvironment(childEnv(), codexHome) : childEnv(), windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'],
     }));
     try {
       await rpc.request('initialize', { clientInfo: { name: 'ally', title: 'Ally', version: '1.0.0' }, capabilities: { experimentalApi: true, mcpServerOpenaiFormElicitation: true } });

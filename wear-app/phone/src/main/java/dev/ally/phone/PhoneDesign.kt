@@ -107,44 +107,36 @@ internal fun folderName(path: String) = path.replace('\\','/').trimEnd('/').subs
 
 @Composable
 internal fun MessageBody(text: String) {
-    // Keep all source text; only interpret basic Markdown presentation.
-    val parts = remember(text) { text.split("```") }
+    val blocks = remember(text) { dev.ally.device.RichReplyContent.parse(text) }
     SelectionContainer {
-        Column(verticalArrangement=Arrangement.spacedBy(12.dp)) {
-            parts.forEachIndexed { index, part ->
-                if(index%2==1) {
-                    val language=part.substringBefore('\n').trim()
-                    val code=if(part.contains('\n')) part.substringAfter('\n').trimEnd() else part
-                    Column(Modifier.fillMaxWidth().border(1.dp,Line,RoundedCornerShape(8.dp)).background(Panel,RoundedCornerShape(8.dp)).padding(14.dp)) {
-                        if(language.isNotBlank() && part.contains('\n')) MicroLabel(language,Modifier.padding(bottom=10.dp))
-                        Text(code,fontFamily=Mono,fontSize=12.sp,lineHeight=19.sp,modifier=Modifier.horizontalScroll(rememberScrollState()))
+        Column(Modifier.fillMaxWidth(), verticalArrangement=Arrangement.spacedBy(12.dp)) {
+            blocks.forEach { block ->
+                if (block.kind == "divider") Box(Modifier.fillMaxWidth().height(1.dp).background(Line))
+                else {
+                    val code = block.kind == "code"
+                    val framed = block.kind in setOf("code", "quote", "table")
+                    val annotation = remember(block) { buildAnnotatedString {
+                        append(block.prefix)
+                        block.spans.forEach { span ->
+                            withStyle(SpanStyle(fontWeight=if(span.bold) FontWeight.Bold else null,
+                                fontStyle=if(span.italic) androidx.compose.ui.text.font.FontStyle.Italic else null,
+                                fontFamily=if(span.code) Mono else null,background=if(span.code) Panel else Color.Unspecified)) {
+                                if(span.url != null) withLink(LinkAnnotation.Url(span.url,TextLinkStyles(SpanStyle(color=Warm,textDecoration=TextDecoration.Underline)))) { append(span.text) }
+                                else append(span.text)
+                            }
+                        }
+                    } }
+                    Column(Modifier.fillMaxWidth().padding(start=if(block.kind=="text") (block.level.coerceAtMost(3)*8).dp else 0.dp)
+                        .then(if(framed) Modifier.border(1.dp,Line,RoundedCornerShape(8.dp)).background(Panel,RoundedCornerShape(8.dp)).padding(14.dp) else Modifier)) {
+                        if(code && block.language.isNotBlank()) MicroLabel(block.language,Modifier.padding(bottom=10.dp))
+                        Text(annotation,fontFamily=if(code) Mono else Geist,
+                            fontWeight=if(block.kind=="heading") FontWeight.SemiBold else FontWeight.Normal,
+                            fontSize=when { code -> 12.sp; block.kind=="heading" -> if(block.level<=2) 21.sp else 18.sp; else -> 15.sp },
+                            lineHeight=if(code) 19.sp else 25.sp,color=White,
+                            modifier=if(code) Modifier.horizontalScroll(rememberScrollState()) else Modifier.fillMaxWidth())
                     }
-                } else if(part.isNotBlank()) {
-                    Text(remember(part) { messageAnnotation(part.trim()) },fontFamily=Geist,fontSize=15.sp,lineHeight=25.sp,color=White)
                 }
             }
         }
-    }
-}
-
-private fun messageAnnotation(text: String): AnnotatedString = buildAnnotatedString {
-    val pattern=Regex("\\*\\*(.+?)\\*\\*|`([^`]+)`|\\[([^\\]]+)\\]\\((https?://[^\\s)]+)\\)")
-    text.lines().forEachIndexed { index, raw ->
-        if(index>0) append("\n")
-        val heading=raw.startsWith("#") && raw.contains(" ")
-        val line=if(heading) raw.replaceFirst(Regex("^#{1,6}\\s+"),"") else raw.replaceFirst(Regex("^[-*] "),"•  ")
-        if(heading) pushStyle(SpanStyle(fontWeight=FontWeight.SemiBold,fontSize=18.sp))
-        var cursor=0
-        pattern.findAll(line).forEach { match ->
-            append(line.substring(cursor,match.range.first))
-            when {
-                match.groups[1]!=null -> withStyle(SpanStyle(fontWeight=FontWeight.Bold)) { append(match.groupValues[1]) }
-                match.groups[2]!=null -> withStyle(SpanStyle(fontFamily=Mono,background=Panel,fontSize=13.sp)) { append(match.groupValues[2]) }
-                else -> withLink(LinkAnnotation.Url(match.groupValues[4],TextLinkStyles(SpanStyle(color=Warm,textDecoration=TextDecoration.Underline)))) { append(match.groupValues[3]) }
-            }
-            cursor=match.range.last+1
-        }
-        append(line.substring(cursor))
-        if(heading) pop()
     }
 }

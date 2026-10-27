@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { memo, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { CopyIcon, GitBranchIcon, PencilIcon, RefreshCcwIcon, Trash2Icon, CheckIcon } from 'lucide-react';
 import { Message, MessageAction, MessageActions, MessageContent } from '@/components/ai-elements/message';
 import { Reasoning, ReasoningContent, ReasoningTrigger } from '@/components/ai-elements/reasoning';
@@ -14,6 +14,7 @@ import WatchReplyContent, { OriginalMessage } from './WatchReplyContent';
 import { browserActivity } from '../../../electron/agent/browserActivity';
 import { displayAssistantText, displayUserText } from '@/lib/messageDisplay';
 import { historyReply } from '@/lib/historyReply';
+import { studyReplyView } from '@/lib/studyPresentation';
 
 function ToolActivity({ parts }: { parts: Segment[] }) {
   const tools = parts.flatMap(part => part.toolExecution ? [part.toolExecution] : []);
@@ -62,7 +63,7 @@ interface AgentReplyProps {
 }
 
 /** An agent reply: thinking, then text interleaved with tool calls. Used live and for history. */
-export function AgentReply({ text, thinking, segments, streaming = false, compact = false }: AgentReplyProps) {
+export const AgentReply = memo(function AgentReply({ text, thinking, segments, streaming = false, compact = false }: AgentReplyProps) {
   const parts: Segment[] = segments?.length ? segments : text ? [{ type: 'text', content: text }] : [];
   // Newer replies keep reasoning inline between tool calls; older ones have one block up top
   const inlineThinking = parts.some(p => p.type === 'thinking');
@@ -98,7 +99,7 @@ export function AgentReply({ text, thinking, segments, streaming = false, compac
       )}
     </>
   );
-}
+});
 
 const compact = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(n >= 10_000 ? 0 : 1)}k` : String(n));
 
@@ -125,7 +126,25 @@ interface ChatMessageProps {
 }
 
 /** A saved chat message with hover actions (copy, retry, edit/fork, delete). */
-export default function ChatMessage({ message, sessionWorking = false, onEdit, onFork, onDelete, onRetry }: ChatMessageProps) {
+export default function ChatMessage(props: ChatMessageProps) {
+  const latest = useRef(props);
+  useLayoutEffect(() => { latest.current = props; });
+  // Parent handlers change while typing/streaming. Keep event dispatch current
+  // without making every unchanged tool/reasoning subtree reconcile again.
+  const actions = useMemo(() => ({
+    onEdit: (id: string, content: string) => latest.current.onEdit(id, content),
+    onFork: (id: string, content: string) => latest.current.onFork(id, content),
+    onDelete: (id: string) => latest.current.onDelete(id),
+    onRetry: (id: string) => latest.current.onRetry(id),
+  }), []);
+  const { message } = props;
+  // ChatManager edits content/timestamp in place. Snapshot its fields so the
+  // memo boundary still sees those edits; native metadata is replaced on sync.
+  const snapshot = useMemo(() => ({ ...message }), [message.id, message.role, message.content, message.timestamp, message.metadata]);
+  return <SavedChatMessage message={snapshot} sessionWorking={props.sessionWorking} {...actions} />;
+}
+
+const SavedChatMessage = memo(function SavedChatMessage({ message, sessionWorking = false, onEdit, onFork, onDelete, onRetry }: ChatMessageProps) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(message.content);
   const [copied, setCopied] = useState(false);
@@ -136,7 +155,7 @@ export default function ChatMessage({ message, sessionWorking = false, onEdit, o
   const copy = async () => {
     const segments = reply.segments;
     const visible = isUser ? text : segments?.length ? segments.filter(part => part.type === 'text').map(part => readableReply(part.content ?? '')).join('\n\n') : readableReply(reply.text);
-    await navigator.clipboard.writeText(isUser ? visible : displayAssistantText(visible));
+    await navigator.clipboard.writeText(isUser ? visible : displayAssistantText(studyReplyView(visible)?.text ?? visible));
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
   };
@@ -210,4 +229,4 @@ export default function ChatMessage({ message, sessionWorking = false, onEdit, o
       </MessageActions>
     </Message>
   );
-}
+});

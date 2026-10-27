@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
-import { ArrowLeft, ArrowRight, ArrowUpRight, Check, Eye, GripVertical, Layers, Pencil, Undo2, X } from 'lucide-react';
+import { ArrowLeft, ArrowRight, ArrowUpRight, Check, Eye, GripVertical, Layers, Maximize2, Minimize2, Pencil, Undo2, X } from 'lucide-react';
 import type { TutorAction, TutorBoard, TutorPoint, VisualTutorApi } from '../../electron/visualTutor/types';
 import Marks from './Marks';
 import DiagramFrame from './DiagramFrame';
 import { dockCanvas, placeCanvas } from './dock';
+import { resizeEdges, resizePanel, type PanelRect, type ResizeEdge } from './resizePanel';
 import './tutor.css';
 
 declare global { interface Window { tutor: Pick<VisualTutorApi, 'overlay' | 'action' | 'sketch' | 'interactive' | 'onChanged' | 'onPillBounds'> } }
@@ -16,6 +17,11 @@ export default function Overlay() {
   const strokeRef = useRef<TutorPoint[]>([]);
   const panelRef = useRef<HTMLElement>(null);
   const dragRef = useRef<{ pointerId: number; x: number; y: number; left: number; top: number } | null>(null);
+  const resizeRef = useRef<{ pointerId: number; x: number; y: number; rect: PanelRect; edge: ResizeEdge } | null>(null);
+  const [resizing, setResizing] = useState(false);
+  const [userSize, setUserSize] = useState<{ width: number; height: number } | null>(null);
+  const [expanded, setExpanded] = useState(false);
+  useEffect(() => { setUserSize(null); setPosition(null); setExpanded(false); }, [board?.id]);
   const [position, setPosition] = useState<{ left: number; top: number } | null>(null);
   const [panelSize, setPanelSize] = useState({ width: 420, height: 180 });
   useEffect(() => { setPosition(null); }, [board?.pillBounds?.x, board?.pillBounds?.y, board?.pillBounds?.width, board?.pillBounds?.height]);
@@ -69,6 +75,8 @@ export default function Overlay() {
   const panelStyle = {
     ...(preferred ?? (board.pillBounds ? dockCanvas({ width: window.innerWidth, height: window.innerHeight }, board.pillBounds, panelSize) : {})),
     ...(position ? { ...position, bottom: 'auto', transform: 'none' } : {}),
+    ...(userSize ?? {}),
+    ...(expanded ? { left: 12, top: 12, bottom: 'auto', transform: 'none', width: Math.max(0, innerWidth - 24), height: Math.max(0, innerHeight - 24) } : {}),
     ...(step?.panel?.transparent ? { background: 'transparent', backdropFilter: 'none', borderColor: 'transparent', boxShadow: 'none' } : {}),
   };
   const action = (label: string, name: TutorAction, icon: React.ReactNode, disabled = false, pressed?: boolean) => <button type="button" title={label} aria-label={label} aria-pressed={pressed} disabled={disabled} onClick={() => act(name)}>{icon}</button>;
@@ -82,6 +90,19 @@ export default function Overlay() {
     const points = strokeRef.current;
     strokeRef.current = []; setStroke([]);
     if (points.length >= 2) void window.tutor.sketch(board.id, points).catch(error => setError(error.message));
+  };
+  const applyResize = (rect: PanelRect) => {
+    setExpanded(false);
+    setPosition({ left: rect.left, top: rect.top });
+    setUserSize({ width: rect.width, height: rect.height });
+  };
+  const endResize = (event: React.PointerEvent<HTMLElement>) => {
+    if (resizeRef.current?.pointerId !== event.pointerId) return;
+    resizeRef.current = null;
+    setResizing(false);
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+    const rect = panelRef.current!.getBoundingClientRect();
+    window.tutor.interactive(event.type !== 'pointercancel' && event.clientX >= rect.left && event.clientX <= rect.right && event.clientY >= rect.top && event.clientY <= rect.bottom);
   };
   return <main className={`tutor-overlay ${board.sketching ? 'is-sketching' : ''}`}>
     {board.frozen && <img className="tutor-frozen" style={displaySize} src={screenshot} alt="Screen snapshot shared with Ally" draggable={false} />}
@@ -98,7 +119,7 @@ export default function Overlay() {
       else strokeRef.current = [...strokeRef.current.slice(0, -1), next];
       setStroke(strokeRef.current);
     }} onPointerUp={endStroke} onPointerCancel={event => { if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId); strokeRef.current = []; setStroke([]); }} />}
-    <section ref={panelRef} className="tutor-panel" style={panelStyle} aria-label="Visual tutor controls" onPointerEnter={() => window.tutor.interactive(true)} onPointerLeave={() => { if (!dragRef.current) window.tutor.interactive(false); }}>
+    <section ref={panelRef} className={`tutor-panel${userSize || expanded ? ' is-user-sized' : ''}${board.presentation === 'study' && step?.diagram ? ' is-rich-study' : ''}${resizing ? ' is-resizing' : ''}`} style={panelStyle} aria-label="Visual tutor controls" onPointerEnter={() => window.tutor.interactive(true)} onPointerLeave={() => { if (!dragRef.current && !resizeRef.current) window.tutor.interactive(false); }}>
       <div className="tutor-heading"><button type="button" className="tutor-move-handle" aria-label="Move explanation panel" title="Drag to move · arrow keys to reposition" onPointerDown={event => {
         if (event.button !== 0 || !panelRef.current) return;
         const rect = panelRef.current.getBoundingClientRect();
@@ -127,12 +148,34 @@ export default function Overlay() {
         event.preventDefault(); event.stopPropagation();
         const rect = panelRef.current.getBoundingClientRect(), distance = event.shiftKey ? 40 : 10;
         setPosition(clampPanel(rect.left + delta[0] * distance, rect.top + delta[1] * distance));
-      }}><GripVertical size={13} className="tutor-grip" /><span className="tutor-brand">Drawing</span><span className="tutor-time">Snapshot {new Date(board.capturedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span></button>{action('Minimise drawing', 'chat', <X size={16} />)}</div>
+      }}><GripVertical size={13} className="tutor-grip" /><span className="tutor-brand">Drawing</span><span className="tutor-time">Snapshot {new Date(board.capturedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span></button>{step?.diagram && <button type="button" aria-label={expanded ? 'Restore card size' : 'Expand card'} title={expanded ? 'Restore card size' : 'Expand card'} onClick={() => setExpanded(value => !value)}>{expanded ? <Minimize2 size={16} /> : <Maximize2 size={16} />}</button>}{action('Minimise drawing', 'chat', <X size={16} />)}</div>
       <div className="tutor-lesson" aria-live="polite"><h1>{step?.title ?? 'Selection attached'}</h1></div>
-      {step?.diagram && <DiagramFrame key={step.id} diagram={step.diagram} title={step.title} />}
+      {step?.diagram && <DiagramFrame key={step.id} diagram={step.diagram} title={step.title} fill={!!userSize || expanded || board.presentation === 'study'} />}
       {error && <p role="alert" className="tutor-error">{error}<button onClick={() => setError('')}>Dismiss</button></p>}
       <div className="tutor-controls"><div className="tutor-navigation">{action('Previous step', 'previous', <ArrowLeft size={16} />, board.selected === 0)}<span>{board.steps.length ? `${board.selected + 1} / ${board.steps.length}` : 'No steps yet'}</span>{action('Next step', 'next', <ArrowRight size={16} />, board.selected >= board.steps.length - 1)}{!board.following && <button className="tutor-follow" onClick={() => act('latest')}>Latest <ArrowUpRight size={13} /></button>}</div><div className="tutor-tools">{action(board.frozen ? 'Return to live screen' : 'Freeze snapshot for stable drawings', 'freeze', board.frozen ? <Layers size={16} /> : <Eye size={16} />, false, board.frozen)}{action(board.sketching ? 'Finish sketching' : 'Sketch a question', 'sketch', board.sketching ? <Check size={16} /> : <Pencil size={16} />, false, board.sketching)}{action('Undo last sketch', 'undo', <Undo2 size={16} />, !board.sketches.length)}</div></div>
-      <div className="tutor-hint">{board.sketching ? 'Sketch in amber · ask in Ally · Esc minimises' : board.frozen ? 'Frozen snapshot · ask in Ally · Esc minimises' : 'Apps remain clickable · ask in Ally · Esc minimises'}</div>
+      <div className="tutor-hint">{board.sketching ? 'Sketch in amber · ask in Ally · Esc minimises' : board.frozen ? 'Frozen snapshot · drag edges to resize · Esc minimises' : 'Apps remain clickable · drag edges to resize · Esc minimises'}</div>
+      {(Object.keys(resizeEdges) as ResizeEdge[]).map(edge => <button key={edge} type="button" className={`tutor-resize-handle tutor-resize-${edge}`} aria-label={`Resize drawing ${resizeEdges[edge]}`} title="Drag to resize · arrow keys resize" onPointerDown={event => {
+        if (event.button !== 0 || !panelRef.current) return;
+        const rect = panelRef.current.getBoundingClientRect();
+        resizeRef.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY, rect: { left: rect.left, top: rect.top, width: rect.width, height: rect.height }, edge };
+        setResizing(true);
+        window.tutor.interactive(true);
+        event.currentTarget.setPointerCapture(event.pointerId);
+        event.preventDefault(); event.stopPropagation();
+      }} onPointerMove={event => {
+        const resize = resizeRef.current;
+        if (!resize || resize.pointerId !== event.pointerId) return;
+        applyResize(resizePanel(resize.rect, resize.edge, event.clientX - resize.x, event.clientY - resize.y, { width: innerWidth, height: innerHeight }));
+      }} onPointerUp={endResize} onPointerCancel={endResize} onLostPointerCapture={() => {
+        if (!resizeRef.current) return;
+        resizeRef.current = null; setResizing(false); window.tutor.interactive(false);
+      }} onKeyDown={event => {
+        const delta = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[event.key];
+        if (!delta || !panelRef.current) return;
+        event.preventDefault(); event.stopPropagation();
+        const rect = panelRef.current.getBoundingClientRect(), distance = event.shiftKey ? 40 : 10;
+        applyResize(resizePanel({ left: rect.left, top: rect.top, width: rect.width, height: rect.height }, edge, delta[0] * distance, delta[1] * distance, { width: innerWidth, height: innerHeight }));
+      }} />)}
     </section>
   </main>;
 }

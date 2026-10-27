@@ -7,6 +7,7 @@ import { AppSettings } from '../types/settings';
 import ShortcutsPanel from './settings/ShortcutsPanel';
 import AgentSettingsSection from './settings/AgentSettingsSection';
 import LookSettingsSection from './settings/LookSettingsSection';
+import NotchSettingsSection from './settings/NotchSettingsSection';
 
 interface SettingsModalProps {
   onMeetingSettings?: () => void;
@@ -506,6 +507,8 @@ export default function SettingsModal({
 
               <SpeechSettingsSection />
 
+              <NotchSettingsSection />
+
               <section className="space-y-2">
                 <h3 className="text-sm font-medium">Chat greeting</h3>
                 <p className="text-xs opacity-60">Your selected Claude Code or Codex model writes the greeting automatically.</p>
@@ -526,7 +529,7 @@ export default function SettingsModal({
                 )}>
                   <p>Ally v2.0.0 · Claude Code + Codex frontend</p>
                   <p>Platform: {platform}</p>
-                  <p>Press Ctrl+Shift+C to toggle visibility</p>
+                  <p>Press Ctrl+Shift+C to switch between the notch and floating window</p>
                 </div>
               </div>
             </div>

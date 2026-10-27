@@ -4,7 +4,7 @@ import type { AgentProvider } from '../agent/types.js';
 export type AssistantStatus = 'running' | 'needs_input' | 'unread' | 'completed' | 'stopped' | 'error';
 export interface AssistantActivityRow {
   id: string; provider: AgentProvider; sessionId?: string; title: string; createdAt?: number; updatedAt: number;
-  status: AssistantStatus; detail: string; unread: boolean;
+  status: AssistantStatus; detail: string; unread: boolean; text?: string;
 }
 
 /** Exact session keys merge device aliases; terminal rows never hide a running turn. */
