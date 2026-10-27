@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ally — your coding agents, within reach</title>
+  <meta name="description" content="Ally is a floating desktop companion for Claude Code and Codex, with voice, visual explanations, phone control and Wear OS apps.">
+  <meta property="og:title" content="Ally — your coding agents, within reach">
+  <meta property="og:description" content="A floating desktop companion for Claude Code and Codex, with voice, visual explanations, phone control and Wear OS apps.">
+  <meta property="og:image" content="/assets/ally.png">
+  <meta name="theme-color" content="#0b1017">
+  <link rel="icon" href="/assets/ally.png">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="nav">
+    <a class="brand" href="#top"><img src="/assets/ally.png" alt="" width="28" height="28"> Ally</a>
+    <nav>
+      <a href="#features">Features</a>
+      <a href="#connect">How it works</a>
+      <a href="#start">Get started</a>
+      <a class="nav-cta" href="https://github.com/AryanRai/Ally">GitHub</a>
+    </nav>
+  </header>
+
+  <main id="top">
+    <section class="hero">
+      <div class="hero-copy">
+        <p class="eyebrow">For Claude Code and Codex</p>
+        <h1>Your agents. Your conversations.<br><span>Within reach.</span></h1>
+        <p class="lede">Ally keeps your coding agents in a small glass window on top of everything — and on your phone and watch. Ask about anything on screen, get drawn explanations, and let the same chat follow you across devices and accounts.</p>
+        <div class="ctas">
+          <a class="btn primary" href="https://github.com/AryanRai/Ally">View on GitHub</a>
+          <a class="btn" href="#start">Get started</a>
+        </div>
+      </div>
+      <figure class="hero-shot" aria-label="Illustration of Ally's floating window">
+        <div class="glow" aria-hidden="true"></div>
+        <div class="mock">
+          <div class="mock-bar">
+            <span class="orb" aria-hidden="true"></span>
+            <span class="mock-input">Hey, what's on your mind?</span>
+            <span class="mock-send" aria-hidden="true">↑</span>
+          </div>
+          <div class="mock-chat">
+            <p class="mock-you">Why does this test fail only on CI?</p>
+            <div class="mock-reply">
+              <p class="mock-status"><span class="dot"></span>Codex · reading 3 files</p>
+              <p>The CI image runs <code>TZ=UTC</code>, so the date parsed in <code>formatDue()</code> shifts a day. Pin the timezone in the test or format with <code>toISOString()</code>.</p>
+              <p class="mock-actions"><span>Apply fix</span><span>Explain more</span></p>
+            </div>
+          </div>
+        </div>
+      </figure>
+    </section>
+
+    <section id="features" class="section">
+      <h2>Everything around your agents</h2>
+      <p class="section-lede">The agents keep their own tools, sessions, folders and permissions. Ally handles the interface around them.</p>
+      <div class="grid">
+        <article class="card">
+          <h3>Pill and notch</h3>
+          <p>A compact glass pill that expands into a full chat. Drag it to the top edge to dock into a notch, where the running reply shows live.</p>
+        </article>
+        <article class="card">
+          <h3>Circle to ask</h3>
+          <p>Select any region of your screen and ask about it. Answers come back with diagrams on a movable drawing board you can sketch on.</p>
+        </article>
+        <article class="card">
+          <h3>Many Codex accounts, one chat</h3>
+          <p>Sign in to several ChatGPT accounts. When one reaches its usage limit, the same chat carries on with your next account — no handoff.</p>
+        </article>
+        <article class="card">
+          <h3>Phone control, anywhere</h3>
+          <p>Let an agent drive your Android phone for a session you approve once, over any network. A Stop button is always one tap away.</p>
+        </article>
+        <article class="card">
+          <h3>Watch, always on</h3>
+          <p>Hold to talk, read replies, review approvals, and keep live agent progress on your Wear OS watch's always-on screen.</p>
+        </article>
+        <article class="card">
+          <h3>Voice that listens back</h3>
+          <p>Local or cloud speech in and out. Speak over a reply to interrupt it; text keeps working when voice is offline.</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="section split">
+      <figure class="split-shot">
+        <img src="/assets/ally-drawing.webp" width="495" height="670" alt="Ally's drawing reader explaining focus distance with a labelled thin-lens diagram">
+      </figure>
+      <div>
+        <p class="eyebrow">Visual explanations</p>
+        <h2>See it, not just read it</h2>
+        <p>When words aren't enough, the agent draws. Diagrams, steps and interactive sketches open in a sandboxed board beside the chat — resizable, explorable, and saved with the conversation.</p>
+        <ul class="ticks">
+          <li>Markdown, math, code and tool activity in every reply</li>
+          <li>Drafts per chat, queued follow-ups and Stop</li>
+          <li>Search every Claude Code and Codex chat by keyword</li>
+        </ul>
+      </div>
+    </section>
+
+    <section id="connect" class="section">
+      <h2>How Ally connects</h2>
+      <p class="section-lede">Your PC stays the hub. Phone and watch reach it through an authenticated bridge; Ally talks to the native agents you already use.</p>
+      <figure class="diagram"><img src="/assets/architecture.svg" width="960" height="390" alt="Phone and watch connect through an authenticated device bridge to Ally desktop, which connects to Claude Code or Codex, speech, and Codex accounts that share one history."></figure>
+    </section>
+
+    <section class="section safety">
+      <div>
+        <h2>You stay in control</h2>
+        <p class="section-lede">Approvals are real requests from the underlying tools, with explicit answers and expiry.</p>
+      </div>
+      <ul class="ticks">
+        <li>Phone control asks once per session, shows a Stop notification, and uses Android's own unlock prompt</li>
+        <li>Passwords, payments, permission prompts and Send/Delete-style buttons are always left to you</li>
+        <li>Microphone and screen access only on the feature you start</li>
+        <li>Account switching never resends a message that may already have run</li>
+      </ul>
+    </section>
+
+    <section id="start" class="section start">
+      <h2>Get started</h2>
+      <p class="section-lede">Install a current Node.js LTS and at least one agent — Claude Code or Codex — and sign in to it.</p>
+      <pre><code>git clone https://github.com/AryanRai/Ally.git
+cd Ally/glass-pip-chat
+npm ci
+npm run dev</code></pre>
+      <p>Then open <strong>Settings → Agents</strong>, check the CLI paths, and start a chat. Phone and watch apps are in <a href="https://github.com/AryanRai/Ally/tree/main/wear-app">wear-app</a>.</p>
+      <div class="ctas">
+        <a class="btn primary" href="https://github.com/AryanRai/Ally#readme">Read the docs</a>
+        <a class="btn" href="https://github.com/AryanRai/Ally/tree/main/docs">All guides</a>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="brand"><img src="/assets/ally.png" alt="" width="22" height="22"> Ally</div>
+    <p>Built by <a href="https://aryanrai.github.io/">Aryan Rai</a> · <a href="https://github.com/AryanRai/Ally">Source on GitHub</a></p>
+  </footer>
+</body>
+</html>

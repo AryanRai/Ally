@@ -8,7 +8,7 @@
 
 A floating desktop companion for **Claude Code** and **Codex**, with voice, visual explanations, and connected Android phone and Wear OS apps.
 
-[Get started](#quick-start) · [Explore the features](#one-conversation-across-your-devices) · [Documentation](docs/README.md) · [Development](#development)
+[Website](https://ally-taupe.vercel.app) · [Get started](#quick-start) · [Explore the features](#one-conversation-across-your-devices) · [Documentation](docs/README.md) · [Development](#development)
 
 ![Electron](https://img.shields.io/badge/Desktop-Electron-47848F?logo=electron&logoColor=white)
 ![React](https://img.shields.io/badge/UI-React-149ECA?logo=react&logoColor=white)
@@ -153,9 +153,9 @@ Start with the [documentation index](docs/README.md) for setup, daily use, archi
 | Circle, drawing boards, and diagrams | [Pill and canvas](docs/pill-canvas-workflow.md) · [Visualization artifacts](docs/drawing-artifacts-and-phone-approvals.md) |
 | Responsiveness and restoring the open chat | [Debugger results](docs/debugger-performance-results.md) |
 
-### Legacy web deployments
+### Website
 
-Ally v2 retired its standalone web build, `ally-remote-service`, Supabase sync, Discord integration, browser extension, and earlier in-app model/tool loop. Current agent work goes through Claude Code or Codex.
+The product page at [ally-taupe.vercel.app](https://ally-taupe.vercel.app) is a static site in [`site/`](site/), deployed by Vercel from this repository.
 
-A legacy Vercel project still points at the removed service directory. Its build failures are separate from desktop and Android builds. See [the deployment diagnosis](docs/vercel-retired-deployments.md) for the proposed cleanup and its current approval state.
+Ally v2 retired its standalone web build, `ally-remote-service`, Supabase sync, Discord integration, browser extension, and earlier in-app model/tool loop. Current agent work goes through Claude Code or Codex. See [the deployment history](docs/vercel-retired-deployments.md).
 
