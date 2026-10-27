@@ -1,6 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="960" height="370" viewBox="0 0 960 370" fill="none" role="img" aria-labelledby="title desc">
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="390" viewBox="0 0 960 390" fill="none" role="img" aria-labelledby="title desc">
   <title id="title">How Ally connects</title>
-  <desc id="desc">Android phone and Wear OS watch connect to an authenticated bridge on the desktop. Ally desktop connects to Claude Code or Codex and to local or configured cloud speech. The PC and Ally stay online.</desc>
+  <desc id="desc">An Android phone and a Wear OS watch connect to an authenticated bridge on the desktop; the phone can also be controlled on-device during an approved session. Ally desktop (floating pill, top notch and chat search) connects to Claude Code or Codex, to local or configured cloud speech, and to signed-in Codex accounts that share one chat history and switch automatically at usage limits. The PC and Ally stay online.</desc>
   <style>
     .surface { fill: #ffffff; }
     .card { fill: #f7f9fc; stroke: #d9e1eb; }
@@ -23,32 +23,36 @@
       <path class="arrow" d="M0 0 7 3.5 0 7Z"/>
     </marker>
   </defs>
-  <rect class="surface" width="960" height="370" rx="16"/>
+  <rect class="surface" width="960" height="390" rx="16"/>
   <text class="eyebrow" x="20" y="35">ONE DESKTOP. CONNECTED CONVERSATIONS.</text>
   <g class="wire" marker-start="url(#arrow)" marker-end="url(#arrow)">
     <path d="M184 115C220 115 222 160 256 160"/>
     <path d="M184 225C220 225 222 195 256 195"/>
     <path d="M454 177H506"/>
     <path d="M704 177H756"/>
-    <path d="M605 224V281"/>
+    <path d="M605 224V291"/>
+    <path d="M850 224V291"/>
   </g>
   <rect class="card" x="20" y="80" width="160" height="70" rx="12"/>
   <text class="label" x="100" y="109" text-anchor="middle">Android phone</text>
-  <text class="detail" x="100" y="132" text-anchor="middle">Chat · share · monitor</text>
+  <text class="detail" x="100" y="132" text-anchor="middle">Chat · share · control</text>
   <rect class="card" x="20" y="190" width="160" height="70" rx="12"/>
   <text class="label" x="100" y="219" text-anchor="middle">Wear OS watch</text>
-  <text class="detail" x="100" y="242" text-anchor="middle">Talk · read · review</text>
+  <text class="detail" x="100" y="242" text-anchor="middle">Talk · always-on progress</text>
   <rect class="card" x="260" y="135" width="190" height="85" rx="12"/>
   <text class="label" x="355" y="169" text-anchor="middle">Device bridge</text>
-  <text class="detail" x="355" y="193" text-anchor="middle">Authenticated · loopback</text>
+  <text class="detail" x="355" y="193" text-anchor="middle">Authenticated · any network</text>
   <rect class="primary" x="510" y="135" width="190" height="85" rx="12"/>
   <text class="label" x="605" y="169" text-anchor="middle">Ally desktop</text>
-  <text class="detail" x="605" y="193" text-anchor="middle">Your conversation hub</text>
+  <text class="detail" x="605" y="193" text-anchor="middle">Pill · notch · chat search</text>
   <rect class="card" x="760" y="135" width="180" height="85" rx="12"/>
   <text class="label" x="850" y="169" text-anchor="middle">Claude Code / Codex</text>
   <text class="detail" x="850" y="193" text-anchor="middle">Native agents and tools</text>
-  <rect class="card" x="510" y="285" width="190" height="60" rx="12"/>
-  <text class="label" x="605" y="310" text-anchor="middle">Speech</text>
-  <text class="detail" x="605" y="331" text-anchor="middle">Local / configured cloud</text>
-  <text class="detail" x="20" y="350">Keep the PC and Ally online.</text>
+  <rect class="card" x="510" y="295" width="190" height="60" rx="12"/>
+  <text class="label" x="605" y="320" text-anchor="middle">Speech</text>
+  <text class="detail" x="605" y="341" text-anchor="middle">Local / configured cloud</text>
+  <rect class="card" x="760" y="295" width="180" height="60" rx="12"/>
+  <text class="label" x="850" y="320" text-anchor="middle">Codex accounts</text>
+  <text class="detail" x="850" y="341" text-anchor="middle">Shared history · auto-switch</text>
+  <text class="detail" x="20" y="372">Keep the PC and Ally online.</text>
 </svg>

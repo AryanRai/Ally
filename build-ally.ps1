@@ -19,16 +19,11 @@ try {
  & node.exe 'scripts\build-electron.js'
  if($LASTEXITCODE -ne 0){throw 'Desktop main-process build failed.'}
 } finally {Pop-Location}
-& node.exe (Join-Path $taskRoot 'ally-study\ally-scene-patch.mjs') (Join-Path $taskRoot 'ally-study\client\Assets\Engine\clicky-draw-engine.js') (Join-Path $taskBuild 'native-scene-engine.js')
-if($LASTEXITCODE -ne 0){throw 'Native scene engine staging failed.'}
-& node.exe (Join-Path $taskRoot 'ally-study\ally-scene-patch.mjs') (Join-Path $taskRoot 'ally-study\client\Assets\Engine\clicky-draw-native.js') (Join-Path $taskBuild 'native-scene-shim.js') --native
-if($LASTEXITCODE -ne 0){throw 'Native hidden-scene readback staging failed.'}
-& node.exe (Join-Path $taskRoot 'ally-study\build-ally-notch.mjs')
-if($LASTEXITCODE -ne 0){throw 'Embedded chat build failed.'}
-if(!$StageOnly){foreach($taskPatch in @('apply-ally-display.ps1','apply-ally-notch.ps1','apply-ally-surface.ps1','apply-ally-settings.ps1','apply-ally-study-timeout.ps1','apply-ally-study-selection.ps1','apply-ally-browser-host.ps1','apply-ally-identity.ps1')){
- & powershell.exe -NoProfile -File (Join-Path $taskRoot ('ally-study\'+$taskPatch)) -Install
- if($LASTEXITCODE -ne 0){throw "Native preparation failed: $taskPatch"}
-}}
+# The native notch adapter is the private ally-study submodule; public clones build the desktop app only.
+$taskNative=Join-Path $taskRoot 'ally-study\build-native.ps1'
+if(Test-Path -LiteralPath $taskNative){
+ & $taskNative -Root $taskRoot -Build $taskBuild -StageOnly:$StageOnly
+} else {Write-Output 'Private native notch adapter not present; built the desktop app only.'}
 if((& (Join-Path $taskRoot 'tools\get-ally-source-hash.ps1') -Root $taskRoot) -ne $taskHash){throw 'Source changed during the build. The candidate is preserved; rebuild before activating.'}
 $taskManifest=@{version=1;desktop=$taskBuildRelative+'\glass-pip-chat';sourceHash=$taskHash;sourceHashVersion=2;builtAt=[DateTime]::UtcNow.ToString('o');nativeRuntimeValidated=$false}
 if($StageOnly){

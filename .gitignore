@@ -67,3 +67,6 @@ ally-study/*.staged
 ally-study/*.ally-staged
 **/__pycache__/
 .local/
+
+# Private: the internal agent ledger (the native notch adapter is the private ally-study submodule).
+docs/agent-collaboration.md

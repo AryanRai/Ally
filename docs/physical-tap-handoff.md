@@ -60,7 +60,7 @@ Desktop arrival ring and phone haptic/feedback occur only after the share activi
 
 Fresh Windows WinRT adapter probe: lowEnergy=true, peripheral=true, extended=true. Present Intel(R) Wireless Bluetooth(R) status OK. Actual publisher smoke test with synthetic random locator reached Started, then accepted explicit stdin stop and exited0. Earlier marshalling failures were corrected; capability-only evidence was not treated as transmitter success.
 
-Read-only ADB inventory: Pixel_7 at192.168.1.23:36153; Android reports SDK37, android.hardware.bluetooth_le and android.hardware.sensor.accelerometer. No ADB permission grants, secure-setting changes, capture, microphone, app interaction or phone install. No physical Android scan reception, calibration, knock, lock/capture refusal or actual screen capture was exercised.
+Read-only ADB inventory: Pixel_7 at<phone-ip>:<port>; Android reports SDK37, android.hardware.bluetooth_le and android.hardware.sensor.accelerometer. No ADB permission grants, secure-setting changes, capture, microphone, app interaction or phone install. No physical Android scan reception, calibration, knock, lock/capture refusal or actual screen capture was exercised.
 
 ## Validation and deployment
 

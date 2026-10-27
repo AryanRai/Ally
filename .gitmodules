@@ -1,0 +1,3 @@
+[submodule "ally-study"]
+	path = ally-study
+	url = https://github.com/AryanRai/ally-study.git

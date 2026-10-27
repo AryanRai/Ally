@@ -60,7 +60,7 @@ Setup guides, feature references, and engineering notes for the desktop, Android
 - [Cross-chat routing](cross-chat-routing.md): authenticated discovery, reading, and explicitly requested forwarding through the agents’ tools.
 - [Realtime perception](realtime-agent.md): capture sessions, relevance classification, policy gating, and contextual cards.
 - [Desktop and Android integration](main-integration-20261018.md): a dated integration and validation snapshot.
-- [Collaboration scratchpad](agent-collaboration.md): file ownership, active deployment slots, and handoffs. Read it before changing shared code or restarting a live instance.
+- Collaboration scratchpad (`agent-collaboration.md`, kept locally and not published): file ownership, active deployment slots, and handoffs. Read it before changing shared code or restarting a live instance.
 
 ## Reading the engineering reports
 

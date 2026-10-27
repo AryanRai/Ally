@@ -27,4 +27,6 @@ for($taskAttempt=0;$taskAttempt -lt 80;$taskAttempt++){
 }
 if(!$taskReady){throw 'Ally desktop did not expose shared chats. The native client was not started.'}
 $env:ALLY_DESKTOP_ROOT=$taskDesktop
-& (Join-Path $PSScriptRoot 'ally-study\start-ally-study.ps1')
+# The native notch is the private ally-study submodule; without it Ally runs as the floating pill.
+$taskStudyStart=Join-Path $PSScriptRoot 'ally-study\start-ally-study.ps1'
+if(Test-Path -LiteralPath $taskStudyStart){& $taskStudyStart} else {Write-Output 'Started Ally. The private native notch adapter is not present.'}

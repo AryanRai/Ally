@@ -20,12 +20,12 @@ When Ally is open on the watch and the wrist drops or the screen times out, Wear
 The activity no longer stops an active read in onStop. Requested playback has a separate mediaPlayback foreground service with a silent Stop audio notification (ID32) and a partial CPU wake lock held only during speech, bounded to10minutes. This does not keep the display awake or disable ambient UI gating. Completion, cancellation, error, new recording, chat switch, mute and explicit Stop release audio resources; stale completion cannot release a replacement read. New readings still require foreground user interaction. Watch JVM tests/build pass; installed-device transition validation pending watch reconnect.
 
 
-Installed on SM-R915F via192.168.1.48:41701 using install-r (data kept),27Oct02:14:48.39watchJVMtests pass. Physical spoken playback across wrist lowering remains to be tried by the user.
+Installed on SM-R915F via<watch-ip>:<port> using install-r (data kept),27Oct02:14:48.39watchJVMtests pass. Physical spoken playback across wrist lowering remains to be tried by the user.
 
 
 Orb recording now sets view.keepScreenOn in both the main watch window (outside the ambient lifecycle gate) and assistant sheet. It clears on recording end/cancel/sheet pause/disposal; no screen-timeout or rotation preference is changed. This keeps the release target visible during capture while allowing normal ambient behaviour after capture.
 
 
 ## Complete long-reply playback (27 October)
-The former 64-frame cloud PCM queue could overflow when synthesis sends many small frames ahead of playback. ReplyAudioBuffer now bounds queued PCM by bytes (4.8MB) and keeps frame order, with tests for500rapidframes includinglastframe, prematureclose and memoryreclamation. Socket close requires explicit complete; missing complete is an interruption, never success. Long reads renew the existing boundedservicewatchdog per600character segment; no wholeanswer10minute cutoff. Individual cloud/local sections remain bounded90s; no partiallyspoken replay onfailure.42watchtests/buildPASS, updatedAPKinstalled-r onSM-R915F192.168.1.48:41701. Physical fullreplyplayback remains unverified.
+The former 64-frame cloud PCM queue could overflow when synthesis sends many small frames ahead of playback. ReplyAudioBuffer now bounds queued PCM by bytes (4.8MB) and keeps frame order, with tests for500rapidframes includinglastframe, prematureclose and memoryreclamation. Socket close requires explicit complete; missing complete is an interruption, never success. Long reads renew the existing boundedservicewatchdog per600character segment; no wholeanswer10minute cutoff. Individual cloud/local sections remain bounded90s; no partiallyspoken replay onfailure.42watchtests/buildPASS, updatedAPKinstalled-r onSM-R915F<watch-ip>:<port>. Physical fullreplyplayback remains unverified.
 

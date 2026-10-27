@@ -20,13 +20,23 @@ Managed profiles verify their ChatGPT email through the provider account API bef
 
 The expanded Codex composer shows its account and offers **Use account** before a session exists. Once a thread exists, **Create handoff chat** opens a separate empty local chat on the chosen account. It sends nothing and copies no transcript, draft or attachments. The original chat, failed-send text, receipts and partial files remain where they were. Review them and explicitly write/send the context and remaining work to transfer. Existing queued work stays with the source chat.
 
-Cross-account native-thread resume is not supported by this implementation and is rejected before submission. Managed profiles exclusively use the documented app-server path, with their own native history. They do not attach to the existing experimental desktop owner, fork source threads, copy native databases, or claim same-thread continuity. The old desktop connector has no supported cross-account identity-attestation contract; its externally managed login behavior is preserved, not extended into an account-switching mechanism.
+## Automatic switching on the same chat (28 October 2026)
+
+All account profiles share one chat history: each profile's `sessions` and `archived_sessions` folders are junctions to the main Codex home (`~/.codex`), and its `config.toml` and `AGENTS.md` are copied so tools and instructions follow the chat. Credentials stay in each profile and are never copied. Because history is shared, any signed-in account can resume any chat, and chats are listed once.
+
+A chat remembers the account it last used. With **Switch accounts automatically** on (the default), Ally picks the next available account (in Settings order) when that account is limited; a limit counts as over once its reported reset time passes, or after 30 minutes when no reset is reported. On a usage limit during a turn:
+
+- **Refused before it ran** (limit seen at turn start, or a structured rejection of `turn/start`): the same message is sent once on the next account.
+- **Cut off after it was accepted:** the chat continues on the next account with a short continuation turn asking the agent to pick up where it stopped.
+- **Delivery uncertain** (a timeout or disconnect with no definite acceptance or rejection): nothing is resent.
+
+When every account is limited, Ally says so and leaves the chat as it is. Turning the setting off restores manual switching (choose an account, or create a handoff chat). Chats currently open in the Codex desktop app run through that app's own login; Ally can move them to another account only when Codex is not holding them open. Verified live: a chat started on one ChatGPT account continued on a different account with its context intact, through Ally's own bridge.
 
 ## Usage and delivery
 
 Statuses distinguish unchecked/unknown, signed out, available reported windows, limited windows and unavailable verification. The UI shows account/plan when reported, percentage used, exact provider Unix reset timestamps and observation time. Observations persist across restarts. They can become stale and do not guarantee model entitlement. Missing/unsupported usage methods stay unknown; Ally never invents allowance or parses local-language error text into reset times. The provider remains authoritative. Login and allowance reads use the documented app-server account methods. [OpenAI app-server account API](https://learn.chatgpt.com/docs/app-server).
 
-There is no automatic account rotation, usage-reset redemption, quota workaround or prompt replay. A limit pauses ordinary queue continuation through the existing failure path. The user can wait, check usage, or review a separate handoff. Account selection does not increase or transfer a provider allowance.
+Ally never redeems usage resets or works around a provider quota: switching moves the chat to an account that still has allowance; it does not increase or transfer any account's allowance. Multiple profiles signed into the same email share one allowance.
 
 | Evidence | Delivery handling |
 |---|---|

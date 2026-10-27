@@ -23,14 +23,15 @@ A floating desktop companion for **Claude Code** and **Codex**, with voice, visu
 
 Ally brings your existing coding agents into a small, always-on-top window. Keep it as a compact glass pill, expand the conversation when you need more room, or continue from your phone or watch. The agents retain their own tools, sessions, working folders, and permissions; Ally handles the interface around them.
 
-The native Study interface now lives in [`ally-study/`](ally-study/). See the [unified notch/pill integration and feature comparison](docs/unified-ally.md) for staged behavior, current parity gaps, and the root build/launch scripts. Native gesture and smoothness validation is still pending.
+Drag the pill to the top edge to dock it into a **notch**, or press `Ctrl+Shift+C`. The notch currently runs on a private local adapter (the `ally-study` submodule, not public); Ally works fully as the floating pill without it, and we're rebuilding the notch as part of Ally. See [Native notch](docs/native-notch.md).
 
 ## One conversation across your devices
 
 | | What you can do |
 | --- | --- |
-| **Desktop** | Switch between Claude Code and Codex, browse native sessions, follow live activity, and resize the floating window. Reopening restores your selected chat and saved draft. |
-| **Phone** | Continue the same chats, share text and attachments into Ally, review real approval requests, and open the Android assistant or agent monitor. |
+| **Desktop** | Switch between Claude Code and Codex, browse and search native sessions, follow live activity, and resize the floating window. Dock the pill into the top notch, where the running reply and Ally's greeting show live. Reopening restores your selected chat and saved draft. |
+| **Codex accounts** | Sign in to several ChatGPT accounts. They share one chat history, so when one reaches its usage limit the same chat continues on your next available account — no handoff. |
+| **Phone** | Continue the same chats, share text and attachments into Ally, review real approval requests, and open the agent monitor. Hold the power button to talk: Ally suggests a chat, and you confirm or pick another before sending. |
 | **Watch** | Hold to talk, browse rich replies and images, switch chats, review supported questions and approvals, and read answers aloud. Always-on display keeps live agent progress visible past the system's return timer. |
 | **Voice** | Use local transcription or configured Google Cloud streaming speech. Speak over playback to interrupt it; text remains available when voice is offline. |
 | **Circle and draw** | Select a screen region, attach it to your next question, and explore explanations on a movable drawing board with sketch tools and interactive diagrams. |
@@ -51,7 +52,7 @@ Opt-in **hold-close handoff** uses nearby Bluetooth plus a deliberate three-seco
 
 Structured context distinguishes observed app/URL/document/media fields from unavailable information. Supported original PDFs can include file details and page count. **Large-file transfers** are chunked and resumable — the desktop bridge and Android client both support restart-safe upload with per-chunk and whole-file SHA-256 integrity (100 MB limit, resume from last acknowledged offset).
 
-**Phone control** via the Ally accessibility service works over any network connection and needs a one-time on-device grant in Android Settings. The optional read-only scrcpy viewer requires ADB and a separate approval. Both require explicit user consent per request.
+**Phone control** lets an agent drive your phone through the Ally app's accessibility service, over any network with no ADB. Turn on **Ally control** once in Android's Accessibility settings. One approval starts a timed session for that chat (15 minutes by default); a notification with **Stop** shows while it runs and the screen stays on. If the phone is locked, Ally shows Android's own fingerprint/face/PIN prompt and continues once you unlock. Passwords, payments, permission prompts and Send/Pay/Delete-style buttons are always left to you. The optional read-only scrcpy viewer requires ADB and a separate approval.
 
 **Setup and exact limits:** [Device continuity guide](docs/device-continuity.md) · [Remaining features](docs/device-continuity-backlog.md). Android updates and staged desktop changes have separate deployment states; see the guide before assuming a feature is live.
 ## Quick start
@@ -59,7 +60,7 @@ Structured context distinguishes observed app/URL/document/media fields from una
 For development from source, install a current Node.js LTS release with npm and at least one supported agent: **Claude Code** or **Codex**. Sign in to that agent before using it through Ally.
 
 ```sh
-git clone https://github.com/AryanRai/Ally.git
+git clone https://github.com/AryanRai/Ally.git   # the private ally-study submodule is optional
 cd Ally/glass-pip-chat
 npm ci
 npm run dev
@@ -131,10 +132,11 @@ Ally/
 │   ├── phone/           Android phone companion
 │   └── device-common/   Shared Android components
 ├── speech-service/      Managed local faster-whisper transcription worker
+├── ally-study/          Private submodule: local native-notch adapter (not public)
 └── docs/                Setup guides, architecture notes, and validation reports
 ```
 
-Before changing shared files, read [collaboration guidance](docs/agent-collaboration.md) and the relevant feature documentation. Preserve concurrent edits, exact chat identity, user drafts, and active work. Use isolated builds for deployment and coordinate any restart.
+Agents working in this repository coordinate through a local ledger (`docs/agent-collaboration.md`, not published) and the relevant feature documentation. Preserve concurrent edits, exact chat identity, user drafts, and active work. Use isolated builds for deployment and coordinate any restart.
 
 ## Documentation
 
@@ -146,6 +148,8 @@ Start with the [documentation index](docs/README.md) for setup, daily use, archi
 | Android phone and Wear OS builds | [Companion guide](wear-app/README.md) |
 | Local transcription and model-cache setup | [Speech worker](speech-service/README.md) |
 | Questions, approvals, and device controls | [Interactions](docs/chat-interactions.md) · [Phone controls](docs/phone-control.md) |
+| Several Codex accounts and automatic switching | [Codex accounts](docs/codex-accounts.md) |
+| The top-edge notch | [Native notch](docs/native-notch.md) |
 | Circle, drawing boards, and diagrams | [Pill and canvas](docs/pill-canvas-workflow.md) · [Visualization artifacts](docs/drawing-artifacts-and-phone-approvals.md) |
 | Responsiveness and restoring the open chat | [Debugger results](docs/debugger-performance-results.md) |
 

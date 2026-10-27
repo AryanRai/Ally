@@ -8,7 +8,7 @@ Claude subscription allowance is unavailable through this integration. Both prov
 
 The aggregate ledger is `provider-usage.json` in Electron's user-data directory. Writes and reads are serialized. Completion reporting does not block responses. Opening Settings or pressing Refresh reads usage; account reads coalesce and cache for 30 seconds. There is no idle polling. The native capability authenticates the proxy; the desktop bridge token stays server-side and the bridge rejects browser Origins.
 
-The native patch is `ally-study/apply-ally-settings.ps1`, applied after the surface patch by the existing build/start scripts. `ALLY_USAGE_URL` carries the connector URL and native capability. The patch stages by default and refuses installation while the private native client is running. Existing installed app files and loaded assemblies are preserved.
+The notch side of this lives in the private `ally-study` adapter. `ALLY_USAGE_URL` carries the connector URL and native capability. The patch stages by default and refuses installation while the private native client is running. Existing installed app files and loaded assemblies are preserved.
 
 Validation on 26 October 2026: focused accounting/bridge/runner and connector tests, TypeScript and isolated Electron compilation passed. A separate hidden Chromium fixture checked populated/unavailable/error states, manual refresh, missing capability, absence of idle polling and horizontal overflow. Synthetic preview/results are under `.local/settings-validation/`. Native staging audited 15,977 methods, valid branch targets, unchanged assembly identity/resources, only five reviewed UI method changes and byte-idempotent reapplication.
 

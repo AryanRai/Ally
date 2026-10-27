@@ -10,6 +10,17 @@ Ally exposes phone control through the existing `ally_chats` MCP server. The cur
 
 Both paths require an explicit per-request user approval on the phone or watch before any operation runs.
 
+
+## On-device control (any network, no ADB)
+
+The Ally phone app includes an accessibility service, **Ally control**. Turn it on once in Android Settings → Accessibility (on Android 13+, sideloaded apps first need **Allow restricted settings** in Ally's App info). The desktop then sends the same validated operations over the authenticated device connection, so control works from any Wi-Fi or mobile data. Omit `serial` in `phone_control` to use it; `phone_control_devices` lists it as transport `on-device`.
+
+- **One approval per session.** The first request from a chat asks once for a timed control session (`sessionMinutes`, default 15, at most 60). Later requests from that chat run without asking until the session ends. The phone enforces the session itself and shows an ongoing "Ally is controlling this phone" notification with **Stop**; Stop ends it on the phone and on the desktop.
+- **Screen and lock.** During a session an invisible, untouchable overlay keeps the screen on; the timeout setting is never changed. If the phone is locked, Ally turns the screen on and shows Android's own fingerprint/face/PIN prompt, and continues once you unlock. If it stays locked for about 75 seconds, nothing runs.
+- **Same safety checks.** The phone reports its screen in uiautomator's format, so the sensitive-screen, protected-control and screen-revision checks below apply unchanged. Text supports Unicode; Recents and JPEG screenshots are available. After an action, the screen read waits briefly for launch and unlock animations to settle, and a screenshot is only returned with the matching screen.
+
+The ADB development adapter described below still works and now uses the same sessions.
+
 ## Setup and scope
 
 Use an Android phone with the updated Ally companion and Keep connected enabled. Install Android SDK platform-tools on the desktop (`ANDROID_HOME`, `ANDROID_SDK_ROOT`, or the usual Windows SDK location; otherwise `adb` on PATH). This adapter needs a reachable local ADB transport; the authenticated phone bridge alone does not provide arbitrary UI control across the internet. Release apps without `run-as` are deliberately unsupported.
