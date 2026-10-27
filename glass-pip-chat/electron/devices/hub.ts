@@ -61,6 +61,7 @@ export class DeviceHub {
   }
   onRevoked(listener: (deviceId: string, grantId: string, reason: string) => void) { this.revokeListeners.add(listener); return () => { this.revokeListeners.delete(listener); }; }
   capabilities(id: string) { return this.devices.get(id)?.capabilities ?? []; }
+  sendTo(id:string,message:unknown){try{this.devices.get(id)?.send(message);}catch{/* disconnected */}}
   private settle(id: string, value?: Record<string, unknown>, error?: Error) {
     const call = this.calls.get(id); if (!call) return;
     clearTimeout(call.timer); call.cleanup(); this.calls.delete(id);

@@ -8,6 +8,8 @@ import { getWindow } from '../window.js';
 import { CircleHandoff, circleRegion, type CircleCapture } from './circleHandoff.js';
 import type { CircleAsk, CircleSubmit, CircleContext, CircleSelectionState } from './types.js';
 import { suspendNativeForCapture, restoreNativeAfterCapture } from '../surface/coordinator.js';
+import { restoreFloatingLevel } from '../windowFloating.js';
+import { safeWindowSend } from '../safeWindowSend.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CAPTURE_DIR = path.join(os.tmpdir(), 'ally-captures');
@@ -17,7 +19,7 @@ let overlay: BrowserWindow | null = null;
 let shot: CircleCapture & { chatId?: string } | null = null;
 let mainWasVisible = false;
 let getMain = getWindow;
-const sendToRenderer = (channel: string, ask: CircleAsk) => getMain()?.webContents.send(channel, ask);
+const sendToRenderer = (channel: string, ask: CircleAsk) => safeWindowSend(getMain(), channel, ask);
 let selectedChatId: string | undefined;
 let selectedChatTitle = '';
 let context: CircleContext | null = null;
@@ -25,7 +27,7 @@ let opening = false;
 let selectionState: CircleSelectionState = { active: false, tool: 'freehand' };
 function publishSelection(state: CircleSelectionState) {
   selectionState = state;
-  getMain()?.webContents.send('circle:selection', state);
+  safeWindowSend(getMain(), 'circle:selection', state);
 }
 const tutorHandoff = new CircleHandoff();
 export const takeCircleTutorCapture = (id: string, chatId: string) => tutorHandoff.take(id, chatId);
@@ -59,7 +61,7 @@ function closeOverlay() {
   shot = null;
   context = null;
   publishSelection({ active: false, tool: 'freehand' });
-  getMain()?.setAlwaysOnTop(true, 'floating');
+  restoreFloatingLevel(getMain());
 }
 
 function pruneOldCaptures() {

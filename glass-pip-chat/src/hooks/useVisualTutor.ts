@@ -3,19 +3,21 @@ import type { TutorAction, TutorBoard } from '../../electron/visualTutor/types';
 
 type Send = (text: string, source: 'circle', extras: { image: { path: string; thumbnail: string } }) => Promise<{ error?: string } | undefined>;
 export function tutorRequest(text: string, board: TutorBoard | null, chatId?: string): string {
+  if (board?.presentation === 'study') return text;
   if (!board || board.chatId !== chatId) return text;
   const focus = board.focus ? ` The attached image is only the selected crop. Its full-display bounds in 0–1000 coordinates are ${JSON.stringify(board.focus)}. Map a point (u,v) in the crop (0–1000) to screen (x + u*width/1000, y + v*height/1000) using these bounds. Draw around this selected area.` : '';
   return `${text}\n\n[Ally visual tutor: ${board.id}. Drawing is available for every Circle question and follow-up, regardless of action. When asked for drawings, use visual_tutor_read, then visual_tutor_draw on ally_chats before your final explanation. For complex diagrams, visual_tutor_draw accepts step.diagram={html,height} with self-contained HTML/SVG and local interactive controls in an isolated sandbox. Otherwise drawing is optional when it helps. If a requested drawing cannot be displayed, explain why instead of silently giving only text. The screen snapshot is from ${new Date(board.capturedAt).toISOString()}, not a live feed.${focus} My amber sketches are available in visual_tutor_read.]`;
 }
 
 /** The existing conversation owns reasoning, voice, history and the exact agent session. */
-export function useVisualTutor(chatId: string | undefined, send: Send) {
+export function useVisualTutor(chatId: string | undefined, send: Send, sessionKey?: string) {
   const [board, setBoard] = useState<TutorBoard | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [pendingSelection, setPendingSelection] = useState(false);
   const pending = useRef<{ boardId: string; chatId: string; image: { path: string; thumbnail: string } } | null>(null);
-  const current = useRef({ chatId, send }); current.current = { chatId, send };
+  const current = useRef({ chatId, send, sessionKey }); current.current = { chatId, send, sessionKey };
+  const belongs = (value: TutorBoard | null) => !!value && (value.chatId === current.current.chatId || !!current.current.sessionKey && value.sessionKey === current.current.sessionKey);
   const boardRef = useRef(board); boardRef.current = board;
   const starting = useRef(false);
   useEffect(() => {
@@ -28,12 +30,23 @@ export function useVisualTutor(chatId: string | undefined, send: Send) {
   }, []);
   useEffect(() => {
     const active = boardRef.current;
-    if (active && active.chatId !== chatId) {
+    if (active && !belongs(active)) {
       void window.pip?.tutor?.end(active.id).catch(error => setError(error.message));
       setBoard(null);
       pending.current = null; setPendingSelection(false);
     }
-  }, [chatId, board?.id]);
+  }, [chatId, sessionKey, board?.id]);
+  const study = async (text: string, blocked = false): Promise<{ error?: string } | undefined> => {
+    const active = boardRef.current;
+    if (!belongs(active) || active?.presentation !== 'study') return;
+    try {
+      if (blocked) throw Error('Study is answering. Stop it or wait before sending the next question.');
+      if (!window.pip?.tutor?.study) throw Error('Update Ally to use the shared Study session.');
+      await window.pip.tutor.study(active.id, text);
+      pending.current = null; setPendingSelection(false); setError('');
+      return {};
+    } catch (error) { const message = error instanceof Error ? error.message : String(error); setError(message); return { error: message }; }
+  };
   const start = async (topic: string, displayId?: number, circleCaptureId?: string, originatingChatId?: string, attachOnly = false) => {
     const api = window.pip?.tutor;
     if (!api) { setError('Visual tutor needs the updated desktop app.'); return; }
@@ -55,7 +68,10 @@ export function useVisualTutor(chatId: string | undefined, send: Send) {
         return;
       }
       // Capture ownership is settled before sending; follow-ups can use existing chat/voice.
-      const result = await target.send(tutorRequest(topic.trim() || 'Explain what I am looking at, step by step, with drawings.', opened, target.chatId), 'circle', { image: { path: capture.imagePath, thumbnail: capture.thumbnail } });
+      const question = topic.trim() || 'Explain what I am looking at, step by step, with drawings.';
+      const result = opened.presentation === 'study'
+        ? await study(question)
+        : await target.send(tutorRequest(question, opened, target.chatId), 'circle', { image: { path: capture.imagePath, thumbnail: capture.thumbnail } });
       if (result?.error) throw new Error(result.error);
     } catch (error) {
       setError(error instanceof Error ? error.message : String(error));
@@ -64,7 +80,7 @@ export function useVisualTutor(chatId: string | undefined, send: Send) {
     } finally { starting.current = false; setBusy(false); }
   };
   const action = (action: TutorAction) => { if (board) void window.pip?.tutor?.action(board.id, action).catch(error => setError(error.message)); };
-  return { board: board?.chatId === chatId ? board : null, busy, error, start, pendingSelection,
+  return { board: belongs(board) ? board : null, busy, error, start, study, pendingSelection,
     attach: (token: string, target: string) => start('', undefined, token, target, true),
     claimAttachment: (blocked = false): { blocked: boolean; image?: { path: string; thumbnail: string } } => {
       const selection = pending.current;

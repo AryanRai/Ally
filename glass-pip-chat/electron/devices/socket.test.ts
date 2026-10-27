@@ -3,6 +3,7 @@ import http from 'node:http';
 import { once } from 'node:events';
 import { WebSocket } from 'ws';
 import { afterEach, expect, it, vi } from 'vitest';
+vi.mock('electron',()=>({powerMonitor:{on:vi.fn(),off:vi.fn(),getSystemIdleState:()=> 'active'}}));
 const mocks = vi.hoisted(() => ({ tools: new Map<string, any>(), cards: null as any, reply: null as any, dismiss: vi.fn() }));
 vi.mock('../perception/ipc.js', () => ({ onAssistCard: (cb: any) => { mocks.cards = cb; return vi.fn(); }, dismissAssistCard: mocks.dismiss }));
 vi.mock('../notifications.js', () => ({ onReplyNotice: (cb: any) => { mocks.reply = cb; return vi.fn(); } }));
@@ -25,7 +26,7 @@ it('requires bridge authorization and rejects browser origins', async () => {
 it('rejects an unpaired device', async () => { const ws = await setup({}); const [error] = await once(ws, 'error'); expect(error.message).toContain('401'); });
 it('coexists with speech upgrade handling and waits for a real decision', async () => {
   const ws = await setup(); const phone = messages(ws); await once(ws, 'open'); ws.send(JSON.stringify({ type: 'hello', deviceId: 'phone-one', kind: 'phone' }));
-  await phone('ready'); await phone('interaction_sync');
+  expect((await phone('ready')).deviceAccessProtocol).toBe(1); await phone('interaction_sync');
   const watch = new WebSocket(`ws://127.0.0.1:${(server.address() as any).port}/v1/devices/live`, { headers: { Authorization: 'Bearer paired' } }); clients.push(watch);
   const wearable = messages(watch); await once(watch, 'open'); watch.send(JSON.stringify({ type: 'hello', deviceId: 'watch-one', kind: 'watch' })); await wearable('ready'); await wearable('interaction_sync');
   const result = mocks.tools.get('phone_notify').handler({ title: 'Test', body: 'Synthetic' }, { caller: 'codex:session-1234' });

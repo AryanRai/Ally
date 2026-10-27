@@ -2,11 +2,14 @@
 // This connects as Ally, not as a native tool executor. It never creates a router.
 import net from 'node:net';
 import { randomUUID } from 'node:crypto';
+import { codexAccessSettings, validateAccess, type AccessScope } from './access.js';
+import type { AgentPermission } from './types.js';
 
 const versions: Record<string, number> = {
   initialize: 0,
   'thread-owner-discovery': 1,
   'thread-follower-read-model-settings': 1,
+  'thread-follower-update-thread-settings': 2,
   'thread-follower-load-complete-history': 1,
   'thread-follower-start-turn': 2,
   'thread-follower-steer-turn': 1,
@@ -114,6 +117,15 @@ export class CodexDesktopClient {
       throw error;
     });
     if (!response.handledByClientId || response.result?.supportsUntrustedAppInput !== true) throw new Error('Unsupported desktop owner');
+    // Discovery can return Codex's cached loaded-conversation entry after an
+    // account change. Snapshot broadcasts are cached too. This read uses the
+    // same live-owner gate as start-turn, without submitting a user message.
+    try {
+      await this.request('thread-follower-read-model-settings', { conversationId }, response.handledByClientId);
+    } catch (error) {
+      if (error instanceof Error && error.message === 'no-client-found') throw new CodexChatUnownedError();
+      throw error; // A timeout/disconnect is uncertain, never permission to send elsewhere.
+    }
     return response.handledByClientId;
   }
 
@@ -230,4 +242,26 @@ export async function steerExternalDesktopChat(sessionId: string, text: string, 
   const client = await CodexDesktopClient.connect();
   try { return await steerDesktopTurn(client, await client.owner(sessionId), sessionId, text, requestId, images); }
   finally { client.close(); }
+}
+
+/** Use the same permission update route as the native client. No turn submission. */
+export async function updateDesktopAccess(client: CodexDesktopClient, owner: string, conversationId: string, permission: AgentPermission): Promise<AccessScope> {
+  validateAccess(permission);
+  const state = await client.snapshot(conversationId, owner);
+  if (state.id !== conversationId || typeof state.cwd !== 'string' || !state.cwd) throw Error('Chat access could not be verified');
+  const turn = desktopTurns(state).at(-1);
+  const activeTurnId = turn?.status === 'inProgress' ? canonicalTurnId(turn.turnId) : undefined;
+  if (turn?.status === 'inProgress' && !activeTurnId) throw Error('Active reply identity unavailable; access was not changed');
+  const response = await client.request('thread-follower-update-thread-settings', {
+    conversationId, threadSettings: codexAccessSettings(permission, state.cwd), ...(activeTurnId ? { activeTurnId } : {}),
+  }, owner, 20000);
+  if (response.result?.method !== 'thread-follower-update-thread-settings' || response.result?.result?.applied !== true) throw Error('Codex did not confirm the access change. Check the chat before retrying.');
+  return activeTurnId ? 'current_reply' : 'next_message';
+}
+
+export async function updateExternalDesktopAccess(sessionId: string, permission: AgentPermission): Promise<AccessScope> {
+  let client: CodexDesktopClient | undefined;
+  try { client = await CodexDesktopClient.connect(); return await updateDesktopAccess(client, await client.owner(sessionId), sessionId, permission); }
+  catch (error) { if (error instanceof CodexChatUnownedError || error instanceof CodexDesktopUnavailableError) return 'next_message'; throw error; }
+  finally { client?.close(); }
 }

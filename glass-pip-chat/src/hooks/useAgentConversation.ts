@@ -125,7 +125,10 @@ export function useAgentConversation({ chats, robotMode, onSentence }: Options) 
       if (result.sessionId && result.sessionId !== sessionId) link(result.sessionId);
       if (result.error) chats.setSendFailure(chatId, { message: result.error, text: failedText });
       if (!result.stopped) speakNewSentences(chatId, result.text, true);
-      if (!result.stopped) window.pip?.notifyReply?.({ id: `reply-${chatId}-${Date.now()}`, chatId, title: result.error ? 'Ally needs attention' : chat.title || 'Ally reply', text: result.error || result.text });
+      const finalSegments = result.segments.filter(s => s.type === 'text' && s.phase === 'final_answer');
+      const replyText = finalSegments.length ? finalSegments.map(s => s.content ?? '').join('\n\n')
+        : result.segments.some(s => s.phase) ? result.segments.filter(s => s.type === 'text' && s.phase !== 'commentary').map(s => s.content ?? '').join('\n\n') : result.text;
+      if (!result.stopped && (result.error || replyText.trim())) window.pip?.notifyReply?.({ id: `reply-${chatId}-${Date.now()}`, kind: result.error ? 'attention' : 'response', chatId, session: sessionId ? { id: sessionId, provider, title: chat.title || 'Ally reply', cwd: runCwd } : undefined, title: result.error ? 'Ally needs attention' : chat.title || 'Ally reply', text: result.error || replyText });
 
       let content = result.text;
       if (result.thinking) content = `<think>${result.thinking}</think>\n\n${content}`;

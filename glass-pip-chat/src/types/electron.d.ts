@@ -8,7 +8,7 @@ export interface PipAPI {
   close: () => void;
   
   // Window resizing
-  resizeWindow: (width: number, height: number) => void;
+  resizeWindow: (width: number, height: number, mode?: 'collapsed' | 'expanded') => void;
   getWindowSize: () => Promise<{ width: number; height: number }>;
   captureQueryScreen?: () => Promise<{ path: string; thumbnail: string }>;
   onManualResize?: (callback: (size: { width: number; height: number }) => void) => () => void;
@@ -63,6 +63,7 @@ export interface PipAPI {
   // Global hotkey events from the main process
   onShortcut: (callback: (event: 'focus-main-input' | 'show-collapsed-and-focus-quick' | 'toggle-collapse' | 'cycle-size' | 'toggle-context') => void) => () => void;
   onSurfaceFloat?: (callback: (id: number) => void) => () => void;
+  onHandoff?: (callback: (value: import('../../electron/devices/handoffPresentation').HandoffVisual | null) => void) => () => void;
   surfaceReady?: (id: number) => void;
   /** Mirrors the pill's live reply (or null to clear) and greeting into the docked notch. */
   /** Reads (or changes one of) the native notch's shared preferences; null when the notch is not connected. */
@@ -92,7 +93,7 @@ export interface PipAPI {
     onAsk: (callback: (ask: import('../../electron/capture/types').CircleAsk) => void) => () => void;
   };
 
-  tutor: Pick<import('../../electron/visualTutor/types').VisualTutorApi, 'start' | 'displays' | 'state' | 'end' | 'show' | 'action' | 'onChanged'>;
+  tutor: Pick<import('../../electron/visualTutor/types').VisualTutorApi, 'start' | 'study' | 'displays' | 'state' | 'end' | 'show' | 'action' | 'onChanged'>;
 
   // Claude Code / Codex agent backends
   agent: {
@@ -117,6 +118,7 @@ export interface PipAPI {
     }) => Promise<string>;
     localImage: (source: string) => Promise<string>;
     interactionHistory: (chatId: string) => Promise<import('../../electron/devices/interactions').InteractionHistory[]>;
+    pendingInteractions: () => Promise<import('../../electron/devices/interactions').ChatInteraction[]>;
     answerInteraction: (chatId: string, id: string, answer: import('../../electron/watch/approvals').ApprovalAnswer) => Promise<{ accepted: boolean }>;
     onInteractionsChanged: (callback: () => void) => () => void;
     sessionInput: (provider: AgentProvider, sessionId: string, text: string, requestId: string, mode: 'steer' | 'queue') => Promise<'steered' | 'queued'>;
@@ -133,6 +135,8 @@ export interface PipAPI {
     readStates: (keys?: string[]) => Promise<{ key: string; revision: string; unread: boolean; hidden?: boolean }[]>;
     markRead: (provider: AgentProvider, id: string, revision: string) => Promise<boolean>;
     loadSession: (provider: AgentProvider, id: string, revision?: string) => Promise<import('../../electron/agent/types').AgentSessionSnapshot>;
+    liveStudyReply?: (key: string) => Promise<import('../../electron/watch/liveStudyReply').LiveStudyReply | null>;
+    onLiveStudyReply?: (callback: (reply: import('../../electron/watch/liveStudyReply').LiveStudyReply) => void) => () => void;
     /** Claude Code sign-in state, verified with a real request */
     claudeAccount: () => Promise<import('../../electron/agent/claudeLogin').ClaudeAccount>;
     claudeLogin: {

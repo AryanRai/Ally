@@ -24,7 +24,8 @@ vi.mock('node:net', async () => {
     server.listen = (_pipe:string, ready:()=>void) => ready(); server.close = vi.fn(); mocks.server = server; return server;
   } } };
 });
-import { createSurfaceCoordinator } from './coordinator';
+import { createSurfaceCoordinator, studyPresentation } from './coordinator';
+import {handoffPresentation} from '../devices/handoffPresentation';
 
 function fixture(visible = false) {
   const hooks = new Map<number, () => void>();
@@ -48,6 +49,33 @@ beforeEach(() => { vi.useFakeTimers(); mocks.point = { x: 500, y: 10 }; });
 afterEach(() => { mocks.app.emit('will-quit'); mocks.ipc.handlers.clear(); mocks.app.removeAllListeners(); mocks.ipc.removeAllListeners(); vi.useRealTimers(); });
 
 describe('native and floating surface coordinator', () => {
+  it('keeps handoff in the active surface and replays latest state when switching',()=>{
+    const f=fixture(true);f.connect();f.socket.write.mockClear();
+    const state={id:'handoff-123',phase:'holding' as const,progress:.5};handoffPresentation.publish(state);
+    expect(f.contents.send).toHaveBeenLastCalledWith('surface:handoff',expect.objectContaining(state));expect(f.socket.write).not.toHaveBeenCalled();
+    f.coordinator.toggle();f.socket.emit('data','SHOWN\n');
+    expect(f.socket.write.mock.calls.some(([line])=>String(line).startsWith('HANDOFF '))).toBe(true);
+    f.socket.write.mockClear();handoffPresentation.publish({...state,progress:.8});
+    expect(f.socket.write).toHaveBeenLastCalledWith(expect.stringMatching(/^HANDOFF /));
+    f.coordinator.float();expect(f.contents.send).toHaveBeenLastCalledWith('surface:handoff',expect.objectContaining({progress:.8}));
+    handoffPresentation.publish({id:state.id,phase:'cancelled'});vi.advanceTimersByTime(3501);
+  });
+  it('submits Study once over the authenticated peer and rejects unknown receipts without replay', async () => {
+    const f=fixture(true), id='12345678-1234-1234-1234-123456789abc';
+    await expect(f.coordinator.study(id)).rejects.toThrow('not ready');
+    f.connect();const received=vi.fn();studyPresentation.on('caption',received);
+    const pending=f.coordinator.study(id);
+    expect(f.socket.write).toHaveBeenLastCalledWith(`STUDY ${id}\n`);
+    await expect(f.coordinator.study(id)).rejects.toThrow('already starting');
+    f.socket.emit('data',`STUDY_ACCEPTED different\nSTUDY_ACCEPTED ${id}\n`);
+    await expect(pending).resolves.toBeUndefined();
+    f.socket.emit('data',`STUDY_CAPTION ${Buffer.from('Now change the frequency.').toString('base64')}\n`);
+    expect(received).toHaveBeenCalledWith('Now change the frequency.');studyPresentation.off('caption',received);
+    const uncertain=f.coordinator.study('22345678-1234-1234-1234-123456789abc');
+    const rejected=expect(uncertain).rejects.toThrow('may have started');
+    await vi.advanceTimersByTimeAsync(5001);await rejected;
+    expect(f.socket.write.mock.calls.filter(([line])=>String(line).startsWith('STUDY '))).toHaveLength(2);
+  });
   it('toggles between notch and focused window, waiting for native visibility before hiding', () => {
     const f = fixture(true); f.connect(); f.socket.write.mockClear();
     f.coordinator.toggle();
@@ -125,6 +153,16 @@ describe('native and floating surface coordinator', () => {
   it('does not dock below the top band', () => {
     const f = fixture(); f.connect(); f.coordinator.float(); f.socket.write.mockClear(); mocks.point.y = 60;
     f.win.emit('will-move'); f.win.emit('moved'); expect(f.socket.write).not.toHaveBeenCalled();
+  });
+  it('restores the floating location from before a docking drag on the shortcut', () => {
+    const f=fixture(true);f.connect();
+    let bounds={x:900,y:500,width:380,height:112};
+    f.win.getBounds=()=>bounds;
+    f.win.emit('will-move');
+    bounds={...bounds,x:500,y:0};f.win.emit('moved');f.socket.emit('data','SHOWN\n');
+    f.win.setBounds.mockClear();f.coordinator.toggle();
+    expect(f.win.setBounds).toHaveBeenCalledWith({x:900,y:500,width:380,height:112},false);
+    expect(f.win.show).toHaveBeenCalledOnce();
   });
   it('docks a top-aligned pill grabbed lower in its header and ignores resize', () => {
     const f = fixture(); f.connect(); f.coordinator.float(); f.socket.write.mockClear();

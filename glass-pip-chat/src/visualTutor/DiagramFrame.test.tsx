@@ -29,3 +29,9 @@ it('fits bounded content and ignores size messages from other windows', () => {
   expect(diagramDocument('<img src="data:image/png;base64,aGVsbG8="><img src="https://private.test/pixel">')).toContain('src="data:image/png;base64,aGVsbG8="');
   expect(diagramDocument('<img src="https://private.test/pixel">')).not.toContain('private.test');
 });
+it('resolves only attached raster assets and keeps the card isolated', () => {
+  const doc = diagramDocument('<img src="ally-image:page1"><img src="ally-image:missing"><img src="file:///C:/private.png"><svg><circle r="5"/></svg><input type="range">', { page1: 'data:image/jpeg;base64,cHJldmlldw==' });
+  expect(doc).toContain('src="data:image/jpeg;base64,cHJldmlldw=="');
+  expect(doc).not.toContain('src="ally-image:'); expect(doc).not.toContain('private.png');
+  expect(doc).toContain('<circle'); expect(doc).toContain('type="range"'); expect(doc).toContain("connect-src 'none'");
+});

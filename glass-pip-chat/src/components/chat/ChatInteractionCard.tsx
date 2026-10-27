@@ -15,7 +15,7 @@ export default function ChatInteractionCard({ request, onAnswer }: ChatInteracti
   const pending = request.state === 'pending';
   const expired = pending && request.expiresAt <= Date.now();
   const question = request.kind === 'question';
-  const allowed = ['accept', 'submit'].includes(request.decision ?? '');
+  const allowed = ['accept', 'acceptForSession', 'submit', 'submitForSession', 'submitAlways'].includes(request.decision ?? '');
   const outcome = request.state === 'answered'
     ? request.decision === 'decline' ? 'Denied' : request.decision === 'cancel' ? 'Cancelled' : question ? 'Answered' : 'Allowed once'
     : request.state === 'cancelled' ? 'Cancelled' : 'Expired';
@@ -25,7 +25,7 @@ export default function ChatInteractionCard({ request, onAnswer }: ChatInteracti
   const decide = async (action: string) => {
     if (sending || !pending || expired) return;
     setSending(true); setError('');
-    try { await onAnswer(request.id, { action, ...(action === 'submit' ? { values } : {}) }); }
+    try { await onAnswer(request.id, { action, ...(['submit', 'submitForSession', 'submitAlways'].includes(action) ? { values } : {}) }); }
     catch (failure) { setError(failure instanceof Error ? failure.message : 'Decision was not confirmed. Try again.'); }
     finally { setSending(false); }
   };
@@ -51,7 +51,7 @@ export default function ChatInteractionCard({ request, onAnswer }: ChatInteracti
         </fieldset>
         {request.desktopOnly && <p className="mt-2 text-[10px] text-muted-foreground">Private answer · desktop only · value is not saved in history</p>}
         <div className="mt-3 flex flex-wrap gap-2">
-          {request.actions.map(action => <button key={action.value} type="button" disabled={sending || expired || (action.value === 'submit' && invalid)} onClick={() => void decide(action.value)} className={`min-h-8 rounded-full px-3 py-1.5 text-xs font-medium transition-colors disabled:opacity-40 ${['accept', 'submit'].includes(action.value) ? 'bg-foreground text-background hover:opacity-85' : 'border border-border bg-white/[0.03] hover:bg-white/10'}`}>{action.label}</button>)}
+          {request.actions.map(action => <button key={action.value} type="button" disabled={sending || expired || (['submit', 'submitForSession', 'submitAlways'].includes(action.value) && invalid)} onClick={() => void decide(action.value)} className={`min-h-8 rounded-full px-3 py-1.5 text-xs font-medium transition-colors disabled:opacity-40 ${['accept', 'acceptForSession', 'submit', 'submitForSession', 'submitAlways'].includes(action.value) ? 'bg-foreground text-background hover:opacity-85' : 'border border-border bg-white/[0.03] hover:bg-white/10'}`}>{action.label}</button>)}
           {sending && <span className="flex items-center gap-1 text-xs text-muted-foreground"><LoaderCircle className="size-3 animate-spin" />Sending…</span>}
         </div>
         {error && <p role="alert" className="mt-2 text-xs text-amber-200 [overflow-wrap:anywhere]">{error}</p>}

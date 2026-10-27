@@ -5,8 +5,10 @@ import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { exec } from 'node:child_process';
 import { boundsPersistence } from './boundsPersistence.js';
+import { WindowPositions, type FloatingMode } from './windowPositions.js';
 import { openLocalDocument, readVisualization } from './localDocument.js';
 import { queryScreen } from './capture/queryScreen.js';
+import { keepWindowFloating } from './windowFloating.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -19,6 +21,9 @@ let resizeCompletion: ReturnType<typeof setTimeout> | undefined;
 let manualResizing = false;
 let manualCompletion: ReturnType<typeof setTimeout> | undefined;
 const BOUNDS_FILE = path.join(app.getPath('userData'), 'window-bounds.json');
+const POSITIONS_FILE = path.join(app.getPath('userData'), 'window-positions.json');
+const floatingPositions = new WindowPositions((() => { try { return JSON.parse(fs.readFileSync(POSITIONS_FILE, 'utf8')); } catch { return {}; } })());
+let savedPositionsJson = JSON.stringify(floatingPositions.snapshot());
 
 let currentTheme: 'light' | 'dark' = 'dark';
 const THEME_FILE = path.join(app.getPath('userData'), 'theme.json');
@@ -85,6 +90,8 @@ function saveBounds(): void {
   if (!win) return;
   const bounds = win.getBounds();
   fs.writeFileSync(BOUNDS_FILE, JSON.stringify(bounds));
+  const positions = JSON.stringify(floatingPositions.snapshot());
+  if (positions !== savedPositionsJson) { fs.writeFileSync(POSITIONS_FILE, positions); savedPositionsJson = positions; }
 }
 const pendingBounds = boundsPersistence(saveBounds);
 
@@ -205,6 +212,7 @@ export async function createWindow(): Promise<void> {
   });
 
   win = w;
+  keepWindowFloating(w);
   // Local diagram frames have no navigation capability, including self-navigation
   // through script. Keep ordinary main-window link handling unchanged.
   w.webContents.on('will-frame-navigate', event => {
@@ -272,6 +280,7 @@ export async function createWindow(): Promise<void> {
   w.on('will-resize', () => { manualResizing = true; settleManualResize(); });
   w.on('resize', settleManualResize);
   w.on('move', pendingBounds.schedule);
+  w.on('moved', () => { if (!w.isDestroyed()) { const [x,y] = w.getPosition(); floatingPositions.move({ x,y }); pendingBounds.schedule(); } });
   app.once('before-quit', pendingBounds.flush);
   
   // Prevent actual window close, minimize to tray instead
@@ -449,7 +458,7 @@ export function registerWindowIpc(): void {
   });
 
   // Window resizing handlers
-  ipcMain.on('window:resize', (_, { width, height }) => {
+  ipcMain.on('window:resize', (_, { width, height, mode }: { width: number; height: number; mode?: FloatingMode }) => {
     if (!win) return;
     if (manualResizing) return;
     if (!Number.isFinite(width) || !Number.isFinite(height)) return;
@@ -464,10 +473,11 @@ export function registerWindowIpc(): void {
     const constrainedWidth = Math.max(120, Math.min(800, width));
     const constrainedHeight = Math.max(64, Math.min(1000, height));
 
-    // Only resize if dimensions actually changed
-    if (currentWidth !== constrainedWidth || currentHeight !== constrainedHeight) {
+    const preferred = floatingPositions.switch(mode === 'collapsed' || mode === 'expanded' ? mode : undefined, { x, y });
+    // Restore mode position even when both modes happen to have the same size.
+    if (currentWidth !== constrainedWidth || currentHeight !== constrainedHeight || preferred.x !== x || preferred.y !== y) {
       // Check if the new size would go off-screen and adjust position if needed
-      const { x: newX, y: newY } = ensureWindowOnScreen(x, y, constrainedWidth, constrainedHeight);
+      const { x: newX, y: newY } = ensureWindowOnScreen(preferred.x, preferred.y, constrainedWidth, constrainedHeight);
       
       // Set new size with animation
       win.setSize(constrainedWidth, constrainedHeight, true);

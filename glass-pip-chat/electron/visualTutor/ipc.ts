@@ -9,7 +9,14 @@ import { circlePixels } from '../capture/circleHandoff.js';
 import { registerDeviceTool } from '../chatsMcp/index.js';
 import { text } from '../chatsMcp/protocol.js';
 import { TutorModel, tutorPrompt } from './model.js';
-import type { TutorAction, TutorBoard, TutorCapture } from './types.js';
+import { MAX_DIAGRAM_HEIGHT, MAX_DIAGRAM_IMAGES, type TutorAction, type TutorBoard, type TutorCapture } from './types.js';
+import { prepareDiagramImages } from './diagramMedia.js';
+import { restoreFloatingLevel } from '../windowFloating.js';
+import { chatSelection } from '../agent/selection.js';
+import { studyPresentation, submitNativeStudy } from '../surface/coordinator.js';
+import { StudyInputs, studyKey } from './studyInputs.js';
+import { registerStudySession, StudyCues } from './studySession.js';
+import { safeWindowSend } from '../safeWindowSend.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const captureDir = path.join(os.tmpdir(), 'ally-visual-tutor');
@@ -22,9 +29,13 @@ let revealOnDraw = true;
 let panelAnchor: TutorBoard['panelAnchor'];
 let anchorSequence = 0;
 let geometryTimer: ReturnType<typeof setTimeout> | undefined;
+let selectionImagePath = '';
+const cues = new StudyCues();
 
 /** The drawing surface has its own preload: it cannot invoke agent, device or file APIs. */
 export function registerVisualTutorIpc(getMain: () => BrowserWindow | null): void {
+  const studyRoot = process.env.ALLY_STUDY_ROOT || path.resolve(app.getAppPath(), '../ally-study');
+  const inputs = new StudyInputs(studyRoot);
   const fromMain = (event: IpcMainInvokeEvent) => {
     if (event.sender !== getMain()?.webContents || event.senderFrame !== event.sender.mainFrame) throw new Error('Visual tutor must be opened from Ally');
   };
@@ -47,8 +58,8 @@ export function registerVisualTutorIpc(getMain: () => BrowserWindow | null): voi
   };
   const publish = () => {
     const board = presentation();
-    getMain()?.webContents.send('tutor:changed', board);
-    overlay?.webContents.send('tutor:changed', board);
+    safeWindowSend(getMain(), 'tutor:changed', board);
+    safeWindowSend(overlay, 'tutor:changed', board);
     if (overlay && board) overlay.setIgnoreMouseEvents(!toolbarInteractive && !board.sketching, { forward: true });
   };
   const close = () => {
@@ -56,16 +67,62 @@ export function registerVisualTutorIpc(getMain: () => BrowserWindow | null): voi
     const board = model.get();
     if (board) model.end(board.id);
     screenshot = '';
+    selectionImagePath = ''; cues.reset();
     panelAnchor = undefined;
     revealOnDraw = true;
     toolbarInteractive = false;
     const closing = overlay; overlay = null;
     closing?.close();
-    getMain()?.setAlwaysOnTop(true, 'floating');
+    restoreFloatingLevel(getMain());
     publish();
   };
 
   setCircleCaptureCleanup(close);
+  const openOverlay = async (board: TutorBoard) => {
+    const created = new BrowserWindow({ ...board.bounds, frame: false, thickFrame: false, transparent: true, backgroundColor: '#00000000', hasShadow: false, resizable: false, movable: false, skipTaskbar: true, alwaysOnTop: true, show: false,
+      webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true, backgroundThrottling: false } });
+    overlay = created;
+    created.setAlwaysOnTop(true, 'screen-saver'); created.setBounds(board.bounds);
+    created.setIgnoreMouseEvents(true, { forward: true }); created.on('focus', keepPillAbove);
+    created.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+    created.webContents.on('will-navigate', event => event.preventDefault());
+    created.webContents.on('will-frame-navigate', event => { if (!['about:blank', 'about:srcdoc'].includes(event.url)) event.preventDefault(); });
+    created.on('closed', () => { if (overlay === created) { overlay = null; if (model.get()?.id === board.id) model.end(board.id); screenshot = ''; selectionImagePath = ''; cues.reset(); publish(); } });
+    if (process.env.VITE_DEV_SERVER_URL) await created.loadURL(new URL('tutor.html', process.env.VITE_DEV_SERVER_URL).toString());
+    else await created.loadFile(path.join(__dirname, '../../renderer/tutor.html'));
+    return created;
+  };
+  const revealCue = (stepId: string | undefined) => {
+    const board = model.get();
+    if (!stepId || board?.presentation !== 'study' || !revealOnDraw || !board.following) return;
+    model.activate(board.id, stepId); overlay?.showInactive(); keepPillAbove(); publish();
+  };
+  const caption = (words: string) => revealCue(cues.hear(words));
+  studyPresentation.on('caption', caption);
+  const unregisterStudy = registerStudySession(async input => {
+    let context: { diagramBoardId?: string; screenshot?: { widthInPixels?: number; heightInPixels?: number }; selection?: { bounds?: TutorBoard['bounds']; capturedAt?: number } } = {};
+    try { context = JSON.parse(input.context); } catch { /* Legacy context has no geometry. */ }
+    let board = model.get();
+    if (!board || (board.sessionKey !== input.sessionKey && board.chatId !== input.chatId)) {
+      close();
+      const display = screen.getAllDisplays().find(display => context.selection?.bounds && JSON.stringify(display.bounds) === JSON.stringify(context.selection.bounds)) ?? screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
+      const width = context.screenshot?.widthInPixels, height = context.screenshot?.heightInPixels;
+      const screenPixels = { width: typeof width === 'number' && width > 0 && Number.isFinite(width) ? width : Math.round(display.bounds.width * display.scaleFactor), height: typeof height === 'number' && height > 0 && Number.isFinite(height) ? height : Math.round(display.bounds.height * display.scaleFactor) };
+      board = { id: randomUUID(), chatId: input.chatId, sessionKey: input.sessionKey, presentation: 'study', screenPixels, displayId: display.id, bounds: { ...display.bounds }, capturedAt: context.selection?.capturedAt ?? Date.now(), steps: [], sketches: [], selected: 0, following: true, sketching: false, frozen: false, revision: 0 };
+      model.start(board); await openOverlay(board);
+    } else if (board.sessionKey !== input.sessionKey) { board.sessionKey = input.sessionKey; model.start(board); }
+    if (input.imagePath) selectionImagePath = input.imagePath;
+    publish();
+    return `Shared Study board: ${board.id}. For interactive HTML/SVG cards use ally_chats study_diagram with this boardId. cue must exactly match a short say() sentence: the card appears on that spoken caption. Update a stable id incrementally; new id means next step. Start a short spoken beat before building a large diagram. visual_tutor_read includes user sketches. Keep screen annotations in native step()/say(), and actions in agent tools.`;
+  });
+  app.once('will-quit', () => { unregisterStudy(); studyPresentation.off('caption', caption); });
+  ipcMain.handle('tutor:study', async (event, id: string, words: unknown) => {
+    fromMain(event);
+    const board = model.require(id), selected = chatSelection.snapshot().selected;
+    if (board.presentation !== 'study' || !selected || typeof words !== 'string') throw Error('Select an area in this chat first.');
+    const requestId = inputs.issue(board, selected, words, selectionImagePath);
+    await submitNativeStudy(requestId);
+  });
   ipcMain.handle('tutor:displays', event => { fromMain(event); return screen.getAllDisplays().map((display, index) => ({ id: display.id, label: `${display.label || `Display ${index + 1}`} · ${display.size.width} × ${display.size.height}` })); });
   ipcMain.handle('tutor:start', async (event, chatId: unknown, displayId?: number, circleCaptureId?: string): Promise<TutorCapture> => {
     fromMain(event);
@@ -101,22 +158,13 @@ export function registerVisualTutorIpc(getMain: () => BrowserWindow | null): voi
       // Freeze uses the local full display; the agent receives only the selected crop.
       screenshot = (image.getSize().width > 1920 ? image.resize({ width: 1920 }) : image).toDataURL();
       const focus = circle?.rect && { x: circle.rect.x / display.bounds.width * 1000, y: circle.rect.y / display.bounds.height * 1000, width: circle.rect.width / display.bounds.width * 1000, height: circle.rect.height / display.bounds.height * 1000 };
-      const board: TutorBoard = { id, chatId, displayId: display.id, bounds: { ...display.bounds }, capturedAt: circle?.capturedAt ?? Date.now(), ...(focus ? { focus } : {}), steps: [], sketches: [], selected: 0, following: true, sketching: false, frozen: !!circle, revision: 0 };
+      const selectedChat = chatSelection.snapshot().selected;
+      if (!selectedChat) throw Error('Choose a chat in Ally before selecting an area.');
+      const board: TutorBoard = { id, chatId, sessionKey: studyKey(selectedChat), presentation: 'study', screenPixels: image.getSize(), displayId: display.id, bounds: { ...display.bounds }, capturedAt: circle?.capturedAt ?? Date.now(), ...(focus ? { focus } : {}), steps: [], sketches: [], selected: 0, following: true, sketching: false, frozen: false, revision: 0 };
+      board.screenBounds = process.platform === 'win32' ? screen.dipToScreenRect(null, display.bounds) : { ...display.bounds };
       model.start(board);
-      overlay = new BrowserWindow({ ...display.bounds, frame: false, thickFrame: false, transparent: true, backgroundColor: '#00000000', hasShadow: false, resizable: false, movable: false, skipTaskbar: true, alwaysOnTop: true, show: false,
-        webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true, backgroundThrottling: false } });
-      const created = overlay;
-      created.setAlwaysOnTop(true, 'screen-saver');
-      created.setBounds(display.bounds);
-      created.setIgnoreMouseEvents(true, { forward: true });
-      created.on('focus', keepPillAbove);
-      created.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
-      created.webContents.on('will-navigate', event => event.preventDefault());
-      created.webContents.on('will-frame-navigate', event => { if (!['about:blank', 'about:srcdoc'].includes(event.url)) event.preventDefault(); });
-      created.on('closed', () => { if (overlay === created) { overlay = null; model.end(board.id); screenshot = ''; publish(); } });
-      if (process.env.VITE_DEV_SERVER_URL) await created.loadURL(new URL('tutor.html', process.env.VITE_DEV_SERVER_URL).toString());
-      else await created.loadFile(path.join(__dirname, '../../renderer/tutor.html'));
-      if (!circle) created.showInactive();
+      selectionImagePath = imagePath;
+      await openOverlay(board);
       if (wasVisible) main?.showInactive();
       keepPillAbove();
       publish();
@@ -163,6 +211,16 @@ export function registerVisualTutorIpc(getMain: () => BrowserWindow | null): voi
   registerDeviceTool({ name: 'visual_tutor_read', description: 'Read an explicitly opened Ally visual tutor board, including teaching steps, screenshot time and user sketches. Requires boardId from the user’s visual tutor prompt. No new capture.',
     inputSchema: { type: 'object', properties: { boardId: { type: 'string' } }, required: ['boardId'], additionalProperties: false },
     handler: async args => { model.require(args.boardId); const board = model.get()!; return text(JSON.stringify({ ...board, instructions: tutorPrompt(board) })); } });
+  registerDeviceTool({ name: 'study_diagram', description: 'Stage or update a spacious interactive HTML/SVG Study card with images, charts, custom diagrams and local scripts/controls. Stable id updates progressively; new id adds a step. cue matches a short spoken sentence so the card follows live narration alongside native drawing and agent tools. For local images/page previews pass assets:[{id,path}] with absolute raster paths, and use <img src="ally-image:ID"> in HTML; do not paste base64 into HTML. Images are fitted automatically; original files are unchanged. Isolated card has no network/files/parent/desktop access. Read sketches with visual_tutor_read.',
+    inputSchema: { type: 'object', properties: { boardId: { type: 'string' }, id: { type: 'string', maxLength: 80 }, title: { type: 'string', maxLength: 120 }, cue: { type: 'string', minLength: 4, maxLength: 300 }, html: { type: 'string', maxLength: 160000 }, height: { type: 'integer', minimum: 120, maximum: MAX_DIAGRAM_HEIGHT }, assets: { type: 'array', maxItems: MAX_DIAGRAM_IMAGES, items: { type: 'object', properties: { id: { type: 'string', maxLength: 40 }, path: { type: 'string' } }, required: ['id','path'], additionalProperties: false } } }, required: ['boardId', 'id', 'title', 'cue', 'html'], additionalProperties: false },
+    handler: async args => {
+      const board = model.require(args.boardId);
+      if (board.presentation !== 'study' || typeof args.cue !== 'string' || args.cue.length < 4 || args.cue.length > 300) throw Error('Use the current Study session and an exact short spoken cue.');
+      const images = await prepareDiagramImages(args.assets);
+      const next = model.draw(board.id, { id: args.id, title: args.title, explanation: args.cue, marks: [], diagram: { html: args.html, height: args.height, images } });
+      revealCue(cues.stage(String(args.id), args.cue)); publish();
+      return text('Study card staged. Say its exact cue in the live drawing program to reveal it.', { boardId: next.id, steps: next.steps.length });
+    } });
   registerDeviceTool({ name: 'visual_tutor_draw', description: 'Draw or update a teaching step on the user-enabled Ally overlay. Optional step.panel={x,y,width,transparent} places the compact panel in full-screen 0–1000 coordinates, clamped away from the Ally pill; transparency is optional and manual dragging remains available. Optional step.diagram={html,height} displays complex self-contained HTML/SVG with isolated local scripts and interactive controls; no network, files, parent/tool access or desktop control. No screen capture. Use 0–1000 screen-relative coordinates; same step ID replaces that step. Call visual_tutor_read to inspect user sketches.',
     inputSchema: { type: 'object', properties: { boardId: { type: 'string' }, step: { type: 'object', properties: {
       diagram: { type: 'object', properties: { html: { type: 'string', maxLength: 160000 }, height: { type: 'integer', minimum: 120, maximum: 600 } }, required: ['html'], additionalProperties: false },
@@ -170,7 +228,10 @@ export function registerVisualTutorIpc(getMain: () => BrowserWindow | null): voi
       id: { type: 'string', maxLength: 80 }, title: { type: 'string', maxLength: 120 }, explanation: { type: 'string', maxLength: 1800 },
       marks: { type: 'array', maxItems: 80, items: { type: 'object', properties: { id: { type: 'string', maxLength: 80 }, kind: { enum: ['arrow', 'line', 'rect', 'ellipse', 'polyline', 'text'] }, color: { enum: ['mint', 'blue', 'amber', 'pink', 'white'] }, points: { type: 'array', minItems: 1, maxItems: 256, items: { type: 'object', properties: { x: { type: 'number', minimum: 0, maximum: 1000 }, y: { type: 'number', minimum: 0, maximum: 1000 } }, required: ['x', 'y'], additionalProperties: false } }, text: { type: 'string', maxLength: 240 } }, required: ['id', 'kind', 'color', 'points'], additionalProperties: false } },
     }, required: ['id', 'title', 'explanation', 'marks'], additionalProperties: false } }, required: ['boardId', 'step'], additionalProperties: false },
-    handler: async args => { const board = model.draw(args.boardId, args.step); if (revealOnDraw) { overlay?.showInactive(); keepPillAbove(); } publish(); return text(`Displayed teaching step ${board.steps.findIndex(s => s.id === (args.step as { id: string }).id) + 1}.`, { boardId: board.id, revision: board.revision, steps: board.steps.length }); } });
+    handler: async args => {
+      if (model.require(args.boardId).presentation === 'study') throw Error('This lesson uses live native Study annotations. Use step()/say() for screen drawing, or study_diagram for interactive cards with a spoken cue.');
+      const board = model.draw(args.boardId, args.step); if (revealOnDraw) { overlay?.showInactive(); keepPillAbove(); } publish(); return text(`Displayed teaching step ${board.steps.findIndex(s => s.id === (args.step as { id: string }).id) + 1}.`, { boardId: board.id, revision: board.revision, steps: board.steps.length });
+    } });
   screenReady();
   function screenReady() {
     void app.whenReady().then(() => {
@@ -193,6 +254,6 @@ export function registerVisualTutorIpc(getMain: () => BrowserWindow | null): voi
       }, 50);
     };
     main?.on('move', moved); main?.on('resize', moved);
-    main?.on('hide', () => { if (model.get()) { revealOnDraw = false; overlay?.hide(); publish(); } });
+    main?.on('hide', () => { const board = model.get(); if (board && board.presentation !== 'study') { revealOnDraw = false; overlay?.hide(); publish(); } });
   });
 }

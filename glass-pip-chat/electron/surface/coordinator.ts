@@ -3,10 +3,15 @@ import net from 'node:net';
 import fs from 'node:fs';
 import path from 'node:path';
 import { randomBytes } from 'node:crypto';
+import { EventEmitter } from 'node:events';
 import { dockingDisplay, pillBounds, parseNativePoint, type Point } from './geometry.js';
 import { setSharedGreeting } from './greeting.js';
+import { handoffPresentation } from '../devices/handoffPresentation.js';
 
 let controller: ReturnType<typeof createSurfaceCoordinator> | undefined;
+export const studyPresentation = new EventEmitter();
+export const submitNativeStudy = (id: string) => controller?.study(id) ?? Promise.reject(Error('Ally Study is unavailable. Open the native app and try again.'));
+export const nativeStudyStatus = () => controller?.studyStatus() ?? { connected: false, captions: false };
 export const revealFloatingSurface = () => controller?.float();
 export const suspendNativeForCapture = () => controller?.suspend() ?? Promise.resolve();
 export const restoreNativeAfterCapture = (focus: boolean) => controller?.restore(focus);
@@ -33,11 +38,14 @@ export function createSurfaceCoordinator(win: BrowserWindow) {
   let peer: net.Socket | undefined, floating = win.isVisible(), capturing = false, userMoving = false;
   let hidden: (() => void) | undefined;
   let transfer = 0;
+  let dragOrigin: Electron.Rectangle | undefined, returnBounds: Electron.Rectangle | undefined;
   let ready: { id: number; complete: () => void; timer: ReturnType<typeof setTimeout> } | undefined;
   // The pill's live reply and greeting, mirrored into the notch while docked.
   let preview: NotchPreview | undefined, greeting = '', arriving = false, sentPreview = '';
   let idleTimer: ReturnType<typeof setTimeout> | undefined;
   const settingsWaiters: ((value: Record<string, unknown>) => void)[] = [];
+  const studyWaiters = new Map<string, { resolve: () => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }>();
+  let studyCaptions = false;
   /** Native notch preferences, shown in Ally's single Settings window. */
   const nativeSettings = (change?: { key: string; value: string | number | boolean }) => new Promise<Record<string, unknown> | null>(resolve => {
     if (!peer) { resolve(null); return; }
@@ -51,6 +59,13 @@ export function createSurfaceCoordinator(win: BrowserWindow) {
   ipcMain.handle('surface:native-settings', settingsHandler);
   const write = (line: string) => peer?.write(line + '\n');
   const docked = () => !!peer && !floating && !capturing;
+  const sendHandoff=(value:ReturnType<typeof handoffPresentation.snapshot>)=>{
+    if(capturing||win.isDestroyed())return;
+    if(docked())write(`HANDOFF ${encode(JSON.stringify(value))}`);
+    else if(floating||win.isVisible())win.webContents.send('surface:handoff',value);
+  };
+  const stopHandoff=handoffPresentation.subscribe(sendHandoff);
+  const restoreHandoff=()=>{const state=handoffPresentation.snapshot();if(state)sendHandoff(state);};
   const flushPreview = () => {
     if (!docked()) return;
     clearTimeout(idleTimer); idleTimer = undefined;
@@ -61,6 +76,7 @@ export function createSurfaceCoordinator(win: BrowserWindow) {
   };
   const dock = () => {
     if (!peer || capturing) return;
+    if (floating) returnBounds = dragOrigin ?? win.getBounds();
     transfer++; floating = false; userMoving = false; arriving = true;
     // The helper acknowledges native visibility before we hide the pill.
     write('NOTCH');
@@ -68,11 +84,19 @@ export function createSurfaceCoordinator(win: BrowserWindow) {
   const float = (point?: Point, drag = false) => {
     if (!peer) return;
     const id = ++transfer;
-    if (point) win.setBounds(pillBounds(point, screen.getDisplayNearestPoint(point).workArea), false);
+    if (point) { win.setBounds(pillBounds(point, screen.getDisplayNearestPoint(point).workArea), false); returnBounds = undefined; }
+    else if (returnBounds) {
+      const area = screen.getDisplayNearestPoint(returnBounds).workArea;
+      const saved = returnBounds; returnBounds = undefined;
+      const restored = { ...saved, x: Math.max(area.x, Math.min(saved.x, area.x + area.width - saved.width)), y: Math.max(area.y, Math.min(saved.y, area.y + area.height - saved.height)) };
+      const current = win.getBounds();
+      if (Object.keys(restored).some(key => restored[key as keyof typeof restored] !== current[key as keyof typeof current])) win.setBounds(restored, false);
+    }
     const show = () => {
       if (id !== transfer || !peer || capturing || win.isDestroyed()) return;
       floating = true; write('HIDE');
       win.showInactive(); win.moveTop();
+      restoreHandoff();
       if (drag) {
         const handle = win.getNativeWindowHandle();
         write(`DRAG ${handle.length === 8 ? handle.readBigUInt64LE().toString() : handle.readUInt32LE().toString()}`);
@@ -105,7 +129,7 @@ export function createSurfaceCoordinator(win: BrowserWindow) {
     socket.on('error', () => {});
     socket.on('data', chunk => {
       buffer += chunk;
-      if (buffer.length > 4096) { socket.destroy(); return; }
+      if (buffer.length > 8192) { socket.destroy(); return; }
       let end: number;
       while ((end = buffer.indexOf('\n')) >= 0) {
         const line = buffer.slice(0, end).trim(); buffer = buffer.slice(end + 1);
@@ -122,9 +146,25 @@ export function createSurfaceCoordinator(win: BrowserWindow) {
           if (preview && !preview.done) { sentPreview = ''; flushPreview(); }
           else if (arriving && greeting) write(`GREET ${encode(greeting)}`);
           arriving = false;
+          restoreHandoff();
           continue;
         }
         if (line === 'HIDDEN') { hidden?.(); hidden = undefined; continue; }
+        if (line === 'STUDY_BOUND 1' || line === 'STUDY_BOUND 0') { studyCaptions = line.endsWith('1'); continue; }
+        if (line.startsWith('STUDY_ACCEPTED ') || line.startsWith('STUDY_ERROR ')) {
+          const [, id, detail] = line.split(' '), pending = studyWaiters.get(id);
+          if (pending) {
+            clearTimeout(pending.timer); studyWaiters.delete(id);
+            if (line.startsWith('STUDY_ACCEPTED ')) pending.resolve();
+            else pending.reject(Error(detail ? Buffer.from(detail, 'base64').toString('utf8').slice(0, 500) : 'Study could not start.'));
+          }
+          continue;
+        }
+        if (line.startsWith('STUDY_CAPTION ')) {
+          const caption = Buffer.from(line.slice(14), 'base64').toString('utf8');
+          if (caption.length <= 1200) studyPresentation.emit('caption', caption);
+          continue;
+        }
         if (line.startsWith('SETTINGS ')) {
           let value: Record<string, unknown> = {};
           try { value = JSON.parse(Buffer.from(line.slice(9), 'base64').toString('utf8')); } catch {}
@@ -142,6 +182,9 @@ export function createSurfaceCoordinator(win: BrowserWindow) {
       clearTimeout(timeout);
       if (peer !== socket) return;
       transfer++; peer = undefined; hidden = undefined;
+      studyCaptions = false;
+      for (const pending of studyWaiters.values()) { clearTimeout(pending.timer); pending.reject(Error('Study connection ended. Check the chat before retrying.')); }
+      studyWaiters.clear();
       if (!win.isDestroyed()) win.showInactive();
     });
   });
@@ -153,18 +196,21 @@ export function createSurfaceCoordinator(win: BrowserWindow) {
   });
   // Electron reports actual user moves separately from resize/setBounds, including
   // Chromium's frameless drag regions. Raw HWND move-loop messages are insufficient.
-  const moving = () => { userMoving = true; };
+  const moving = () => { if (!userMoving) dragOrigin = win.getBounds(); userMoving = true; };
   const moved = () => {
     if (userMoving && floating && !capturing && dockingDisplay(screen.getCursorScreenPoint(), screen.getAllDisplays().map(d => d.bounds), win.getBounds())) dock();
-    userMoving = false;
+    userMoving = false; dragOrigin = undefined;
   };
   win.on('will-move', moving);
   win.on('moved', moved);
   win.on('show', () => { if (peer && !floating && !capturing) { floating = true; write('HIDE'); } });
   const dispose = () => {
+    stopHandoff();
     write('NOTCH'); peer?.destroy(); server.close();
     if (ready) clearTimeout(ready.timer);
     clearTimeout(idleTimer);
+    for (const pending of studyWaiters.values()) { clearTimeout(pending.timer); pending.reject(Error('Ally is closing.')); }
+    studyWaiters.clear();
     ipcMain.removeListener('surface:ready', rendererReady);
     ipcMain.removeListener('surface:preview', rendererPreview);
     ipcMain.removeHandler('surface:native-settings');
@@ -174,6 +220,16 @@ export function createSurfaceCoordinator(win: BrowserWindow) {
   };
   app.once('will-quit', dispose);
   return {
+    studyStatus: () => ({ connected: !!peer, captions: studyCaptions }),
+    study(id: string): Promise<void> {
+      if (!peer || capturing) return Promise.reject(Error('Ally Study is not ready. Finish the selection and try again.'));
+      if (!/^[a-f0-9-]{36}$/.test(id)) return Promise.reject(Error('Invalid Study request.'));
+      if (studyWaiters.has(id)) return Promise.reject(Error('This Study request is already starting.'));
+      return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => { studyWaiters.delete(id); reject(Error('Study may have started. Check the same chat before retrying.')); }, 5000);
+        studyWaiters.set(id, { resolve, reject, timer }); write(`STUDY ${id}`);
+      });
+    },
     float,
     toggle() {
       if (capturing || win.isDestroyed()) return;

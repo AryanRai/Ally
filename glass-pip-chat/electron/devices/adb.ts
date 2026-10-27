@@ -12,10 +12,13 @@ export type PhoneOperation =
   | { type: 'open_app'; packageName: string };
 export interface PhoneView { revision: string; width: number; height: number; ui: string }
 
-export function createAdbRun(): AdbRun {
+export function adbBinary(): string {
   const sdk = process.env.ANDROID_HOME || process.env.ANDROID_SDK_ROOT || join(process.env.LOCALAPPDATA || '', 'Android', 'Sdk');
   const candidate = join(sdk, 'platform-tools', process.platform === 'win32' ? 'adb.exe' : 'adb');
-  const binary = existsSync(candidate) ? candidate : 'adb';
+  return existsSync(candidate) ? candidate : 'adb';
+}
+export function createAdbRun(): AdbRun {
+  const binary = adbBinary();
   return (args, signal) => new Promise((resolve, reject) => {
     execFile(binary, args, { encoding: 'buffer', windowsHide: true, timeout: 15_000, maxBuffer: 12 * 1024 * 1024, signal }, (err, stdout) => {
       // Never expose subprocess stderr (it can contain UI or entered text).
@@ -98,8 +101,8 @@ export class AdbPhone {
     if (!/^[A-Za-z0-9_.:\-]{4,180}$/.test(serial) || serial.startsWith('-')) throw Error('Invalid explicit ADB serial.');
     return ['-s', serial];
   }
-  async list() {
-    const output = (await this.run(['devices', '-l'])).toString();
+  async list(signal?:AbortSignal) {
+    const output = (await (signal?this.run(['devices', '-l'],signal):this.run(['devices', '-l']))).toString();
     return output.split(/\r?\n/).flatMap(line => {
       const m = /^(\S+)\s+device\s+(.*)$/.exec(line);
       return m ? [{ serial: m[1], model: /model:(\S+)/.exec(m[2])?.[1] || 'Android', transport: 'authorized-adb' }] : [];

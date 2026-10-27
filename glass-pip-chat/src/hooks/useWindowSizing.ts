@@ -7,7 +7,7 @@ export function useWindowSizing(width: number, height: number, collapsed: boolea
     const pip = window.pip;
     if (!pip) return;
     setIsResizing(true);
-    const resize = () => pip.resizeWindow(width, height);
+    const resize = () => pip.resizeWindow(width, height, collapsed ? 'collapsed' : 'expanded');
     const delay = collapsed ? CHAT_COLLAPSE_MS : 0;
     const scheduled = delay ? setTimeout(resize, delay) : undefined;
     if (!delay) resize();

@@ -46,3 +46,7 @@ if (existsSync(assetsSource)) {
 }
 
 console.log('Electron build completed!');
+mkdirSync(join(outDir, 'electron/browser'), { recursive: true });
+for (const asset of ['preload.cjs', 'toolbar.html', 'toolbar.js']) {
+  cpSync(join(rootDir, 'electron/browser', asset), join(outDir, 'electron/browser', asset));
+}

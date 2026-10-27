@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { CodexRpc } from './codexRpc.js';
 import type { AgentProvider, AgentUsage } from './types.js';
+import { ClaudeAllowanceStore } from './claudeAllowance.js';
 
 type Totals = { runs: number; inputTokens?: number; outputTokens?: number; cachedTokens?: number; costUsd?: number };
 type Ledger = { version: 1; since: string; codex: Totals; claude: Totals };
@@ -101,9 +102,12 @@ export class CodexUsageReader {
   }
 }
 const codexUsage = new CodexUsageReader();
+let claudeAllowance: ClaudeAllowanceStore | undefined;
+const claudePlan = () => claudeAllowance ??= new ClaudeAllowanceStore(path.join(app.getPath('userData'), 'claude-allowance.json'));
+export function observeClaudeAllowance(event: unknown) { try { claudePlan().observe(event); } catch { /* Usage cannot interrupt an agent. */ } }
 export async function readProviderUsage(binary?: string) {
   const [recorded, codex] = await Promise.all([
     localLedger().snapshot().catch(() => null), codexUsage.read(binary),
   ]);
-  return { recorded, codex, claude: { allowanceAvailable: false } };
+  return { recorded, codex, claude: claudePlan().read() };
 }

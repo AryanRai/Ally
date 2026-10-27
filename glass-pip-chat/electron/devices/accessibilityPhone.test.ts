@@ -33,6 +33,21 @@ function fixture(options: { enabled?: boolean; xml?: string } = {}) {
 const base = { chatId: 'codex:session-1234', deviceId: 'phone-one', operations: [] as unknown[] };
 
 describe('on-device phone control sessions', () => {
+  it('handoff requests a bounded grant without reading or operating the screen',async()=>{
+    const f=fixture();const signal=new AbortController().signal;
+    const pending=f.control.requestSession('phone-one','codex:session-1234',signal);await f.approve();
+    const grant=await pending;
+    expect(grant.expiresAt-Date.now()).toBeGreaterThan(899000);
+    expect(f.calls.map(c=>c.method)).toEqual(['control.status','control.grant']);
+    expect(await f.control.requestSession('phone-one','codex:session-1234',signal)).toEqual(grant);
+    expect(f.commands).toHaveLength(1);f.control.close();f.hub.close();
+  });
+  it('handoff refusal creates no control grant and never reads a screen',async()=>{
+    const f=fixture();const pending=f.control.requestSession('phone-one','codex:session-1234',new AbortController().signal);
+    const rejected=expect(pending).rejects.toThrow('Declined');await flush();
+    f.hub.receipt('phone-one',{id:f.commands.at(-1).id,status:'rejected'});await rejected;
+    expect(f.calls.map(c=>c.method)).toEqual(['control.status']);f.control.close();f.hub.close();
+  });
   it('asks once, then runs later plans in the same session without asking', async () => {
     vi.useFakeTimers();
     const f = fixture();

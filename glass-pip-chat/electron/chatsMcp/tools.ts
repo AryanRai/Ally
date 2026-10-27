@@ -189,6 +189,7 @@ export function chatTools(deps: ToolDeps): ToolDef[] {
 
 /** Guidance sent at initialize so agents use the tools well. */
 export const SERVER_INSTRUCTIONS = [
+  'Use ally_usage to check account-wide Codex/Claude plan allowances when deciding where to route authorized work. Unknown/stale is not exhausted or available. Do not infer balance from token costs, switch providers, or resend an uncertain message automatically.',
   'Ally connects the user\'s Claude Code and Codex chats.',
   'To find a chat: ally_search_chats (by topic) or ally_list_chats (newest first, optional folder filter). Prefer the most recent strong match; if several fit equally, ask the user which.',
   'To use another chat\'s knowledge: ally_read_chat. To route the user\'s message: ally_send_to_chat, which by default returns that chat\'s reply so you can relay it (including questions). To hand the user over: ally_open_chat.',

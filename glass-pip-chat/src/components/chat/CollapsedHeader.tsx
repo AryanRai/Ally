@@ -60,6 +60,8 @@ interface CollapsedHeaderProps {
   onContextToggle?: () => void;
   uiSettings?: any;
   currentResponse?: string;
+  currentQuestion?: string;
+  liveResponseId?: string;
   responseSegments?: Segment[];
   currentModel: string;
   showModelSelector: boolean;
@@ -128,6 +130,8 @@ export default function CollapsedHeader({
   showContext,
   onContextToggle,
   currentResponse,
+  currentQuestion,
+  liveResponseId,
   responseSegments,
   currentModel,
   showModelSelector,
@@ -319,13 +323,13 @@ export default function CollapsedHeader({
       {/* Current turn stays below the pill, including after completion. */}
       <div className="space-y-1.5 px-2 pb-1.5" style={noDrag}>
         {chatTitle && <button type="button" onClick={onCollapseToggle} title={chatTitle} className="block w-full truncate text-left text-[10px] text-foreground/45 hover:text-foreground/75">{chatTitle}</button>}
-        {latestUser && <CompactUserMessage key={latestUser.id} content={latestUser.content} images={latestUser.metadata?.images ?? (latestUser.metadata?.image ? [latestUser.metadata.image] : undefined)} />}
+        {currentQuestion ? <CompactUserMessage key={liveResponseId} content={currentQuestion} /> : latestUser && <CompactUserMessage key={latestUser.id} content={latestUser.content} images={latestUser.metadata?.images ?? (latestUser.metadata?.image ? [latestUser.metadata.image] : undefined)} />}
         <CollapsedResponsePreview
           readerChatId={readerChatId}
           response={currentResponse || ((!isTyping || stopDisabledReason) ? latestReply?.content : '') || ''}
           segments={currentResponse ? responseSegments : ((!isTyping || stopDisabledReason) ? latestReply?.metadata?.segments : undefined)}
           images={!currentResponse && (!isTyping || stopDisabledReason) ? latestReply?.metadata?.images : undefined}
-          responseId={latestUser?.id}
+          responseId={liveResponseId || latestUser?.id}
           isTyping={isTyping}
           workingStatus={workingStatus}
           onCopy={onCopyMessage}

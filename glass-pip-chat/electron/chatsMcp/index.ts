@@ -1,5 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { forwardDelivery } from './forwardDelivery.js';
+import { usageTool } from './usage.js';
+import { readProviderUsage } from '../agent/providerUsage.js';
 import { listRunningSessions } from '../agent/runningSessions.js';
 import { messageQueue } from '../agent/messageQueue.js';
 // ally-chats: an MCP server inside Ally that lets any agent find, read and
@@ -17,7 +19,7 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import { childEnv, launcherFor, resolveAgentBinary } from '../agent/binaries.js';
 import { listCodexChats, loadCodexChat } from '../agent/codexHistory.js';
-import { startAgentRun } from '../agent/runner.js';
+import { startForwardedRun } from './forwardRun.js';
 import { listAgentSessions, loadAgentSession } from '../agent/sessions.js';
 import type { AgentConfig, AgentProvider } from '../agent/types.js';
 import { handleRpc, type CallContext, type ToolDef, type ToolResult } from './protocol.js';
@@ -116,9 +118,9 @@ async function send(target: { provider: AgentProvider; id: string; cwd?: string;
   // Another request can arrive while native running-session discovery is pending.
   if (forwarding.has(key)) return { status: 'error', reply: '', error: 'that chat is still answering a forwarded message' };
   forwarding.add(key);
-  return forwardDelivery(emit => startAgentRun({ provider: target.provider, prompt, cwd: target.cwd || cfg.defaultCwd,
+  return forwardDelivery(emit => startForwardedRun({ provider: target.provider, prompt, cwd: target.cwd || cfg.defaultCwd,
     sessionId: target.id, permission: cfg.permission, codexDesktop: cfg.codexDesktop === true },
-    (_runId, event) => emit(event), target.provider === 'claude' ? cfg.claudePath : cfg.codexPath, undefined, 'desktop'),
+    (_runId, event) => emit(event), target.provider === 'claude' ? cfg.claudePath : cfg.codexPath),
     opts.wait, opts.timeoutMs, () => forwarding.delete(key));
 }
 
@@ -133,7 +135,7 @@ function open(target: { provider: AgentProvider; id: string; cwd?: string; title
   for (const cb of openListeners) { try { cb(req); } catch { /* listeners must not break tools */ } }
 }
 
-const tools = () => [...chatTools({ index, load, send, open }), ...deviceTools.values()];
+const tools = () => [...chatTools({ index, load, send, open }), usageTool(() => readProviderUsage(agentConfig().codexPath)), ...deviceTools.values()];
 
 // ---------------------------------------------------------------------------
 // HTTP server

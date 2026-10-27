@@ -17,7 +17,7 @@ export function compactUserMessage(raw: string) {
   if (/^\s*<send_user_message_question_reply>/.test(content)) {
     return { label: 'You answered', text: 'Question reply received', questions: [] as string[], original: raw };
   }
-  return { label: 'You', text: content, questions: [] as string[] };
+  return { label: 'You', text: content, questions: [] as string[], ...(content !== raw ? { original: raw } : {}) };
 }
 
 /** Only the exact standalone footer produced by Ally is status metadata. */

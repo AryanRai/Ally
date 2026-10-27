@@ -41,6 +41,8 @@ function retainUsage(previous: Message[], incoming: Message[]): Message[] {
 export class ChatManager {
   private static instance: ChatManager;
   private state: ChatState;
+  private compactCache = localStorage.getItem('ally-compact-chat-cache') === 'true';
+  private recoveringStorage = false;
   selectionRestored = true;
 
   private constructor() {
@@ -117,7 +119,38 @@ export class ChatManager {
       const chat = this.getActiveChat();
       const selected: SavedSelection | null = chat && { id: chat.id, title: chat.title, agent: chat.agent, createdAt: chat.createdAt, updatedAt: chat.updatedAt };
       localStorage.setItem(SELECTION_KEY, JSON.stringify(selected));
-    } catch (error) { console.error('Failed to save selected chat:', error); }
+    } catch (error) { this.recoverStorage(error); console.error('Failed to save selected chat:', error); }
+  }
+
+  /** Keep full overflow data before freeing the reloadable native transcript cache. */
+  private recoverStorage(error: unknown): void {
+    if (!(error instanceof DOMException) || error.name !== 'QuotaExceededError' || this.recoveringStorage || typeof indexedDB === 'undefined') return;
+    this.recoveringStorage = true;
+    const backup = JSON.stringify(this.state), previous = localStorage.getItem(CHAT_STORAGE_KEY);
+    const request = indexedDB.open('ally-chat-recovery', 1);
+    request.onupgradeneeded = () => request.result.createObjectStore('snapshots');
+    request.onerror = () => { this.recoveringStorage = false; };
+    request.onsuccess = () => {
+      const db = request.result, tx = db.transaction('snapshots', 'readwrite');
+      tx.objectStore('snapshots').put({ previous, current: backup, savedAt: Date.now() }, 'before-compaction');
+      tx.oncomplete = () => {
+        db.close();
+        try {
+          localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(this.cachedState(true)));
+          localStorage.setItem('ally-compact-chat-cache', 'true');
+          this.compactCache = true;
+          this.saveSelection();
+        } catch (failure) { console.error('Chat cache recovery failed; full backup retained:', failure); }
+        finally { this.recoveringStorage = false; }
+      };
+      tx.onabort = tx.onerror = () => { db.close(); this.recoveringStorage = false; };
+    };
+  }
+
+  private cachedState(compact = this.compactCache): ChatState {
+    if (!compact) return this.state;
+    return { ...this.state, chats: this.state.chats.map(chat => chat.agent?.sessionId && !chat.sendFailure
+      ? { ...chat, messages: [] } : chat) };
   }
 
   private createInitialState(): ChatState {
@@ -152,8 +185,9 @@ export class ChatManager {
   private saveState(): void {
     this.saveSelection();
     try {
-      localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(this.state));
+      localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(this.cachedState()));
     } catch (error) {
+      this.recoverStorage(error);
       console.error('Failed to save chat state:', error);
     }
   }

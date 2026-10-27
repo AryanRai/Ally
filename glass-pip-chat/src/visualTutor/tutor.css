@@ -42,6 +42,8 @@ button:focus-visible { outline: 2px solid #70f0c0; outline-offset: 2px; }
 .tutor-diagram-toggle { font-size: 10px; color: #ffffffa6; padding: 5px 8px; }
 .tutor-panel { max-width: calc(100% - 20px); }
 .tutor-panel.is-user-sized { display: flex; flex-direction: column; overflow: hidden; }
+.tutor-panel.is-rich-study { width: min(760px, calc(100% - 24px)); height: min(700px, calc(100% - 48px)); display: flex; flex-direction: column; overflow: hidden; }
+.tutor-panel.is-rich-study > :not(.tutor-diagram) { flex-shrink: 0; }
 .tutor-panel.is-user-sized > :not(.tutor-diagram) { flex-shrink: 0; }
 .tutor-diagram-fill { display: flex; flex-direction: column; flex: 1 1 0; min-height: 60px; max-height: none; overflow: hidden; }
 .tutor-diagram-fill > button { flex-shrink: 0; align-self: flex-start; }

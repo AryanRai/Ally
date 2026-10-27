@@ -85,6 +85,25 @@ export class PhoneControl {
     if (grant) this.grants.delete(key);
     return undefined;
   }
+  /** Handoff can request a session without inspecting a screen or performing an operation. */
+  async requestSession(deviceId:string,chatId:string,signal:AbortSignal) {
+    if(signal.aborted)throw Error('Handoff control request cancelled.');
+    if(!this.connected(deviceId)||!AccessibilityPhone.supported(this.hub,deviceId))throw Error('On-device control is unavailable.');
+    const existing=this.activeGrant(deviceId,chatId);if(existing)return existing;
+    if(this.busy.has(deviceId))throw Error('This phone already has an active control request.');
+    this.busy.add(deviceId);
+    try {
+    const connection=this.hub.connectionSignal(deviceId);
+    if(!(await this.device.status(deviceId,signal)).enabled)throw Error('Enable Ally control in Android Accessibility first.');
+    const answer=await this.hub.command('phone','phone_control_approve',{deviceId,chatId,title:'Phone handoff · 15-minute control session',body:'Allow the selected Ally chat to inspect and control this phone for 15 minutes. A phone notification has Stop. No screen is inspected by starting this session. Credentials, payments, security approvals and communications remain protected.',acceptLabel:'Allow 15 minutes'},signal);
+    if(!answer.ok)throw Error(answer.message);
+    if(signal.aborted||!connection||connection.aborted||this.hub.connectionSignal(deviceId)!==connection)throw Error('Phone disconnected before grant.');
+    const grant={id:`grant-${randomUUID()}`,deviceId,chatId,expiresAt:this.now()+15*60000};
+    await this.device.grant(grant,'Phone handoff',signal);
+    for(const [key,value] of this.grants)if(value.deviceId===deviceId)this.grants.delete(key);
+    this.grants.set(`${deviceId}|${chatId}`,grant);return grant;
+    }finally{this.busy.delete(deviceId);}
+  }
 
   async execute(args: Record<string, unknown>, caller?: string, parentSignal?: AbortSignal): Promise<ToolResult> {
     const chatId = originatingChat(args, caller);

@@ -6,6 +6,8 @@ import type { AgentEvent, AgentRunOptions, AgentInteractionHandler } from './typ
 import { startUserQuestions, WATCH_QUESTION_INSTRUCTIONS } from './userQuestions.js';
 import { ALLY_BROWSER_INSTRUCTIONS } from './browserContext.js';
 import { allyChatsMcpServers } from '../chatsMcp/registry.js';
+import { codexApprovalPolicy } from './approvalPolicy.js';
+import { codexAccessSettings, unsupportedAccessUpdate, type AccessControl } from './access.js';
 
 export function codexThreadConfig(opts: AgentRunOptions, interactive = false): Record<string, unknown> {
   const servers: Record<string, { url: string }> = {};
@@ -14,10 +16,7 @@ export function codexThreadConfig(opts: AgentRunOptions, interactive = false): R
   // Ally's cross-chat tools (find / read / forward to other chats)
   for (const [name, url] of Object.entries(allyChatsMcpServers(opts))) servers[name] = { url };
   return {
-    cwd: opts.cwd, approvalPolicy: interactive ? 'on-request' : 'never',
-    // Full access reduces eligible prompts through Codex's supported reviewer.
-    // Keep on-request and the UI handler: mandatory browser forms still need a human.
-    ...(interactive ? { approvalsReviewer: opts.permission === 'full' ? 'auto_review' : 'user' } : {}),
+    cwd: opts.cwd, ...codexApprovalPolicy(opts.permission, interactive),
     sandbox: opts.permission === 'full' ? 'danger-full-access' : opts.permission === 'readonly' ? 'read-only' : 'workspace-write',
     ...(opts.model && opts.model !== 'default' ? { model: opts.model } : {}),
     ...(!opts.ephemeral || opts.robot ? { developerInstructions: [!opts.ephemeral && ALLY_BROWSER_INSTRUCTIONS, opts.robot?.instructions].filter(Boolean).join('\n\n') } : {}),
@@ -37,13 +36,15 @@ export async function codexResumeConfig(rpc: CodexRpc, config: Record<string, un
 }
 
 /** Starts asynchronously so stop remains available even during initialization/resume. */
-export function runCodexTurn(opts: AgentRunOptions, emit: (event: AgentEvent) => void, binary?: string, interact?: AgentInteractionHandler, interactionSurface: 'watch' | 'desktop' = 'watch'): { stop: () => void; steer: (text: string, images?: string[]) => Promise<boolean> } {
+export function runCodexTurn(opts: AgentRunOptions, emit: (event: AgentEvent) => void, binary?: string, interact?: AgentInteractionHandler, interactionSurface: 'watch' | 'desktop' = 'watch', recoverOwner?: (emit: (event: AgentEvent) => void) => { stop: () => void; steer: (text: string, images?: string[]) => Promise<boolean> } & AccessControl): { stop: () => void; steer: (text: string, images?: string[]) => Promise<boolean> } & AccessControl {
+  let recovered: ({ stop: () => void; steer: (text: string, images?: string[]) => Promise<boolean> } & AccessControl) | undefined;
   let rpc: CodexRpc | undefined;
   let sessionId: string | undefined;
   let turnId: string | undefined;
   let stopped = false;
   let finished = false;
   let dispatched = false;
+  let priorEffort: string | null | undefined;
   let stopTimer: ReturnType<typeof setTimeout> | undefined;
   let userQuestions: Awaited<ReturnType<typeof startUserQuestions>> | undefined;
   const startedAt = Date.now();
@@ -57,9 +58,16 @@ export function runCodexTurn(opts: AgentRunOptions, emit: (event: AgentEvent) =>
     interactions.clear();
     userQuestions?.close();
     clearTimeout(stopTimer);
-    // Close before publishing completion, releasing writer ownership to Codex.
-    rpc?.close();
-    emit({ ...event, sessionId, usage: { ...event.usage, durationMs: Date.now() - startedAt } });
+    const complete = () => {
+      // Restore Study's temporary setting before releasing the writer/queue.
+      if (rpc) { rpc.onClose = undefined; rpc.close(); }
+      emit({ ...event, sessionId, usage: { ...event.usage, durationMs: Date.now() - startedAt } });
+    };
+    if (opts.reasoningEffort && dispatched && priorEffort !== undefined && rpc && sessionId) {
+      void rpc.request('thread/settings/update', { threadId: sessionId, effort: priorEffort }, 3000).catch(() => {
+        emit({ kind: 'stderr', text: 'Study could not restore the previous reasoning setting. Check it in Codex before the next typed reply.' });
+      }).finally(complete);
+    } else complete();
   };
   void (async () => {
     try {
@@ -90,9 +98,12 @@ export function runCodexTurn(opts: AgentRunOptions, emit: (event: AgentEvent) =>
         if (stopped) { finish({ kind: 'done' }); return; }
         const resumeConfig = await codexResumeConfig(rpc, config);
         if (finished || stopped) { finish({ kind: 'done' }); return; }
-        await rpc.request('thread/resume', { threadId: sessionId, ...resumeConfig, excludeTurns: true });
+        const resumed = await rpc.request('thread/resume', { threadId: sessionId, ...resumeConfig, excludeTurns: true });
+        priorEffort = resumed.reasoningEffort;
       } else {
-        sessionId = (await rpc.request('thread/start', { ...config, ephemeral: !!opts.ephemeral })).thread.id;
+        const created = await rpc.request('thread/start', { ...config, ephemeral: !!opts.ephemeral });
+        sessionId = created.thread.id;
+        priorEffort = created.reasoningEffort;
         if (!opts.ephemeral) await rpc.request('thread/name/set', { threadId: sessionId, name: chatTitle(opts.prompt) }).catch(() => { /* Naming must never prevent an authorized send. */ });
       }
       if (!opts.ephemeral && !finished) emit({ kind: 'session', sessionId: sessionId! });
@@ -110,21 +121,40 @@ export function runCodexTurn(opts: AgentRunOptions, emit: (event: AgentEvent) =>
       const result = await rpc.request('turn/start', {
         threadId: sessionId,
         input: [{ type: 'text', text: opts.prompt }, ...(opts.images ?? []).map(file => ({ type: 'localImage', path: file }))],
+        ...(opts.reasoningEffort && priorEffort !== undefined ? { effort: opts.reasoningEffort } : {}),
       });
       turnId = result.turn.id;
       if (!finished) emit({ kind: 'accepted', sessionId: sessionId!, turnId });
       if (stopped && !finished) await rpc.request('turn/interrupt', { threadId: sessionId, turnId });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      // Discovery and writer ownership can race during desktop account/reconnect
+      // transitions. A rejected resume precedes turn/start: no user input was
+      // delivered. Recheck the exact desktop owner once, with no fallback loop.
+      if (!dispatched && !finished && !stopped && opts.sessionId && opts.codexDesktop && /active writer/i.test(message) && recoverOwner) {
+        for (const controller of interactions.values()) controller.abort();
+        interactions.clear(); userQuestions?.close(); if (rpc) { rpc.onClose = undefined; rpc.close(); } rpc = undefined;
+        emit({ kind: 'stderr', text: 'Reconnecting to the existing Codex chat…' });
+        try { recovered = recoverOwner(finish); } catch (failure) { finish({ kind: 'done', isError: true, error: failure instanceof Error ? failure.message : String(failure) }); }
+        return;
+      }
       const writerError = dispatched
         ? 'Codex reported a chat ownership conflict after submission. Check the same chat in Codex before retrying; your message may already have been accepted. Ally did not resend it or create a copy.'
         : opts.codexDesktop
           ? 'Ally could not connect to this chat through its Codex desktop owner. Open the same chat in Codex and retry. Your message was not sent. No copy was created.'
           : 'This chat is open in Codex. Enable Codex desktop connection in Ally Settings to continue it here. Your message was not sent. No copy was created.';
-      finish({ kind: 'done', isError: !stopped, error: stopped ? undefined : /active writer/i.test(message) ? writerError : message });
+      finish({ kind: 'done', delivery: dispatched ? 'uncertain' : 'not_sent', isError: !stopped, error: stopped ? undefined : /active writer/i.test(message) ? writerError : message });
     }
   })();
-  return { steer: async (text, images) => {
+  return { setPermission: async permission => {
+    if (recovered) return recovered.setPermission ? recovered.setPermission(permission) : 'next_message';
+    if (finished || stopped) throw Error('This reply has finished; choose access again for the next message.');
+    if (!rpc || !sessionId || !turnId) throw Error('Still connecting. Try changing access once the reply starts.');
+    try { await rpc.request('thread/settings/update', { threadId: sessionId, ...codexAccessSettings(permission, opts.cwd) }); }
+    catch (error) { if (unsupportedAccessUpdate(error)) return 'next_message'; throw error; }
+    return 'current_reply';
+  }, steer: async (text, images) => {
+    if (recovered) return recovered.steer(text, images);
     if (finished || stopped) throw new Error('This response has finished. Send your input as a new message.');
     if (!rpc || !sessionId || !turnId) return false;
     const expected = turnId;
@@ -132,6 +162,7 @@ export function runCodexTurn(opts: AgentRunOptions, emit: (event: AgentEvent) =>
     if (result.turnId !== expected) throw new Error('Codex did not confirm this input. Check the chat before sending it again.');
     return true;
   }, stop: () => {
+    if (recovered) { recovered.stop(); return; }
     if (finished || stopped) return;
     stopped = true;
     userQuestions?.close();

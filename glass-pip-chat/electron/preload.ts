@@ -10,7 +10,7 @@ const pipAPI = {
   close: () => ipcRenderer.send('pip:close'),
   
   // Window resizing
-  resizeWindow: (width: number, height: number) => ipcRenderer.send('window:resize', { width, height }),
+  resizeWindow: (width: number, height: number, mode?: 'collapsed' | 'expanded') => ipcRenderer.send('window:resize', { width, height, mode }),
   getWindowSize: () => ipcRenderer.invoke('window:get-size'),
   captureQueryScreen: () => ipcRenderer.invoke('context:query-screen'),
   onManualResize: (callback: (size: { width: number; height: number }) => void) => {
@@ -40,6 +40,10 @@ const pipAPI = {
   },
   surfaceReady: (id: number) => ipcRenderer.send('surface:ready', id),
   surfacePreview: (value: unknown) => ipcRenderer.send('surface:preview', value),
+    onHandoff: (callback: (value: import('./devices/handoffPresentation.js').HandoffVisual | null) => void) => {
+      const handler=(_:unknown,value:import('./devices/handoffPresentation.js').HandoffVisual|null)=>callback(value);
+      ipcRenderer.on('surface:handoff',handler);return()=>{ipcRenderer.removeListener('surface:handoff',handler);};
+    },
   nativeSettings: (change?: { key: string; value: string | number | boolean }) => ipcRenderer.invoke('surface:native-settings', change),
 
   // Get platform info
@@ -146,6 +150,7 @@ const pipAPI = {
   },
 
   tutor: {
+    study: (id: string, words: string) => ipcRenderer.invoke('tutor:study', id, words),
     action: (id: string, action: import('./visualTutor/types').TutorAction) => ipcRenderer.invoke('tutor:action', id, action),
     show: (id: string, point?: { x: number; y: number }) => ipcRenderer.invoke('tutor:show', id, point),
     start: (chatId: string, displayId?: number, circleCaptureId?: string) => ipcRenderer.invoke('tutor:start', chatId, displayId, circleCaptureId),
@@ -171,6 +176,7 @@ const pipAPI = {
     send: (opts: Record<string, unknown>) => ipcRenderer.invoke('agent:send', opts),
     localImage: (source: string) => ipcRenderer.invoke('agent:localImage', source),
     interactionHistory: (chatId: string) => ipcRenderer.invoke('agent:interactionHistory', chatId),
+    pendingInteractions: () => ipcRenderer.invoke('agent:pendingInteractions'),
     answerInteraction: (chatId: string, id: string, answer: import('./watch/approvals').ApprovalAnswer) => ipcRenderer.invoke('agent:answerInteraction', chatId, id, answer),
     onInteractionsChanged: (callback: () => void) => {
       const handler = () => callback(); ipcRenderer.on('agent:interactionsChanged', handler);
@@ -192,6 +198,12 @@ const pipAPI = {
       return () => { ipcRenderer.removeListener('agent:selection', handler); };
     },
     loadSession: (provider: 'claude' | 'codex', id: string, revision?: string) => ipcRenderer.invoke('agent:loadSession', provider, id, revision),
+    liveStudyReply: (key: string) => ipcRenderer.invoke('agent:liveStudyReply', key),
+    onLiveStudyReply: (callback: (reply: import('./watch/liveStudyReply').LiveStudyReply) => void) => {
+      const handler = (_: unknown, reply: import('./watch/liveStudyReply').LiveStudyReply) => callback(reply);
+      ipcRenderer.on('agent:liveStudyReply', handler);
+      return () => ipcRenderer.removeListener('agent:liveStudyReply', handler);
+    },
     readStates: (keys?: string[]) => ipcRenderer.invoke('agent:readStates', keys),
     markRead: (provider: 'claude' | 'codex', id: string, revision: string) => ipcRenderer.invoke('agent:markRead', provider, id, revision),
     onSessionsChanged: (callback: (provider: 'claude' | 'codex') => void) => {

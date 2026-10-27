@@ -7,6 +7,9 @@ import type { AgentProvider, AgentSessionSummary } from './types.js';
 import { readCodexActivity } from './codexActivity.js';
 import { chatTitle } from './chatTitle.js';
 import { readDesktopActivity } from './codexDesktop.js';
+import { activityPreview } from './activityPreview.js';
+const publicPreviews = new Map<string, string>();
+export const sessionActivityText = (provider: AgentProvider, id: string) => publicPreviews.get(`${provider}:${id}`) || '';
 
 const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
 const managed = new Map<string, AgentSessionSummary>();
@@ -81,6 +84,8 @@ export async function scanRunningSessions(home = os.homedir(), now = Date.now(),
         const title = titles.get(id) || (customTitle !== 'Chat' ? customTitle : '') || textContent(prompt?.message?.content ?? prompt?.payload?.content).replace(/<[^>]+>[\s\S]*?<\/[^>]+>/g, '').trim() || `${provider === 'codex' ? 'Codex' : 'Claude'} chat`;
         const summary = { id, provider, title: chatTitle(title), cwd, updatedAt: native?.running ? now : stat.mtimeMs };
         const key = `${provider}:${id}`;
+        publicPreviews.set(key, activityPreview(tail, provider));
+        if (publicPreviews.size > 256) publicPreviews.delete(publicPreviews.keys().next().value!);
         const live = provider === 'codex' ? native?.running === true || activity?.pending === true : isRunning(claudeTurnPending(tail), claudeActivityAt(tail, stat.mtimeMs), now);
         const status = live ? 'running' : provider === 'codex' ? activity?.status : claudeTerminalStatus(tail);
         if (status && status !== 'running' && (observed.get(key)?.updatedAt ?? 0) <= summary.updatedAt) observed.set(key, { ...summary, status });

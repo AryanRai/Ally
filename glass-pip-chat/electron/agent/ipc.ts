@@ -20,8 +20,11 @@ import { chatSelection, type SharedChatSelection } from './selection.js';
 import { generateGreeting } from './greeting.js';
 import { registerClaudeLoginIpc } from './claudeLogin.js';
 import { desktopInteraction } from './desktopApprovals.js';
+import { startNativeDesktopApprovals } from './nativeDesktopApprovals.js';
 import { localImage } from './localImage.js';
 import { startWatchBridge } from '../watch/bridge.js';
+import { liveStudyReplies } from '../watch/liveStudyReply.js';
+import { revealFloatingSurface } from '../surface/coordinator.js';
 import type { AgentConfig, AgentProvider, AgentRunOptions } from './types.js';
 
 const CONFIG_FILE = () => path.join(app.getPath('userData'), 'agent-config.json');
@@ -48,7 +51,9 @@ export function registerAgentIpc(getWindow: () => BrowserWindow | null, onConfig
   const stopInteractionEvents = interactions.subscribe((event) => {
     const win = getWindow(); if (!win || win.isDestroyed()) return;
     win.webContents.send('agent:interactionsChanged');
-    if (event.type === 'interaction' && event.request.kind === 'question') {
+    if (event.type === 'interaction') {
+      revealFloatingSurface();
+      if (win.isMinimized()) win.restore();
       if (!win.isVisible()) win.show();
       win.flashFrame(true);
     }
@@ -58,8 +63,9 @@ export function registerAgentIpc(getWindow: () => BrowserWindow | null, onConfig
   configureUnread(path.join(app.getPath('userData'), 'chat-read-state.json'));
   messageQueue.configure(path.join(app.getPath('userData'), 'message-queue.json'));
   const stopNativeUnread = startNativeUnread();
+  const stopNativeApprovals = startNativeDesktopApprovals(() => !!config.codexDesktop);
   const stopUnreadTracking = startUnreadTracking();
-  app.on('will-quit', () => { stopNativeUnread(); stopUnreadTracking(); });
+  app.on('will-quit', () => { stopNativeApprovals(); stopNativeUnread(); stopUnreadTracking(); });
   configureCodexMigrations(path.join(app.getPath('userData'), 'codex-migrations.json'));
   configureCodexHistory(config.codexPath);
   onConfig?.(config);
@@ -132,6 +138,7 @@ export function registerAgentIpc(getWindow: () => BrowserWindow | null, onConfig
     if (typeof chatId !== 'string' || !/^(codex|claude):[\w-]{8,100}$/.test(chatId)) throw Error('Select the original chat');
     return interactions.history(chatId);
   });
+  ipcMain.handle('agent:pendingInteractions', event => { fromMain(event);return interactions.list(); });
   ipcMain.handle('agent:answerInteraction', (event, chatId: string, id: string, answer: import('../watch/approvals').ApprovalAnswer) => {
     fromMain(event);
     const request = interactions.list(chatId).find(request => request.id === id);
@@ -183,6 +190,12 @@ export function registerAgentIpc(getWindow: () => BrowserWindow | null, onConfig
     if (accepted && provider === 'codex') acknowledgeNativeUnread(id);
     return accepted;
   });
+  ipcMain.handle('agent:liveStudyReply', (event, key: string) => event.sender === getWindow()?.webContents && typeof key === 'string' ? liveStudyReplies.read(key) : null);
+  const stopLiveStudy = liveStudyReplies.subscribe(reply => {
+    const win = getWindow();
+    if (win && !win.isDestroyed()) win.webContents.send('agent:liveStudyReply', reply);
+  });
+  app.once('will-quit', () => { stopLiveStudy(); liveStudyReplies.close(); });
   ipcMain.handle('agent:loadSession', async (_, provider: AgentProvider, id: string, revision?: string) => {
     const readState = unreadState(provider, id); // Captured before loading: never acknowledge a later unseen reply.
     const snapshot = provider === 'codex' ? await loadCodexChat(id, revision) : await loadAgentSession(provider, id, revision);

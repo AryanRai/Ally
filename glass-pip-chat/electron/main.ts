@@ -11,6 +11,7 @@ import { registerCursorIpc, stopCursorWatch } from './ipc/cursor.js';
 import { registerAgentIpc } from './agent/ipc.js';
 import { registerCircleIpc, startCircle } from './capture/circle.js';
 import { registerVisualTutorIpc } from './visualTutor/ipc.js';
+import { registerBrowserTools } from './browser/index.js';
 import { startShakeDetection, stopShakeDetection } from './capture/shake.js';
 import { registerSurfaceCoordinator, revealFloatingSurface, toggleAllySurface } from './surface/coordinator.js';
 
@@ -52,6 +53,7 @@ registerChatsMcp(getWindow);
 registerCursorIpc();
 registerCircleIpc();
 registerVisualTutorIpc(getWindow);
+registerBrowserTools();
 registerAgentIpc(getWindow, config => {
   // `screen` (used by the detector) is only available once the app is ready
   void app.whenReady().then(() => {

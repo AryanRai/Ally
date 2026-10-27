@@ -4,12 +4,15 @@ import { cn } from '../lib/utils';
 import { ThemeUtils } from '../utils/themeUtils';
 import { useAgentGreeting } from '../hooks/useAgentGreeting';
 import { useNotchPreview } from '../hooks/useNotchPreview';
+import { useLiveStudyReply } from '../hooks/useLiveStudyReply';
 import { SettingsManager } from '../utils/settingsManager';
 import type { AppSettings } from '../types/settings';
 import type { Segment } from '../types/chat';
 import type { AgentPermission } from '../types/agent';
 
 import { useWindowManagement } from '../hooks/useWindowManagement';
+import { useWindowSizing } from '../hooks/useWindowSizing';
+import ExpandedChatSurface from './chat/ExpandedChatSurface';
 import { useContextMonitoring } from '../hooks/useContextMonitoring';
 import { useSpeechService } from '../hooks/useSpeechService';
 import { useEditState } from '../hooks/useEditState';
@@ -18,6 +21,8 @@ import { useChatDrafts } from '../hooks/useChatDrafts';
 import { useAgentConversation } from '../hooks/useAgentConversation';
 import { useChatInteractions } from '../hooks/useChatInteractions';
 import ChatInteractionCard from './chat/ChatInteractionCard';
+import PendingDecisionOverlay from './chat/PendingDecisionOverlay';
+import HandoffHalo from './chat/HandoffHalo';
 import { interactionTimeline } from '../lib/interactionTimeline';
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
 import { useExternalSessions } from '../hooks/useExternalSessions';
@@ -102,9 +107,14 @@ export default function GlassChatPiP() {
 
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const activeChat = chats.activeChat;
-  const selectionError = useSharedChatSelection(activeChat, chats.selectionRestored, conversation.permission, conversation.openSession);
+  const selectionError = useSharedChatSelection(activeChat, chats.selectionRestored, conversation.permission, conversation.openSession, chats.setAgent, {
+    setPermission: conversation.setPermission,
+    selectLocal: id => { if (!chats.getChat(id)) return false; chats.select(id); return true; },
+  });
   const messages = activeChat?.messages ?? [];
   const sessionKey = activeChat?.agent?.sessionId ? `${activeChat.agent.provider}:${activeChat.agent.sessionId}` : undefined;
+  const studyLive = useLiveStudyReply(sessionKey);
+  const liveStudy = studyLive?.working ? studyLive : null;
   const decisions = useChatInteractions(sessionKey);
   const timeline = useMemo(() => state.collapsed ? [] : interactionTimeline(messages, decisions.rows), [messages, decisions.rows, state.collapsed]);
   const pendingDecisions = decisions.rows.filter(row => row.state === 'pending');
@@ -122,13 +132,13 @@ export default function GlassChatPiP() {
   const runningChatTitle = chats.chats.find(chat => chat.id === runningChatId)?.title || 'another chat';
   // The active chat is mid-turn in the Claude Code / Codex app: show it working, but
   // Stop belongs to that app (Ally only reads its transcript)
-  const externalWorking = !activeIsWorking && (conversation.externalRunning || selectedSessionRunning(activeChat, external.running));
+  const externalWorking = !activeIsWorking && (!!liveStudy || conversation.externalRunning || selectedSessionRunning(activeChat, external.running));
   const externalApp = activeChat?.agent?.provider === 'codex' ? 'Codex' : 'Claude Code';
   const externalTool = externalWorking
     ? [...((messages.at(-1)?.metadata?.segments ?? []) as Segment[])].reverse().find(s => s.type === 'tool' && s.toolExecution?.status === 'executing')?.toolExecution
     : undefined;
   const externalStatus = externalTool ? `Working · ${externalTool.name}` : 'Thinking…';
-  const tutor = useVisualTutor(activeChat?.id, conversation.send);
+  const tutor = useVisualTutor(activeChat?.id, conversation.send, activeChat?.agent?.sessionId ? `${activeChat.agent.provider}:${activeChat.agent.sessionId}` : activeChat?.id);
   useEffect(() => { void window.pip?.circle?.setChat?.(activeChat?.id, activeChat?.title).catch(() => {}); }, [activeChat?.id, activeChat?.title]);
   const greeting = useAgentGreeting(conversation.provider, conversation.modelName);
   const lastMessage = messages.at(-1);
@@ -173,7 +183,9 @@ export default function GlassChatPiP() {
 
     const includeClipboard = context.shouldIncludeContext(fromQuickInput, state.collapsed);
     if (includeClipboard) context.clearNewContextFlag();
-    const result = await conversation.send(tutor.decorate(text), 'text', { mode, image: attachment.image, context: includeClipboard ? context.contextData.clipboard : undefined });
+    const result = tutor.board?.presentation === 'study'
+      ? await tutor.study(includeClipboard ? `Context (from my clipboard):\n${context.contextData.clipboard}\n\n${text}` : text, activeIsWorking || externalWorking)
+      : await conversation.send(tutor.decorate(text), 'text', { mode, image: attachment.image, context: includeClipboard ? context.contextData.clipboard : undefined });
     if (result?.error) {
       // Preserve anything typed meanwhile; a failure also keeps a saved copy per chat.
       if (fromQuickInput) setQuickInput(current => current || text);
@@ -187,6 +199,10 @@ export default function GlassChatPiP() {
     const text = speech.lastRecognizedText;
     if (!text || !speech.voiceModeEnabled || speech.recognitionId === lastSpeechRef.current) return;
     lastSpeechRef.current = speech.recognitionId;
+    if (tutor.board?.presentation === 'study') {
+      void tutor.study(text, activeIsWorking || externalWorking).then(result => { if (result?.error) setInput(current => current ? `${current}\n${text}` : text); });
+      return;
+    }
     const attachment = tutor.claimAttachment(activeIsWorking || externalWorking);
     if (attachment.blocked) { setInput(current => current ? `${current}\n${text}` : text); return; }
     if (screenAutoAttach && !attachment.image) {
@@ -371,17 +387,7 @@ export default function GlassChatPiP() {
     }
   }, [state.size, state.collapsed, padding, manualSize?.width]);
 
-  useEffect(() => {
-    if (!window.pip) return;
-    setIsResizing(true);
-    const delay = state.collapsed ? 200 : 50; // let collapse cleanup settle first
-    const resize = setTimeout(() => window.pip.resizeWindow(contentWidth + padding * 2, contentHeight + padding * 2), delay);
-    const reset = setTimeout(() => setIsResizing(false), 400 + delay);
-    return () => {
-      clearTimeout(resize);
-      clearTimeout(reset);
-    };
-  }, [contentWidth, contentHeight, padding, state.collapsed]);
+  useWindowSizing(contentWidth + padding * 2, contentHeight + padding * 2, state.collapsed, setIsResizing);
 
   // Folders the user's chats already run in, newest first, for the folder picker
   const recentFolders = useMemo(() => {
@@ -443,6 +449,7 @@ export default function GlassChatPiP() {
         style={{ width: '100%', height: '100%' }}
       >
         <FlowField state={backdropState} />
+        <PendingDecisionOverlay/>
         {/* Orbit Mary's panel glow: while the agent works and while you type */}
         <WindowGlow agentWorking={isTyping || externalWorking} userTyping={!!(state.collapsed ? quickInput : input).trim()} />
 
@@ -502,7 +509,7 @@ export default function GlassChatPiP() {
                 theme={theme}
                 key={activeChat?.id ?? 'empty'}
                 chatTitle={activeChat?.title}
-                workingStatus={conversation.inputStatus || (activeIsWorking ? workingStatus : meetingWorking ? (meetingTurn?.text ? 'Writing meeting notes…' : 'Working on meeting notes…') : externalWorking ? externalStatus : workingStatus)}
+                workingStatus={conversation.inputStatus || liveStudy?.activity || (activeIsWorking ? workingStatus : meetingWorking ? (meetingTurn?.text ? 'Writing meeting notes…' : 'Working on meeting notes…') : externalWorking ? externalStatus : workingStatus)}
                 stopDisabledReason={externalWorking && !meetingWorking && !conversation.canStop ? `Live in ${externalApp} · Stop there` : undefined}
                 sendFailure={activeChat?.sendFailure?.message || screenNotice}
                 onHeightChange={setCollapsedBodyHeight}
@@ -531,7 +538,9 @@ export default function GlassChatPiP() {
                 showContext={context.showContext}
                 onContextToggle={() => context.setShowContext(!context.showContext)}
                 uiSettings={appSettings.ui}
-                currentResponse={currentResponse || meetingTurn?.text}
+                currentResponse={currentResponse || liveStudy?.text || (externalWorking && lastMessage?.role === 'assistant' ? lastMessage.content : '') || meetingTurn?.text}
+                currentQuestion={liveStudy?.question}
+                liveResponseId={liveStudy?.id}
                 responseSegments={currentResponse ? streamingSegments : undefined}
                 meetingControls={<MessageQueueStack chatId={activeChat?.agent?.sessionId ? `${activeChat.agent.provider}:${activeChat.agent.sessionId}` : undefined} />}
                 drawingControls={<><CircleSelectionControls /><VisualTutorControls compact tutor={tutor} disabled={!activeChat || activeIsWorking || externalWorking} /></>}
@@ -583,18 +592,11 @@ export default function GlassChatPiP() {
           </div>
 
           {/* Content */}
-          <AnimatePresence mode="wait">
-            {!state.collapsed && (
-              <motion.div
-                key="content"
-                className="flex flex-col h-[calc(100%-44px)]"
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                transition={{ duration: 0.2 }}
-              >
+          <ExpandedChatSurface
+            key={activeChat?.id ?? 'empty'}
+            collapsed={state.collapsed}
+            transcript={<>
                 {/* Transcript (AI Elements): sticks to the bottom while the agent streams */}
-                <div className="relative flex min-h-0 flex-1 flex-col">
                 <ContextCards perception={perception} chat={activeChat} />
                 <Conversation className="flex-1 select-text">
                   <ConversationContent className={cn('px-3 py-3', { compact: 'gap-3', normal: 'gap-5', comfortable: 'gap-7' }[appSettings.ui.messageSpacing])}>
@@ -631,7 +633,8 @@ export default function GlassChatPiP() {
                   </ConversationContent>
                   <ConversationScrollButton />
                 </Conversation>
-                </div>
+            </>}
+          >
 
                 {activeChat?.sendFailure && <div role="alert" className="border-t border-border px-3 py-2 text-xs text-amber-200">
                   <p>{activeChat.sendFailure.message}</p>
@@ -692,13 +695,12 @@ export default function GlassChatPiP() {
                     </motion.div>
                   )}
                 </AnimatePresence>
-              </motion.div>
-            )}
-          </AnimatePresence>
+          </ExpandedChatSurface>
         </div>
       </motion.div>
 
       <ClaudeLoginDialog />
+      <HandoffHalo />
       <PerceptionDebug open={perceptionDebug} onOpenChange={setPerceptionDebug} perception={perception} />
 
       <SettingsModal

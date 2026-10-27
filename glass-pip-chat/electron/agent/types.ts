@@ -26,6 +26,8 @@ export interface AgentRunOptions {
   sessionId?: string;
   /** Model alias/slug; 'default' or empty uses the agent's own default */
   model?: string;
+  /** Per-turn Study effort; restore the chat's prior setting after the turn. */
+  reasoningEffort?: 'low' | 'medium' | 'high';
   permission?: AgentPermission;
   robot?: AgentRobotContext;
   /** PNG/JPEG files to show the agent (e.g. a circled screen region) */
@@ -64,7 +66,7 @@ export type AgentEvent =
   | { kind: 'tool_update'; id: string; input: Record<string, unknown> }
   /** `images`: data URLs the tool returned (screenshots, image reads) */
   | { kind: 'tool_end'; id: string; output?: string; isError?: boolean; images?: string[] }
-  | { kind: 'done'; stopped?: boolean; sessionId?: string; isError?: boolean; error?: string; costUsd?: number; usage?: AgentUsage }
+  | { kind: 'done'; delivery?: 'not_sent' | 'uncertain' | 'accepted'; stopped?: boolean; sessionId?: string; isError?: boolean; error?: string; costUsd?: number; usage?: AgentUsage }
   | { kind: 'stderr'; text: string };
 
 /** Per-turn totals the CLIs report. */

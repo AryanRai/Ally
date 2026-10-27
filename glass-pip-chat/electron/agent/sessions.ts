@@ -417,7 +417,7 @@ function* codexHistoryBuilder(records: any[]): Generator<void, { cwd?: string; m
           b.user(cleaned, ts, images);
           baseline = { input_tokens: total.input_tokens ?? 0, output_tokens: total.output_tokens ?? 0, cached_input_tokens: total.cached_input_tokens ?? 0 };
         }
-      } else if (p.role === 'assistant' && text.trim()) {
+      } else if (p.role === 'assistant' && p.channel !== 'analysis' && text.trim()) {
         b.text(text.trim(), ts, { itemId: p.id, phase: p.phase ?? (['commentary', 'final'].includes(p.channel) ? (p.channel === 'final' ? 'final_answer' : 'commentary') : undefined) });
       }
     } else if (p.type === 'function_call' || p.type === 'custom_tool_call') {

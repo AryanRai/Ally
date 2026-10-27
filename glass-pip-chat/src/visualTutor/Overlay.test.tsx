@@ -14,6 +14,18 @@ async function mount(initial = board) {
   return { api, changed };
 }
 describe('visual teaching overlay', () => {
+  it('gives Study media a large fill area and expands/restores without changing the lesson', async () => {
+    vi.stubGlobal('innerWidth', 1280); vi.stubGlobal('innerHeight', 800);
+    const { api } = await mount({ ...board, presentation: 'study', steps: [{ ...board.steps[0], diagram: { html: '<svg><circle r="10"/></svg>', height: 900 } }] });
+    const panel = screen.getByRole('region', { name: 'Visual tutor controls' });
+    expect(panel.classList.contains('is-rich-study')).toBe(true);
+    expect(screen.getByTitle('Diagram: A visual explanation')).toHaveStyle({ height: '100%' });
+    fireEvent.click(screen.getByRole('button', { name: 'Expand card' }));
+    expect(panel).toHaveStyle({ left: '12px', top: '12px', width: '1256px', height: '776px' });
+    fireEvent.click(screen.getByRole('button', { name: 'Restore card size' }));
+    expect(panel.style.width).toBe(''); expect(panel.style.height).toBe('');
+    expect(api.action).not.toHaveBeenCalled();
+  });
   it('resizes from borders with capture across diagrams, and retains size through live updates', async () => {
     vi.stubGlobal('PointerEvent', class extends MouseEvent { pointerId = 1; });
     vi.stubGlobal('innerWidth', 1000); vi.stubGlobal('innerHeight', 800);
