@@ -217,12 +217,27 @@ export function registerAgentIpc(getWindow: () => BrowserWindow | null, onConfig
 
   // Chats run in the Codex app use only its login; continue one stopped by a usage limit on another account.
   const limitFile = path.join(app.getPath('userData'), 'codex-app-limits.json');
+  const waitFile = path.join(app.getPath('userData'), 'codex-limit-waiting.json');
   let limitIds: string[] = [];
   try { limitIds = JSON.parse(fs.readFileSync(limitFile, 'utf8')).filter((id: unknown) => typeof id === 'string'); } catch { /* first run */ }
   const stopLimitWatch = watchCodexAppLimits(path.join(sharedCodexHome(), 'sessions'), {
     latest: readLatestCodexTurn,
     autoSwitch: () => codexAccounts.autoSwitch(),
     markDefaultLimited: () => { try { codexAccounts.limited('default'); } catch { /* Observation only. */ } },
+    nextReset: () => {
+      const resets = Object.values(codexAccounts.snapshot().status).flatMap(status => status.windows)
+        .filter(w => w.usedPercent >= 100 && Number.isFinite(w.resetsAt) && w.resetsAt! > Date.now()).map(w => w.resetsAt!);
+      return resets.length ? Math.min(...resets) : undefined;
+    },
+    waiting: {
+      load: () => {
+        try {
+          return (JSON.parse(fs.readFileSync(waitFile, 'utf8')) as any[]).filter(chat => chat && typeof chat.threadId === 'string' && /^[\w-]{1,200}$/.test(chat.threadId)
+            && typeof chat.prompt === 'string' && chat.prompt && typeof chat.cwd === 'string' && typeof chat.title === 'string' && Number.isFinite(chat.since));
+        } catch { return []; }
+      },
+      save: chats => { try { fs.writeFileSync(waitFile, JSON.stringify(chats)); } catch { /* Kept in memory. */ } },
+    },
     handled: {
       has: id => limitIds.includes(id),
       add: id => {

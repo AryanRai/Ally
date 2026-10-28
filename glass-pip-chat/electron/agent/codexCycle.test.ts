@@ -63,7 +63,7 @@ describe('automatic Codex account switching on the same chat', () => {
     runCodexTurnCycling(h.opts, e => h.events.push(e), h.start, h.accounts);
     for (const run of [0, 1, 2]) h.runs[run].emit({ kind: 'done', delivery: 'not_sent', usageLimit: true, isError: true, error: 'limit' });
     expect(h.tried).toEqual(['default', 'b', 'c']);
-    expect(h.events.at(-2)).toEqual({ kind: 'stderr', text: 'All your Codex accounts have reached their usage limits.' });
+    expect(h.events.at(-2)).toEqual({ kind: 'stderr', text: 'All your Codex accounts have reached their usage limits. Ally will continue this chat when one resets.' });
     expect(h.events.at(-1)).toMatchObject({ kind: 'done', usageLimit: true });
   });
 

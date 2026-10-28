@@ -1,4 +1,5 @@
 import { codexAccounts } from './codexAccounts.js';
+import { waitForCodexReset } from './codexAppLimits.js';
 import type { AgentEvent, AgentRunOptions } from './types.js';
 
 type Run = { stop: () => void; steer: (text: string, images?: string[]) => Promise<boolean> };
@@ -54,7 +55,12 @@ export function runCodexTurnCycling<R extends Run>(
           });
           return;
         }
-        if (resumable && accounts.autoSwitch()) emit({ kind: 'stderr', text: 'All your Codex accounts have reached their usage limits.' });
+        if (resumable && accounts.autoSwitch()) {
+          emit({ kind: 'stderr', text: 'All your Codex accounts have reached their usage limits. Ally will continue this chat when one resets.' });
+          // Attachments cannot be resent faithfully later; those chats wait for you instead.
+          const cutOff = ev.delivery === 'accepted';
+          if (sessionId && (cutOff || !o.images?.length)) waitForCodexReset({ threadId: sessionId, cwd: o.cwd, title: 'Codex chat', prompt: cutOff ? CONTINUE_PROMPT : o.prompt, since: Date.now() });
+        }
       }
       emit(ev);
     });
