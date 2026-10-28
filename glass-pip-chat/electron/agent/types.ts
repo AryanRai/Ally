@@ -19,6 +19,8 @@ export interface AgentRunOptions {
   queueKey?: string;
   /** Receipt from the exact stopped session; never a replay of its last input. */
   resumeToken?: string;
+  /** The chat's own title, shown while it runs; without it the prompt's tail stands in. */
+  title?: string;
   provider: AgentProvider;
   /** Stable profile; never changes for an existing thread. */
   codexAccountId?: string;
@@ -90,6 +92,8 @@ export interface AgentConfig {
   codexPath?: string;
   /** Applies to existing Codex chats from both Ally desktop and the watch. */
   codexDesktop?: boolean;
+  /** Start the KiCAD MCP server for every Ally turn, not only in KiCad project folders. */
+  kicadEverywhere?: boolean;
   robotMcpUrl?: string;
   /** DroidCore motion MCP server (DroidCore/runtime), passed alongside HowYouSeeMe in Robot mode */
   droidcoreMcpUrl?: string;

@@ -143,7 +143,7 @@ export async function startAgentRun(
   const queued = () => messageQueue.snapshot(queueKey).items;
   const pending = new Set<Promise<unknown>>();
   const receipts = new FollowupReceipts();
-  const summary = () => sessionId && !opts.ephemeral ? { provider: opts.provider, id: sessionId, title: opts.prompt.slice(-80), cwd: opts.cwd, updatedAt: Date.now() } : undefined;
+  const summary = () => sessionId && !opts.ephemeral ? { provider: opts.provider, id: sessionId, title: opts.title?.trim() || opts.prompt.slice(-80), cwd: opts.cwd, updatedAt: Date.now() } : undefined;
   const complete = (event: AgentEvent) => {
     if (finished) return;
     finished = true;

@@ -32,6 +32,14 @@ export const fail = (t: string): ToolResult => ({ content: [{ type: 'text', text
 
 const error = (id: JsonRpc['id'], code: number, message: string) => ({ jsonrpc: '2.0', id: id ?? null, error: { code, message } });
 
+/** Shared provider boundary: Claude accepts nested unions, but never root unions. */
+export function assertToolSchema(tool: Pick<ToolDef, 'name' | 'inputSchema'>): void {
+  const schema = tool.inputSchema;
+  if (!schema || schema.type !== 'object' || ['oneOf', 'allOf', 'anyOf'].some(key => key in schema)) {
+    throw new Error(`Tool ${tool.name} must expose an object inputSchema without top-level oneOf, allOf or anyOf.`);
+  }
+}
+
 /** Handle one JSON-RPC message. Returns null for notifications (HTTP 202, no body). */
 export async function handleRpc(msg: JsonRpc, tools: () => ToolDef[], ctx: CallContext, instructions?: string): Promise<object | null> {
   if (!msg || typeof msg !== 'object' || typeof msg.method !== 'string') return error(msg?.id, -32600, 'Invalid request');
@@ -53,8 +61,12 @@ export async function handleRpc(msg: JsonRpc, tools: () => ToolDef[], ctx: CallC
     }
     case 'ping':
       return { jsonrpc: '2.0', id, result: {} };
-    case 'tools/list':
-      return { jsonrpc: '2.0', id, result: { tools: tools().map(({ name, description, inputSchema, annotations }) => ({ name, description, inputSchema, ...(annotations ? { annotations } : {}) })) } };
+    case 'tools/list': {
+      const listing = tools();
+      try { listing.forEach(assertToolSchema); }
+      catch (e) { return error(id, -32603, e instanceof Error ? e.message : String(e)); }
+      return { jsonrpc: '2.0', id, result: { tools: listing.map(({ name, description, inputSchema, annotations }) => ({ name, description, inputSchema, ...(annotations ? { annotations } : {}) })) } };
+    }
     case 'tools/call': {
       const tool = tools().find(t => t.name === msg.params?.name);
       if (!tool) return error(id, -32602, `Unknown tool: ${msg.params?.name}`);

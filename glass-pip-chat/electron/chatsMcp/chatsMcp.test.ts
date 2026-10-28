@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { authorize, chatServerPort } from './index';
+import { authorize, chatServerPort, registerDeviceTool } from './index';
 import { handleRpc } from './protocol';
 import { allyChatsMcpServers, forwarding, setEndpoint } from './registry';
 import { ChatIndex, scoreChat, terms } from './search';
@@ -30,6 +30,18 @@ function makeIndex() {
 
 describe('protocol', () => {
   const tools = () => [{ name: 'echo', description: 'd', inputSchema: { type: 'object' }, handler: async (a: any) => ({ content: [{ type: 'text' as const, text: String(a.x) }] }) }];
+  it.each(['oneOf', 'allOf', 'anyOf'])('identifies any tool with a root %s regardless of its index', async key => {
+    const bad = { ...tools()[0], name: 'future_study_tool', inputSchema: { type: 'object', [key]: [{ required: ['html'] }] } };
+    for (const listing of [[bad, ...tools()], [...tools(), bad]]) {
+      expect(await handleRpc({ id: 1, method: 'tools/list' }, () => listing, {})).toMatchObject({ error: { code: -32603, message: expect.stringContaining('future_study_tool') } });
+    }
+    expect(() => registerDeviceTool(bad)).toThrow('future_study_tool');
+  });
+  it('keeps nested operation unions intact and rejects non-object roots', async () => {
+    const schema = { type: 'object', properties: { operations: { type: 'array', items: { oneOf: [{ type: 'string' }, { type: 'number' }] } } } };
+    expect(await handleRpc({ id: 1, method: 'tools/list' }, () => [{ ...tools()[0], inputSchema: schema }], {})).toMatchObject({ result: { tools: [{ inputSchema: schema }] } });
+    expect(await handleRpc({ id: 1, method: 'tools/list' }, () => [{ ...tools()[0], inputSchema: { type: 'array' } }], {})).toMatchObject({ error: { code: -32603 } });
+  });
   it('initializes, lists and calls tools; notifications get no reply', async () => {
     expect(await handleRpc({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-03-26' } }, tools, {})).toMatchObject({ result: { protocolVersion: '2025-03-26', capabilities: { tools: {} } } });
     expect(await handleRpc({ jsonrpc: '2.0', method: 'notifications/initialized' }, tools, {})).toBeNull();

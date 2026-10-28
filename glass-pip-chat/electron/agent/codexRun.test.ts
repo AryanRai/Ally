@@ -5,6 +5,8 @@ import type { AgentEvent } from './types';
 import { startUserQuestions } from './userQuestions';
 import { ALLY_BROWSER_INSTRUCTIONS } from './browserContext';
 vi.mock('./codexMigration.js', () => ({ interactiveCodexSession: async (_rpc: unknown, id: string) => id }));
+// Per-turn MCP savings read the real ~/.codex config; mcpSavings.test covers them.
+vi.mock('./mcpSavings.js', () => ({ codexMcpOverrides: () => ({}) }));
 vi.mock('./userQuestions.js', () => ({ startUserQuestions: vi.fn(async () => ({ config: { url: 'http://localhost:1234/mcp' }, close: vi.fn() })), WATCH_QUESTION_INSTRUCTIONS: 'Ask on the watch.' }));
 afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers(); });
 const opts = { provider: 'codex' as const, cwd: '/work', prompt: 'hello' };

@@ -7,11 +7,14 @@ import type { AgentEvent, AgentRunOptions, AgentInteractionHandler } from './typ
 import { startUserQuestions, WATCH_QUESTION_INSTRUCTIONS } from './userQuestions.js';
 import { ALLY_BROWSER_INSTRUCTIONS } from './browserContext.js';
 import { allyChatsMcpServers } from '../chatsMcp/registry.js';
+import { codexMcpOverrides } from './mcpSavings.js';
+import { currentCodegraphPool } from './codegraphPool.js';
 import { codexApprovalPolicy } from './approvalPolicy.js';
 import { codexAccessSettings, unsupportedAccessUpdate, type AccessControl } from './access.js';
 
 export function codexThreadConfig(opts: AgentRunOptions, interactive = false): Record<string, unknown> {
-  const servers: Record<string, { url: string }> = {};
+  // Fewer per-turn servers: KiCAD only where it is needed, CodeGraph shared per folder.
+  const servers: Record<string, Record<string, unknown>> = codexMcpOverrides(opts.cwd);
   if (opts.robot?.mcpUrl) servers.howyouseeme = { url: opts.robot.mcpUrl };
   if (opts.robot?.motionMcpUrl) servers.droidcore = { url: opts.robot.motionMcpUrl };
   // Ally's cross-chat tools (find / read / forward to other chats)
@@ -48,6 +51,8 @@ export function runCodexTurn(opts: AgentRunOptions, emit: (event: AgentEvent) =>
   let accepted = false;
   let startingTurn = false;
   let releaseProfile: (() => void) | undefined;
+  // The folder's shared CodeGraph stays open while this turn runs.
+  const releaseCodegraph = currentCodegraphPool()?.acquire(opts.cwd);
   let priorEffort: string | null | undefined;
   let stopTimer: ReturnType<typeof setTimeout> | undefined;
   let userQuestions: Awaited<ReturnType<typeof startUserQuestions>> | undefined;
@@ -68,6 +73,7 @@ export function runCodexTurn(opts: AgentRunOptions, emit: (event: AgentEvent) =>
       // Restore Study's temporary setting before releasing the writer/queue.
       if (rpc) { rpc.onClose = undefined; rpc.close(); }
       releaseProfile?.();
+      releaseCodegraph?.();
       emit({ ...event, delivery: event.delivery ?? (accepted ? 'accepted' : dispatched ? 'uncertain' : 'not_sent'), ...(limitHit ? { usageLimit: true } : {}), sessionId, usage: { ...event.usage, durationMs: Date.now() - startedAt } });
     };
     if (opts.reasoningEffort && dispatched && priorEffort !== undefined && rpc && sessionId) {

@@ -17,6 +17,8 @@ import { watchAgentSessions } from './sessionWatch.js';
 import { configureCodexMigrations } from './codexMigration.js';
 import { configureCodexHistory, listCodexChats, listCodexChatsPage, loadCodexChat, closeCodexHistory, readLatestCodexTurn } from './codexHistory.js';
 import { watchCodexAppLimits } from './codexAppLimits.js';
+import { configureMcpSavings } from './mcpSavings.js';
+import { codegraphPool, stopCodegraphPool } from './codegraphPool.js';
 import { codexAccounts, sharedCodexHome } from './codexAccounts.js';
 import { notifyReply } from '../notifications.js';
 import { chatSelection, type SharedChatSelection } from './selection.js';
@@ -51,6 +53,10 @@ function loadConfig(): AgentConfig {
 /** Registers `agent:*` IPC; `onConfig` sees the config at startup and after every change. */
 export function registerAgentIpc(getWindow: () => BrowserWindow | null, onConfig?: (config: AgentConfig) => void): void {
   let config = loadConfig();
+  // Fewer MCP servers for Ally's own turns: KiCAD only where needed, one CodeGraph per folder.
+  configureMcpSavings(config);
+  void codegraphPool();
+  app.once('will-quit', stopCodegraphPool);
   registerCodexAccountIpc(getWindow, () => config.codexPath);
   interactions.configure(path.join(app.getPath('userData'), 'chat-interactions.json'));
   const stopInteractionEvents = interactions.subscribe((event) => {
@@ -87,6 +93,7 @@ export function registerAgentIpc(getWindow: () => BrowserWindow | null, onConfig
     config = { ...config, ...patch };
     fs.writeFileSync(CONFIG_FILE(), JSON.stringify(config, null, 2));
     onConfig?.(config);
+    configureMcpSavings(config);
     configureCodexHistory(config.codexPath);
     return { ...config, homeCwd: app.getPath('home') };
   });
@@ -247,7 +254,7 @@ export function registerAgentIpc(getWindow: () => BrowserWindow | null, onConfig
     },
     notify: (id, title, text, threadId, cwd) => notifyReply({ id, kind: 'attention', title, text, session: { id: threadId, provider: 'codex', title, cwd } }),
     continueChat: turn => new Promise((resolve, reject) => {
-      startAgentRun({ provider: 'codex', prompt: turn.prompt, cwd: turn.cwd || config.defaultCwd, sessionId: turn.threadId, permission: config.permission, codexDesktop: config.codexDesktop === true },
+      startAgentRun({ provider: 'codex', prompt: turn.prompt, title: turn.title, cwd: turn.cwd || config.defaultCwd, sessionId: turn.threadId, permission: config.permission, codexDesktop: config.codexDesktop === true },
         (_runId, event) => { if (event.kind === 'done') resolve(event); },
         config.codexPath, desktopInteraction(() => `codex:${turn.threadId}`), 'desktop').catch(reject);
     }),

@@ -22,7 +22,7 @@ import { listCodexChats, loadCodexChat } from '../agent/codexHistory.js';
 import { startForwardedRun } from './forwardRun.js';
 import { listAgentSessions, loadAgentSession } from '../agent/sessions.js';
 import type { AgentConfig, AgentProvider } from '../agent/types.js';
-import { handleRpc, type CallContext, type ToolDef, type ToolResult } from './protocol.js';
+import { assertToolSchema, handleRpc, type CallContext, type ToolDef, type ToolResult } from './protocol.js';
 import { ChatIndex, type SearchHit } from './search.js';
 import { chatTools, SERVER_INSTRUCTIONS, type SendResult } from './tools.js';
 import { forwarding, serverUrl, setEndpoint, SERVER_NAME } from './registry.js';
@@ -60,6 +60,7 @@ export interface DeviceToolSpec {
 /** Watch/phone actions become tools on this server for every agent. */
 export function registerDeviceTool(spec: DeviceToolSpec): () => void {
   if (!/^[a-z][a-z0-9_]{2,63}$/.test(spec.name)) throw new Error(`Invalid tool name ${spec.name}`);
+  assertToolSchema(spec);
   deviceTools.set(spec.name, {
     name: spec.name,
     description: spec.requiresConfirmation ? `${spec.description} (The user confirms on the device before it runs.)` : spec.description,
@@ -118,7 +119,7 @@ async function send(target: { provider: AgentProvider; id: string; cwd?: string;
   // Another request can arrive while native running-session discovery is pending.
   if (forwarding.has(key)) return { status: 'error', reply: '', error: 'that chat is still answering a forwarded message' };
   forwarding.add(key);
-  return forwardDelivery(emit => startForwardedRun({ provider: target.provider, prompt, cwd: target.cwd || cfg.defaultCwd,
+  return forwardDelivery(emit => startForwardedRun({ provider: target.provider, prompt, title: target.title, cwd: target.cwd || cfg.defaultCwd,
     sessionId: target.id, permission: cfg.permission, codexDesktop: cfg.codexDesktop === true },
     (_runId, event) => emit(event), target.provider === 'claude' ? cfg.claudePath : cfg.codexPath),
     opts.wait, opts.timeoutMs, () => forwarding.delete(key));
