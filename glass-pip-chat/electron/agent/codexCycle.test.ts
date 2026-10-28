@@ -13,6 +13,7 @@ function harness(order = ['default', 'b', 'c'], autoSwitch = true) {
     autoSwitch: () => autoSwitch,
     next: (exclude: Set<string>) => order.find(id => !exclude.has(id) && !limited.has(id)),
     label: (id: string) => `acct-${id}`,
+    list: () => order.map(id => ({ id, label: id })),
     limited: vi.fn((id: string) => { limited.add(id); }),
   };
   const runs: { opts: AgentRunOptions; emit: (ev: AgentEvent) => void; stop: ReturnType<typeof vi.fn> }[] = [];
@@ -85,6 +86,25 @@ describe('automatic Codex account switching on the same chat', () => {
     h.runs[0].emit({ kind: 'done', delivery: 'not_sent', isError: true, error: "You've hit your usage limit." });
     expect(h.accounts.limited).toHaveBeenCalledWith('default');
     expect(h.runs[1].opts).toMatchObject({ codexAccountId: 'b', codexDesktop: false });
+  });
+
+  it('continues a desktop-route reply cut off by a structured limit on the next account, and records the limit', () => {
+    const h = harness();
+    runCodexTurnCycling({ ...h.opts, codexDesktop: true }, e => h.events.push(e), h.start, h.accounts);
+    h.runs[0].emit({ kind: 'done', delivery: 'accepted', usageLimit: true, isError: true, error: 'limit' });
+    expect(h.accounts.limited).toHaveBeenCalledWith('default');
+    expect(h.runs[1].opts).toMatchObject({ codexAccountId: 'b', codexDesktop: false, sessionId: 'thread-1', prompt: CONTINUE_PROMPT });
+  });
+
+  it('re-checks profiles whose saved limit may be stale before giving up, but never probes the original login', () => {
+    const h = harness();
+    h.limited.add('default'); h.limited.add('b'); h.limited.add('c'); // Saved as limited; c has actually reset.
+    runCodexTurnCycling({ ...h.opts, codexAccountId: 'b' }, e => h.events.push(e), h.start, h.accounts);
+    h.runs[0].emit({ kind: 'done', delivery: 'not_sent', usageLimit: true });
+    expect(h.runs[1].opts.codexAccountId).toBe('c');
+    h.runs[1].emit({ kind: 'done', delivery: 'accepted' });
+    expect(h.runs).toHaveLength(2);
+    expect(h.tried).not.toContain('default');
   });
 
   it('routes steer and permission calls to the account run that is active now', async () => {

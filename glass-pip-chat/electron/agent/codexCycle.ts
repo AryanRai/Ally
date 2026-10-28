@@ -2,7 +2,15 @@ import { codexAccounts } from './codexAccounts.js';
 import type { AgentEvent, AgentRunOptions } from './types.js';
 
 type Run = { stop: () => void; steer: (text: string, images?: string[]) => Promise<boolean> };
-type Accounts = Pick<typeof codexAccounts, 'autoSwitch' | 'next' | 'label' | 'limited'>;
+type Accounts = Pick<typeof codexAccounts, 'autoSwitch' | 'next' | 'label' | 'limited' | 'list'>;
+
+/**
+ * A saved limit can be stale (allowances reset early, or the record predates a reset), so before
+ * giving up, try each other profile once. Ally's runner reads a profile's live limits before sending
+ * and refuses with nothing sent if it is still limited. The original login has no such check, so it
+ * is never probed.
+ */
+const probe = (accounts: Accounts, tried: Set<string>) => accounts.list().map(a => a.id).find(id => id !== 'default' && !tried.has(id));
 
 export const CONTINUE_PROMPT = 'Your previous reply was cut off because the Codex account reached its usage limit; this turn runs on another of my accounts. Continue exactly where you stopped. Do not repeat work or text you already finished.';
 
@@ -32,9 +40,10 @@ export function runCodexTurnCycling<R extends Run>(
     current = start(o, ev => {
       if (ev.kind === 'session') sessionId = ev.sessionId;
       if (ev.kind === 'done' && !stopped && !ev.stopped && !o.ephemeral && hitLimit(ev)) {
-        if (!ev.usageLimit) { try { accounts.limited(account); } catch { /* Observation only. */ } }
+        // Ally's own runner records the limit itself; the desktop route cannot, so record it here.
+        if (!ev.usageLimit || o.codexDesktop) { try { accounts.limited(account); } catch { /* Observation only. */ } }
         const resumable = ev.delivery === 'not_sent' || (ev.delivery === 'accepted' && !!sessionId);
-        const next = resumable && accounts.autoSwitch() ? accounts.next(tried) : undefined;
+        const next = resumable && accounts.autoSwitch() ? accounts.next(tried) ?? probe(accounts, tried) : undefined;
         if (next) {
           const cutOff = ev.delivery === 'accepted';
           emit({ kind: 'stderr', text: `${accounts.label(account)} reached its usage limit · ${cutOff ? 'continuing' : 'sending'} on ${accounts.label(next)}` });

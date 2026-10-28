@@ -274,3 +274,11 @@ export async function repairCodexDeviceTitle(id: string, title: string): Promise
   if (!isDeviceProtocolTitle(thread.preview ?? '') && !isDeviceProtocolTitle(thread.name ?? '')) return;
   await rpc.request('thread/name/set', { threadId: thread.id ?? mappedCodexSession(id), name: chatTitle(title) });
 }
+
+/** Newest turn and folder of one chat, read-only; used to notice a Codex-app turn stopped by a usage limit. */
+export async function readLatestCodexTurn(threadId: string): Promise<{ turn?: any; cwd?: string; title?: string }> {
+  const rpc = await reader('metadata');
+  const { thread } = await historyRead(rpc, 'thread/read', { threadId }, 'metadata');
+  const page = await historyRead(rpc, 'thread/turns/list', { threadId, limit: 1, sortDirection: 'desc', itemsView: 'full' }, 'metadata');
+  return { turn: (page?.data ?? page?.turns ?? [])[0], cwd: thread?.cwd, title: thread?.name || thread?.preview };
+}

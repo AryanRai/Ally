@@ -11,6 +11,7 @@ import { childEnv, isWin, launcherFor, resolveAgentBinary } from './binaries.js'
 import { ClaudeStreamParser, StreamParser } from './parsers.js';
 import { codexAccounts } from './codexAccounts.js';
 import { runCodexTurnCycling } from './codexCycle.js';
+import { markAllyCodexTurn } from './codexAppLimits.js';
 import { runCodexTurn } from './codexRun.js';
 import { runCodexDesktopTurn } from './codexDesktopRun.js';
 import { recoverExactCodexOwner } from './codexOwnerRecovery.js';
@@ -158,8 +159,11 @@ export async function startAgentRun(
   const launch = async (prompt: string, initial = false, images?: string[]) => {
     ending = false;
     currentId = undefined;
+    if (opts.provider === 'codex') markAllyCodexTurn(sessionId);
     const id = await startTrackedRun({ ...opts, prompt, sessionId, images: initial ? opts.images : images }, (_id, event) => {
       if (finished) return;
+      // The Codex-app limit watcher must leave Ally's own turns to codexCycle.
+      if (opts.provider === 'codex') markAllyCodexTurn(sessionId ?? (event.kind === 'session' ? event.sessionId : undefined));
       if (event.kind === 'session') {
         sessionId = event.sessionId;
         // New conversations acquire their canonical identity before accepting input.

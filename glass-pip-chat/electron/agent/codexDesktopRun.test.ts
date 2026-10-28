@@ -116,6 +116,8 @@ describe('Codex desktop coordination', () => {
     broadcast(active('hello')); broadcast(active('hello world')); broadcast(active('hello world', 'completed'));
     expect(events.filter(e => e.kind === 'text').map(e => (e as any).text).join('')).toBe('hello world\n\n');
     expect(events.filter(e => e.kind === 'done')).toHaveLength(1);
+    // Account cycling relies on a completed turn reporting that it was accepted.
+    expect(events.find(e => e.kind === 'done')).toMatchObject({ delivery: 'accepted' });
     expect(client.request).toHaveBeenCalledOnce(); expect(client.close).toHaveBeenCalledOnce();
   });
   it.each([
