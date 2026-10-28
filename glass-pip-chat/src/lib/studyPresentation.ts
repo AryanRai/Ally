@@ -3,7 +3,7 @@ import { parse, tokenizer } from 'acorn';
 /** Display projections only. Never feed these back into history or the interpreter. */
 export function studyUserText(raw: string): string {
   if (!raw.startsWith('Ally Study: continue this selected chat as a full agent.')
-    || !raw.includes('The app draws and speaks each step live.')
+    || !(raw.includes('The app draws and speaks each step live.') || raw.includes('Present explanations as a fenced javascript drawing program. Draw/speak live.'))
     || !raw.includes('Resume normal formatting after this turn.')) return raw;
   // Context can contain OCR with invalid JSON. Only the runtime delimiter matters;
   // take its first occurrence after the instructions so quoted requests stay whole.

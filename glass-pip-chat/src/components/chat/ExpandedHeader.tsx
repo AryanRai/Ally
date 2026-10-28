@@ -10,6 +10,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { UnifiedModelSelector } from '../UnifiedModelSelector';
+import OutputMuteButton from './OutputMuteButton';
 
 interface ExpandedHeaderProps {
   platform: string;
@@ -108,6 +109,7 @@ export default function ExpandedHeader({
       </div>
 
       <div className="flex shrink-0 items-center gap-0.5" style={{ ...noDrag, userSelect: 'none' }}>
+        <OutputMuteButton />
         <UnifiedModelSelector
           platform={platform}
           theme={theme}

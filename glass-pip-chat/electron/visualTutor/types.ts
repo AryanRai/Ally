@@ -12,8 +12,13 @@ export interface TutorMark {
 export const MAX_DIAGRAM_IMAGE_UNITS = 4 * 1024 * 1024;
 export const MAX_DIAGRAM_IMAGES = 8;
 export const MAX_DIAGRAM_HEIGHT = 1200;
-export interface TutorStep { id: string; title: string; explanation: string; marks: TutorMark[]; diagram?: { html: string; height: number; images?: Record<string, string> }; panel?: { x: number; y: number; width: number; transparent?: boolean } }
+export interface StudyClip {jobId:string;state:'queued'|'rendering'|'ready'|'error'|'cancelled';src?:string;duration?:number;error?:string}
+export interface TutorStep { id: string; title: string; explanation: string; marks: TutorMark[]; lesson?:import('./lesson.js').LessonBeat; clip?:StudyClip; diagram?: { html: string; height: number; images?: Record<string, string> }; panel?: { x: number; y: number; width: number; transparent?: boolean } }
 export interface TutorBoard {
+  bookmarks?:Record<string,import('./playback.js').PlaybackBookmark>;
+  mediaToken?:string;
+  presentationBounds?: { x:number;y:number;width:number;height:number };
+  playback?: import('./playback.js').PlaybackCommand;
   id: string;
   chatId: string;
   /** One Study lesson across local pill IDs and the native canonical chat ID. */
@@ -42,6 +47,13 @@ export interface TutorBoard {
 export interface TutorCapture { board: TutorBoard; imagePath: string; thumbnail: string }
 export type TutorAction = 'previous' | 'next' | 'latest' | 'sketch' | 'undo' | 'freeze' | 'chat' | 'close';
 export interface VisualTutorApi {
+  review?: (boardId:string,stepId:string)=>Promise<void>;
+  controlPlayback?: (command:import('./playback.js').PlaybackCommand)=>Promise<import('./playback.js').PlaybackState>;
+  loadNarration?: (boardId:string,key:string)=>Promise<Uint8Array>;
+  mediaState?: (state:import('./lesson.js').MediaObservation)=>void;
+  playbackAck?: (command:import('./playback.js').PlaybackCommand,state:import('./playback.js').PlaybackState)=>Promise<void>;
+  loadClip?: (boardId: string, src: string) => Promise<Uint8Array>;
+  cancelRender?: (boardId:string,jobId:string)=>Promise<void>;
   study: (id: string, words: string) => Promise<void>;
   onPillBounds?: (callback: (bounds: { x: number; y: number; width: number; height: number }) => void) => () => void;
   show: (id: string, point?: TutorPoint) => Promise<void>;

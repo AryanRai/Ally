@@ -73,6 +73,13 @@ const pipAPI = {
 
   // Speech: audio capture remains explicit in the renderer; credentials stay in main.
   speech: {
+    outputMute: () => ipcRenderer.invoke('speech:outputMute'),
+    setOutputMute: (muted: boolean) => ipcRenderer.invoke('speech:setOutputMute', muted),
+    onOutputMute: (callback: (value: { muted: boolean }) => void) => {
+      const handler = (_: unknown, value: { muted: boolean }) => callback(value);
+      ipcRenderer.on('speech:outputMute', handler);
+      return () => ipcRenderer.removeListener('speech:outputMute', handler);
+    },
     settings: () => ipcRenderer.invoke('speech:settings'),
     saveSettings: (patch: unknown) => ipcRenderer.invoke('speech:saveSettings', patch),
     liveStart: (id: string) => ipcRenderer.send('speech:liveStart', id),

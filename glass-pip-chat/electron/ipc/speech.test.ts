@@ -4,6 +4,7 @@ vi.mock('electron', () => ({ app: { on: vi.fn() }, ipcMain: { handle: (name: str
 vi.mock('../speech/runtime.js', () => ({ ensureSpeechRuntime: mocks.ensure, getSpeechRuntimeStatus: vi.fn(), stopSpeechRuntime: vi.fn() }));
 vi.mock('../speech/native.js', () => ({ nativeSpeech: mocks.native, cancelNativeSpeech: vi.fn(), installedVoices: vi.fn() }));
 vi.mock('../speech/google.js', () => ({ googleSpeech: mocks.cloud, googleVoices: vi.fn() }));
+vi.mock('../speech/outputMute.js', () => ({ outputMute: () => ({muted:false}), setOutputMute: vi.fn(), registerOutputMute: vi.fn() }));
 
 describe('voice IPC', () => {
   beforeEach(async () => { vi.clearAllMocks(); mocks.handlers.clear(); const { registerSpeechIpc } = await import('./speech'); registerSpeechIpc(); });

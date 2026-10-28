@@ -11,16 +11,16 @@ export function chirpWave(symbols:number[]){
  for(let i=0;i<count;i++){const p=i%960;const gain=p<640?Math.min(1,p/80,(640-p)/80):0;buf.writeInt16LE(Math.round(4500*gain*Math.sin(2*Math.PI*frequencies[symbols[Math.floor(i/960)]]*p/16000)),44+i*2);}return buf;
 }
 export class AcousticProbe {
- private grants=new Map<string,{expires:number}>();private seen=new Map<string,number>();private last=new Map<string,number>();
+ private grants=new Map<string,object>();private seen=new Map<string,number>();private last=new Map<string,number>();
  constructor(private d:{now:()=>number;unlocked:()=>boolean;emit:(symbols:number[])=>Promise<void>}){}
  async message(device:string,kind:string,m:any,send:(v:unknown)=>void){
   if(kind!=='phone')return;
   const now=this.d.now();
-  if(m.type==='acoustic_enable'){if(m.enabled===true&&this.d.unlocked())this.grants.set(device,{expires:now+900000});else this.close(device);return;}
+  if(m.type==='acoustic_enable'){if(m.enabled===true&&this.d.unlocked()){if(!this.grants.has(device))this.grants.set(device,{});}else this.close(device);return;}
   const id=typeof m.requestId==='string'?m.requestId:'';
   const fail=(message:string)=>send({type:'acoustic_error',requestId:id,message});
   const grant=this.grants.get(device);
-  if(!/^[a-f0-9-]{36}$/.test(id)||!this.d.unlocked()||!grant||now>=grant.expires){fail('Start an explicit acoustic session while both devices are unlocked');return;}
+  if(!/^[a-f0-9-]{36}$/.test(id)||!this.d.unlocked()||!grant){fail('Enable audio proximity while both devices are unlocked');return;}
   const key=device+':'+id;
   for(const [k,v] of this.seen)if(now-v>1800000)this.seen.delete(k);
   if(this.seen.has(key)||now-(this.last.get(device)??-Infinity)<8000){fail('Chirp already attempted or cooling down; no replay');return;}
@@ -28,7 +28,7 @@ export class AcousticProbe {
   const symbols=[...randomBytes(8)].map(v=>v&3);
   send({type:'acoustic_challenge',requestId:id,symbols});
   await new Promise(r=>setTimeout(r,350));
-  if(!this.d.unlocked()||this.grants.get(device)!==grant||this.d.now()>=grant.expires){fail('Acoustic session stopped');return;}
+  if(!this.d.unlocked()||this.grants.get(device)!==grant){fail('Acoustic session stopped');return;}
   try{await this.d.emit(symbols);}catch{fail('PC could not play its chirp. Check normal audio output.');}
  }
  close(device:string){this.grants.delete(device);}

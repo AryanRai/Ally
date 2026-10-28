@@ -27,7 +27,8 @@ export function watchHistory(messages: AgentHistoryMessage[], media?: DeviceMedi
     usage: m.usage,
     ...(media ? { attachments: [...media.dataUrls(m.images, 'Attached image'),
       ...(m.role === 'assistant' ? media.markdown(m.content) : []),
-      ...m.segments?.flatMap(s => media.dataUrls(s.toolExecution?.images, 'Tool screenshot')) ?? []].filter((asset, i, all) => all.findIndex(a => a.id === asset.id) === i).slice(0, 12) } : {}),
+      // One sequence per message, so several tool screenshots are numbered 1, 2, 3 rather than all "1".
+      ...media.dataUrls(m.segments?.flatMap(s => s.toolExecution?.images ?? []), 'Tool screenshot')].filter((asset, i, all) => all.findIndex(a => a.id === asset.id) === i).slice(0, 12) } : {}),
     steps: m.segments?.flatMap(s => s.toolExecution ? [{ id: s.toolExecution.id, name: s.toolExecution.name,
       ...(browserActivity(s.toolExecution.name, s.toolExecution.parameters) ?? (/cua_repl/i.test(s.toolExecution.name) ? { kind: 'other' as const } : {})),
       status: s.toolExecution.status === 'executing' ? 'running' as const : s.toolExecution.status === 'error' ? 'error' as const : 'done' as const,
@@ -110,6 +111,13 @@ export class WatchConversations {
       this.save();
     }
     return chat.messages;
+  }
+  /** The glance reader needs current text, not every historical attachment or a
+   * scan of all running chats. Full history remains available in history(). */
+  async preview(chat: WatchChat): Promise<{ messages: WatchMessage[]; running: boolean }> {
+    if (!chat.sessionId) return { messages: chat.messages.slice(-30), running: false };
+    const snapshot = await this.loadLinkedSession(chat);
+    return { messages: watchHistory(snapshot.messages.slice(-30)), running: !!snapshot.running };
   }
   /** Refresh the native folder immediately before submission, without acquiring a writer. */
   async prepareRun(id: string): Promise<WatchChat> {

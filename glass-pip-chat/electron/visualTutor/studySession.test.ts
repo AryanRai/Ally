@@ -30,3 +30,18 @@ it('registers a single presentation adapter without starting an agent', async ()
   expect(await prepareStudySession({chatId:'a',sessionKey:'codex:original',context:'{}'})).toBe('board for codex:original');
   stop(); expect(await prepareStudySession({chatId:'a',sessionKey:'a',context:'{}'})).toBe('');
 });
+it('retains spoken cues for late rendering and clears them for the next turn',()=>{
+ const cues=new StudyCues();
+ cues.hear('Watch the car and its attached parts move together.');
+ cues.hear('Now the car body changes colour.');
+ expect(cues.stage('car','Watch the car and its attached parts move together.')).toBe('car');
+ expect(cues.stage('colour','Now the car body changes colour.')).toBe('colour');
+ cues.reset();expect(cues.stage('car','Watch the car and its attached parts move together.')).toBeUndefined();
+});
+it('reads the real native caption JSON, ignoring chips and decoding escapes',()=>{
+ const cues=new StudyCues();cues.stage('wave','Watch the rotating arrow trace a sine wave.');
+ expect(cues.hear(JSON.stringify({header:'Step 2',text:'Watch the rotating arrow trace a sine wave.',chips:Array.from({length:40},()=>({label:'waiting','state':'waiting'}))}))).toBe('wave');
+ cues.stage('escape',"Let’s move the car.");
+ expect(cues.hear('{"text":"Let\\u2019s move the car.","chips":[]}')).toBe('escape');
+ expect(cues.hear('{"header":"Watch the rotating arrow trace a sine wave.","chips":[]}')).toBeUndefined();
+});

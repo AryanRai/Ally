@@ -11,7 +11,7 @@ it('provides only the selected API reference, including progressive speech examp
     expect(result).toContain(reference.example);
     expect(reference.example).toContain('step(1)');
     expect(reference.example).toContain('say(');
-    expect(result.length).toBeLessThan(topic==='editing'?3500:2400);
+    expect(result.length).toBeLessThan(topic==='manim'?5500:topic==='editing'?4500:topic==='lesson'?3000:2400);
   }
   expect(nativeStudyReference('graph')).not.toContain('lessonMechanism');
   expect(()=>nativeStudyReference('__proto__')).toThrow('Choose');

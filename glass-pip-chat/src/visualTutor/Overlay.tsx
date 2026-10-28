@@ -3,11 +3,13 @@ import { ArrowLeft, ArrowRight, ArrowUpRight, Check, Eye, GripVertical, Layers, 
 import type { TutorAction, TutorBoard, TutorPoint, VisualTutorApi } from '../../electron/visualTutor/types';
 import Marks from './Marks';
 import DiagramFrame from './DiagramFrame';
+import StudyClip from './StudyClip';
+import ReviewStrip from './ReviewStrip';
 import { dockCanvas, placeCanvas } from './dock';
 import { resizeEdges, resizePanel, type PanelRect, type ResizeEdge } from './resizePanel';
 import './tutor.css';
 
-declare global { interface Window { tutor: Pick<VisualTutorApi, 'overlay' | 'action' | 'sketch' | 'interactive' | 'onChanged' | 'onPillBounds'> } }
+declare global { interface Window { tutor: Pick<VisualTutorApi, 'overlay' | 'action' | 'sketch' | 'interactive' | 'onChanged' | 'onPillBounds' | 'cancelRender' | 'loadClip' | 'playbackAck' | 'mediaState' | 'review' | 'controlPlayback' | 'loadNarration'> } }
 
 export default function Overlay() {
   const [board, setBoard] = useState<TutorBoard | null>(null);
@@ -49,11 +51,14 @@ export default function Overlay() {
     return () => { observer.disconnect(); window.removeEventListener('resize', keepVisible); };
   }, [board?.id]);
   useEffect(() => {
-    return window.tutor.onPillBounds?.(bounds => setBoard(previous => previous ? { ...previous, pillBounds: { ...bounds, x: bounds.x - previous.bounds.x, y: bounds.y - previous.bounds.y } } : previous));
+    return window.tutor.onPillBounds?.(bounds => setBoard(previous => previous ? { ...previous, pillBounds: { ...bounds, x: bounds.x - (previous.presentationBounds??previous.bounds).x, y: bounds.y - (previous.presentationBounds??previous.bounds).y } } : previous));
   }, []);
   useEffect(() => {
-    const off = window.tutor.onChanged(setBoard);
-    void window.tutor.overlay().then(state => { setBoard(previous => previous && state.board && previous.revision > state.board.revision ? previous : state.board); setScreenshot(state.screenshot); }).catch(error => setError(String(error)));
+    // Context-bridge callbacks can finish out of order: an older acknowledgement
+    // must not erase a newer playback command, cue or narration track.
+    const receive=(next:TutorBoard|null)=>setBoard(previous=>previous&&next&&previous.id===next.id&&previous.revision>next.revision?previous:next);
+    const off = window.tutor.onChanged(receive);
+    void window.tutor.overlay().then(state => { receive(state.board); setScreenshot(state.screenshot); }).catch(error => setError(String(error)));
     return off;
   }, []);
   const act = (action: TutorAction) => {
@@ -70,7 +75,11 @@ export default function Overlay() {
   }, [board?.id]);
   if (!board) return error ? <div role="alert" className="tutor-error">{error}</div> : null;
   const step = board.steps[board.selected];
-  const preferredRequest = board.panelAnchor ? { ...board.panelAnchor, width: step?.panel?.width ?? panelSize.width / board.bounds.width * 1000 } : step?.panel;
+  // Width is an input, not feedback from ResizeObserver. The native display
+  // and Chromium viewport can differ by a DIP; converting measured width via
+  // those different coordinate systems repeatedly grows the card each frame.
+  const intendedWidth = userSize?.width ?? Math.min(step?.diagram || step?.clip ? 760 : 420, window.innerWidth - 24);
+  const preferredRequest = board.panelAnchor ? { ...board.panelAnchor, width: step?.panel?.width ?? intendedWidth / window.innerWidth * 1000 } : step?.panel;
   const preferred = preferredRequest ? placeCanvas({ width: window.innerWidth, height: window.innerHeight }, board.pillBounds, panelSize, preferredRequest) : undefined;
   const panelStyle = {
     ...(preferred ?? (board.pillBounds ? dockCanvas({ width: window.innerWidth, height: window.innerHeight }, board.pillBounds, panelSize) : {})),
@@ -119,7 +128,7 @@ export default function Overlay() {
       else strokeRef.current = [...strokeRef.current.slice(0, -1), next];
       setStroke(strokeRef.current);
     }} onPointerUp={endStroke} onPointerCancel={event => { if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId); strokeRef.current = []; setStroke([]); }} />}
-    <section ref={panelRef} className={`tutor-panel${userSize || expanded ? ' is-user-sized' : ''}${board.presentation === 'study' && step?.diagram ? ' is-rich-study' : ''}${resizing ? ' is-resizing' : ''}`} style={panelStyle} aria-label="Visual tutor controls" onPointerEnter={() => window.tutor.interactive(true)} onPointerLeave={() => { if (!dragRef.current && !resizeRef.current) window.tutor.interactive(false); }}>
+    <section ref={panelRef} className={`tutor-panel${userSize || expanded ? ' is-user-sized' : ''}${board.presentation === 'study' && (step?.diagram || step?.clip) ? ' is-rich-study' : ''}${resizing ? ' is-resizing' : ''}`} style={panelStyle} aria-label="Visual tutor controls" onPointerEnter={() => window.tutor.interactive(true)} onPointerLeave={() => { if (!dragRef.current && !resizeRef.current) window.tutor.interactive(false); }}>
       <div className="tutor-heading"><button type="button" className="tutor-move-handle" aria-label="Move explanation panel" title="Drag to move · arrow keys to reposition" onPointerDown={event => {
         if (event.button !== 0 || !panelRef.current) return;
         const rect = panelRef.current.getBoundingClientRect();
@@ -148,10 +157,12 @@ export default function Overlay() {
         event.preventDefault(); event.stopPropagation();
         const rect = panelRef.current.getBoundingClientRect(), distance = event.shiftKey ? 40 : 10;
         setPosition(clampPanel(rect.left + delta[0] * distance, rect.top + delta[1] * distance));
-      }}><GripVertical size={13} className="tutor-grip" /><span className="tutor-brand">Drawing</span><span className="tutor-time">Snapshot {new Date(board.capturedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span></button>{step?.diagram && <button type="button" aria-label={expanded ? 'Restore card size' : 'Expand card'} title={expanded ? 'Restore card size' : 'Expand card'} onClick={() => setExpanded(value => !value)}>{expanded ? <Minimize2 size={16} /> : <Maximize2 size={16} />}</button>}{action('Minimise drawing', 'chat', <X size={16} />)}</div>
+      }}><GripVertical size={13} className="tutor-grip" /><span className="tutor-brand">Drawing</span><span className="tutor-time">Snapshot {new Date(board.capturedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span></button>{(step?.diagram || step?.clip) && <button type="button" aria-label={expanded ? 'Restore card size' : 'Expand card'} title={expanded ? 'Restore card size' : 'Expand card'} onClick={() => setExpanded(value => !value)}>{expanded ? <Minimize2 size={16} /> : <Maximize2 size={16} />}</button>}{action('Minimise drawing', 'chat', <X size={16} />)}</div>
       <div className="tutor-lesson" aria-live="polite"><h1>{step?.title ?? 'Selection attached'}</h1></div>
+      {step?.clip && <StudyClip key={step.id} clip={step.clip} lesson={step.lesson} bookmark={board.bookmarks?.[step.id]} review={!board.following} loadNarration={key=>window.tutor.loadNarration?window.tutor.loadNarration(board.id,key):Promise.reject(Error('Narration loader unavailable'))} layoutKey={JSON.stringify(panelStyle)} mediaIdentity={board.mediaToken?{boardId:board.id,stepId:step.id,token:board.mediaToken}:undefined} onMedia={state=>window.tutor.mediaState?.(state)} command={board.playback?.stepId===step.id?board.playback:undefined} onPlayback={(command,state)=>{void window.tutor.playbackAck?.(command,state).catch(error=>setError(error.message));}} active={board.visible!==false} loadClip={src => window.tutor.loadClip ? window.tutor.loadClip(board.id,src) : Promise.reject(Error('Study clip loader is unavailable'))} onCancel={() => { void window.tutor.cancelRender?.(board.id, step.clip!.jobId).catch(error => setError(error.message)); }} />}
       {step?.diagram && <DiagramFrame key={step.id} diagram={step.diagram} title={step.title} fill={!!userSize || expanded || board.presentation === 'study'} />}
       {error && <p role="alert" className="tutor-error">{error}<button onClick={() => setError('')}>Dismiss</button></p>}
+      {board.presentation==='study'&&board.steps.length>0&&<ReviewStrip board={board} select={id=>{void window.tutor.review?.(board.id,id).catch(error=>setError(error.message));}} control={(action,rate)=>{if(step)void window.tutor.controlPlayback?.({boardId:board.id,stepId:step.id,requestId:crypto.randomUUID(),action,...(rate?{rate}:{})}).catch(error=>setError(error.message));}}/>}
       <div className="tutor-controls"><div className="tutor-navigation">{action('Previous step', 'previous', <ArrowLeft size={16} />, board.selected === 0)}<span>{board.steps.length ? `${board.selected + 1} / ${board.steps.length}` : 'No steps yet'}</span>{action('Next step', 'next', <ArrowRight size={16} />, board.selected >= board.steps.length - 1)}{!board.following && <button className="tutor-follow" onClick={() => act('latest')}>Latest <ArrowUpRight size={13} /></button>}</div><div className="tutor-tools">{action(board.frozen ? 'Return to live screen' : 'Freeze snapshot for stable drawings', 'freeze', board.frozen ? <Layers size={16} /> : <Eye size={16} />, false, board.frozen)}{action(board.sketching ? 'Finish sketching' : 'Sketch a question', 'sketch', board.sketching ? <Check size={16} /> : <Pencil size={16} />, false, board.sketching)}{action('Undo last sketch', 'undo', <Undo2 size={16} />, !board.sketches.length)}</div></div>
       <div className="tutor-hint">{board.sketching ? 'Sketch in amber · ask in Ally · Esc minimises' : board.frozen ? 'Frozen snapshot · drag edges to resize · Esc minimises' : 'Apps remain clickable · drag edges to resize · Esc minimises'}</div>
       {(Object.keys(resizeEdges) as ResizeEdge[]).map(edge => <button key={edge} type="button" className={`tutor-resize-handle tutor-resize-${edge}`} aria-label={`Resize drawing ${resizeEdges[edge]}`} title="Drag to resize · arrow keys resize" onPointerDown={event => {

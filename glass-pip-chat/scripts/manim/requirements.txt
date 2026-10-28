@@ -1,0 +1,2 @@
+manim[typst]==0.22.0
+typst==0.15.0

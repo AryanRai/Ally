@@ -8,7 +8,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import type { AgentEvent } from '../agent/types';
 
 const fake = vi.hoisted(() => ({ root: '', load: vi.fn(), start: vi.fn(), stop: vi.fn(), activity: vi.fn(), steer: vi.fn(), input: vi.fn(), access: vi.fn(), desktopAccess: vi.fn() }));
-vi.mock('electron', () => ({ app: { getPath: () => fake.root } }));
+vi.mock('electron', () => ({ app: { getPath: () => fake.root }, webContents:{getAllWebContents:()=>[]} }));
 vi.mock('../agent/runner.js', () => ({ startAgentRun: fake.start, stopAgentRun: fake.stop, steerAgentRun: fake.input, canStopAgentSession: () => false, stopAgentSession: () => false, changeAgentSessionAccess: fake.access }));
 vi.mock('../agent/sessions.js', () => ({ listAgentSessions: vi.fn(), loadAgentSession: fake.load }));
 vi.mock('../agent/codexHistory.js', () => ({ listCodexChats: vi.fn(), loadCodexChat: fake.load, repairCodexDeviceTitle: vi.fn(async () => {}) }));
@@ -30,6 +30,34 @@ import { liveStudyReplies } from './liveStudyReply';
 import { interactions } from '../devices/interactions';
 
 let stop: (() => void) | undefined;
+
+it('serves authenticated current preview with public progress without scanning every running chat or sending a turn',async()=>{
+  fake.root=fs.mkdtempSync(path.join(os.tmpdir(),'ally-preview-route-'));
+  fs.writeFileSync(path.join(fake.root,'watch-bridge.json'),JSON.stringify({enabled:true,token:'synthetic-only',port:0,sessions:{}}));
+  fs.writeFileSync(path.join(fake.root,'watch-chats.json'),JSON.stringify([{id:'preview-chat',provider:'claude',sessionId:'original',title:'Preview',cwd:fake.root,messages:[],updatedAt:1}]));
+  fake.load.mockResolvedValue({running:true,messages:[{role:'user',content:'Do the work',timestamp:1},{role:'assistant',content:'Checking',timestamp:2,segments:[{type:'text',phase:'commentary',content:'Checking current files.'}]}]});
+  const create=vi.spyOn(http,'createServer');stop=startWatchBridge(()=>({defaultCwd:fake.root,permission:'readonly'}));
+  const server=create.mock.results[0].value as http.Server;if(!server.listening)await once(server,'listening');
+  const endpoint=`http://127.0.0.1:${(server.address() as {port:number}).port}/v1/chats/preview-chat/preview`;
+  expect((await fetch(endpoint)).status).toBe(401);
+  const response=await fetch(endpoint,{headers:{Authorization:'Bearer synthetic-only'}});
+  expect(response.status).toBe(200);expect(await response.json()).toMatchObject({chat:{id:'preview-chat'},running:true,progress:[{text:'Checking current files.'}],messages:[{text:'Do the work'},{commentary:['Checking current files.']}]});
+  expect(fake.start).not.toHaveBeenCalled();expect(fake.stop).not.toHaveBeenCalled();
+});
+
+it('authenticates shared output mute without starting or stopping an agent',async()=>{
+  fake.root=fs.mkdtempSync(path.join(os.tmpdir(),'ally-bridge-mute-'));
+  fs.writeFileSync(path.join(fake.root,'watch-bridge.json'),JSON.stringify({enabled:true,token:'synthetic-only',port:0,sessions:{}}));
+  const create=vi.spyOn(http,'createServer');stop=startWatchBridge(()=>({defaultCwd:fake.root,permission:'readonly'}));
+  const server=create.mock.results[0].value as http.Server;if(!server.listening)await once(server,'listening');
+  const endpoint=`http://127.0.0.1:${(server.address() as {port:number}).port}/v1/audio-mute`;
+  expect((await fetch(endpoint)).status).toBe(401);
+  const headers={Authorization:'Bearer synthetic-only','Content-Type':'application/json'};
+  expect(await(await fetch(endpoint,{headers})).json()).toEqual({muted:false});
+  expect(await(await fetch(endpoint,{headers,method:'POST',body:JSON.stringify({muted:true})})).json()).toEqual({muted:true});
+  expect(JSON.parse(fs.readFileSync(path.join(fake.root,'output-mute.json'),'utf8'))).toEqual({muted:true});
+  expect(fake.start).not.toHaveBeenCalled();expect(fake.stop).not.toHaveBeenCalled();
+});
 
 it('does not kill or replay a quiet long-running tool at the display timeout and still honors completion and Stop', async () => {
   fake.root = fs.mkdtempSync(path.join(os.tmpdir(), 'ally-long-tool-'));
@@ -569,4 +597,26 @@ it('exposes a shared stopped receipt and accepts one explicit same-chat Resume f
   expect((await request('/v1/messages',{...resume,requestId:'other-device'})).status).toBe(409);
   expect(fake.start).toHaveBeenCalledTimes(2);
   expect((await (await request('/v1/chats/chat')).json()).interrupted).toBeUndefined();
+});
+
+it('answers native playback commands without starting an agent or stopping another run',async()=>{
+ const {registerStudyControl}=await import('../visualTutor/studySession');
+ fake.root=fs.mkdtempSync(path.join(os.tmpdir(),'ally-study-controls-'));
+ messageQueue.configure(path.join(fake.root,'queue.json'));
+ fs.writeFileSync(path.join(fake.root,'watch-bridge.json'),JSON.stringify({enabled:true,token:'synthetic-only',port:0,sessions:{}}));
+ fs.writeFileSync(path.join(fake.root,'watch-chats.json'),JSON.stringify([{id:'study-control',provider:'codex',sessionId:'original',title:'Fixture',cwd:fake.root,messages:[],updatedAt:1}]));
+ fake.load.mockResolvedValue({cwd:fake.root,messages:[]});
+ const control=vi.fn(async()=> '```javascript\nstep(1); say("Paused.");\n```'),release=registerStudyControl(control);
+ try{
+  const create=vi.spyOn(http,'createServer');stop=startWatchBridge(()=>({defaultCwd:fake.root,permission:'readonly'}));
+  const server=create.mock.results[0].value as http.Server;if(!server.listening)await once(server,'listening');
+  const base=`http://127.0.0.1:${(server.address() as {port:number}).port}`,headers={Authorization:'Bearer synthetic-only','Content-Type':'application/json'};
+  const response=await fetch(base+'/v1/messages',{method:'POST',headers,body:JSON.stringify({chatId:'study-control',provider:'codex',requestId:'pause-one',permission:'readonly',presentation:'native-study',context:'{}',text:'Pause there.'})});
+  expect(response.status).toBe(202);const accepted=await response.json();
+  await vi.waitFor(()=>expect(control).toHaveBeenCalledWith({sessionKey:'codex:original',words:'Pause there.'}));
+  const result=await (await fetch(base+`/v1/turns/${accepted.id}`,{headers})).json();expect(result.status).toBe('done');
+  expect(fake.start).not.toHaveBeenCalled();expect(fake.stop).not.toHaveBeenCalled();
+  const duplicate=await (await fetch(base+'/v1/messages',{method:'POST',headers,body:JSON.stringify({chatId:'study-control',provider:'codex',requestId:'pause-one',permission:'readonly',presentation:'native-study',context:'{}',text:'Pause there.'})})).json();
+  expect(duplicate.id).toBe(accepted.id);expect(control).toHaveBeenCalledOnce();
+ }finally{release();}
 });

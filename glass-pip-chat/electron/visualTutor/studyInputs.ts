@@ -14,6 +14,8 @@ export class StudyInputs {
     if (!words.trim() || words.length > 12000) throw Error('Add a Study question (up to 12000 characters).');
     if (board.sessionKey !== studyKey(selected)) throw Error('The selected chat changed. Select the area again.');
     if (imagePath && !fs.existsSync(imagePath)) throw Error('This selection expired. Select the area again.');
+    const display = imagePath ? board.screenBounds : undefined;
+    if (imagePath && (!display || ![display.x,display.y,display.width,display.height].every(Number.isFinite) || display.width <= 0 || display.height <= 0)) throw Error('This selection has no display geometry. Select the area again.');
     const id = randomUUID(), directory = this.directory();
     fs.mkdirSync(directory, { recursive: true });
     for (const name of fs.readdirSync(directory)) {
@@ -26,8 +28,6 @@ export class StudyInputs {
     const json = path.join(directory, `${id}.json`);
     fs.writeFileSync(json + '.staged', JSON.stringify(record)); fs.renameSync(json + '.staged', json);
     // Bind the drawing to the captured monitor even if the cursor moves to the pill.
-    const display = board.screenBounds;
-    if (imagePath && !display) { this.discard(id); throw Error('This selection has no display geometry. Select the area again.'); }
     const geometry = display ? [display.x, display.y, display.width, display.height].join(',') : '';
     fs.writeFileSync(path.join(directory, `${id}.input`), [words, imagePath, geometry].map(value => Buffer.from(value).toString('base64')).join('\n') + '\n');
     return id;

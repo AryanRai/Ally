@@ -38,6 +38,9 @@ export interface PipAPI {
 
   // Speech service
   speech: {
+    outputMute: () => Promise<{ muted: boolean }>;
+    setOutputMute: (muted: boolean) => Promise<{ muted: boolean }>;
+    onOutputMute: (callback: (value: { muted: boolean }) => void) => () => void;
     settings: () => Promise<import('../../electron/speech/settings').SpeechSettings>;
     saveSettings: (patch: Partial<import('../../electron/speech/settings').SpeechSettings>) => Promise<import('../../electron/speech/settings').SpeechSettings>;
     liveStart: (id: string) => void;

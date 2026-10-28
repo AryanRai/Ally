@@ -1,4 +1,5 @@
 import { TUTOR_COLORS, MAX_DIAGRAM_HEIGHT, MAX_DIAGRAM_IMAGES, MAX_DIAGRAM_IMAGE_UNITS, type TutorBoard, type TutorMark, type TutorPoint, type TutorStep } from './types.js';
+import { isManimClipUrl } from '../manim/media.js';
 
 export const LIMITS = { steps: 16, marks: 80, points: 256, sketches: 40, totalPoints: 4000 };
 const kinds = ['arrow', 'line', 'rect', 'ellipse', 'polyline', 'text'];
@@ -60,7 +61,13 @@ export function parseStep(value: unknown): TutorStep {
     }
     diagram = { html: string(input.html, 160000, 'diagram HTML/SVG'), height, ...(images ? { images } : {}) };
   }
-  return { id: string(step.id, 80, 'step ID'), title: string(step.title, 120, 'step title'), explanation: step.explanation === '' ? '' : string(step.explanation, 1800, 'explanation'), marks, ...(diagram ? { diagram } : {}), ...(panel ? { panel } : {}) };
+  let clip:TutorStep['clip'];
+  if(step.clip!==undefined){const q=object(step.clip);if(!['queued','rendering','ready','error','cancelled'].includes(String(q.state)))throw Error('Invalid clip state');
+    if(q.src!==undefined&&!isManimClipUrl(q.src))throw Error('Invalid generated clip URL');
+    if(q.state==='ready'&&!q.src)throw Error('Ready clip requires media');
+    if(q.duration!==undefined&&(typeof q.duration!=='number'||!Number.isFinite(q.duration)||q.duration<0||q.duration>65))throw Error('Invalid clip duration');
+    clip={jobId:string(q.jobId,80,'render ID'),state:q.state as NonNullable<TutorStep['clip']>['state'],...(q.src?{src:q.src as string}:{}),...(q.duration!==undefined?{duration:q.duration as number}:{}),...(q.error?{error:string(q.error,1800,'render error')}:{})};}
+  return { id: string(step.id, 80, 'step ID'), title: string(step.title, 120, 'step title'), explanation: step.explanation === '' ? '' : string(step.explanation, 1800, 'explanation'), marks, ...(clip?{clip}:{}), ...(diagram ? { diagram } : {}), ...(panel ? { panel } : {}) };
 }
 
 /** All validation happens before mutation; a stale tool can never revive a closed board. */
@@ -76,6 +83,7 @@ export class TutorModel {
     const board = this.require(id);
     const step = parseStep(input);
     const index = board.steps.findIndex(s => s.id === step.id);
+    if(index>=0&&step.clip&&board.steps[index].clip?.jobId===step.clip.jobId)step.lesson=board.steps[index].lesson;
     if (index < 0 && board.steps.length >= LIMITS.steps) throw new Error(`At most ${LIMITS.steps} steps; update an existing step instead`);
     if (index < 0) board.steps.push(step); else board.steps[index] = step;
     if (board.following && board.presentation !== 'study') board.selected = board.steps.length - 1;
