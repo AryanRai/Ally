@@ -35,7 +35,7 @@ class PhysicalTapService : Service() {
     private var calibrationLabel = ""
     private var lastCalibrationSample = 0L
     private val reviewConsent=ReviewSwipeConsent()
-    private var audioAttemptAt=0L
+    private val audioTrigger=AcousticTrigger()
     private var overlay: HoldHandoffOverlay? = null
     private var scanner: BluetoothLeScanner? = null
     private var listening = false
@@ -98,12 +98,12 @@ class PhysicalTapService : Service() {
             val near = calibrated && result.rssi >= threshold && rules.near(now, threshold)
             val far = calibrated && result.rssi <= prefs.getInt("hold.farRssi",-70) && median?.let{it<=prefs.getInt("hold.farRssi",-70)}==true
             val audio=prefs.getBoolean("acoustic.enabled",false)
-            val radioPresent=result.rssi>=threshold-12&&rules.near(now,threshold-10)
-            val qualified = if(audio)audioApproach.observe(radioPresent,AcousticProbeService.far(this@PhysicalTapService)) else approach.observe(near, far, now)
+            val qualified = if(audio)false else approach.observe(near, far, now)
             // A silent qualification/backoff is not evidence of actual departure.
-            hold.observe(if(audio)qualified else if (hold.requiresDeparture()) !far else qualified, now)
+            // Audio mode uses the fresh rolling median in tick, avoiding cancellation by one RF dip.
+            if(!audio)hold.observe(if (hold.requiresDeparture()) !far else qualified, now)
             if (!hold.requiresDeparture() && prefs.getBoolean("hold.awaitDeparture",false)&&(!audio||AcousticProbeService.far(this@PhysicalTapService))) prefs.edit().putBoolean("hold.awaitDeparture",false).apply()
-            if (if(audio)!radioPresent else !near) cancelAttempt("Moved away · hold cancelled", reset = false)
+            if (!audio&&!near) cancelAttempt("Moved away · hold cancelled", reset = false)
         }
     }
     override fun onBind(intent: Intent?): IBinder? = null
@@ -178,14 +178,18 @@ class PhysicalTapService : Service() {
         if (!unlocked() || !optedIn() || DeviceLink.status.value != "Connected" || service == null) { diagnose("Paused: locked, disconnected or accessibility unavailable");cancelAttempt("Hold cancelled · phone unavailable"); return }
         if (calibrationUntil > now || PhysicalTapSettingsActivity.visible || !eligible(service)) { diagnose("Paused: calibration/settings/Ally/system screen; open YouTube");cancelAttempt("Open another app to hold-close", reset = false); hold.cancelProgress(); return }
         if(!prefs.getBoolean("hold.calibrated2",false)){cancelAttempt("Calibrate far and near in Hold-close settings",reset=false);return}
+        val audio=prefs.getBoolean("acoustic.enabled",false)
+        val coarseRadio=rules.near(now,prefs.getInt("tap.rssi",-55)-10)
+        if(audio){
+            hold.observe(audioApproach.observe(coarseRadio,AcousticProbeService.far(this),pending!=null||reviewJob?.isActive==true),now)
+            if(!hold.requiresDeparture()&&AcousticProbeService.far(this))prefs.edit().putBoolean("hold.awaitDeparture",false).apply()
+        }
         val progress = hold.progress(now)
         if ((pending != null || reviewJob?.isActive == true) && !hold.stillClose(now)) { cancelAttempt("Moved away or signal lost · hold cancelled"); return }
         if (pending != null || reviewJob?.isActive == true) return
-        val audio=prefs.getBoolean("acoustic.enabled",false)
-        if(audio&&!AcousticProbeService.active.value){diagnose("Audio session stopped/expired: explicitly Start it again");overlay?.cancel();return}
-        val coarseRadio=rules.near(now,prefs.getInt("tap.rssi",-55)-10)
-        if(audio&&coarseRadio&&!AcousticProbeService.near(this)&&(audioAttemptAt==0L||now-audioAttemptAt>=8000)){
-            audioAttemptAt=now;AcousticProbeService.instance?.probe()
+        if(audio&&!AcousticProbeService.active.value){diagnose("Audio is enabled but paused by Android: open Audio proximity and Resume");overlay?.cancel();return}
+        if(audio&&audioTrigger.shouldProbe(if(coarseRadio)rules.medianRssi(now) else null,now,AcousticProbeService.instance?.checking==true,AcousticProbeService.near(this),reviewConsent.active)){
+            AcousticProbeService.instance?.probe()
         }
         if (progress <= 0f) { diagnose(if(audio&&audioApproach.waitingForDeparture())"Waiting for a verified FAR chirp before another offer" else if(audio&&coarseRadio)"Checking acoustic proximity: "+AcousticProbeService.status.value else "Waiting for fresh paired-PC radio / approach");overlay?.cancel(); return }
         if(peerProtocol>=2 && now-lastProgressAt>=200){

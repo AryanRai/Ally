@@ -33,10 +33,12 @@ object AssistantRoutePicker {
     }.orEmpty()
 
     /** The compact window shown: [limit] chats with New chat, or matches while searching. */
-    fun rows(picker: Picker, limit: Int, query: String = "", hits: List<AssistantChoice> = emptyList()): List<AssistantChoice> {
+    fun rows(picker: Picker, limit: Int, query: String = "", hits: List<AssistantChoice> = emptyList(), provider: String? = null): List<AssistantChoice> {
         val q = query.trim()
-        if (q.isNotEmpty()) return (picker.chats.filter { it.title.contains(q, true) } + hits).distinctBy { it.id }.take(maxOf(limit, 8))
-        val chats = picker.chats.take(limit)
-        return if (picker.suggested == NEW) listOf(picker.fresh) + chats else chats + picker.fresh
+        val matching = picker.chats.filter { provider == null || it.provider == provider }
+        if (q.isNotEmpty()) return (matching.filter { it.title.contains(q, true) } + hits.filter { provider == null || it.provider == provider }).distinctBy { it.id }.take(maxOf(limit, 8))
+        val chats = matching.take(limit)
+        val fresh = picker.fresh
+        return if (picker.suggested == NEW) listOf(fresh) + chats else chats + fresh
     }
 }
