@@ -4,8 +4,23 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 
 /** The original Codex home; every profile shares its chat history so a chat can move between accounts. */
-export const sharedCodexHome = () => process.env.CODEX_HOME || path.join(os.homedir(), '.codex');
+export const sharedCodexHome = () => {
+  const inherited = process.env.CODEX_HOME;
+  // Ally may itself be launched from a turn running in a private account profile.
+  // That profile must never become the shared destination for all accounts.
+  return inherited && !/[\\/]codex-profiles[\\/][0-9a-f-]{36}[\\/]?$/i.test(path.resolve(inherited))
+    ? inherited : path.join(os.homedir(), '.codex');
+};
 const sameDir = (a: string, b: string) => path.resolve(a.replace(/^\\\\\?\\/, '')).replace(/[\\/]+$/, '').toLowerCase() === path.resolve(b).replace(/[\\/]+$/, '').toLowerCase();
+const canonicalDir = (directory: string): string => {
+  const resolved = path.resolve(directory);
+  try { return fs.realpathSync(resolved); }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw Error('Cannot resolve Codex history directories safely. No history was changed.');
+    const parent = path.dirname(resolved);
+    return parent === resolved ? resolved : path.join(canonicalDir(parent), path.basename(resolved));
+  }
+};
 
 /**
  * Points a profile's history folders at the shared home with junctions (no credentials move).
@@ -13,6 +28,8 @@ const sameDir = (a: string, b: string) => path.resolve(a.replace(/^\\\\\?\\/, ''
  * config.toml/AGENTS.md are copied so the same tools and instructions follow the chat.
  */
 export function shareCodexHistory(home: string, shared = sharedCodexHome()) {
+  if (sameDir(home, shared)) throw Error('A Codex account profile cannot be its own shared history home.');
+  if (sameDir(canonicalDir(home), canonicalDir(shared))) throw Error('A Codex account profile cannot be its own shared history home (directory alias).');
   fs.mkdirSync(home, { recursive: true });
   for (const dir of ['sessions', 'archived_sessions']) {
     const target = path.join(shared, dir), link = path.join(home, dir);
@@ -99,7 +116,10 @@ export class CodexAccounts {
     const status = this.state.status[id];
     if (status?.state === 'signed_out') return false;
     if (status?.state !== 'limited') return true;
-    const resets = status.windows.map(w => w.resetsAt).filter((t): t is number => Number.isFinite(t));
+    // Only exhausted windows block; a weekly window at 63% must not hold an account whose 5-hour window reset.
+    // Resets that predate the observation are stale (the limit was hit again since), so wait the retry period instead.
+    const resets = status.windows.filter(w => w.usedPercent >= 100).map(w => w.resetsAt)
+      .filter((t): t is number => Number.isFinite(t) && t! > status.checkedAt);
     return resets.length ? Math.max(...resets) <= now : now - status.checkedAt > LIMIT_RETRY_MS;
   }
   /** The next available account after those already tried, in Settings order. */
@@ -211,10 +231,16 @@ export function loginCodexProfile(id: string): () => void {
 }
 
 /** Remove inherited alternate credentials rather than accidentally using them in a profile. */
-export function codexProfileEnvironment(base: NodeJS.ProcessEnv, home: string): NodeJS.ProcessEnv {
+/**
+ * Credentials stay in the profile's own CODEX_HOME. Codex's databases (including which session file
+ * is the current one for each chat) are shared with the original home, so every account continues the
+ * same chat instead of splitting it into separate copies.
+ */
+export function codexProfileEnvironment(base: NodeJS.ProcessEnv, home: string, shared = sharedCodexHome()): NodeJS.ProcessEnv {
   const env = { ...base };
-  for (const key of Object.keys(env)) if (/^(CODEX_HOME|OPENAI_BASE_URL|OPENAI_API_KEY|CODEX_API_KEY|CODEX_ACCESS_TOKEN|OPENAI_IDENTITY_TOKEN_FILE|OPENAI_IDENTITY_TOKEN|OPENAI_IDENTITY_PROVIDER_ID|OPENAI_SERVICE_ACCOUNT_ID)$/i.test(key)) delete env[key];
+  for (const key of Object.keys(env)) if (/^(CODEX_HOME|CODEX_SQLITE_HOME|OPENAI_BASE_URL|OPENAI_API_KEY|CODEX_API_KEY|CODEX_ACCESS_TOKEN|OPENAI_IDENTITY_TOKEN_FILE|OPENAI_IDENTITY_TOKEN|OPENAI_IDENTITY_PROVIDER_ID|OPENAI_SERVICE_ACCOUNT_ID)$/i.test(key)) delete env[key];
   env.CODEX_HOME = home;
+  env.CODEX_SQLITE_HOME = shared;
   return env;
 }
 

@@ -21,7 +21,8 @@ function transport() {
 }
 it('launches a profile through documented CODEX_HOME/file storage only, with no inherited alternate credentials', async () => {
   transport(); const rpc = await CodexRpc.connect('/codex', '/owned/profile');
-  expect(spawn).toHaveBeenCalledWith('/codex', ['app-server', '-c', 'cli_auth_credentials_store="file"'], expect.objectContaining({ env: { HOME: '/actual', USERPROFILE: 'C:/actual', APPDATA: 'C:/actual/AppData', CODEX_HOME: '/owned/profile' }, windowsHide: true }));
+  // Credentials stay in the profile; the databases are shared so every account sees the same chats.
+  expect(spawn).toHaveBeenCalledWith('/codex', ['app-server', '-c', 'cli_auth_credentials_store="file"'], expect.objectContaining({ env: { HOME: '/actual', USERPROFILE: 'C:/actual', APPDATA: 'C:/actual/AppData', CODEX_HOME: '/owned/profile', CODEX_SQLITE_HOME: process.env.CODEX_HOME }, windowsHide: true }));
   rpc.close();
 });
 it('preserves the pre-existing login environment and startup arguments for the legacy connection', async () => {
