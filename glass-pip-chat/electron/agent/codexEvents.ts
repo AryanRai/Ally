@@ -12,6 +12,12 @@ export function codexErrorMessage(raw: string | undefined): string | undefined {
   return detail;
 }
 
+/** Codex's structured usage-limit code, as the app-server (camelCase) or the desktop stream (snake_case or keyed object) reports it. */
+export function isUsageLimitInfo(info: unknown): boolean {
+  if (typeof info === 'string') return /^usage_?limit_?exceeded$/i.test(info);
+  return !!info && typeof info === 'object' && Object.keys(info).some(key => /^usage_?limit_?exceeded$/i.test(key));
+}
+
 /** Normalizes the documented app-server item stream, without duplicating deltas on completion. */
 export class CodexEventParser {
   private phases = new Map<string, 'commentary' | 'final_answer'>();
@@ -96,7 +102,8 @@ export class CodexEventParser {
     if (method === 'turn/completed') {
       const out: AgentEvent[] = [...this.progress].map(([id, input]) => ({ kind: 'tool_end', id, output: JSON.stringify(input), isError: p.turn?.status !== 'completed' }));
       out.push({ kind: 'done', sessionId: this.sessionId, usage: this.usage,
-        isError: p.turn?.status === 'failed', error: codexErrorMessage(p.turn?.error?.message) });
+        isError: p.turn?.status === 'failed', error: codexErrorMessage(p.turn?.error?.message),
+        ...(isUsageLimitInfo(p.turn?.error?.codexErrorInfo ?? p.turn?.error?.codex_error_info) ? { usageLimit: true } : {}) });
       return out;
     }
     if (method === 'error' && !p.willRetry) return [{ kind: 'done', sessionId: this.sessionId, isError: true, error: codexErrorMessage(p.error?.message) ?? 'Codex turn failed' }];

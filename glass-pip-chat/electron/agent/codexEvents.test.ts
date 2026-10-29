@@ -34,6 +34,12 @@ describe('Codex app-server events', () => {
       config: { mcp_servers: { howyouseeme: { url: 'http://perception' }, droidcore: { url: 'http://motion' } } },
     });
   });
+  it.each(['usageLimitExceeded', 'usage_limit_exceeded', { usageLimitExceeded: {} }])('flags a structured usage limit (%j) so the chat can move accounts', info => {
+    const [done] = new CodexEventParser('t').handle('turn/completed', { threadId: 't', turn: { status: 'failed', error: { message: 'You’ve hit your usage limit.', codexErrorInfo: info } } });
+    expect(done).toMatchObject({ kind: 'done', isError: true, usageLimit: true });
+    const [other] = new CodexEventParser('t').handle('turn/completed', { threadId: 't', turn: { status: 'failed', error: { message: 'x', codexErrorInfo: 'other' } } });
+    expect(other).not.toHaveProperty('usageLimit');
+  });
   it('explains the ChatGPT unsupported-model error instead of showing raw JSON', () => {
     const raw = JSON.stringify({ detail: "The 'gpt-6.1-sol' model is not supported when using Codex with a ChatGPT account.", error: { type: 'invalid_request_error', code: 'model_not_found', message: "The 'gpt-6.1-sol' model is not supported when using Codex with a ChatGPT account." } });
     const [done] = new CodexEventParser('t').handle('turn/completed', { threadId: 't', turn: { status: 'failed', error: { message: raw } } });

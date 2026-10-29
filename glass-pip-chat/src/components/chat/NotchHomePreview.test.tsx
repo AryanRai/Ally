@@ -71,4 +71,48 @@ describe('compact notch Home', () => {
     expect(api.mock.calls.length).toBeGreaterThan(reads);
     expect(screen.getByText('Stable answer')).toBeTruthy();
   });
+  it('continues public progress while history stalls, survives reconnects and keeps completed text',async()=>{
+    vi.useFakeTimers();vi.spyOn(document,'hidden','get').mockReturnValue(false);
+    let historyResolve!:(value:unknown)=>void,finished=false;
+    const api=vi.fn(async(route:string)=>{
+      if(route==='selection')return {selected:{chatId:'one',title:'Live chat'},activeTurn:{id:'live',chatId:'one'}};
+      if(route==='turns/live')return {id:'live',chatId:'one',status:finished?'done':'thinking',transcript:'Current question',reply:finished?{text:'Complete reply.'}:undefined,progress:[{id:'public',text:'Testing the changes.'}],activity:'Using tools'};
+      if(route.endsWith('/preview'))return new Promise(resolve=>{historyResolve=resolve;});
+      return {};
+    });
+    render(<NotchHome api={api}/>);await act(async()=>{await vi.advanceTimersByTimeAsync(1);});
+    expect(screen.getByText('Testing the changes.')).toBeTruthy();expect(screen.queryByText('Ally is working on your question…')).toBeNull();
+    finished=true;await act(async()=>{await vi.advanceTimersByTimeAsync(500);});
+    expect(screen.getByText('Complete reply.')).toBeTruthy();
+    await act(async()=>historyResolve({chat:{id:'one',title:'Live chat'},messages:[{role:'user',text:'Current question',timestamp:1}],running:false}));
+    expect(screen.getByText('Complete reply.')).toBeTruthy();
+  });
+  it('copies the visible reply and holds selected text stable during a live update',async()=>{
+    const writeText=vi.fn(async()=>{});Object.defineProperty(navigator,'clipboard',{value:{writeText},configurable:true});
+    const props={title:'Chat',question:'Question',answer:'First answer',working:true,onOpenChat:vi.fn(),onRefresh:vi.fn()};
+    const {rerender}=render(<NotchHomePreview {...props}/>);
+    const panel=screen.getByRole('region',{name:'Live chat preview'});fireEvent.pointerDown(panel);
+    rerender(<NotchHomePreview {...props} answer="New answer"/>);
+    expect(screen.getByText('First answer')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button',{name:'Copy preview'}));await act(async()=>{});expect(writeText).toHaveBeenCalledWith('First answer');
+    fireEvent.pointerUp(document);expect(screen.getByText('New answer')).toBeTruthy();
+  });
+  it('keeps the last good preview on reconnect and ignores a late reply from the previous selection',async()=>{
+    vi.useFakeTimers();vi.spyOn(document,'hidden','get').mockReturnValue(false);
+    let selected='one',failure=false,lateResolve!:(value:unknown)=>void;
+    const api=vi.fn(async(route:string)=>{
+      if(route==='selection')return {selected:{chatId:selected,title:selected}};
+      if(route==='chats/one/preview'){
+        if(failure)return new Promise(resolve=>{lateResolve=resolve;});
+        return {chat:{id:'one',title:'one'},messages:[{role:'user',text:'Q1',timestamp:1},{role:'assistant',text:'Cached answer',timestamp:2}],running:false};
+      }
+      if(route==='chats/two/preview')return {chat:{id:'two',title:'two'},messages:[{role:'user',text:'Q2',timestamp:3},{role:'assistant',text:'New selected answer',timestamp:4}],running:false};
+      return {};
+    });
+    render(<NotchHome api={api}/>);await act(async()=>{await vi.advanceTimersByTimeAsync(1);});expect(screen.getByText('Cached answer')).toBeTruthy();
+    failure=true;await act(async()=>{await vi.advanceTimersByTimeAsync(12000);});expect(screen.getByText('Cached answer')).toBeTruthy();
+    selected='two';await act(async()=>{await vi.advanceTimersByTimeAsync(2000);});expect(screen.getByText('New selected answer')).toBeTruthy();
+    await act(async()=>lateResolve({chat:{id:'one',title:'one'},messages:[{role:'assistant',text:'Stale response',timestamp:5}],running:false}));
+    expect(screen.queryByText('Stale response')).toBeNull();expect(screen.getByText('New selected answer')).toBeTruthy();
+  });
 });

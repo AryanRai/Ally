@@ -14,6 +14,23 @@ async function mount(initial = board) {
   return { api, changed };
 }
 describe('visual teaching overlay', () => {
+  it('rejects a late older board snapshot after a newer lesson update',async()=>{
+    const {changed}=await mount(board);
+    const newer={...board,revision:20,steps:[{...board.steps[0],title:'Current explanation'}]};
+    act(()=>changed(newer));expect(screen.getByRole('heading',{name:'Current explanation'})).toBeInTheDocument();
+    act(()=>changed({...board,revision:19}));expect(screen.getByRole('heading',{name:'Current explanation'})).toBeInTheDocument();
+    act(()=>changed({...board,id:'different-board',revision:0,steps:[{...board.steps[0],title:'New board'}]}));
+    expect(screen.getByRole('heading',{name:'New board'})).toBeInTheDocument();
+  });
+  it('keeps anchored width stable when native and viewport widths differ',async()=>{
+    vi.stubGlobal('innerWidth',1601);vi.stubGlobal('innerHeight',903);
+    let measure:()=>void=()=>{};
+    vi.stubGlobal('ResizeObserver',class {constructor(callback:()=>void){measure=callback;}observe(){}disconnect(){}});
+    await mount({...board,presentation:'study',bounds:{x:0,y:0,width:1600,height:900},panelAnchor:{x:580,y:730,sequence:1},steps:[{...board.steps[0],diagram:{html:'<svg/>',height:500}}]});
+    const panel=screen.getByRole('region',{name:'Visual tutor controls'});
+    Object.defineProperties(panel,{offsetWidth:{get:()=>Math.round(parseFloat(panel.style.width))},offsetHeight:{value:700}});
+    for(let i=0;i<25;i++){act(()=>measure());expect(parseFloat(panel.style.width)).toBeCloseTo(760,5);}
+  });
   it('gives Study media a large fill area and expands/restores without changing the lesson', async () => {
     vi.stubGlobal('innerWidth', 1280); vi.stubGlobal('innerHeight', 800);
     const { api } = await mount({ ...board, presentation: 'study', steps: [{ ...board.steps[0], diagram: { html: '<svg><circle r="10"/></svg>', height: 900 } }] });

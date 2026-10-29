@@ -33,21 +33,25 @@ import { WatchApprovals, watchPermission } from './approvals.js';
 import { attachSpeechSocket } from './speechSocket.js';
 import { transcribeAudioRequest } from './transcription.js';
 import { speechSettings } from '../speech/settings.js';
+import { outputMute, setOutputMute } from '../speech/outputMute.js';
 import { notifyReply } from '../notifications.js';
 import { attachDeviceSocket } from '../devices/socket.js';
 import { DeviceMedia, MAX_ATTACHMENT, approvalImageUrls, type DeviceAttachment } from './media.js';
 import { TransferStore, MAX_CHUNK } from './transfer.js';
 import { interactions } from '../devices/interactions.js';
 import { chatSelection } from '../agent/selection.js';
+import { answerNativeJobApproval } from '../nativeJobs/approvals.js';
 import { buildNativeStudyPrompt } from './nativeStudy.js';
 import { studyReasoning } from './studyReasoning.js';
-import { prepareStudySession } from '../visualTutor/studySession.js';
+import { StudyTiming } from './studyTiming.js';
+import { prepareStudySession, handleStudyControl } from '../visualTutor/studySession.js';
 import { registerNativeStudyTools } from './nativeStudyTools.js';
 import { readProviderUsage } from '../agent/providerUsage.js';
 import { sharedGreeting } from '../surface/greeting.js';
 import { liveStudyReplies } from './liveStudyReply.js';
 import { updateProgress, presentProgress, historyProgress, type ProgressState } from './progress.js';
 import { searchChats } from '../chatsMcp/index.js';
+import { compactAgentSession } from '../agent/compact.js';
 
 interface BridgeConfig { enabled: boolean; token: string; port: number; sessions: Partial<Record<AgentProvider, string>>; transport?: WatchTransportConfig; cloudTunnel?: CloudTunnelConfig }
 interface Turn extends ActivityState, ProgressState { delivery?: 'not_sent' | 'uncertain' | 'accepted'; nativeStudy?: string; resumeToken?: string; waitingExternal?: boolean; chatId: string; id: string; requestId: string; provider: AgentProvider; permission: AgentPermission; status: 'thinking' | 'done' | 'error'; activity: string; transcript: string; liveText?: string; reply?: WatchReply; error?: string; runId?: string; startedAt: number; uploads?: DeviceAttachment[]; submission?: string }
@@ -94,6 +98,7 @@ export function startWatchBridge(getConfig: () => AgentConfig): (() => void) | u
   const nativeStreams = new NativeTurnStreams();
   const nativePrograms = new Map<string, string>();
   const finishedAt = new Map<string, number>();
+  const studyTimings = new Map<string, StudyTiming>();
   const activityTitles = new Map<string, string>();
   const titleReads = new Set<string>();
   const titleRetries = new Map<string, number>();
@@ -144,6 +149,9 @@ export function startWatchBridge(getConfig: () => AgentConfig): (() => void) | u
     if (turn.status !== 'thinking') return;
     clearTimeout(timeouts.get(turn.id)); timeouts.delete(turn.id);
     turn.status = error ? 'error' : 'done';
+    const timing = studyTimings.get(turn.id)?.finish(!!error);
+    studyTimings.delete(turn.id);
+    if (timing) console.info('[Study timing ms]', JSON.stringify(timing));
     finishedAt.set(turn.id, Date.now());
     interactionChatKeys.delete(turn.id);
     approvals.cancel(turn.id);
@@ -161,6 +169,7 @@ export function startWatchBridge(getConfig: () => AgentConfig): (() => void) | u
   };
   const run = async (turn: Turn) => {
     if (closed || turn.status !== 'thinking') return;
+    if (turn.nativeStudy !== undefined) studyTimings.set(turn.id, new StudyTiming());
     const agent = getConfig();
     let output = '';
     let textItem: string | undefined;
@@ -182,11 +191,24 @@ export function startWatchBridge(getConfig: () => AgentConfig): (() => void) | u
         armTimeout(turn);
       }
       const chat = await conversations.prepareRun(turn.chatId);
+      studyTimings.get(turn.id)?.mark('historyReady');
       interactionChatKeys.set(turn.id, `${chat.provider}:${chat.sessionId || chat.id}`);
       if (closed || turn.status !== 'thinking') return;
+      if(turn.nativeStudy!==undefined){
+        const key=chat.sessionId?`${chat.provider}:${chat.sessionId}`:chat.id;
+        const program=await handleStudyControl(key,turn.transcript);
+        if(program){
+          if(closed||turn.status!=='thinking')return;
+          turn.delivery='accepted';turn.liveText=program;nativePrograms.set(turn.id,program);
+          studyTimings.get(turn.id)?.mark('firstText');
+          liveStudyReplies.publish({key,id:turn.id,question:turn.transcript,text:program,working:false,activity:'Response ready',startedAt:turn.startedAt});
+          nativeStreams.publish(turn.id,{type:'text',text:program});finish(turn,undefined,program);return;
+        }
+      }
       const diagramInstructions = turn.nativeStudy !== undefined ? await prepareStudySession({ chatId: chat.id, sessionKey: chat.sessionId ? `${chat.provider}:${chat.sessionId}` : chat.id, context: turn.nativeStudy, imagePath: turn.uploads?.find(a => a.mimeType.startsWith('image/')) ? media.file(turn.uploads.find(a => a.mimeType.startsWith('image/'))!) : undefined }) : '';
       if (closed || turn.status !== 'thinking') return;
-      const runId = await startAgentRun({ provider: turn.provider, cwd: chat.cwd || agent.defaultCwd, permission: turn.permission,
+      studyTimings.get(turn.id)?.mark('boardReady');
+      const runId = await startAgentRun({ provider: turn.provider, title: chat.title, cwd: chat.cwd || agent.defaultCwd, permission: turn.permission,
         queueKey: chat.sessionId ? `${chat.provider}:${chat.sessionId}` : chat.id,
         sessionId: chat.sessionId, codexAccountId: chat.codexAccountId, resumeToken: turn.resumeToken,
         images: turn.uploads?.filter(a => a.mimeType.startsWith('image/')).map(a => media.file(a)),
@@ -204,13 +226,14 @@ export function startWatchBridge(getConfig: () => AgentConfig): (() => void) | u
           const selection = chatSelection.snapshot();
           if (selection.selected?.chatId === chat.id) chatSelection.set({ ...selection.selected, sessionId: event.sessionId }, selection.version, selection.origin);
         }
-        if (event.kind === 'accepted') turn.delivery = 'accepted';
+        if (event.kind === 'accepted') { turn.delivery = 'accepted'; studyTimings.get(turn.id)?.mark('accepted'); }
         if (event.kind === 'input' && event.mode !== 'queued') turn.transcript += `\n\nAdditional input:\n${event.text}`;
         if (event.kind === 'continuation') {
             output = ''; finalOutput = ''; hasPhase = false; turn.liveText = ''; textItem = undefined;
           if (turn.nativeStudy !== undefined) { nativePrograms.set(turn.id, ''); nativeStreams.publish(turn.id, { type: 'reset' }); }
         }
         if (event.kind === 'text') {
+            if (event.text.trim()) studyTimings.get(turn.id)?.mark('firstText');
             if (event.phase) hasPhase = true;
             if (event.phase === 'commentary') {
               const id = `commentary:${event.itemId ?? 'progress'}`;
@@ -333,6 +356,12 @@ export function startWatchBridge(getConfig: () => AgentConfig): (() => void) | u
     try {
       if (req.headers.origin || !authorized(req.headers.authorization, config.token)) { send(res, 401, { error: 'Pair Ally from the desktop first' }); return; }
       const url = new URL(req.url ?? '/', 'http://localhost');
+      if (url.pathname === '/v1/audio-mute' && req.method === 'GET') { send(res, 200, outputMute()); return; }
+      if (url.pathname === '/v1/audio-mute' && req.method === 'POST') {
+        const chunks: Buffer[] = []; let size = 0;
+        for await (const chunk of req) { size += chunk.length; if (size > 128) throw Error('Mute request too large'); chunks.push(chunk); }
+        send(res, 200, setOutputMute(JSON.parse(Buffer.concat(chunks).toString()).muted)); return;
+      }
       const accessRoute = /^\/v1\/chats\/([^/]+)\/access$/.exec(url.pathname);
       if (req.method === 'POST' && accessRoute) {
         const chunks: Buffer[] = []; let bytes = 0;
@@ -360,6 +389,11 @@ export function startWatchBridge(getConfig: () => AgentConfig): (() => void) | u
         const input=JSON.parse(Buffer.concat(parts).toString('utf8')),id=url.pathname.split('/')[3];
         if(!interactions.list().some(request=>request.id===id&&!request.desktopOnly))throw Error('Request was already answered or is desktop only');
         interactions.answer(id,input,'study');send(res,200,{accepted:true});return;
+      }
+      if (req.method === 'POST' && url.pathname === '/v1/native-jobs/approvals') {
+        const parts:Buffer[]=[];let size=0;for await(const part of req){size+=part.length;if(size>256000)throw Error('Request is too large');parts.push(part);}
+        const controller=new AbortController();res.once('close',()=>{if(!res.writableEnded)controller.abort();});
+        send(res,200,{result:await answerNativeJobApproval(JSON.parse(Buffer.concat(parts).toString('utf8')),controller.signal)});return;
       }
       if (url.pathname === '/v1/selection') {
         if (req.method === 'GET') { send(res, 200, chatSelection.snapshot()); return; }
@@ -508,6 +542,16 @@ export function startWatchBridge(getConfig: () => AgentConfig): (() => void) | u
         const offset = Math.max(0, Math.min(100000, Number(url.searchParams.get('offset')) || 0));
         send(res, 200, await conversations.list(provider, offset)); return;
       }
+      const previewRoute = req.method === 'GET' && /^\/v1\/chats\/([^/]+)\/preview$/.exec(url.pathname);
+      if (previewRoute) {
+        const chat = await getConversation(decodeURIComponent(previewRoute[1]));
+        const active = [...turns.values()].find(t => t.chatId === chat.id && t.status === 'thinking');
+        const snapshot = active && !active.waitingExternal ? { messages: chat.messages.slice(-30), running: true } : await conversations.preview(chat);
+        const progress = active ? { progress: presentProgress(active.progress), progressTurnId: active.id } : historyProgress(snapshot.messages, snapshot.running);
+        send(res, 200, { chat: chatSummary(chat), messages: snapshot.messages, running: !!active || snapshot.running, ...progress, activeTurnId: active?.id,
+          ...(active ? { turn: { id: active.id, chatId: active.chatId, status: active.status, startedAt: active.startedAt, transcript: active.transcript, liveText: active.liveText, reply: active.reply, activity: active.activity, progress: presentProgress(active.progress) } } : {}) });
+        return;
+      }
       if (req.method === 'GET' && url.pathname.startsWith('/v1/chats/')) {
         const chat = await getConversation(decodeURIComponent(url.pathname.slice('/v1/chats/'.length)));
         const readState = unreadState(chat.provider, chat.sessionId ?? chat.id);
@@ -618,6 +662,17 @@ export function startWatchBridge(getConfig: () => AgentConfig): (() => void) | u
         for await (const chunk of req) { size += chunk.length; if (size > 16000) { send(res, 413, { error: 'Answer too large' }); return; } parts.push(chunk); }
         try { approvals.answer(turn.id, approvalRoute[2], JSON.parse(Buffer.concat(parts).toString())); send(res, 200, { accepted: true }); }
         catch (error) { send(res, 409, { error: error instanceof Error ? error.message : 'Invalid approval answer' }); }
+        return;
+      }
+      const compactRoute = req.method === 'POST' && /^\/v1\/chats\/([^/]+)\/compact$/.exec(url.pathname);
+      if (compactRoute) {
+        // Compaction runs through the chat's own owner, never while it is replying.
+        const chat = await getConversation(decodeURIComponent(compactRoute[1]));
+        if (!chat.sessionId) { send(res, 200, { compacted: false, provider: chat.provider, reason: 'This chat has no agent session yet.' }); return; }
+        const busy = [...turns.values()].some(t => t.chatId === chat.id && t.status === 'thinking') || canStopAgentSession(queueKey(chat))
+          || (await listRunningSessions()).some(s => s.provider === chat.provider && s.id === chat.sessionId);
+        if (busy) { send(res, 409, { compacted: false, provider: chat.provider, reason: 'This chat is replying. Compact it after the reply finishes.' }); return; }
+        send(res, 200, await compactAgentSession({ provider: chat.provider, sessionId: chat.sessionId, cwd: chat.cwd, codexDesktop: !!getConfig().codexDesktop }));
         return;
       }
       if (req.method !== 'POST' || !['/v1/messages', '/v1/audio', '/v1/chats'].includes(url.pathname)) { send(res, 404, { error: 'Not found' }); return; }

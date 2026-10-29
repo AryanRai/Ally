@@ -70,7 +70,12 @@ describe('native and floating surface coordinator', () => {
     f.socket.emit('data',`STUDY_ACCEPTED different\nSTUDY_ACCEPTED ${id}\n`);
     await expect(pending).resolves.toBeUndefined();
     f.socket.emit('data',`STUDY_CAPTION ${Buffer.from('Now change the frequency.').toString('base64')}\n`);
-    expect(received).toHaveBeenCalledWith('Now change the frequency.');studyPresentation.off('caption',received);
+    expect(received).toHaveBeenCalledWith('Now change the frequency.');
+    const caption=JSON.stringify({header:'Step 2',text:'Watch the rotating arrow trace a sine wave.',chips:Array.from({length:200},()=>({label:'waiting',state:'waiting'}))});
+    const encoded=`STUDY_CAPTION ${Buffer.from(caption).toString('base64')}\n`;
+    f.socket.emit('data',encoded.slice(0,9000));f.socket.emit('data',encoded.slice(9000));
+    expect(f.socket.destroy).not.toHaveBeenCalled();expect(received).toHaveBeenLastCalledWith(caption);
+    studyPresentation.off('caption',received);
     const uncertain=f.coordinator.study('22345678-1234-1234-1234-123456789abc');
     const rejected=expect(uncertain).rejects.toThrow('may have started');
     await vi.advanceTimersByTimeAsync(5001);await rejected;

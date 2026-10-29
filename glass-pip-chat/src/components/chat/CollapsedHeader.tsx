@@ -4,6 +4,7 @@ import { ArrowUp, ChevronDown, Clipboard, GripVertical, Lasso, Maximize2, MoreHo
 import { cn } from '@/lib/utils';
 import type { Message, Segment } from '@/types/chat';
 import AgentPresence from '@/components/glow/AgentPresence';
+import OutputMuteButton from './OutputMuteButton';
 import type { OrbMood } from '@/components/glow/EnergyOrb';
 import type { RobotPulse, RobotStatus } from '@/components/glow/RobotAvatar';
 import PillAgentMonitor from './PillAgentMonitor';
@@ -251,6 +252,7 @@ export default function CollapsedHeader({
         </form>
 
         <div className="flex shrink-0 items-center" style={noDrag}>
+          <OutputMuteButton />
           <button
             type="button"
             className={cn(iconButton, 'relative', extras && 'bg-white/8 text-foreground')}

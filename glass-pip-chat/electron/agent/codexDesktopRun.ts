@@ -77,7 +77,8 @@ export function runCodexDesktopTurn(opts: AgentRunOptions, emit: (event: AgentEv
     for (const controller of approvals.values()) controller.abort();
     const complete = () => {
       client?.close();
-      emit({ ...event, sessionId: id, usage: { ...event.usage, durationMs: Date.now() - startedAt } });
+      // A completed turn reports no delivery of its own; account cycling needs it to continue the chat elsewhere.
+      emit({ ...event, delivery: event.delivery ?? (turnId ? 'accepted' : dispatched ? 'uncertain' : 'not_sent'), sessionId: id, usage: { ...event.usage, durationMs: Date.now() - startedAt } });
     };
     if (opts.reasoningEffort && dispatched && priorEffort !== undefined && client && owner) {
       void client.request('thread-follower-update-thread-settings', {

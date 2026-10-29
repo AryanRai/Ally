@@ -10,6 +10,14 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class AssistantRoutePickerTest {
+    @Test fun providerFiltersExposeCodexEvenBehindManyRecentClaudeChatsWithoutChangingDestination() {
+        val recent = (1..12).map { chat("claude:$it", "Claude $it", "claude", it.toLong()) } + chat("codex:original", "Study", "codex", 0)
+        val picker = AssistantRoutePicker.options(route("choose", recent.first()), recent, "claude")
+        assertFalse(ids(AssistantRoutePicker.rows(picker, 5)).contains("codex:original"))
+        assertEquals(listOf("codex:original", AssistantRoutePicker.NEW), ids(AssistantRoutePicker.rows(picker, 5, provider = "codex")))
+        assertEquals("claude:1", picker.suggested)
+        assertEquals("New claude chat", picker.fresh.title)
+    }
     private fun chat(id: String, title: String, provider: String = "codex", updated: Long = 0) =
         JSONObject().put("id", id).put("title", title).put("provider", provider).put("updatedAt", updated)
     private fun route(kind: String, vararg chats: JSONObject) = JSONObject().put("kind", kind).put("chats", JSONArray(chats.toList()))

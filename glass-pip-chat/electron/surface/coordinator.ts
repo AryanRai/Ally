@@ -129,7 +129,8 @@ export function createSurfaceCoordinator(win: BrowserWindow) {
     socket.on('error', () => {});
     socket.on('data', chunk => {
       buffer += chunk;
-      if (buffer.length > 8192) { socket.destroy(); return; }
+      // A native caption is JSON with chips as well as text (base64 UTF-8).
+      if (buffer.length > (authenticated ? 196608 : 8192)) { socket.destroy(); return; }
       let end: number;
       while ((end = buffer.indexOf('\n')) >= 0) {
         const line = buffer.slice(0, end).trim(); buffer = buffer.slice(end + 1);
@@ -162,7 +163,7 @@ export function createSurfaceCoordinator(win: BrowserWindow) {
         }
         if (line.startsWith('STUDY_CAPTION ')) {
           const caption = Buffer.from(line.slice(14), 'base64').toString('utf8');
-          if (caption.length <= 1200) studyPresentation.emit('caption', caption);
+          if (caption.length <= 32768) studyPresentation.emit('caption', caption);
           continue;
         }
         if (line.startsWith('SETTINGS ')) {

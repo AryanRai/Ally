@@ -1,6 +1,7 @@
 // @vitest-environment node
 import { expect, it } from 'vitest';
 import { buildNativeStudyPrompt, NATIVE_STUDY_INSTRUCTIONS } from './nativeStudy';
+import { NATIVE_STUDY_FOLLOWUP_INSTRUCTION } from './nativeStudyFollowups';
 
 it('keeps the live drawing/speech contract and includes the question once', () => {
   const prompt=buildNativeStudyPrompt('Explain this.', '{"screenshot":{"widthInPixels":1280,"heightInPixels":720},"highlight":{"text":"selected equation"}}');
@@ -14,6 +15,9 @@ it('keeps the live drawing/speech contract and includes the question once', () =
   expect(prompt).toContain('Resume normal formatting after this turn');
   expect(prompt).not.toContain('phone and watch');
   expect(prompt.length).toBeLessThan(4100);
+  expect(NATIVE_STUDY_INSTRUCTIONS.length).toBeLessThan(3200);
+  expect(prompt).toContain('short complete say() sentence before longer drawing code');
+  expect(prompt).toContain('never as a prerequisite to answering');
 });
 
 it('allows requested agent actions while keeping executable actions out of the drawing interpreter',()=>{
@@ -51,4 +55,13 @@ it('reports native browser gates without inventing personal-Codex settings or cl
  expect(prompt).toContain('actually listed in this chat');
  expect(prompt).toContain('do not switch tools/backends to bypass');
  expect(prompt).toContain('never present a fenced error or drawing program as evidence');
+});
+
+it('asks for tap-to-ask follow-up buttons and sparing sound accents within a small budget',()=>{
+ const prompt=buildNativeStudyPrompt('Explain the period of sin','{}');
+ expect(prompt).toContain('2–3 short tap-to-ask follow-ups');
+ expect(prompt).toContain('{ask:"Why is the period 2π?"}');
+ expect(prompt).toContain('at most one per answer');
+ expect(prompt).not.toContain('nextQuestions');
+ expect(NATIVE_STUDY_FOLLOWUP_INSTRUCTION.length).toBeLessThan(300);
 });

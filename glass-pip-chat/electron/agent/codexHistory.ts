@@ -2,9 +2,13 @@ import { configureDiscoveryReader, rememberCodexThread, hiddenConversation } fro
 import { canonicalTurnId, readDesktopActivity } from './codexDesktop.js';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs/promises';
+import path from 'node:path';
 import { localImageDataUrl } from './imageFile.js';
 import { CodexRpc } from './codexRpc.js';
+import { sharedCodexHome } from './codexAccounts.js';
 import { CodexLocalHistory } from './codexLocalHistory.js';
+import { CodexPaginatedHistory } from './codexPaginatedHistory.js';
+import { CodexBranchTurns, mergeBranchMessages } from './codexBranchTurns.js';
 import { CodexEventParser } from './codexEvents.js';
 import { codexMigrationAliases, mappedCodexSession } from './codexMigration.js';
 import { thumbnails } from './thumbs.js';
@@ -34,7 +38,7 @@ export function closeCodexHistory() {
 }
 async function reader(lane: ReadLane = 'history'): Promise<CodexRpc> {
   if (!connections[lane]) {
-    const opening = CodexRpc.connect(binary).then(rpc => {
+    const opening = CodexRpc.connect(binary, sharedCodexHome()).then(rpc => {
       rpc.onClose = () => { if (connections[lane] === opening) delete connections[lane]; };
       return rpc;
     }).catch(error => { if (connections[lane] === opening) delete connections[lane]; throw error; });
@@ -107,13 +111,24 @@ async function listDefaultCodexChatsPage(limit = 30, startCursor?: string): Prom
 }
 
 /** One shared history lists every account's chats once; a chat's account is tracked separately. */
-export async function listCodexChatsPage(limit = 30, cursor?: string): Promise<{ sessions: AgentSessionSummary[]; nextCursor?: string }> {
-  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 80) throw Error('Invalid chat page size');
+const listingLoads = new Map<string, Promise<{ sessions: AgentSessionSummary[]; nextCursor?: string }>>();
+export function listCodexChatsPage(limit = 30, cursor?: string): Promise<{ sessions: AgentSessionSummary[]; nextCursor?: string }> {
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 80) return Promise.reject(Error('Invalid chat page size'));
   // Cursors from the earlier per-account directory start again from the shared list.
-  return listDefaultCodexChatsPage(limit, cursor?.startsWith('profiles:') ? undefined : cursor);
+  const start = cursor?.startsWith('profiles:') ? undefined : cursor;
+  const key = JSON.stringify([limit, start]);
+  const existing = listingLoads.get(key);
+  if (existing) return existing;
+  const work = listDefaultCodexChatsPage(limit, start).finally(() => {
+    if (listingLoads.get(key) === work) listingLoads.delete(key);
+  });
+  listingLoads.set(key, work);
+  return work;
 }
 
 const localHistory = new CodexLocalHistory();
+const paginatedHistory = new CodexPaginatedHistory();
+const branchTurns = new CodexBranchTurns(path.join(sharedCodexHome(), 'sessions'));
 const historyLoads = new Map<string, Promise<AgentSessionSnapshot>>();
 const nativeTurns = new Map<string, { fingerprint: string; turns: any[]; snapshot?: AgentSessionSnapshot }>();
 /** Repeated desktop/device reads share one immutable load; each caller owns its receipt/revision. */
@@ -166,17 +181,21 @@ async function loadNativeCodexChat(id: string, previousRevision?: string): Promi
   } else if (!cached) {
     turns.push(...(await historyRead(rpc, 'thread/read', { threadId: sessionId, includeTurns: true })).thread.turns);
   }
+  const suffix = thread.historyMode === 'paginated' ? await paginatedHistory.read(sessionId, thread.path).catch(() => undefined) : undefined;
   const activity = await readCodexActivity(thread.path).catch(() => undefined);
   const managed = isManagedSessionRunning('codex', sessionId);
   const last = turns.at(-1);
-  const live = last?.status === 'interrupted' && !(activity?.pending && activity.recent && canonicalTurnId(last.id) === canonicalTurnId(activity.turnId)) ? await readDesktopActivity(sessionId) : undefined;
+  const live = !suffix?.turnIds.size && last?.status === 'interrupted' && !(activity?.pending && activity.recent && canonicalTurnId(last.id) === canonicalTurnId(activity.turnId)) ? await readDesktopActivity(sessionId) : undefined;
   // Only correct the matching active turn. Never erase an earlier real Stop.
   if (last?.status === 'interrupted' && ((activity?.pending && (activity.recent || managed) && canonicalTurnId(last.id) === canonicalTurnId(activity.turnId)) || (live?.running && canonicalTurnId(last.id) === live.turnId))) last.status = 'inProgress';
-  const running = managed || live?.running === true || codexTurnsPending(turns);
-  const revision = createHash('sha256').update(JSON.stringify([sessionId, thread.name, thread.cwd, fingerprint ?? turns, running])).digest('hex');
+  const running = managed || (suffix?.turnIds.size ? !!(activity?.pending && activity.recent) : live?.running === true || codexTurnsPending(turns));
+  const known = new Set<string>([...turns.map(t => canonicalTurnId(t.id)!), ...(suffix?.turnIds ?? [])].filter(Boolean));
+  const branches = await branchTurns.read(sessionId, thread.path, known).catch(() => undefined);
+  const revision = createHash('sha256').update(JSON.stringify([sessionId, thread.name, thread.cwd, fingerprint ?? turns, running, branches?.revision])).digest('hex');
   const identity = { createdAt: (thread.createdAt ?? 0) * 1000, sessionId, title: thread.name ? chatTitle(thread.name) : undefined, ...(sessionId !== id ? { originalSessionId: id } : {}) };
   if (revision === previousRevision) return { ...identity, cwd: normalizeCwd(thread.cwd), revision, unchanged: true, messages: [], running };
-  const snapshot = { ...identity, cwd: normalizeCwd(thread.cwd), revision, running, messages: cached?.snapshot?.revision === revision ? cached.snapshot.messages : await cooperativeCodexHistoryMessages(turns, thread.createdAt * 1000) };
+  const baseTurns = suffix?.turnIds.size ? turns.filter(t => !suffix.turnIds.has(canonicalTurnId(t.id)!)) : turns;
+  const snapshot = { ...identity, cwd: normalizeCwd(suffix?.cwd ?? thread.cwd), revision, running, messages: cached?.snapshot?.revision === revision ? cached.snapshot.messages : mergeBranchMessages([...await cooperativeCodexHistoryMessages(baseTurns, thread.createdAt * 1000), ...(suffix?.messages ?? [])], branches?.messages ?? []) };
   if (fingerprint) {
     const after = await fs.stat(thread.path).catch(() => undefined);
     if (after && stat && after.size === stat.size && after.mtimeMs === stat.mtimeMs && after.ctimeMs === stat.ctimeMs) {
@@ -273,4 +292,12 @@ export async function repairCodexDeviceTitle(id: string, title: string): Promise
   if (thread.name && !isDeviceProtocolTitle(thread.name)) return;
   if (!isDeviceProtocolTitle(thread.preview ?? '') && !isDeviceProtocolTitle(thread.name ?? '')) return;
   await rpc.request('thread/name/set', { threadId: thread.id ?? mappedCodexSession(id), name: chatTitle(title) });
+}
+
+/** Newest turn and folder of one chat, read-only; used to notice a Codex-app turn stopped by a usage limit. */
+export async function readLatestCodexTurn(threadId: string): Promise<{ turn?: any; cwd?: string; title?: string }> {
+  const rpc = await reader('metadata');
+  const { thread } = await historyRead(rpc, 'thread/read', { threadId }, 'metadata');
+  const page = await historyRead(rpc, 'thread/turns/list', { threadId, limit: 1, sortDirection: 'desc', itemsView: 'full' }, 'metadata');
+  return { turn: (page?.data ?? page?.turns ?? [])[0], cwd: thread?.cwd, title: thread?.name || thread?.preview };
 }

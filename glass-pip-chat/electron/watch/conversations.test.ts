@@ -11,6 +11,16 @@ let root: string;
 beforeEach(() => { root = fs.mkdtempSync(path.join(os.tmpdir(), 'ally-watch-chats-')); });
 afterEach(() => fs.rmSync(root, { recursive: true, force: true }));
 describe('watch conversations', () => {
+  it('projects a bounded current preview without decoding attachments or replacing full history',async()=>{
+    const deps={list:vi.fn(),load:vi.fn(async()=>({revision:'preview-r1',running:true,messages:Array.from({length:80},(_,i)=>({role:i%2?'assistant' as const:'user' as const,content:`Message ${i}`,timestamp:i,images:['private image'],segments:i===79?[{type:'text' as const,phase:'commentary' as const,content:'Checking the latest change'}]:undefined}))}))};
+    const media={dataUrls:vi.fn(()=>[]),markdown:vi.fn(()=>[])};
+    const store=new WatchConversations(path.join(root,'preview.json'),deps,{},root,media as never);
+    const chat=store.create('claude',root,'preview');chat.sessionId='original';chat.messages=[{id:'earlier',role:'assistant',text:'Stored complete history',timestamp:1,components:[]}];
+    const result=await store.preview(chat);
+    expect(result.running).toBe(true);expect(result.messages).toHaveLength(30);
+    expect(result.messages[0].text).toBe('Message 50');expect(result.messages.at(-1)?.commentary).toEqual(['Checking the latest change']);
+    expect(media.dataUrls).not.toHaveBeenCalled();expect(media.markdown).not.toHaveBeenCalled();expect(chat.messages[0].text).toBe('Stored complete history');
+  });
   it('orders by recent activity after open, completion, refresh and restart', async () => {
     const native = [
       {id:'new',provider:'codex' as const,title:'New',createdAt:20,updatedAt:30},

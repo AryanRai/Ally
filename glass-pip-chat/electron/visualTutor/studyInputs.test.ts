@@ -22,5 +22,11 @@ it('binds the exact crop, original session and permission before native capture 
   expect(record.context.screenshot).toBeUndefined();
   expect(record.context.selection.sourcePixels).toEqual({width:2400,height:1350});
   expect(()=>input.issue(board,{...selected,chatId:'codex:other'},'Wrong chat',image)).toThrow('selected chat changed');
+  const missing={...board,screenBounds:undefined};
+  expect(()=>input.issue(missing,{...selected,sessionId:'original'},'Missing geometry',image)).toThrow('no display geometry');
+  expect(fs.readdirSync(path.join(root,'profile/study-inputs'))).toEqual([id+'.input',id+'.json']);
+  const textId=input.issue(board,{...selected,sessionId:'original'},'Fresh native capture','');
+  const textWire=fs.readFileSync(path.join(root,'profile/study-inputs',textId+'.input'),'utf8').split('\n');
+  expect(textWire[2]).toBe('');input.discard(textId);
   input.discard(id); expect(fs.existsSync(path.join(root,'profile/study-inputs',id+'.json'))).toBe(false);
 });

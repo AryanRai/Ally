@@ -29,9 +29,13 @@ async function whichAll(name: string): Promise<string[]> {
 }
 
 /** Prefer a real executable over a shell shim (.cmd / extensionless npm stub). */
-function pickExecutable(paths: string[]): string | undefined {
+export function pickExecutable(paths: string[]): string | undefined {
   if (!isWin) return paths[0];
-  return paths.find(p => /\.exe$/i.test(p)) ?? paths.find(p => /\.cmd$/i.test(p));
+  // Modern npm Claude installs hide a native executable behind a .cmd shim.
+  // Prefer that over an earlier legacy JS installation on the inherited PATH.
+  return paths.find(p => /\.exe$/i.test(p))
+    ?? paths.find(p => /\.(cmd|bat)$/i.test(p) && /\.exe$/i.test(launcherFor(p).command) && !launcherFor(p).shell)
+    ?? paths.find(p => /\.(cmd|bat)$/i.test(p));
 }
 
 async function findCodexInWindowsApps(): Promise<string | undefined> {
@@ -73,9 +77,11 @@ export function launcherFor(bin: string): Launcher {
   if (!isWin || !/\.(cmd|bat)$/i.test(bin)) return { command: bin, prefixArgs: [], shell: false };
   try {
     const shim = fs.readFileSync(bin, 'utf8');
-    const m = shim.match(/"%dp0%\\([^"]+?\.(exe|js|cjs|mjs))"/i);
-    if (m) {
+    // npm shims may mention an optional node.exe before the actual CLI target.
+    // Inspect every candidate; a missing optional node must not force cmd.exe.
+    for (const m of shim.matchAll(/"%dp0%\\([^"]+?\.(exe|js|cjs|mjs))"/gi)) {
       const target = path.join(path.dirname(bin), m[1]);
+      if (/^node\.exe$/i.test(m[1])) continue;
       if (fs.existsSync(target)) {
         return m[2].toLowerCase() === 'exe'
           ? { command: target, prefixArgs: [], shell: false }

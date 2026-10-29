@@ -6,6 +6,20 @@ export const step = (id = 'one'): TutorStep => ({ id, title: 'The triangle', exp
 const started = () => { const model = new TutorModel(); model.start(board()); return model; };
 
 describe('visual tutor scene boundary', () => {
+  it('retains staged lesson annotations through render-status updates without leaking them into a replacement job',()=>{
+    const model=started();model.draw('session-1',{...step(),clip:{jobId:'job',state:'rendering'}});
+    model.require('session-1').steps[0].lesson={id:'beat',stepId:'one',cue:'Watch.',mode:'wait',started:false,annotations:[]};
+    expect(model.draw('session-1',{...step(),clip:{jobId:'job',state:'rendering'}}).steps[0].lesson?.id).toBe('beat');
+    expect(model.draw('session-1',{...step(),clip:{jobId:'replacement',state:'rendering'}}).steps[0].lesson).toBeUndefined();
+  });
+  it('accepts only generated local capability clips and preserves sketches/manual step review',()=>{
+    const model=started(),initial=board();initial.presentation='study';initial.following=false;initial.sketches=[{id:'user-stroke',kind:'polyline',color:'amber',points:[{x:1,y:1},{x:2,y:2}]}];model.start(initial);
+    const src='http://127.0.0.1:5196/'+'a'.repeat(64)+'/'+'b'.repeat(32)+'.mp4';
+    const next=model.draw(initial.id,{...step(),clip:{jobId:'render',state:'ready',src,duration:10}});
+    expect(next.steps[0].clip?.src).toBe(src);expect(next.sketches).toEqual(initial.sketches);expect(next.following).toBe(false);
+    for(const url of ['file:///C:/secret.mp4','https://example.com/video.mp4','http://127.0.0.1:5196/arbitrary'])expect(()=>model.draw(initial.id,{...step(),clip:{jobId:'render',state:'ready',src:url}})).toThrow();
+    expect(()=>model.draw(initial.id,{...step(),clip:{jobId:'render',state:'ready'}})).toThrow();
+  });
   it('accepts bounded complex diagrams separately from plain annotation text and revokes them with the board', () => {
     const model = started();
     expect(model.draw('session-1', { ...step(), diagram: { html: '<svg><circle r="4"/></svg><input type="range">', height: 300 } }).steps[0].diagram?.height).toBe(300);

@@ -114,6 +114,19 @@ export default function AgentSettingsSection({ platform, theme }: AgentSettingsS
               className="accent-white mt-0.5" />
           </label>
         )}
+        <label className="flex items-start justify-between gap-3 text-xs cursor-pointer">
+          <span>
+            KiCAD tools in every chat
+            <span className={cn('block mt-1 text-[10px] leading-relaxed', muted)}>
+              Off: Ally starts KiCAD only for chats in a folder with a KiCad project, which saves memory.
+              Affects chats Ally runs, not the Codex app.
+            </span>
+          </span>
+          <input type="checkbox" aria-label="KiCAD tools in every chat"
+            checked={config.kicadEverywhere ?? false}
+            onChange={e => update({ kicadEverywhere: e.target.checked })}
+            className="accent-white mt-0.5" />
+        </label>
         <ChatsMcpSettings muted={muted} box={box} />
         <div className="space-y-1">
           <span className={cn('text-xs block', muted)}>Default working folder</span>

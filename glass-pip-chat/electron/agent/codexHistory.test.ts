@@ -6,7 +6,7 @@ import path from 'node:path';
 vi.mock('./thumbs.js', () => ({ thumbnails: (images?: string[]) => images?.length ? images : undefined }));
 vi.mock('./codexMigration.js', () => ({ mappedCodexSession: (id: string) => id, codexMigrationAliases: () => ({}) }));
 import { CodexRpc } from './codexRpc';
-import { closeCodexHistory, codexHistoryMessages, cooperativeCodexHistoryMessages, listCodexChats, loadCodexChat, repairCodexDeviceTitle } from './codexHistory';
+import { closeCodexHistory, codexHistoryMessages, cooperativeCodexHistoryMessages, listCodexChats, listCodexChatsPage, loadCodexChat, repairCodexDeviceTitle } from './codexHistory';
 vi.mock('./codexDesktop.js', async importOriginal => ({ ...await importOriginal<typeof import('./codexDesktop.js')>(), readDesktopActivity: vi.fn(async () => undefined) }));
 import { readDesktopActivity } from './codexDesktop';
 import { readCodexActivity } from './codexActivity';
@@ -14,6 +14,57 @@ import { resolveCodexDiscovery } from './codexDiscovery';
 vi.mock('./codexActivity.js', () => ({ readCodexActivity: vi.fn(async () => undefined) }));
 afterEach(() => { closeCodexHistory(); vi.restoreAllMocks(); });
 describe('API history', () => {
+  it('overlays verified paginated suffix turns onto the full native base when the API stops early', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ally-current-suffix-'));
+    const file = path.join(root, 'rollout');
+    const records = [
+      { type: 'session_meta', payload: { id: 'suffix-regression', history_mode: 'paginated', history_base: { thread_id: 'suffix-regression', end_ordinal_exclusive: 50 } } },
+      { type: 'event_msg', payload: { type: 'task_started', turn_id: 'build' } },
+      { type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'Build' }] } },
+      { type: 'response_item', payload: { type: 'message', role: 'assistant', phase: 'final_answer', content: [{ type: 'output_text', text: 'Build complete' }] } },
+      { type: 'event_msg', payload: { type: 'task_complete', turn_id: 'build' } },
+      { type: 'event_msg', payload: { type: 'task_started', turn_id: 'latest' } },
+      { type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'Now what?' }] } },
+      { type: 'response_item', payload: { type: 'message', role: 'assistant', phase: 'final_answer', content: [{ type: 'output_text', text: 'Record your words' }] } },
+      { type: 'event_msg', payload: { type: 'task_complete', turn_id: 'latest' } },
+    ];
+    const write = () => fs.writeFileSync(file, records.map((r, i) => JSON.stringify({ ...r, ordinal: 50 + i, timestamp: new Date(1000 + i * 1000).toISOString() })).join('\n') + '\n');
+    write();
+    const request = vi.fn(async (method: string) => method === 'thread/read' ? { thread: { path: file, historyMode: 'paginated', createdAt: 1 } } : { data: [
+      { id: 'base', status: 'completed', itemsView: 'full', items: [{ type: 'agentMessage', id: 'base-a', text: 'Earlier history' }] },
+      { id: 'build-berry-display-1', status: 'interrupted', itemsView: 'full', items: [{ type: 'userMessage', content: [{ type: 'text', text: 'Build' }] }, { type: 'agentMessage', id: 'stale', phase: 'commentary', text: 'Working' }] },
+    ], nextCursor: null });
+    vi.spyOn(CodexRpc, 'connect').mockResolvedValue({ request, close: vi.fn() } as unknown as CodexRpc);
+    vi.mocked(readCodexActivity).mockResolvedValue({ turnId: 'latest', pending: false, recent: true, status: 'completed', updatedAt: Date.now() });
+    try {
+      const first = await loadCodexChat('suffix-regression');
+      expect(first.messages.map(m => m.content)).toEqual(['Earlier history', 'Build', 'Build complete', 'Now what?', 'Record your words']);
+      expect(first.running).toBe(false);
+      expect((await loadCodexChat('suffix-regression', first.revision)).unchanged).toBe(true);
+      records[7].payload = { ...records[7].payload, content: [{ type: 'output_text', text: 'Updated final answer' }] } as never; write();
+      expect((await loadCodexChat('suffix-regression', first.revision)).messages.at(-1)!.content).toBe('Updated final answer');
+      expect(request.mock.calls.every(([method]) => ['thread/read', 'thread/turns/list'].includes(method))).toBe(true);
+    } finally { fs.rmSync(root, { recursive: true, force: true }); }
+  });
+  it('browses the shared home despite an inherited private account and shares concurrent refreshes', async () => {
+    const previous = process.env.CODEX_HOME;
+    process.env.CODEX_HOME = path.join(os.homedir(), 'codex-profiles', '4e7a74c5-440d-40e5-8ae7-f0e8aa95745f');
+    let finish!: (value: unknown) => void;
+    const request = vi.fn(() => new Promise(resolve => { finish = resolve; }));
+    const connect = vi.spyOn(CodexRpc, 'connect').mockResolvedValue({ request, close: vi.fn() } as unknown as CodexRpc);
+    try {
+      const one = listCodexChatsPage(5), two = listCodexChatsPage(5);
+      await vi.waitFor(() => expect(request).toHaveBeenCalledOnce());
+      expect(connect).toHaveBeenCalledWith(undefined, path.join(os.homedir(), '.codex'));
+      finish({ data: [{ id: 'shared', updatedAt: 1 }], nextCursor: null });
+      expect(await two).toEqual(await one);
+      request.mockResolvedValueOnce({ data: [], nextCursor: null });
+      await listCodexChatsPage(5);
+      expect(request).toHaveBeenCalledTimes(2);
+    } finally {
+      if (previous === undefined) delete process.env.CODEX_HOME; else process.env.CODEX_HOME = previous;
+    }
+  });
   it('yields during expensive conversion while preserving every turn, status and message exactly', async () => {
     const turns = Array.from({length: 60}, (_, i) => ({ id: `t${i}`, status: i % 3 ? 'completed' : 'interrupted', startedAt: i + 1,
       items: [{type:'userMessage',content:[{type:'text',text:`Prompt ${i}`}]}, {type:'agentMessage',id:`a${i}`,text:`Answer ${i}`}] }));

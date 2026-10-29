@@ -2,11 +2,15 @@ import { app, ipcMain } from 'electron';
 import { ensureSpeechRuntime, getSpeechRuntimeStatus, stopSpeechRuntime } from '../speech/runtime.js';
 import { nativeSpeech, cancelNativeSpeech, installedVoices, type VoiceOptions } from '../speech/native.js';
 import { googleSpeech, googleVoices } from '../speech/google.js';
+import { outputMute, setOutputMute, registerOutputMute } from '../speech/outputMute.js';
 
 const failed = (error: unknown) => ({ success: false as const, error: error instanceof Error ? error.message : 'Speech operation failed.' });
 
 /** Main process keeps worker credentials and recordings out of URLs, logs and persisted chats. */
 export function registerSpeechIpc(): void {
+  registerOutputMute();
+  ipcMain.handle('speech:outputMute', () => outputMute());
+  ipcMain.handle('speech:setOutputMute', (_, muted) => setOutputMute(muted));
   let cloudRequest: AbortController | undefined;
   ipcMain.handle('speech:connect', async () => {
     try { await ensureSpeechRuntime(); return { success: true }; } catch (error) { return failed(error); }

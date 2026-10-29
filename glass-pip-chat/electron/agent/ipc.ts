@@ -15,7 +15,12 @@ import { listAgentModels, listAgentSessions, loadAgentSession } from './sessions
 import { readAgentMonitor } from './agentMonitor.js';
 import { watchAgentSessions } from './sessionWatch.js';
 import { configureCodexMigrations } from './codexMigration.js';
-import { configureCodexHistory, listCodexChats, listCodexChatsPage, loadCodexChat, closeCodexHistory } from './codexHistory.js';
+import { configureCodexHistory, listCodexChats, listCodexChatsPage, loadCodexChat, closeCodexHistory, readLatestCodexTurn } from './codexHistory.js';
+import { watchCodexAppLimits } from './codexAppLimits.js';
+import { configureMcpSavings } from './mcpSavings.js';
+import { codegraphPool, stopCodegraphPool } from './codegraphPool.js';
+import { codexAccounts, sharedCodexHome } from './codexAccounts.js';
+import { notifyReply } from '../notifications.js';
 import { chatSelection, type SharedChatSelection } from './selection.js';
 import { generateGreeting } from './greeting.js';
 import { registerCodexAccountIpc } from './codexAccountIpc.js';
@@ -48,6 +53,10 @@ function loadConfig(): AgentConfig {
 /** Registers `agent:*` IPC; `onConfig` sees the config at startup and after every change. */
 export function registerAgentIpc(getWindow: () => BrowserWindow | null, onConfig?: (config: AgentConfig) => void): void {
   let config = loadConfig();
+  // Fewer MCP servers for Ally's own turns: KiCAD only where needed, one CodeGraph per folder.
+  configureMcpSavings(config);
+  void codegraphPool();
+  app.once('will-quit', stopCodegraphPool);
   registerCodexAccountIpc(getWindow, () => config.codexPath);
   interactions.configure(path.join(app.getPath('userData'), 'chat-interactions.json'));
   const stopInteractionEvents = interactions.subscribe((event) => {
@@ -84,6 +93,7 @@ export function registerAgentIpc(getWindow: () => BrowserWindow | null, onConfig
     config = { ...config, ...patch };
     fs.writeFileSync(CONFIG_FILE(), JSON.stringify(config, null, 2));
     onConfig?.(config);
+    configureMcpSavings(config);
     configureCodexHistory(config.codexPath);
     return { ...config, homeCwd: app.getPath('home') };
   });
@@ -211,6 +221,45 @@ export function registerAgentIpc(getWindow: () => BrowserWindow | null, onConfig
     if (win && !win.isDestroyed()) win.webContents.send('agent:sessionsChanged', provider);
   });
   app.on('will-quit', stopWatching);
+
+  // Chats run in the Codex app use only its login; continue one stopped by a usage limit on another account.
+  const limitFile = path.join(app.getPath('userData'), 'codex-app-limits.json');
+  const waitFile = path.join(app.getPath('userData'), 'codex-limit-waiting.json');
+  let limitIds: string[] = [];
+  try { limitIds = JSON.parse(fs.readFileSync(limitFile, 'utf8')).filter((id: unknown) => typeof id === 'string'); } catch { /* first run */ }
+  const stopLimitWatch = watchCodexAppLimits(path.join(sharedCodexHome(), 'sessions'), {
+    latest: readLatestCodexTurn,
+    autoSwitch: () => codexAccounts.autoSwitch(),
+    markDefaultLimited: () => { try { codexAccounts.limited('default'); } catch { /* Observation only. */ } },
+    nextReset: () => {
+      const resets = Object.values(codexAccounts.snapshot().status).flatMap(status => status.windows)
+        .filter(w => w.usedPercent >= 100 && Number.isFinite(w.resetsAt) && w.resetsAt! > Date.now()).map(w => w.resetsAt!);
+      return resets.length ? Math.min(...resets) : undefined;
+    },
+    waiting: {
+      load: () => {
+        try {
+          return (JSON.parse(fs.readFileSync(waitFile, 'utf8')) as any[]).filter(chat => chat && typeof chat.threadId === 'string' && /^[\w-]{1,200}$/.test(chat.threadId)
+            && typeof chat.prompt === 'string' && chat.prompt && typeof chat.cwd === 'string' && typeof chat.title === 'string' && Number.isFinite(chat.since));
+        } catch { return []; }
+      },
+      save: chats => { try { fs.writeFileSync(waitFile, JSON.stringify(chats)); } catch { /* Kept in memory. */ } },
+    },
+    handled: {
+      has: id => limitIds.includes(id),
+      add: id => {
+        limitIds = [...limitIds.filter(other => other !== id), id].slice(-300);
+        try { fs.writeFileSync(limitFile, JSON.stringify(limitIds)); } catch { /* Kept in memory. */ }
+      },
+    },
+    notify: (id, title, text, threadId, cwd) => notifyReply({ id, kind: 'attention', title, text, session: { id: threadId, provider: 'codex', title, cwd } }),
+    continueChat: turn => new Promise((resolve, reject) => {
+      startAgentRun({ provider: 'codex', prompt: turn.prompt, title: turn.title, cwd: turn.cwd || config.defaultCwd, sessionId: turn.threadId, permission: config.permission, codexDesktop: config.codexDesktop === true },
+        (_runId, event) => { if (event.kind === 'done') resolve(event); },
+        config.codexPath, desktopInteraction(() => `codex:${turn.threadId}`), 'desktop').catch(reject);
+    }),
+  });
+  app.on('will-quit', stopLimitWatch);
 
   ipcMain.handle('agent:pickFolder', async (_, current?: string) => {
     const win = getWindow();

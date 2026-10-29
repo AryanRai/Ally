@@ -23,4 +23,10 @@ describe('selected chat Home preview', () => {
     expect(notchHomePreview(null, null)).toEqual({ title: 'Ally', question: '', answer: '', working: false });
     expect(notchHomePreview({ ...history, messages: [{ role: 'assistant', text: '<think>Internal thought</think>\nDone.', timestamp: 1 }] }, null).answer).toBe('Done.');
   });
+  it('shows public commentary when no final text has arrived and retains a finished live reply until history catches up',()=>{
+    const active={id:'turn',chatId:'one',status:'thinking',transcript:'New question',progress:[{id:'a',text:'Checking the files.'}],activity:'Using browser'};
+    expect(notchHomePreview(history,active)).toMatchObject({question:'New question',answer:'',progress:['Checking the files.'],activity:'Using browser',working:true});
+    expect(notchHomePreview({...history,running:true},{...active,status:'done',reply:{text:'Finished answer.'}})).toMatchObject({answer:'Finished answer.',working:false});
+    expect(notchHomePreview({...history,progress:[{id:'b',text:'Recent external update.'}],messages:[{role:'user',text:'Next',timestamp:5},{role:'assistant',text:'',commentary:['External progress.'],timestamp:6}]},null)).toMatchObject({progress:['Recent external update.']});
+  });
 });
