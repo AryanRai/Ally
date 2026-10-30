@@ -30,7 +30,7 @@ import { startNativeDesktopApprovals } from './nativeDesktopApprovals.js';
 import { localImage } from './localImage.js';
 import { startWatchBridge } from '../watch/bridge.js';
 import { liveStudyReplies } from '../watch/liveStudyReply.js';
-import { revealFloatingSurface } from '../surface/coordinator.js';
+import { presentDecisionOnNative, revealFloatingSurface } from '../surface/coordinator.js';
 import type { AgentConfig, AgentProvider, AgentRunOptions } from './types.js';
 
 const CONFIG_FILE = () => path.join(app.getPath('userData'), 'agent-config.json');
@@ -63,6 +63,7 @@ export function registerAgentIpc(getWindow: () => BrowserWindow | null, onConfig
     const win = getWindow(); if (!win || win.isDestroyed()) return;
     win.webContents.send('agent:interactionsChanged');
     if (event.type === 'interaction') {
+      if (presentDecisionOnNative(event.request)) return;
       revealFloatingSurface();
       if (win.isMinimized()) win.restore();
       if (!win.isVisible()) win.show();

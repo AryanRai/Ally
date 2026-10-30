@@ -31,6 +31,12 @@ describe('per-turn MCP servers', () => {
     expect(codexMcpOverrides(folder(), both)).not.toHaveProperty('kicad');
   });
 
+  it('starts mcp-unreal only in an Unreal project folder and never the robot servers outside robot mode', () => {
+    const all = new Set(['mcp-unreal', 'howyouseeme', 'droidcore']);
+    expect(codexMcpOverrides(folder(['lecture.pdf']), all)).toEqual({ 'mcp-unreal': { enabled: false }, howyouseeme: { enabled: false }, droidcore: { enabled: false } });
+    expect(codexMcpOverrides(folder(['UE5Project/OrbitSim.uproject']), all)).not.toHaveProperty('mcp-unreal');
+  });
+
   it('only switches off servers the user configured', () => {
     expect(codexMcpOverrides(folder(), new Set(['ally_chats']))).toEqual({});
   });

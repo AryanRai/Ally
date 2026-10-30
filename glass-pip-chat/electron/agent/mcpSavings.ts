@@ -30,20 +30,29 @@ function configuredServers(home = sharedCodexHome()): Set<string> {
   } catch { return new Set(); }
 }
 
-/** A KiCad project in the folder itself or one level down. */
-export function hasKicadProject(cwd: string | undefined): boolean {
+/** A project file with this extension in the folder itself or one level down. */
+function hasProject(cwd: string | undefined, extension: string): boolean {
   if (!cwd) return false;
-  const found = (dir: string) => { try { return fs.readdirSync(dir).some(name => name.toLowerCase().endsWith('.kicad_pro')); } catch { return false; } };
+  const found = (dir: string) => { try { return fs.readdirSync(dir).some(name => name.toLowerCase().endsWith(extension)); } catch { return false; } };
   if (found(cwd)) return true;
   try {
     return fs.readdirSync(cwd, { withFileTypes: true }).some(entry => entry.isDirectory() && !entry.name.startsWith('.') && entry.name !== 'node_modules' && found(path.join(cwd, entry.name)));
   } catch { return false; }
 }
+export const hasKicadProject = (cwd: string | undefined) => hasProject(cwd, '.kicad_pro');
+export const hasUnrealProject = (cwd: string | undefined) => hasProject(cwd, '.uproject');
+
+/** Robot servers: Ally adds these itself in robot mode, so they are switched off elsewhere. */
+const ROBOT_SERVERS = ['howyouseeme', 'droidcore'];
 
 /** MCP overrides for one Codex turn, merged into its `mcp_servers` config. */
 export function codexMcpOverrides(cwd: string | undefined, servers = configuredServers()): Record<string, Record<string, unknown>> {
   const overrides: Record<string, Record<string, unknown>> = {};
   if (servers.has('kicad') && !kicadEverywhere && !hasKicadProject(cwd)) overrides.kicad = { enabled: false };
+  // mcp-unreal waits for the Unreal editor and holds every turn for its 120 s start timeout without it.
+  if (servers.has('mcp-unreal') && !hasUnrealProject(cwd)) overrides['mcp-unreal'] = { enabled: false };
+  // Nothing listens on these outside robot mode; each turn otherwise waits for them to fail.
+  for (const name of ROBOT_SERVERS) if (servers.has(name)) overrides[name] = { enabled: false };
   const shared = servers.has('codegraph') ? currentCodegraphPool()?.url(cwd) : undefined;
   // Codex cannot turn a stdio server into a URL one, so the shared server joins under its own name.
   if (shared) { overrides.codegraph = { enabled: false }; overrides[SHARED_CODEGRAPH] = { url: shared }; }

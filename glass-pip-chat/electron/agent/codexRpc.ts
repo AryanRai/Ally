@@ -7,6 +7,11 @@ export class CodexRpcError extends Error {
 }
 import { childEnv, launcherFor, resolveAgentBinary } from './binaries.js';
 
+/** Prefer the native sandbox when supported; Codex retains managed-policy and
+ * legacy fallback selection. This never changes a turn's permissions/approvals. */
+export const codexSandboxStartupArgs = (platform = process.platform): string[] =>
+  platform === 'win32' ? ['-c', 'features.prefer_mxc=true'] : [];
+
 /** A private stdio connection. Browsing uses read/list only; each turn owns its own server. */
 export class CodexRpc {
   private nextId = 0;
@@ -50,7 +55,7 @@ export class CodexRpc {
     if (!bin) throw new Error('Codex CLI not found. Install Codex or set its executable in Settings.');
     const launcher = launcherFor(bin);
     if (launcher.shell) throw new Error('Set the Codex executable path in Settings; app-server requires a direct executable.');
-    const rpc = new CodexRpc(spawn(launcher.command, [...launcher.prefixArgs, 'app-server', ...(codexHome ? ['-c', 'cli_auth_credentials_store="file"'] : [])], {
+    const rpc = new CodexRpc(spawn(launcher.command, [...launcher.prefixArgs, 'app-server', ...codexSandboxStartupArgs(), ...(codexHome ? ['-c', 'cli_auth_credentials_store="file"'] : [])], {
       env: codexHome ? codexProfileEnvironment(childEnv(), codexHome) : childEnv(), windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'],
     }));
     try {

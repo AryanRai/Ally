@@ -13,6 +13,7 @@ export const sessionActivityText = (provider: AgentProvider, id: string) => publ
 
 const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
 const managed = new Map<string, AgentSessionSummary>();
+const runLifetimes = new Map<string, AbortController>();
 const settled = new Map<string, number>();
 const finishedRuns = new Set<string>();
 export interface SessionActivity extends AgentSessionSummary { status: 'running' | 'completed' | 'stopped' | 'error' }
@@ -20,10 +21,20 @@ const recentActivity = new Map<string, SessionActivity>();
 export function isManagedSessionRunning(provider: AgentProvider, id: string) {
   return [...managed.values()].some(s => s.provider === provider && s.id === id);
 }
+/** Trusted local run identity, never supplied by browser-tool arguments. */
+export function managedSessionRunId(provider: AgentProvider, id: string): string | undefined {
+  const matches = [...managed].filter(([, session]) => session.provider === provider && session.id === id);
+  return matches.length === 1 ? matches[0][0] : undefined;
+}
+/** Exact authenticated managed prompt lifetime; absent for unknown/ambiguous owners. */
+export function managedSessionSignal(provider:AgentProvider,id:string):AbortSignal|undefined {
+  const run=managedSessionRunId(provider,id);return run?runLifetimes.get(run)?.signal:undefined;
+}
 export function trackRunningSession(runId: string, session?: AgentSessionSummary) {
-  if (session && !finishedRuns.has(runId)) managed.set(runId, session);
+  if (session && !finishedRuns.has(runId)) {managed.set(runId, session);if(!runLifetimes.has(runId))runLifetimes.set(runId,new AbortController());}
 }
 export function finishRunningSession(runId: string) {
+  runLifetimes.get(runId)?.abort();runLifetimes.delete(runId);
   const session = managed.get(runId);
   if (session) settled.set(`${session.provider}:${session.id}`, Date.now());
   managed.delete(runId);
