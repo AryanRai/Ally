@@ -8,6 +8,11 @@ const history: HomeHistory = { chat: { id: 'one', title: 'MECH5720' }, running: 
   { role: 'assistant', text: '```js\nstep(1); say("Added on page 34.");\n```', timestamp: 4 },
 ] };
 describe('selected chat Home preview', () => {
+  it('carries live command activity only from the selected chat', () => {
+    const turn = { id: 'turn', chatId: 'one', status: 'thinking', steps: [{ id: 'cmd', name: 'shell', status: 'running' }], timeline: [{ id: 'update', type: 'update' as const, text: 'Checking' }, { id: 'tool', type: 'tool' as const, stepId: 'cmd' }], startedAt: 1000 };
+    expect(notchHomePreview(history, turn)).toMatchObject({ activityContent: { steps: turn.steps, timeline: turn.timeline }, startedAt: 1000 });
+    expect(notchHomePreview(history, { ...turn, chatId: 'other' })).not.toHaveProperty('activityContent');
+  });
   it('shows the most recent question and readable Study answer', () => {
     expect(notchHomePreview(history, null)).toEqual({ title: 'MECH5720', question: 'Note this in formula sheet.', answer: 'Added on page 34.', working: false });
   });

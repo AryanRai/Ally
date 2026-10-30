@@ -1,15 +1,19 @@
+import type {InteractionHistory} from '../../../electron/devices/interactions';
+import type {ApprovalAnswer} from '../../../electron/watch/approvals';
 import { ArrowUpRight, Check, Copy, Ellipsis, RefreshCw } from 'lucide-react';
 import CompactMarkdown from './CompactMarkdown';
 import allyMark from '../../../assets/allay.png';
 import { memo, useEffect, useRef, useState } from 'react';
 import { copyPreviewText } from '@/lib/copyPreviewText';
+import { DeviceActivityReply, type DeviceActivityContent, type DeviceAsset } from './DeviceActivityReply';
+import { compactInteractions } from '@/lib/compactInteractions';
 
-type Props = { title: string; question: string; answer: string; working: boolean; progress?: string[]; activity?: string; loading?: boolean; error?: string; controls?: React.ReactNode; onOpenChat: () => void; onRefresh: () => void };
+type Props = { title: string; question: string; answer: string; working: boolean; progress?: string[]; activity?: string; activityContent?: DeviceActivityContent; requests?: InteractionHistory[]; requestSince?: number; onAnswerRequest?: (id:string,answer:ApprovalAnswer)=>Promise<unknown>; renderAsset?: (asset: DeviceAsset) => React.ReactNode; startedAt?: number; loading?: boolean; error?: string; controls?: React.ReactNode; onOpenChat: () => void; onRefresh: () => void };
 
 /** A glance at the selected chat. The native switcher owns the full workspace. */
-export default memo(function NotchHomePreview({ title, question, answer, working, progress = [], activity, loading, error, controls, onOpenChat, onRefresh }: Props) {
+export default memo(function NotchHomePreview({ title, question, answer, working, progress = [], activity, activityContent, requests = [], requestSince, onAnswerRequest, renderAsset, startedAt, loading, error, controls, onOpenChat, onRefresh }: Props) {
   const [copied,setCopied]=useState(''),[copyError,setCopyError]=useState('');
-  const reader=useRef<HTMLDivElement>(null),held=useRef(false),latest=useRef({question,answer,progress});latest.current={question,answer,progress};
+  const reader=useRef<HTMLDivElement>(null),held=useRef(false),latest=useRef({question,answer,progress,activityContent});latest.current={question,answer,progress,activityContent};
   const [selectionView,setSelectionView]=useState<typeof latest.current|null>(null);
   useEffect(()=>{
     const changed=()=>{if(held.current)return;const selection=window.getSelection();const selecting=selection&&!selection.isCollapsed&&reader.current?.contains(selection.anchorNode)&&reader.current.contains(selection.focusNode);setSelectionView(old=>selecting?old??latest.current:null);};
@@ -17,13 +21,17 @@ export default memo(function NotchHomePreview({ title, question, answer, working
     document.addEventListener('selectionchange',changed);document.addEventListener('pointerup',released);
     return()=>{document.removeEventListener('selectionchange',changed);document.removeEventListener('pointerup',released);};
   },[]);
-  const visible=selectionView??{question,answer,progress};
+  const visible=selectionView??{question,answer,progress,activityContent};
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => { if (!requests.length && !activityContent?.timeline?.some(row => row.type === 'request')) return; const timer = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(timer); }, [requests.length, activityContent]);
+  const compactRequests = compactInteractions([...requests, ...(visible.activityContent?.timeline?.flatMap(row => row.type === 'request' ? [row.request] : []) ?? [])], requestSince, now);
+  const compactContent = visible.activityContent ? { ...visible.activityContent, timeline: visible.activityContent.timeline?.filter(row => row.type !== 'request') } : {};
   const copyText=visible.answer||visible.progress.join('\n\n');
   return <section className="ally-home" aria-label="Selected chat preview">
     <div className="ally-home-pill">
       <img className="ally-home-brand" src={allyMark} alt="Ally"/>
       <button className="ally-home-title" onClick={onOpenChat} title={title}>{title}</button>
-      <span className={`ally-home-state ${working ? 'is-working' : ''}`} role="status" title={activity}>{working ? activity || 'Working' : 'Ready'}</span>
+      {!activityContent && <span className={`ally-home-state ${working ? 'is-working' : ''}`} role="status" title={activity}>{working ? activity || 'Working' : 'Ready'}</span>}
       <button type="button" className="ally-home-copy" disabled={!copyText} aria-label="Copy preview" title={copyError || 'Copy reply or latest updates'} onClick={()=>{setCopyError('');void copyPreviewText(copyText).then(()=>setCopied(copyText)).catch(()=>setCopyError('Select the text and press Ctrl+C.'));}}>{copied===copyText&&copyText?<Check size={14}/>:<Copy size={14}/>}</button>
       {controls}
       <details className="ally-home-menu"><summary aria-label="Preview menu"><Ellipsis size={16}/></summary>
@@ -32,10 +40,11 @@ export default memo(function NotchHomePreview({ title, question, answer, working
     </div>
     <div ref={reader} className="ally-home-body" role="region" aria-label="Live chat preview" tabIndex={0} style={{userSelect:'text',WebkitUserSelect:'text'}} onPointerDown={()=>{held.current=true;setSelectionView(latest.current);}}>
       {visible.question && <p className="ally-home-question" title={visible.question}><span>You</span>{visible.question}</p>}
+      {(visible.activityContent || compactRequests.length) ? <DeviceActivityReply requests={compactRequests} onAnswerRequest={onAnswerRequest} renderAsset={renderAsset} content={compactContent} text={visible.answer} working={working} startedAt={startedAt} action={activity}/> : <>
       {!!visible.progress.length && <div className="ally-home-updates"><span>Latest update</span>{visible.progress.map((text,i)=><div key={i}><CompactMarkdown>{text}</CompactMarkdown></div>)}</div>}
       {visible.answer ? <div className="ally-home-answer"><CompactMarkdown>{visible.answer}</CompactMarkdown></div>
         : visible.progress.length ? null
-        : <p className="ally-home-empty">{loading ? 'Loading your chat…' : working ? 'Ally is working on your question…' : 'Your latest question and answer will appear here.'}</p>}
+        : <p className="ally-home-empty">{loading ? 'Loading your chat…' : working ? 'Ally is working on your question…' : 'Your latest question and answer will appear here.'}</p>}</>}
       {error && <p className="ally-home-error" role="alert">{error}</p>}
       {copyError && <p className="ally-home-error" role="alert">{copyError}</p>}
     </div>

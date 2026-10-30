@@ -1,6 +1,6 @@
 package dev.ally.device
 
-/** Foreground energy endpointing; it never records, transcribes, or submits by itself. */
+/** Endpoint timing only; phone feeds classified speech, watch retains energy input. */
 class AssistantSilence private constructor(
     private val pauseSeconds: Float,
     private val startTimeoutSeconds: Float,
@@ -15,6 +15,8 @@ class AssistantSilence private constructor(
     private var voiced = 0f
     private var lastSpeech = 0f
     private var previous = 0f
+
+    fun sampleSpeech(isSpeech: Boolean, seconds: Float) = sample(if (isSpeech) 1f else 0f, seconds)
 
     fun sample(level: Float, seconds: Float): Boolean {
         val delta = (seconds - previous).coerceIn(0f, .3f)
@@ -31,8 +33,8 @@ class AssistantSilence private constructor(
     }
 
     companion object {
-        // Phone requests often contain pauses for thought and quieter endings.
+        // Automatic phone invocation should finish promptly after a sentence.
         // PcmRecording supplies RMS scaled by five, rather than raw PCM amplitude.
-        fun phone() = AssistantSilence(4f, 8f, .025f, .018f, true)
+        fun phone() = AssistantSilence(1.2f, 8f, .025f, .018f, true)
     }
 }

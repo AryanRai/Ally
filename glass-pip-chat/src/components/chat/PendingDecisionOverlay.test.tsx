@@ -18,3 +18,11 @@ it('answers only the specific server-issued request from the visible card',async
  render(<PendingDecisionOverlay/>);fireEvent.click(await screen.findByRole('button',{name:'Allow for this session'}));
  await waitFor(()=>expect(answer).toHaveBeenCalledWith('codex:other-session','request',{action:'submitForSession',values:{}}));
 });
+
+it('leaves the selected chat request in its inline card and only overlays other chats',async()=>{
+ const row={id:'selected',chatId:'codex:selected-session',kind:'approval',title:'Selected request',detail:'Details',fields:[],actions:[{value:'decline',label:'Decline'}],expiresAt:Date.now()+60000};
+ window.pip={agent:{pendingInteractions:async()=>[row,{...row,id:'other',chatId:'codex:other-session',title:'Other request'}],onInteractionsChanged:()=>()=>{}}} as any;
+ render(<PendingDecisionOverlay excludeChatId="codex:selected-session"/>);
+ expect(await screen.findByRole('dialog')).toHaveTextContent('Other request');
+ expect(screen.queryByText('Selected request')).toBeNull();
+});

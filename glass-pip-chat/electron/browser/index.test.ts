@@ -7,11 +7,43 @@ const fixture=vi.hoisted(()=>({activity:vi.fn(async()=>({running:true,turnId:'tu
 vi.mock('../agent/codexDesktop.js',()=>({readDesktopActivity:fixture.activity}));
 vi.mock('electron',()=>({app:{whenReady:()=>Promise.resolve(),getAppPath:()=>'/ally',getPath:()=>os.tmpdir(),once:()=>{}},nativeImage:{}}));
 const consent=vi.hoisted(()=>({request:vi.fn()}));
+const managed=vi.hoisted(()=>vi.fn(():string|undefined=>undefined));
+vi.mock('../agent/runningSessions.js',()=>({managedSessionRunId:managed}));
 vi.mock('../devices/interactions.js',()=>({interactions:{request:consent.request}}));
 vi.mock('../chatsMcp/index.js',()=>({registerDeviceTool:(tool:any)=>{fixture.tools.set(tool.name,tool);return()=>{};}}));
-vi.mock('./chrome.js',()=>({ChromeBridge:class {listen=async()=>{};list=()=>[{profileId:'profile'}];request=fixture.request;close=()=>{};}}));
+vi.mock('./chrome.js',()=>({ChromeBridge:class {listen=async()=>{};list=()=>[{profileId:'profile'}];waitForConnection=async()=>true;status=()=>({state:'connected'});request=fixture.request;close=()=>{};}}));
 vi.mock('./inApp.js',()=>({InAppBrowser:class {open=fixture.open;action=fixture.action;list=()=>[];close=()=>{};}}));
 import {registerBrowserTools} from './index';
+it('uses the trusted managed run to scope Stop, preserves it within a turn, and labels debugger failures',async()=>{
+ registerBrowserTools();const tool=fixture.tools.get('browser_control'),ctx={caller:'codex:managed-browser'};
+ const args={backend:'chrome',profileId:'profile',operation:'snapshot',tabId:'12'};
+ managed.mockReturnValue('run-a');
+ const before=fixture.activity.mock.calls.length;
+ await tool.handler(args,ctx); const firstTask=fixture.request.mock.calls.at(-1)![1].task;
+ await tool.handler({...args,turnId:'forged'},ctx);
+ expect(fixture.request.mock.calls.at(-1)![1].task).toBe(firstTask);
+ fixture.request.mockRejectedValueOnce(Error('Browser access stopped for this turn: Chrome detached the debugger from tab 12 (target_closed), three times'));
+ const failure=await tool.handler(args,ctx);
+ expect(failure.isError).toBe(true);
+ expect(JSON.parse(failure.content[0].text).fault).toMatchObject({code:'BROWSER_TURN_STOPPED',chromeConnected:true,retryActionAutomatically:false});
+ managed.mockReturnValue('run-b');await tool.handler(args,ctx);
+ expect(fixture.request.mock.calls.at(-2)![1]).toEqual({operation:'end',task:firstTask,tidy:false});
+ expect(fixture.request.mock.calls.at(-1)![1].task).not.toBe(firstTask);
+ expect(fixture.activity.mock.calls.length).toBe(before);
+ managed.mockReturnValue(undefined);fixture.request.mockClear();
+});
+it('exposes focused read tools without letting extraction authorize an action',async()=>{
+ registerBrowserTools(); const tool=fixture.tools.get('browser_control'),ctx={caller:'codex:fixture-read-tools'};
+ expect(tool.inputSchema.properties.operation.enum).toContain('extract');
+ expect(tool.inputSchema.properties.query).toBeDefined();
+ const base={backend:'chrome',profileId:'profile',tabId:'12'};
+ const snapshot=JSON.parse((await tool.handler({...base,operation:'snapshot',query:'Saved',interactive:true},ctx)).content[0].text);
+ expect(fixture.request.mock.calls.at(-1)![1]).toMatchObject({operation:'snapshot',query:'Saved',interactive:true});
+ await tool.handler({...base,operation:'extract'},ctx);
+ await expect(tool.handler({...base,operation:'click',ref:'e1',revision:snapshot.revision,requestId:'after-extract'},ctx)).rejects.toThrow('current revision');
+ await expect(tool.handler({...base,backend:'ally',operation:'wait_for',text:'Saved'},ctx)).rejects.toThrow('selected Chrome');
+ fixture.request.mockClear();
+});
 it('MCP uses explicit backends and originating chat, consumes revisions and deduplicates actions',async()=>{
  registerBrowserTools(); const tool=fixture.tools.get('browser_control'),ctx={caller:'codex:fixture'};
  const call=(args:any)=>tool.handler(args,ctx);

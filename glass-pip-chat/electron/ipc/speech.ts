@@ -3,6 +3,9 @@ import { ensureSpeechRuntime, getSpeechRuntimeStatus, stopSpeechRuntime } from '
 import { nativeSpeech, cancelNativeSpeech, installedVoices, type VoiceOptions } from '../speech/native.js';
 import { googleSpeech, googleVoices } from '../speech/google.js';
 import { outputMute, setOutputMute, registerOutputMute } from '../speech/outputMute.js';
+import { speechSettings } from '../speech/settings.js';
+import { transcribeRecording } from '../speech/transcription.js';
+import { synthesizeCloudWav } from '../speech/streaming.js';
 
 const failed = (error: unknown) => ({ success: false as const, error: error instanceof Error ? error.message : 'Speech operation failed.' });
 
@@ -25,6 +28,8 @@ export function registerSpeechIpc(): void {
   ipcMain.handle('speech:transcribe', async (_, bytes: Uint8Array) => {
     try {
       if (!(bytes instanceof Uint8Array) || bytes.byteLength < 6444 || bytes.byteLength > 1_950_044) throw new Error('Invalid recording length.');
+      const settings = speechSettings();
+      if (settings.cloud && (settings.transcriptionProvider ?? settings.cloudProvider) === 'gemini') return { success: true, ...await transcribeRecording(bytes, settings) };
       const { url, token } = await ensureSpeechRuntime();
       const response = await fetch(`${url}/transcribe`, {
         method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'audio/wav' },
@@ -37,9 +42,9 @@ export function registerSpeechIpc(): void {
   });
   ipcMain.handle('speech:synthesize', async (_, text: string, options?: VoiceOptions) => {
     try {
-      if (options?.engine === 'google') {
+      if (options?.engine === 'google' || options?.engine === 'gemini') {
         const request = new AbortController(); cloudRequest = request;
-        try { return { success: true, audio_data: await googleSpeech(text, options.cloudVoice ?? '', request.signal), provider: 'google' }; }
+        try { return { success: true, audio_data: options.engine === 'gemini' ? await synthesizeCloudWav({ ...speechSettings(), cloud: true, cloudProvider: 'gemini' }, text, request.signal) : await googleSpeech(text, options.cloudVoice ?? '', request.signal), provider: options.engine }; }
         catch (error) {
           if (request.signal.aborted) return failed(new Error('Speech cancelled.'));
           return { success: true, audio_data: await nativeSpeech(text, options), provider: 'local', warning: `${failed(error).error} Using your Windows voice.` };

@@ -7,15 +7,15 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class AssistantSilenceTest {
-    @Test fun phoneKeepsTheWholeRequestAcrossThinkingPauses() {
+    @Test fun phoneFinishesAfterShortPauseAndContinuingSpeechResetsIt() {
         val phone = AssistantSilence.phone()
         val old = AssistantSilence()
         for (i in 1..10) { assertFalse(phone.sample(.15f, i / 10f)); old.sample(.15f, i / 10f) }
-        assertTrue(old.sample(0f, 2.6f)) // Reproduces the old premature endpoint.
-        for (i in 11..40) assertFalse(phone.sample(0f, i / 10f))
-        assertFalse(phone.sample(.15f, 4.1f)) // The user continues the same sentence.
-        for (i in 42..80) assertFalse(phone.sample(0f, i / 10f))
-        assertTrue(phone.sample(0f, 8.2f))
+        for (i in 11..19) assertFalse(phone.sample(0f, i / 10f))
+        assertFalse(phone.sample(.15f, 2f))
+        for (i in 21..31) assertFalse(phone.sample(0f, i / 10f))
+        assertTrue(phone.sample(0f, 3.3f))
+        assertTrue(old.sample(0f, 2.6f)) // Watch keeps its existing 1.5s pause.
     }
 
     @Test fun phoneDetectsQuietPcmAndKeepsQuieterSentenceEndings() {
@@ -33,8 +33,8 @@ class AssistantSilenceTest {
         repeat(10) { i -> val level = frame(.01); phone.sample(level, (i + 1) / 10f); old.sample(level, (i + 1) / 10f) }
         assertTrue(phone.heard); assertFalse(old.heard)
         for (i in 11..60) assertFalse(phone.sample(frame(.006), i / 10f))
-        for (i in 61..99) assertFalse(phone.sample(0f, i / 10f))
-        assertTrue(phone.sample(0f, 10.1f))
+        for (i in 61..71) assertFalse(phone.sample(0f, i / 10f))
+        assertTrue(phone.sample(0f, 7.3f))
     }
 
     @Test fun phoneAllowsTimeToStartButSilentActivationStillEndsWithoutSpeech() {

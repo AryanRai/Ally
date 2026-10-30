@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({ input: null as any, output: null as any, close: vi.fn(), recognize: vi.fn() }));
 vi.mock('@google-cloud/speech', () => ({ v2: { SpeechClient: class { _streamingRecognize() { return mocks.input; } recognize = mocks.recognize; close = mocks.close; } } }));
 vi.mock('@google-cloud/text-to-speech', () => ({ TextToSpeechClient: class { streamingSynthesize() { return mocks.output; } close = mocks.close; } }));
-import { recognizeLive, synthesizeLive } from './streaming';
+import { recognizeLive, synthesizeLive, synthesizeCloudWav } from './streaming';
 const settings = { cloud: true, project: 'test-project', voice: 'en-AU-Chirp3-HD-Aoede', notifications: true };
 function stream() { return Object.assign(new EventEmitter(), { write: vi.fn(), end: vi.fn(), destroy: vi.fn(), writableLength: 0 }); }
 describe('bounded Google speech streams', () => {
@@ -31,6 +31,21 @@ describe('bounded Google speech streams', () => {
   it('does not start Google when cloud speech is off', () => {
     expect(() => recognizeLive({ ...settings, cloud: false }, vi.fn())).toThrow();
     expect(mocks.input.write).not.toHaveBeenCalled();
+  });
+  it('keeps Chirp dictation when Gemini is selected only for speaking',()=>{
+    const mic=recognizeLive({...settings,cloudProvider:'gemini',transcriptionProvider:'google'},vi.fn());
+    expect(mocks.input.write.mock.calls[0][0].streamingConfig.config.model).toBe('chirp_3');mic.cancel();
+  });
+  it('uses Gemini model and style while retaining 24 kHz PCM transport', async () => {
+    const done=synthesizeLive({...settings,cloudProvider:'gemini',geminiVoice:'Kore',geminiStyle:'Warm and clear'},'Exact supplied words',settings.voice,vi.fn(),new AbortController().signal);
+    expect(mocks.output.write.mock.calls[0][0].streamingConfig.voice).toEqual({name:'Kore',languageCode:'en-US',modelName:'gemini-2.5-flash-tts'});
+    expect(mocks.output.end.mock.calls[0][0]).toEqual({input:{text:'Exact supplied words',prompt:'Warm and clear'}});
+    mocks.output.emit('end');await done;
+  });
+  it('wraps PCM once for complete-file consumers and suppresses late chunks',async()=>{
+    const done=synthesizeCloudWav({...settings,cloudProvider:'gemini'},'Hello',new AbortController().signal);
+    mocks.output.emit('data',{audioContent:Buffer.from([1,0,2,0])});mocks.output.emit('end');mocks.output.emit('data',{audioContent:Buffer.alloc(4)});
+    const wav=Buffer.from(await done,'base64');expect(wav.toString('ascii',0,4)).toBe('RIFF');expect(wav.readUInt32LE(24)).toBe(24000);expect(wav.readUInt32LE(40)).toBe(4);expect(wav.length).toBe(48);
   });
   it('delivers PCM before the stream ends and cancels outstanding audio', async () => {
     const abort = new AbortController(); const audio = vi.fn();

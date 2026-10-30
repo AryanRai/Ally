@@ -25,6 +25,7 @@ vi.mock('node:net', async () => {
   } } };
 });
 import { createSurfaceCoordinator, studyPresentation } from './coordinator';
+import { interactions } from '../devices/interactions';
 import {handoffPresentation} from '../devices/handoffPresentation';
 
 function fixture(visible = false) {
@@ -49,6 +50,21 @@ beforeEach(() => { vi.useFakeTimers(); mocks.point = { x: 500, y: 10 }; });
 afterEach(() => { mocks.app.emit('will-quit'); mocks.ipc.handlers.clear(); mocks.app.removeAllListeners(); mocks.ipc.removeAllListeners(); vi.useRealTimers(); });
 
 describe('native and floating surface coordinator', () => {
+  it('presents decisions in the docked capable notch once and keeps the pill hidden', () => {
+    const f=fixture(false); f.connect();
+    const request={id:'surface-question',chatId:'codex:surface-test-session',kind:'question' as const,title:'Choose',detail:'Which?',fields:[],actions:[{label:'No',value:'decline'}],expiresAt:Date.now()+60000};
+    expect(f.coordinator.decision(request)).toBe(false);
+    f.socket.emit('data','DECISIONS_READY\n');f.socket.write.mockClear();
+    const remove=interactions.add(request,()=>{},()=>{});
+    expect(f.coordinator.decision(request)).toBe(true);
+    expect(f.coordinator.decision(request)).toBe(true);
+    expect(f.socket.write.mock.calls.filter(([line])=>String(line).startsWith('DECISIONS '))).toHaveLength(1);
+    expect(f.win.show).not.toHaveBeenCalled();expect(f.win.showInactive).not.toHaveBeenCalled();
+    expect(f.coordinator.decision({...request,desktopOnly:true})).toBe(false);
+    remove();
+    const lines=f.socket.write.mock.calls.filter(([line])=>String(line).startsWith('DECISIONS '));
+    expect(JSON.parse(Buffer.from(String(lines.at(-1)?.[0]).trim().split(' ')[1],'base64').toString())).toEqual({count:0});
+  });
   it('keeps handoff in the active surface and replays latest state when switching',()=>{
     const f=fixture(true);f.connect();f.socket.write.mockClear();
     const state={id:'handoff-123',phase:'holding' as const,progress:.5};handoffPresentation.publish(state);

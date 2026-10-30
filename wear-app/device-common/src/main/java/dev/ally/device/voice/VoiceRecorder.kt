@@ -14,7 +14,10 @@ interface VoiceCapture {
 }
 
 /** Each gesture owns its recorder. Cancellation never releases a recorder still being read. */
-class VoiceRecorder(private val maxSeconds: Int = 60) : VoiceCapture {
+class VoiceRecorder(private val maxSeconds: Int = 60,
+    private val detectorFactory: (() -> PcmSpeechDetector?)? = null,
+    private val onSpeech: (Boolean, Float) -> Unit = { _, _ -> },
+    private val onDetectorUnavailable: () -> Unit = {}) : VoiceCapture {
     private class Capture(val audio: AudioRecord, maxSeconds: Int) {
         val recording = AtomicBoolean(true)
         val pcm = PcmRecording(maxSeconds)
@@ -36,7 +39,10 @@ class VoiceRecorder(private val maxSeconds: Int = 60) : VoiceCapture {
         val minimum = AudioRecord.getMinBufferSize(16000, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
         check(minimum > 0) { "This microphone does not support voice capture" }
         val size = maxOf(4096, minimum)
-        val audio = AudioRecord(MediaRecorder.AudioSource.VOICE_RECOGNITION, 16000, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, size)
+        // Leave room for model initialization while the microphone is already
+        // listening. Keep individual reads small for live text and halo updates.
+        val capacity = if (detectorFactory != null) maxOf(size, 64000) else size
+        val audio = AudioRecord(MediaRecorder.AudioSource.VOICE_RECOGNITION, 16000, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, capacity)
         try {
             check(audio.state == AudioRecord.STATE_INITIALIZED) { "Microphone unavailable" }
             audio.startRecording()
@@ -45,7 +51,13 @@ class VoiceRecorder(private val maxSeconds: Int = 60) : VoiceCapture {
         val capture = Capture(audio, maxSeconds)
         current = capture
         capture.job = scope.launch(Dispatchers.IO) {
+            var detector: PcmSpeechDetector? = null
             try {
+                detector = runCatching { detectorFactory?.invoke() }.getOrNull()
+                var frames = detector?.let { PcmSpeechFrames(it) }
+                if (detectorFactory != null && frames == null) withContext(Dispatchers.Main) {
+                    if (current === capture && capture.recording.get()) onDetectorUnavailable()
+                }
                 val buffer = ByteArray(size)
                 while (capture.recording.get() && isActive) {
                     val n = audio.read(buffer, 0, buffer.size)
@@ -53,9 +65,18 @@ class VoiceRecorder(private val maxSeconds: Int = 60) : VoiceCapture {
                     check(n >= 0) { "Microphone stopped. Try again." }
                     if (n == 0) { delay(10); continue }
                     val level = capture.pcm.append(buffer, n)
-                    onAudio(buffer.copyOf(n))
+                    val bytes = buffer.copyOf(n)
+                    onAudio(bytes)
+                    val speech = try { frames?.append(bytes).orEmpty() } catch (_: Exception) {
+                        frames = null
+                        withContext(Dispatchers.Main) { if (current === capture && capture.recording.get()) onDetectorUnavailable() }
+                        emptyList()
+                    }
                     withContext(Dispatchers.Main) {
                         if (current === capture && capture.recording.get()) onLevel(level, capture.pcm.seconds)
+                        for ((voiced, seconds) in speech) {
+                            if (current === capture && capture.recording.get()) onSpeech(voiced, seconds)
+                        }
                     }
                     if (capture.pcm.full) {
                         withContext(Dispatchers.Main) { if (current === capture) onLimit() }
@@ -66,6 +87,7 @@ class VoiceRecorder(private val maxSeconds: Int = 60) : VoiceCapture {
                 if (error is CancellationException) throw error
                 withContext(Dispatchers.Main) { if (current === capture && capture.recording.get()) onError(error.message ?: "Microphone unavailable") }
             } finally {
+                runCatching { detector?.close() }
                 capture.release()
             }
         }

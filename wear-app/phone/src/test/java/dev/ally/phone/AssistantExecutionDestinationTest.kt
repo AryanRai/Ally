@@ -7,6 +7,14 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class AssistantExecutionDestinationTest {
+    @Test fun localGeminiHandoffHasAnExplicitLabelAndDoesNotEnablePhoneBackendExecution() {
+        val offer = Destination.parse(JSONObject())
+        assertEquals("Send to phone · Gemini", Destination.rows(offer, true).last().title)
+        assertEquals("Phone · Gemini unavailable", Destination.rows(offer).last().title)
+        assertEquals("Send to PC · Codex / Claude", Destination.rows(offer, true).first().title)
+        assertNull(Destination.select(Destination.PHONE, offer))
+        assertThrows(IllegalArgumentException::class.java) { Destination.requirePc("gemini") }
+    }
     @Test fun oldBridgesOfferOnlyTheirExistingPcPathWithoutAuthorizingIt() {
         val offer = Destination.parse(JSONObject())
         assertTrue(offer.pcAvailable)

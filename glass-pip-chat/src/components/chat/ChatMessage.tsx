@@ -11,33 +11,34 @@ import ToolCall, { describeTool, ImageStrip } from './ToolCall';
 import { needsClaudeLogin, openClaudeLogin } from '@/lib/claudeLogin';
 import { readableReply, watchUserText } from '@/lib/watchPresentation';
 import WatchReplyContent, { OriginalMessage } from './WatchReplyContent';
-import { browserActivity } from '../../../electron/agent/browserActivity';
 import { displayAssistantText, displayUserText } from '@/lib/messageDisplay';
 import { historyReply } from '@/lib/historyReply';
 import { studyReplyView } from '@/lib/studyPresentation';
+import ChatInteractionCard from './ChatInteractionCard';
+import type { InteractionHistory } from '../../../electron/devices/interactions';
+import type { ApprovalAnswer } from '../../../electron/watch/approvals';
+import { requestAnchor } from '@/lib/activityRequests';
+type ReplyPart = Segment | { type: 'interaction'; request: InteractionHistory };
 
 function ToolActivity({ parts }: { parts: Segment[] }) {
   const tools = parts.flatMap(part => part.toolExecution ? [part.toolExecution] : []);
   const failures = tools.filter(tool => tool.status === 'error').length;
   const running = tools.some(tool => tool.status === 'executing' || tool.status === 'pending');
-  const browsers = tools.every(tool => browserActivity(tool.name, tool.parameters));
   const context = tools.length ? describeTool(tools[tools.length - 1]).target : undefined;
-  const allImages = tools.flatMap(t => t.images ?? []);
   return <>
     <details className="my-2 rounded-lg border border-border/60 px-3 py-2 text-xs text-foreground/55">
       <summary className="cursor-pointer select-none hover:text-foreground/80">
-        {running ? 'Working' : browsers ? 'Used browser' : 'Activity'} · {tools.length} actions
+        {running ? 'Working…' : 'Thinking'} · {tools.length} steps
         {failures > 0 && <span className="ml-2 text-destructive">{failures} failed</span>}
         {context && <span className="mt-1 block truncate pl-3.5 text-[11px] text-foreground/40">{context}</span>}
       </summary>
       <div className="mt-2 space-y-1">{tools.map(tool => <ToolCall key={tool.id} tool={tool} />)}</div>
     </details>
-    {!!allImages.length && <ImageStrip images={allImages} className="mb-1 ml-3.5 mt-1" />}
   </>;
 }
 
-function groupToolRuns(parts: Segment[]): Segment[][] {
-  const groups: Segment[][] = [];
+function groupToolRuns(parts: ReplyPart[]): ReplyPart[][] {
+  const groups: ReplyPart[][] = [];
   for (const part of parts) {
     const previous = groups[groups.length - 1];
     if (part.type === 'tool' && part.toolExecution && previous?.[0].type === 'tool' && previous[0].toolExecution) previous.push(part);
@@ -60,45 +61,49 @@ interface AgentReplyProps {
   segments?: Segment[];
   streaming?: boolean;
   compact?: boolean;
+  durationMs?: number;
+  requests?: InteractionHistory[];
+  onAnswerRequest?: (id: string, answer: ApprovalAnswer) => Promise<unknown>;
 }
 
 /** An agent reply: thinking, then text interleaved with tool calls. Used live and for history. */
-export const AgentReply = memo(function AgentReply({ text, thinking, segments, streaming = false, compact = false }: AgentReplyProps) {
-  const parts: Segment[] = segments?.length ? segments : text ? [{ type: 'text', content: text }] : [];
+export const AgentReply = memo(function AgentReply({ text, thinking, segments, streaming = false, compact = false, durationMs, requests = [], onAnswerRequest }: AgentReplyProps) {
+  const original: Segment[] = segments?.length ? segments : text ? [{ type: 'text', content: text, phase: 'final_answer' }] : [];
+  const steps = original.flatMap(part => part.toolExecution ? [{ id: part.toolExecution.id, startedAt: part.toolExecution.startTime, endedAt: part.toolExecution.endTime }] : []);
+  const anchors = requests.map(request => ({ request, anchor: requestAnchor(request.createdAt, steps) }));
+  const unanchored: ReplyPart[] = anchors.filter(row => !row.anchor).map(row => ({ type: 'interaction', request: row.request }));
+  const parts: ReplyPart[] = original.flatMap((part): ReplyPart[] => [...(part.phase === 'final_answer' ? unanchored.splice(0) : []), part, ...anchors.filter(row => row.anchor && row.anchor === part.toolExecution?.id).map(row => ({ type: 'interaction' as const, request: row.request }))]);
+  parts.push(...unanchored);
   // Newer replies keep reasoning inline between tool calls; older ones have one block up top
   const inlineThinking = parts.some(p => p.type === 'thinking');
-  return (
-    <>
-      {thinking && !inlineThinking && (
-        <Reasoning isStreaming={streaming && parts.length === 0} defaultOpen={false} className="mb-1">
-          <ReasoningTrigger />
-          <ReasoningContent>{thinking}</ReasoningContent>
-        </Reasoning>
-      )}
-      {groupToolRuns(parts).map((group, i, groups) => {
-        const part = group[0];
-        return group.length > 1 ? <ToolActivity key={group[0].toolExecution?.id ?? i} parts={group} /> :
-        part.type === 'tool' && part.toolExecution ? (
-          <ToolCall key={part.toolExecution.id ?? i} tool={part.toolExecution} />
-        ) : part.type === 'thinking' ? (
-          <Reasoning key={i} isStreaming={streaming && i === groups.length - 1} defaultOpen={false} className="my-0.5">
-            <ReasoningTrigger />
-            <ReasoningContent>{part.content ?? ''}</ReasoningContent>
-          </Reasoning>
-        ) : (
-          <WatchReplyContent
-            key={i}
-            compact={compact}
-            streaming={streaming && i === groups.length - 1}
-            content={part.content ?? ''}
-          />
-        )
-      })}
-      {streaming && parts.length === 0 && !thinking && (
-        <Shimmer className="font-mono text-xs" duration={1.2}>Working…</Shimmer>
-      )}
-    </>
-  );
+  const finalIndex = parts.findIndex(part => part.type === 'text' && part.phase === 'final_answer');
+  const canSummarize = !streaming && finalIndex > 0 && !requests.some(row => row.state === 'pending');
+  const activity = canSummarize ? parts.slice(0, finalIndex) : parts;
+  const renderParts = (entries: ReplyPart[]) => groupToolRuns(entries).map((group, i, groups) => {
+    const part = group[0];
+    if (part.type === 'interaction') return <ChatInteractionCard key={part.request.id} request={part.request} onAnswer={onAnswerRequest ?? (async () => { throw Error('Open the originating chat to answer.'); })} />;
+    if (part.type === 'tool' && part.toolExecution) return <ToolActivity key={part.toolExecution.id ?? i} parts={group as Segment[]} />;
+    if (part.type === 'thinking') return <Reasoning key={i} isStreaming={streaming && i === groups.length - 1} defaultOpen={false} className="my-0.5">
+      <ReasoningTrigger /><ReasoningContent>{part.content ?? ''}</ReasoningContent>
+    </Reasoning>;
+    return <WatchReplyContent key={part.itemId ?? i} compact={compact} streaming={streaming && i === groups.length - 1} content={part.content ?? ''} />;
+  });
+  const tools = activity.filter(part => part.type === 'tool').length;
+  const updates = activity.filter(part => part.type === 'text').length;
+  const elapsed = durationMs != null && durationMs > 0 ? ` · ${Math.max(1, Math.round(durationMs / 1000))}s` : '';
+  return <>
+    {thinking && !inlineThinking && <Reasoning isStreaming={streaming && parts.length === 0} defaultOpen={false} className="mb-1">
+      <ReasoningTrigger /><ReasoningContent>{thinking}</ReasoningContent>
+    </Reasoning>}
+    {canSummarize ? <>
+      <details className="my-2 text-xs text-foreground/55" key="completed-activity">
+        <summary className="cursor-pointer select-none py-2">Activity · {tools} steps · {updates} updates{elapsed}</summary>
+        <div className="mt-2 space-y-2">{renderParts(activity)}</div>
+      </details>
+      {renderParts(parts.slice(finalIndex))}
+    </> : renderParts(parts)}
+    {streaming && parts.length === 0 && !thinking && <Shimmer className="font-mono text-xs" duration={1.2}>Working…</Shimmer>}
+  </>;
 });
 
 const compact = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(n >= 10_000 ? 0 : 1)}k` : String(n));
@@ -119,6 +124,7 @@ interface ChatMessageProps {
   message: ChatMessageType;
   /** Positive live evidence for this exact reply, supplied by the selected chat. */
   sessionWorking?: boolean;
+  onAnswerRequest?: (id: string, answer: ApprovalAnswer) => Promise<unknown>;
   onEdit: (id: string, content: string) => void;
   onFork: (id: string, content: string) => void;
   onDelete: (id: string) => void;
@@ -141,10 +147,10 @@ export default function ChatMessage(props: ChatMessageProps) {
   // ChatManager edits content/timestamp in place. Snapshot its fields so the
   // memo boundary still sees those edits; native metadata is replaced on sync.
   const snapshot = useMemo(() => ({ ...message }), [message.id, message.role, message.content, message.timestamp, message.metadata]);
-  return <SavedChatMessage message={snapshot} sessionWorking={props.sessionWorking} {...actions} />;
+  return <SavedChatMessage message={snapshot} sessionWorking={props.sessionWorking} onAnswerRequest={props.onAnswerRequest} {...actions} />;
 }
 
-const SavedChatMessage = memo(function SavedChatMessage({ message, sessionWorking = false, onEdit, onFork, onDelete, onRetry }: ChatMessageProps) {
+const SavedChatMessage = memo(function SavedChatMessage({ message, sessionWorking = false, onAnswerRequest, onEdit, onFork, onDelete, onRetry }: ChatMessageProps) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(message.content);
   const [copied, setCopied] = useState(false);
@@ -195,7 +201,7 @@ const SavedChatMessage = memo(function SavedChatMessage({ message, sessionWorkin
           </div>
         ) : (
           <>
-            <AgentReply text={reply.text} thinking={thinking} segments={reply.segments} streaming={sessionWorking} />
+            <AgentReply text={reply.text} thinking={thinking} segments={reply.segments} streaming={sessionWorking} durationMs={message.metadata?.usage?.durationMs} requests={message.metadata?.interactions} onAnswerRequest={onAnswerRequest}/>
             {reply.interrupted && !sessionWorking && <p className="mt-1 text-[11px] text-foreground/45">This earlier reply was interrupted.</p>}
           </>
         )}

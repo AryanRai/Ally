@@ -3,7 +3,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { scanRunningSessions } from './runningSessions';
+import { scanRunningSessions, managedSessionSignal, managedSessionRunId, trackRunningSession, finishRunningSession } from './runningSessions';
 import { STALE_TURN_MS } from './sessionActivity';
 import { readDesktopActivity } from './codexDesktop';
 
@@ -13,6 +13,23 @@ let home: string;
 const now = Date.now();
 const id = '11111111-1111-1111-1111-111111111111';
 const ev = (type: string) => ({ type: 'event_msg', payload: { type } });
+it('returns one exact managed run identity and refuses ambiguous or completed ownership',()=>{
+ const summary={id:'browser-session',provider:'codex' as const,title:'Fixture',cwd:'/fixture',updatedAt:now};
+ trackRunningSession('browser-run-a',summary);
+ expect(managedSessionRunId('codex',summary.id)).toBe('browser-run-a');
+ expect(managedSessionRunId('claude',summary.id)).toBeUndefined();
+ trackRunningSession('browser-run-b',summary);
+ expect(managedSessionRunId('codex',summary.id)).toBeUndefined();
+ finishRunningSession('browser-run-a');expect(managedSessionRunId('codex',summary.id)).toBe('browser-run-b');
+ finishRunningSession('browser-run-b');expect(managedSessionRunId('codex',summary.id)).toBeUndefined();
+});
+it('exact prompt signal ends on finish and never revives for a later run',()=>{
+ const summary={id:'control-session',provider:'codex' as const,title:'Control',cwd:'/fixture',updatedAt:now};
+ trackRunningSession('control-run-a',summary);const first=managedSessionSignal('codex',summary.id)!;
+ expect(first.aborted).toBe(false);finishRunningSession('control-run-a');expect(first.aborted).toBe(true);
+ trackRunningSession('control-run-b',summary);const next=managedSessionSignal('codex',summary.id)!;
+ expect(next).not.toBe(first);expect(next.aborted).toBe(false);finishRunningSession('control-run-b');expect(next.aborted).toBe(true);
+});
 beforeEach(async () => { home = await fs.mkdtemp(path.join(os.tmpdir(), 'ally-running-')); });
 afterEach(async () => { await fs.rm(home, { recursive: true, force: true }); });
 async function write(relative: string, records: unknown[], at = now) {

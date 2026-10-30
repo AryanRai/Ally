@@ -1,0 +1,22 @@
+import { fireEvent, render, screen, waitFor, cleanup } from '@testing-library/react';
+import { afterEach, expect, it, vi } from 'vitest';
+const controls = vi.hoisted(() => ({disconnect:vi.fn(async()=>{}),connect:vi.fn(async()=>{}),synthesizeSpeech:vi.fn(),stopCurrentSpeech:vi.fn(),status:{phase:'offline'},isConnected:false}));
+vi.mock('../../hooks/useSpeechService',()=>({useSpeechService:()=>controls}));
+import SpeechSettingsSection from './SpeechSettingsSection';
+afterEach(()=>{cleanup();vi.unstubAllGlobals();localStorage.clear();});
+it('offers Gemini with independent transcription and sends only selected settings to main',async()=>{
+ const save=vi.fn(async()=>({}));
+ vi.stubGlobal('pip',undefined);
+ Object.defineProperty(window,'pip',{value:{speech:{settings:async()=>({cloud:true,project:'orbit-test',voice:'en-AU-Chirp3-HD-Aoede',notifications:true}),saveSettings:save,voices:async()=>({voices:[]}),cloudVoices:async()=>({voices:[{name:'en-AU-Chirp3-HD-Aoede'}]})}},configurable:true});
+ render(<SpeechSettingsSection/>);
+ const engine=screen.getByLabelText('Speech engine · desktop, phone and watch');
+ await waitFor(()=>expect((engine as HTMLSelectElement).value).toBe('google'));
+ fireEvent.change(engine,{target:{value:'gemini'}});
+ expect(save).toHaveBeenCalledWith({cloud:true,cloudProvider:'gemini',transcriptionProvider:'gemini'});
+ fireEvent.change(screen.getByLabelText('Transcription provider'),{target:{value:'google'}});
+ expect(save).toHaveBeenCalledWith({transcriptionProvider:'google'});
+ fireEvent.change(screen.getByLabelText('Gemini voice'),{target:{value:'Kore'}});
+ expect(save).toHaveBeenCalledWith({geminiVoice:'Kore'});
+ expect(screen.getByLabelText('Google Cloud speech project')).toBeTruthy();
+ expect(screen.queryByLabelText(/API key/i)).toBeNull();
+});

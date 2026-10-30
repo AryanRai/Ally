@@ -16,6 +16,7 @@ describe('robot MCP servers', () => {
       const args = claudeArgs({ provider: 'claude', prompt: 'explain my selection', cwd: '.', permission: 'readonly' }, {});
       const allowed = args[args.indexOf('--allowedTools') + 1].split(',');
       expect(allowed).toContain('mcp__ally_chats__visual_tutor_read');
+      expect(allowed).toContain('mcp__ally_chats__study_open');
       expect(allowed).toContain('mcp__ally_chats__visual_tutor_draw');
       expect(allowed).toContain('mcp__ally_chats__native_study_reference');
       expect(allowed).not.toContain('mcp__ally_chats__ally_send_to_chat');

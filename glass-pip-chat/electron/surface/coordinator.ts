@@ -6,12 +6,15 @@ import { randomBytes } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { dockingDisplay, pillBounds, parseNativePoint, type Point } from './geometry.js';
 import { setSharedGreeting } from './greeting.js';
+import { interactions, type ChatInteraction } from '../devices/interactions.js';
 import { handoffPresentation } from '../devices/handoffPresentation.js';
 
 let controller: ReturnType<typeof createSurfaceCoordinator> | undefined;
 export const studyPresentation = new EventEmitter();
 export const submitNativeStudy = (id: string) => controller?.study(id) ?? Promise.reject(Error('Ally Study is unavailable. Open the native app and try again.'));
+export const nativeDecisionStatus = () => controller?.decisionStatus() ?? { connected: false, supported: false, docked: false };
 export const nativeStudyStatus = () => controller?.studyStatus() ?? { connected: false, captions: false };
+export const presentDecisionOnNative = (request: ChatInteraction) => controller?.decision(request) ?? false;
 export const revealFloatingSurface = () => controller?.float();
 export const suspendNativeForCapture = () => controller?.suspend() ?? Promise.resolve();
 export const restoreNativeAfterCapture = (focus: boolean) => controller?.restore(focus);
@@ -45,7 +48,7 @@ export function createSurfaceCoordinator(win: BrowserWindow) {
   let idleTimer: ReturnType<typeof setTimeout> | undefined;
   const settingsWaiters: ((value: Record<string, unknown>) => void)[] = [];
   const studyWaiters = new Map<string, { resolve: () => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }>();
-  let studyCaptions = false;
+  let studyCaptions = false, nativeDecisions = false;
   /** Native notch preferences, shown in Ally's single Settings window. */
   const nativeSettings = (change?: { key: string; value: string | number | boolean }) => new Promise<Record<string, unknown> | null>(resolve => {
     if (!peer) { resolve(null); return; }
@@ -64,6 +67,16 @@ export function createSurfaceCoordinator(win: BrowserWindow) {
     if(docked())write(`HANDOFF ${encode(JSON.stringify(value))}`);
     else if(floating||win.isVisible())win.webContents.send('surface:handoff',value);
   };
+  let sentDecisions = '';
+  const flushDecisions = () => {
+    if (!docked() || !nativeDecisions) return;
+    const ids = interactions.list().filter(row => !row.desktopOnly).map(row => row.id).sort();
+    const signature = JSON.stringify(ids);
+    if(signature === sentDecisions) return;
+    sentDecisions = signature;
+    write(`DECISIONS ${encode(JSON.stringify({count:ids.length}))}`);
+  };
+  const stopDecisions = interactions.subscribe(() => flushDecisions());
   const stopHandoff=handoffPresentation.subscribe(sendHandoff);
   const restoreHandoff=()=>{const state=handoffPresentation.snapshot();if(state)sendHandoff(state);};
   const flushPreview = () => {
@@ -147,9 +160,11 @@ export function createSurfaceCoordinator(win: BrowserWindow) {
           if (preview && !preview.done) { sentPreview = ''; flushPreview(); }
           else if (arriving && greeting) write(`GREET ${encode(greeting)}`);
           arriving = false;
+          sentDecisions = ''; flushDecisions();
           restoreHandoff();
           continue;
         }
+        if (line === 'DECISIONS_READY') { nativeDecisions = true; sentDecisions = ''; flushDecisions(); continue; }
         if (line === 'HIDDEN') { hidden?.(); hidden = undefined; continue; }
         if (line === 'STUDY_BOUND 1' || line === 'STUDY_BOUND 0') { studyCaptions = line.endsWith('1'); continue; }
         if (line.startsWith('STUDY_ACCEPTED ') || line.startsWith('STUDY_ERROR ')) {
@@ -183,7 +198,7 @@ export function createSurfaceCoordinator(win: BrowserWindow) {
       clearTimeout(timeout);
       if (peer !== socket) return;
       transfer++; peer = undefined; hidden = undefined;
-      studyCaptions = false;
+      studyCaptions = false; nativeDecisions = false; sentDecisions = '';
       for (const pending of studyWaiters.values()) { clearTimeout(pending.timer); pending.reject(Error('Study connection ended. Check the chat before retrying.')); }
       studyWaiters.clear();
       if (!win.isDestroyed()) win.showInactive();
@@ -206,7 +221,7 @@ export function createSurfaceCoordinator(win: BrowserWindow) {
   win.on('moved', moved);
   win.on('show', () => { if (peer && !floating && !capturing) { floating = true; write('HIDE'); } });
   const dispose = () => {
-    stopHandoff();
+    stopHandoff(); stopDecisions();
     write('NOTCH'); peer?.destroy(); server.close();
     if (ready) clearTimeout(ready.timer);
     clearTimeout(idleTimer);
@@ -221,6 +236,11 @@ export function createSurfaceCoordinator(win: BrowserWindow) {
   };
   app.once('will-quit', dispose);
   return {
+    decision(request: ChatInteraction): boolean {
+      if (!docked() || !nativeDecisions || request.desktopOnly) return false;
+      flushDecisions(); return true;
+    },
+    decisionStatus: () => ({ connected: !!peer, supported: nativeDecisions, docked: docked() }),
     studyStatus: () => ({ connected: !!peer, captions: studyCaptions }),
     study(id: string): Promise<void> {
       if (!peer || capturing) return Promise.reject(Error('Ally Study is not ready. Finish the selection and try again.'));

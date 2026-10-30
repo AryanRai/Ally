@@ -1,0 +1,17 @@
+# Ally phone widgets
+
+The agent widget now follows the phone app's neutral surfaces, Tanker mark, Geist body and mono labels. Its hero uses the exact shared `drawPhoneOrb` renderer from PhoneOrb, rendered as a deterministic static frame in the saved phone style/palette. Compose and widgets call the same renderer; recording/speech animation and interaction stay in the app. No independent agent loop or launcher animation service is added.
+
+The large widget shows an honest headline, attention/unread detail, up to two priority-ordered conversation rows, last-checked timestamp, refresh, Talk and Agent monitor. Duplicate agent identities are counted once. Saved/stale activity never claims current live work. Rows open the observed original chat; orb/Talk explicitly invoke existing voice entry; monitor/refresh do not record audio or send prompts. Existing receiver IDs and widget instances are preserved.
+
+The compact shortcut widget also uses the real orb with Talk, Agents and Inbox. Resizing the agent widget progressively hides the second row, rows, freshness/detail and action bar to preserve the core orb/headline in small footprints. The orb remains a Talk target, and the headline opens the monitor. Existing small instances need not be removed. New agent widgets default to a taller footprint for readable rows.
+
+Appearance saves refresh installed widgets immediately. Activity updates reuse the existing SURFACE_CHANGED broadcast and read-only cached feed; no extra polling, permission or voice capture is introduced. Refresh is explicit/bounded and normal periodic widget refresh remains unchanged.
+
+Source validation covers duplicate/priority/limit projection and stale/unchecked/empty states. Physical launcher acceptance is separate from build proof. During this task, supported phone control inspected launcher pages but did not find an Ally home-screen widget; a real clarification asks whether the user meant the launcher widget or floating assistant window. No control of protected Ally UI via an alternate transport is used.
+
+Installed Pixel7 APK SHA256 EDA4C569828230EA762421461FC933A7EB1CBB349D748AB36BE6C61D6C83B43D, independently matched installed base.apk.212phone tests0fail/error; assemble/lint/watchcompilePASS; sourcehashesstable. Assistantbindingpreserved; no desktoprestart. Proof.local/widget-redesign/validation.json. Home-screen assumption stated while clarification pending; physical widgetvisualacceptance remains pending.
+
+Widget monitor follow-up: confirmed from source that SurfaceActions launched MainActivity before opening the monitor, leaving the full app underneath. Phone widget/Quick Settings monitor and voice actions now target a dedicated non-exported transparent no-history WidgetEntryActivity with its own task affinity. It invokes the existing selected assistant, performs no automatic monitor microphone/screen capture, and immediately finishes. Chat/Inbox still explicitly open their intended screens. The launcher remains underneath; no blanket self-control exemption or security gate change is added.
+
+Installed26164A77CEB1F6BE68C091DDE30F6101D03F81741CEBC1E05EF52378D0356F4A independentlymatchedbase.apk; phoneassemble/lint/watchcompilePASS. A laptop-origin supported control call explicitly requested desktopPreview:true but stopped before inspection with System or lock screen, so neither widgetclicknorrawviewerwasperformed. Source diagnosis is not a claim of physical acceptance. Phone control session explicitly ended before install; assistantbindingretained.

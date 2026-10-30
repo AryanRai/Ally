@@ -3,6 +3,18 @@ import { DeviceHub } from './hub';
 import { AdbPhone } from './adb';
 import { PhoneControl } from './phoneControl';
 
+// Node's timers/promises is otherwise independent of Vitest's virtual clock.
+vi.mock('node:timers/promises', () => {
+  const delay = (ms: number, value: unknown, options: { signal?: AbortSignal } = {}) => new Promise((resolve, reject) => {
+    const signal = options.signal;
+    const abort = () => { clearTimeout(timer); signal?.removeEventListener('abort', abort); reject(Error('Cancelled')); };
+    const timer = setTimeout(() => { signal?.removeEventListener('abort', abort); resolve(value); }, ms);
+    signal?.addEventListener('abort', abort, { once: true });
+    if (signal?.aborted) abort();
+  });
+  return { setTimeout: delay, default: { setTimeout: delay } };
+});
+
 const screen = (extra = '') => `<hierarchy rotation="0"><node text="Notes" resource-id="" class="android.widget.FrameLayout" package="com.example.notes" content-desc="" password="false" bounds="[0,0][1080,2400]">${extra}<node text="New note" resource-id="" class="android.widget.Button" package="com.example.notes" content-desc="" password="false" bounds="[0,100][540,300]"/></node></hierarchy>`;
 const flush = async () => { for (let i = 0; i < 8; i++) await Promise.resolve(); };
 
@@ -33,6 +45,45 @@ function fixture(options: { enabled?: boolean; xml?: string } = {}) {
 const base = { chatId: 'codex:session-1234', deviceId: 'phone-one', operations: [] as unknown[] };
 
 describe('on-device phone control sessions', () => {
+  it('waits for the post-unlock SystemUI tree to become an app before inspection or capture', async () => {
+    vi.useFakeTimers();
+    const f = fixture({ xml: screen().replaceAll('com.example.notes', 'com.android.systemui') });
+    try {
+      const pending = f.control.execute({ ...base, requestId: 'unlock-race-0001', screenshot: true });
+      await vi.advanceTimersByTimeAsync(0); await f.approve();
+      await vi.advanceTimersByTimeAsync(6000);
+      expect(f.control.history()[0]).toMatchObject({ state: 'running', completedOperations: 0 });
+      expect(f.calls.some(c => c.method === 'control.screenshot' || c.method === 'control.perform')).toBe(false);
+      f.setXml(screen()); await vi.advanceTimersByTimeAsync(1000);
+      const result = await pending;
+      expect(result.isError).toBeUndefined();
+      expect(result.content.some(c => c.type === 'image')).toBe(true);
+      expect(f.commands).toHaveLength(1);
+    } finally { f.control.close(); f.hub.close(); vi.useRealTimers(); }
+  });
+  it.each(['timeout', 'cancel'] as const)('ends an unlock wait on %s without input or screenshot', async reason => {
+    vi.useFakeTimers();
+    const f = fixture({ xml: screen().replaceAll('com.example.notes', 'com.android.systemui') });
+    try {
+      const pending = f.control.execute({ ...base, requestId: 'unlock-ended-0001', screenshot: true });
+      await vi.advanceTimersByTimeAsync(0); await f.approve(); await vi.advanceTimersByTimeAsync(2000);
+      if (reason === 'cancel') f.control.cancel('unlock-ended-0001');
+      else await vi.advanceTimersByTimeAsync(90000);
+      expect((await pending).isError).toBe(true);
+      expect(f.calls.some(c => c.method === 'control.perform' || c.method === 'control.screenshot')).toBe(false);
+    } finally { f.control.close(); f.hub.close(); vi.useRealTimers(); }
+  });
+  it('does not retry a protected-app refusal as if it were a transient unlock screen', async () => {
+    vi.useFakeTimers();
+    const f = fixture({ xml: screen().replaceAll('com.example.notes', 'com.android.permissioncontroller') });
+    try {
+      const pending = f.control.execute({ ...base, requestId: 'unlock-protected-0001' });
+      await vi.advanceTimersByTimeAsync(0); await f.approve(); await vi.advanceTimersByTimeAsync(1000);
+      expect((await pending).isError).toBe(true);
+      expect(f.calls.filter(c => c.method === 'control.view')).toHaveLength(1);
+      expect(f.control.history()[0].message).toContain('Protected app');
+    } finally { f.control.close(); f.hub.close(); vi.useRealTimers(); }
+  });
   it('handoff requests a bounded grant without reading or operating the screen',async()=>{
     const f=fixture();const signal=new AbortController().signal;
     const pending=f.control.requestSession('phone-one','codex:session-1234',signal);await f.approve();

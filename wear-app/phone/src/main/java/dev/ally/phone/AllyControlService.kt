@@ -28,6 +28,8 @@ import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.collectLatest
 
 /**
  * Executes the desktop agent's exact, already-validated operations on this phone. It never
@@ -36,11 +38,27 @@ import kotlin.coroutines.resumeWithException
 class AllyControlService : AccessibilityService() {
     companion object { @Volatile var instance: AllyControlService? = null; private set }
 
-    override fun onServiceConnected() { instance = this }
-    override fun onAccessibilityEvent(event: AccessibilityEvent?) {}
-    override fun onInterrupt() {}
-    override fun onUnbind(intent: Intent?): Boolean { keepAwake(false); instance = null; ControlBridge.end(this, "Ally control was turned off.") ; return super.onUnbind(intent) }
-    override fun onDestroy() { keepAwake(false); instance = null; super.onDestroy() }
+    private var edge: ControlEdgeGlow? = null
+    private var marker: ControlTouchMarker? = null
+    private val visualHandler = Handler(Looper.getMainLooper())
+    private var visualJob: Job? = null
+    private val drawControl = object:Runnable { override fun run() { val state=ControlBridge.visual.value;edge?.update(state);if(state.grantId.isNotBlank())visualHandler.postDelayed(this,500) } }
+    private val lockVisuals=object:BroadcastReceiver(){override fun onReceive(c:Context,i:Intent){edge?.close();marker?.close()}}
+    @Volatile var protectedSurface = false; private set
+    override fun onServiceConnected() {
+        instance = this; edge=ControlEdgeGlow(this);marker=ControlTouchMarker(this);visualJob?.cancel()
+        visualJob=CoroutineScope(Dispatchers.Main.immediate).launch{ControlBridge.visual.collectLatest{state->visualHandler.removeCallbacks(drawControl);edge?.update(state);if(state.grantId.isNotBlank())visualHandler.postDelayed(drawControl,500)}}
+        runCatching{registerReceiver(lockVisuals,android.content.IntentFilter(Intent.ACTION_SCREEN_OFF),Context.RECEIVER_NOT_EXPORTED)};dev.ally.phone.notch.PhoneNotch.resume(this)
+    }
+    override fun onAccessibilityEvent(event: AccessibilityEvent?) {
+        if(event?.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
+            protectedSurface=event.packageName?.toString() in setOf("android","com.android.systemui","com.android.settings","com.android.permissioncontroller","com.google.android.permissioncontroller","com.android.packageinstaller","com.google.android.packageinstaller")
+            edge?.update(ControlBridge.visual.value)
+        }
+    }
+    override fun onInterrupt() { edge?.close();marker?.close();ControlBridge.end(this,"Ally control was interrupted.") }
+    override fun onUnbind(intent: Intent?): Boolean { visualJob?.cancel();edge?.close();visualHandler.removeCallbacksAndMessages(null);marker?.close();keepAwake(false); instance = null; ControlBridge.end(this, "Ally control was turned off.") ; return super.onUnbind(intent) }
+    override fun onDestroy() { visualJob?.cancel();runCatching{unregisterReceiver(lockVisuals)};visualHandler.removeCallbacksAndMessages(null);edge?.close();edge=null;marker?.close();marker=null;keepAwake(false);ControlBridge.end(this,"Ally control service stopped.");instance = null; super.onDestroy() }
 
     private var awake: android.view.View? = null
     /**
@@ -81,6 +99,8 @@ class AllyControlService : AccessibilityService() {
 
     suspend fun gesture(points: List<Pair<Int, Int>>, durationMs: Long): Unit = withContext(Dispatchers.Main) {
         val path = Path().apply { moveTo(points[0].first.toFloat(), points[0].second.toFloat()); points.drop(1).forEach { lineTo(it.first.toFloat(), it.second.toFloat()) } }
+        // Show where Ally is touching; the overlay is touch-through, so it never blocks the gesture.
+        marker?.show(points, durationMs)
         val description = GestureDescription.Builder().addStroke(GestureDescription.StrokeDescription(path, 0, durationMs)).build()
         val done = suspendCancellableCoroutine { c ->
             val callback = object : GestureResultCallback() {
@@ -114,6 +134,10 @@ class AllyControlService : AccessibilityService() {
 
     /** JPEG at most 1080 px wide; apps that set FLAG_SECURE make Android refuse the capture. */
     suspend fun screenshot(): JSONObject = withContext(Dispatchers.Main) {
+        edge?.hideForCapture(true);marker?.hideForCapture(true)
+        dev.ally.phone.notch.PhoneNotch.hideForCapture(true)
+        try {
+        delay(60)
         val bitmap = suspendCancellableCoroutine { c ->
             takeScreenshot(Display.DEFAULT_DISPLAY, mainExecutor, object : TakeScreenshotCallback {
                 override fun onSuccess(result: ScreenshotResult) {
@@ -132,11 +156,13 @@ class AllyControlService : AccessibilityService() {
             val bytes = ByteArrayOutputStream().also { sized.compress(Bitmap.CompressFormat.JPEG, 70, it) }.toByteArray()
             JSONObject().put("mimeType", "image/jpeg").put("data", Base64.encodeToString(bytes, Base64.NO_WRAP)).put("scale", scale.toDouble())
         }
+        } finally { edge?.hideForCapture(false);marker?.hideForCapture(false);dev.ally.phone.notch.PhoneNotch.hideForCapture(false) }
     }
 }
 
 /** Grant enforcement, desktop calls and the persistent "Ally is controlling this phone" notice. */
 object ControlBridge {
+    val visual = MutableStateFlow(ControlVisualState())
     private const val CHANNEL = "ally-control"
     private const val NOTICE = 31
     private const val SETUP = 32
@@ -149,6 +175,7 @@ object ControlBridge {
     fun install(context: Context) {
         appContext = context.applicationContext
         DeviceLink.controlHandler = { c, message, reply -> handle(c, message, reply) }
+        scope.launch { DeviceLink.status.collectLatest { if(it!="Connected")end(context,"Phone connection ended.") } }
     }
 
     private fun handle(context: Context, message: JSONObject, reply: (JSONObject) -> Unit) {
@@ -174,6 +201,7 @@ object ControlBridge {
                     ?: throw IllegalArgumentException("Invalid control session.")
                 if (service == null) { promptSetup(context); throw IllegalStateException(SETUP_MESSAGE) }
                 grant = next; showNotice(context, next); service.keepAwake(true)
+                visual.value=ControlVisualState(next.id,next.chatId,next.title,next.expiresAt)
                 handler.removeCallbacks(expire); handler.postDelayed(expire, next.expiresAt - System.currentTimeMillis() + 500)
                 return JSONObject().put("granted", true)
             }
@@ -190,7 +218,12 @@ object ControlBridge {
                 JSONObject().put("xml", withContext(Dispatchers.Default) { service.tree() }).put("width", width).put("height", height)
             }
             "control.screenshot" -> service.screenshot()
-            "control.perform" -> { perform(service, params.getJSONObject("operation")); JSONObject() }
+            "control.perform" -> {
+                if(context.getSystemService(android.app.KeyguardManager::class.java).isDeviceLocked)throw IllegalStateException("Unlock the phone before continuing control.")
+                visual.value=visual.value.performing()
+                try { perform(service, params.getJSONObject("operation")); JSONObject() }
+                finally { if(visual.value.grantId==active.id)visual.value=visual.value.settled() }
+            }
             else -> throw IllegalArgumentException("Unsupported phone control call.")
         }
     }
@@ -245,6 +278,7 @@ object ControlBridge {
 
     /** Ends the session on the phone; the desktop is told so it stops immediately too. */
     fun end(context: Context, reason: String?, notifyDesktop: Boolean = true) {
+        visual.value=ControlVisualState()
         val ended = grant ?: return
         grant = null; handler.removeCallbacks(expire)
         AllyControlService.instance?.keepAwake(false)

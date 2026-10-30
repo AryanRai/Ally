@@ -10,7 +10,7 @@ typealias WatchAction = dev.ally.device.ReplyAction
 typealias WatchReply = dev.ally.device.ReplyContent
 
 data class WatchChat(val id: String, val provider: String, val title: String, val cwd: String, val updatedAt: Long = 0, val unread: Boolean = false, val sessionKey: String = "", val createdAt: Long = 0)
-data class ChatMessage(val id: String, val role: String, val reply: WatchReply, val steps: List<WatchStep>, val usage: String, val attachments: List<DeviceAttachment> = emptyList(), val timestamp: Long = System.currentTimeMillis())
+data class ChatMessage(val id: String, val role: String, val reply: WatchReply, val steps: List<WatchStep>, val usage: String, val attachments: List<DeviceAttachment> = emptyList(), val timestamp: Long = System.currentTimeMillis(), val timeline: List<ActivityEntry> = emptyList(), val durationMs: Long = 0)
 
 object ChatParser {
     fun matchesSelection(json: JSONObject, selectedId: String?) = selectedId != null && json.optJSONObject("chat")?.optString("id") == selectedId
@@ -23,11 +23,11 @@ object ChatParser {
         val rows = json.optJSONArray("messages") ?: return emptyList()
         return (0 until rows.length()).map { index ->
             val row = rows.getJSONObject(index)
-            ChatMessage(row.getString("id"), row.getString("role"), CardParser.parse(row), ActivityParser.steps(row), ActivityParser.usage(row), AttachmentParser.list(row), row.optLong("timestamp"))
+            ChatMessage(row.getString("id"), row.getString("role"), CardParser.parse(row), ActivityParser.steps(row), ActivityParser.usage(row), AttachmentParser.list(row), row.optLong("timestamp"), ActivityTimeline.read(row), ActivityTimeline.duration(row))
         }
     }
 }
-data class WatchStep(val id: String, val name: String, val status: String, val detail: String, val kind: String = "", val context: String = "") {
+data class WatchStep(val id: String, val name: String, val status: String, val detail: String, val kind: String = "", val context: String = "", val attachments: List<DeviceAttachment> = emptyList(), val startedAt: Long = 0, val endedAt: Long = 0) {
     val label: String get() {
         val browser = kind == "browser" || (kind.isEmpty() && Regex("^(mcp__)?cua_repl(?:__|\\.| · )(js|js_reset)$").matches(name))
         if (browser) return when (status) {
@@ -97,6 +97,9 @@ data class WatchState(val progress: List<dev.ally.device.LiveProgress> = emptyLi
     val liveAttachments: List<DeviceAttachment> = emptyList(),
     val reply: WatchReply = WatchReply("", emptyList()),
     val steps: List<WatchStep> = emptyList(),
+    val timeline: List<ActivityEntry> = emptyList(),
+    val activityStartedAt: Long = 0,
+    val activityDurationMs: Long = 0,
     val usage: String = "",
     val turnId: String? = null,
     val muted: Boolean = false,
@@ -110,11 +113,11 @@ data class WatchState(val progress: List<dev.ally.device.LiveProgress> = emptyLi
 object ActivityParser {
     fun steps(json: JSONObject): List<WatchStep> {
         val array = json.optJSONArray("steps") ?: return emptyList()
-        return (maxOf(0, array.length() - 24) until array.length()).mapNotNull { i ->
+        return (maxOf(0, array.length() - 128) until array.length()).mapNotNull { i ->
             val step = array.optJSONObject(i) ?: return@mapNotNull null
             val status = step.optString("status")
             if (status !in setOf("running", "done", "error", "interrupted")) return@mapNotNull null
-            WatchStep(step.optString("id").take(160), step.optString("name").take(100), status, step.optString("detail").take(3202), step.optString("kind"), step.optString("context").take(120))
+            WatchStep(step.optString("id").take(160), step.optString("name").take(100), status, step.optString("detail").take(3202), step.optString("kind"), step.optString("context").take(120), AttachmentParser.list(step), step.optLong("startedAt"), step.optLong("endedAt"))
         }
     }
     fun usage(json: JSONObject): String {

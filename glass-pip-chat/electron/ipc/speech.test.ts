@@ -4,6 +4,9 @@ vi.mock('electron', () => ({ app: { on: vi.fn() }, ipcMain: { handle: (name: str
 vi.mock('../speech/runtime.js', () => ({ ensureSpeechRuntime: mocks.ensure, getSpeechRuntimeStatus: vi.fn(), stopSpeechRuntime: vi.fn() }));
 vi.mock('../speech/native.js', () => ({ nativeSpeech: mocks.native, cancelNativeSpeech: vi.fn(), installedVoices: vi.fn() }));
 vi.mock('../speech/google.js', () => ({ googleSpeech: mocks.cloud, googleVoices: vi.fn() }));
+vi.mock('../speech/settings.js', () => ({ speechSettings: () => ({cloud:false,project:'test-project',voice:'en-AU-Chirp3-HD-Aoede'}) }));
+vi.mock('../speech/transcription.js', () => ({ transcribeRecording: vi.fn() }));
+vi.mock('../speech/streaming.js', () => ({ synthesizeCloudWav: vi.fn() }));
 vi.mock('../speech/outputMute.js', () => ({ outputMute: () => ({muted:false}), setOutputMute: vi.fn(), registerOutputMute: vi.fn() }));
 
 describe('voice IPC', () => {

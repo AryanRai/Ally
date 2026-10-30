@@ -103,7 +103,8 @@ internal fun HistoryScreen(state: WatchState, send: (String) -> Unit, back: () -
     val deviceInbox by dev.ally.device.DeviceLink.inbox.collectAsState()
     val sessionKey = (state.chats + state.quickChats + state.running).firstOrNull { it.id == state.chatId }?.sessionKey
     val requests = dev.ally.device.DeviceInteractions.forChat(deviceInbox,state.chatId,state.chatSessionKey,sessionKey,state.readReceipt?.key)
-    val timeline = dev.ally.device.DeviceInteractions.timeline(requests,state.messages,{it.id},{it.timestamp})
+    val activeRequests = if(state.phase == Phase.THINKING && state.activityStartedAt > 0) requests.filter { dev.ally.device.DeviceInteractions.requestedAt(it) >= state.activityStartedAt } else emptyList()
+    val timeline = dev.ally.device.DeviceInteractions.timeline(requests - activeRequests.toSet(),state.messages,{it.id},{it.timestamp},{it.role})
     val working = state.externalRunning || state.phase in setOf(Phase.THINKING, Phase.UPLOADING)
     val scroll = rememberLazyListState()
     val scope = rememberCoroutineScope()
@@ -127,7 +128,7 @@ internal fun HistoryScreen(state: WatchState, send: (String) -> Unit, back: () -
         }
     }
     LaunchedEffect(state.chatId) { following = true; withFrameNanos { }; scroll.scrollToItem((scroll.layoutInfo.totalItemsCount-1).coerceAtLeast(0)) }
-    LaunchedEffect(state.messages.lastOrNull()?.id, state.liveText, state.readySequence) {
+    LaunchedEffect(state.messages.lastOrNull()?.id, state.liveText, state.timeline, state.steps, state.readySequence) {
         if (following) { withFrameNanos { }; scroll.scrollToItem((scroll.layoutInfo.totalItemsCount-1).coerceAtLeast(0)) }
     }
     Box(Modifier.fillMaxSize()) {
@@ -149,10 +150,10 @@ internal fun HistoryScreen(state: WatchState, send: (String) -> Unit, back: () -
                 if (message.role == "user") Text(message.reply.text, color = White, fontSize = 12.sp, lineHeight = 16.sp,
                     modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(6.dp)).background(Panel).border(1.dp, Hairline, RoundedCornerShape(6.dp)).padding(10.dp))
                 else {
-                    ActivityGroup(message.steps, message.reply.commentary)
+                    ActivityGroup(message.steps, message.reply.commentary, message.timeline, message.durationMs, state.externalRunning && message.id == state.messages.lastOrNull()?.id, action = state.detail, requests=entry.requests)
                     if (message.reply.text.isNotBlank()) RichReply(message.reply.text)
                     message.reply.cards.forEachIndexed { index, card -> key(message.id, index, card) { GeneratedCard(card, send, pulse, !working && !state.loadingHistory && state.phase != Phase.RECORDING) } }
-                    AttachmentView(message.attachments, compact = true)
+                    AttachmentView(message.attachments.filterNot { asset -> message.steps.any { step -> step.attachments.any { it.id == asset.id } } }, compact = true)
                     val spokenText = remember(message.reply) { message.reply.readAloudText() }
                     if (spokenText.isNotBlank()) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
                         ReplyAudioControl(state.speaking, state.speaking || (!state.muted && state.phase != Phase.RECORDING && !state.inputRecording && !state.inputSending)) {
@@ -161,32 +162,21 @@ internal fun HistoryScreen(state: WatchState, send: (String) -> Unit, back: () -
                     }
                     if (message.usage.isNotBlank()) Text(message.usage, fontFamily = Mono, color = Muted, fontSize = 8.sp)
                 }
-                if (message.role == "user") AttachmentView(message.attachments, compact = true)
+                if (message.role == "user") AttachmentView(message.attachments.filterNot { asset -> message.steps.any { step -> step.attachments.any { it.id == asset.id } } }, compact = true)
             }
             }
         }
-        if (working && state.progress.any { it.kind == "commentary" }) item(key = "public-progress") {
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("Progress", color = Muted, fontSize = 10.sp)
-                state.progress.filter { it.kind == "commentary" }.takeLast(2).forEach { RichReply(it.text) }
-                if (state.speaking) Button(onClick = stopAudio) { Text("Stop audio", fontSize = 11.sp) }
+        if (working && !(state.externalRunning && state.messages.lastOrNull()?.role == "assistant")) item(key = "live-activity") {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (state.transcript.isNotBlank() && state.messages.none { it.role == "user" && it.reply.text == state.transcript && it.timestamp >= state.activityStartedAt }) Text(state.transcript, color = White, fontSize = 12.sp, modifier = Modifier.fillMaxWidth().background(Panel).padding(10.dp))
+                ActivityGroup(state.steps, state.progress.filter { it.kind == "commentary" }.map { it.text }, state.timeline, state.activityDurationMs, true, state.activityStartedAt, if (state.externalRunning) "Working in another app…" else state.detail, requests=activeRequests)
             }
         }
         if (state.liveText.isNotBlank() || state.liveAttachments.isNotEmpty()) item(key = "live-reply") {
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(if (working) "Reply in progress" else "Partial reply", color = Muted, fontSize = 10.sp)
                 RichReply(state.liveText)
-                AttachmentView(state.liveAttachments, compact = true)
-            }
-        }
-        if (working) item {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (state.transcript.isNotBlank()) Text(state.transcript, color = White, fontSize = 12.sp, modifier = Modifier.fillMaxWidth().background(Panel).padding(10.dp))
-                ActivityGroup(state.steps, emptyList())
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    androidx.wear.compose.material3.CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
-                    Text(if (state.externalRunning) "Thinking · working in another app…" else state.detail, color = Muted, fontSize = 11.sp)
-                }
+                AttachmentView(state.liveAttachments.filterNot { asset -> state.steps.any { step -> step.attachments.any { it.id == asset.id } } }, compact = true)
             }
         }
         if (state.phase in setOf(Phase.ERROR, Phase.OFFLINE)) item { Text(state.detail, color = Amber, fontSize = 11.sp) }

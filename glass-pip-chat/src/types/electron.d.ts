@@ -54,7 +54,7 @@ export interface PipAPI {
     voices: () => Promise<{ success: boolean; voices?: string[]; error?: string }>;
     cloudVoices: () => Promise<{ success: boolean; voices?: Array<{ name: string; languageCodes: string[] }>; error?: string }>;
     transcribe: (bytes: Uint8Array) => Promise<{ success: boolean; text?: string; error?: string; status?: number }>;
-    synthesize: (text: string, options?: { voice?: string; rate?: number; volume?: number; engine?: 'local' | 'google'; cloudVoice?: string }) => Promise<{ success: boolean; audio_data?: string; error?: string; warning?: string; provider?: string }>;
+    synthesize: (text: string, options?: { voice?: string; rate?: number; volume?: number; engine?: 'local' | 'google' | 'gemini'; cloudVoice?: string }) => Promise<{ success: boolean; audio_data?: string; error?: string; warning?: string; provider?: string }>;
     cancel: () => Promise<{ success: boolean }>;
   };
 

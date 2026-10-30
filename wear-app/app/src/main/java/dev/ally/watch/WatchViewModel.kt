@@ -465,7 +465,7 @@ internal class WatchConversation(private val application: Application, initial: 
     }
     private fun clearReply() {
         prefs.edit().remove("reply").remove("activity").apply()
-        mutable.update { it.copy(liveAttachments = emptyList(), liveText = "", reply = WatchReply("", emptyList()), steps = emptyList(), usage = "", turnId = null, approval = null, approvalError = "") }
+        mutable.update { it.copy(liveAttachments = emptyList(), liveText = "", reply = WatchReply("", emptyList()), steps = emptyList(), timeline = emptyList(), activityStartedAt = 0, activityDurationMs = 0, usage = "", turnId = null, approval = null, approvalError = "") }
     }
     private fun acceptedDraft(text: String?) {
         val base = application.getSharedPreferences("ally-watch", 0)
@@ -495,7 +495,7 @@ internal class WatchConversation(private val application: Application, initial: 
     }
     private suspend fun poll(id: String) {
         if (foreground && !ReplyMonitor.start(getApplication(), id, mutable.value.chatId ?: "")) mutable.update { it.copy(speechError = "Keep Ally open for reply alerts on this watch.") }
-        mutable.update { it.copy(phase = Phase.THINKING, turnId = id, detail = "Thinking…") }
+        mutable.update { it.copy(phase = Phase.THINKING, turnId = id, detail = "Thinking…", timeline = if(it.turnId == id) it.timeline else emptyList(), steps = if(it.turnId == id) it.steps else emptyList(), activityStartedAt = if(it.turnId == id) it.activityStartedAt else 0, activityDurationMs = if(it.turnId == id) it.activityDurationMs else 0) }
         try {
             var polls = 0
             while (polls < 240) {
@@ -506,22 +506,22 @@ internal class WatchConversation(private val application: Application, initial: 
                 if (approval == null) polls++
                 mutable.update { it.copy(approval = approval, approvalError = if (it.approval?.id == approval?.id) it.approvalError else "") }
                 result.optString("transcript").takeIf { it.isNotBlank() }?.let { lastText = it }
-                mutable.update { it.copy(liveAttachments = AttachmentParser.list(result), liveText = result.optString("liveText").take(12000), transcript = result.optString("transcript", it.transcript), detail = result.optString("activity", "Thinking…"), steps = ActivityParser.steps(result), usage = ActivityParser.usage(result)) }
+                mutable.update { it.copy(liveAttachments = AttachmentParser.list(result), liveText = result.optString("liveText").take(12000), transcript = result.optString("transcript", it.transcript), detail = result.optString("activity", "Thinking…"), steps = ActivityParser.steps(result), timeline = ActivityTimeline.read(result), activityStartedAt = result.optLong("startedAt"), activityDurationMs = ActivityTimeline.duration(result), usage = ActivityParser.usage(result)) }
                 when (result.optString("status")) {
                     "done" -> {
                         lastText = null; lastAudio = null; requestId = null
                         val json = result.getJSONObject("reply")
-                        prefs.edit().remove("turn").putString("reply", json.toString()).putString("activity", JSONObject().put("steps", result.optJSONArray("steps")).put("usage", result.optJSONObject("usage")).put("transcript", result.optString("transcript")).toString()).apply()
+                        prefs.edit().remove("turn").putString("reply", json.toString()).putString("activity", JSONObject().put("steps", result.optJSONArray("steps")).put("timeline", result.optJSONArray("timeline")).put("durationMs", ActivityTimeline.duration(result)).put("usage", result.optJSONObject("usage")).put("transcript", result.optString("transcript")).toString()).apply()
                         mutable.update { it.copy(liveAttachments = emptyList(), liveText = "", phase = Phase.READY, approval = null, reply = CardParser.parse(json), detail = "Response ready", readySequence = it.readySequence + 1) }
                         val reply = CardParser.parse(json)
                         mutable.update { it.copy(messages = it.messages + listOf(
                             ChatMessage("$id-user", "user", WatchReply(result.optString("transcript"), emptyList()), emptyList(), ""),
-                            ChatMessage("$id-assistant", "assistant", reply, ActivityParser.steps(result), ActivityParser.usage(result), AttachmentParser.list(result)))) }
+                            ChatMessage("$id-assistant", "assistant", reply, ActivityParser.steps(result), ActivityParser.usage(result), AttachmentParser.list(result), timeline = ActivityTimeline.read(result), durationMs = ActivityTimeline.duration(result)))) }
                         mutable.update { it.copy(loadingHistory = true) }
                         try { loadHistory() } catch (e: Exception) { if (e is CancellationException) throw e }
                         finally { mutable.update { it.copy(loadingHistory = false) } }
                         // Native history can lag the final event; do not erase the answer we just received.
-                        mutable.update { it.copy(messages = if (it.messages.lastOrNull()?.let { m -> m.role == "assistant" && m.reply.text == reply.text } == true) it.messages.dropLast(1) + it.messages.last().copy(attachments = (it.messages.last().attachments + AttachmentParser.list(result)).distinctBy { a -> a.id }) else it.messages + ChatMessage("$id-assistant", "assistant", reply, ActivityParser.steps(result), ActivityParser.usage(result), AttachmentParser.list(result))) }
+                        mutable.update { it.copy(messages = if (it.messages.lastOrNull()?.let { m -> m.role == "assistant" && m.reply.text == reply.text } == true) it.messages.dropLast(1) + it.messages.last().copy(attachments = (it.messages.last().attachments + AttachmentParser.list(result)).distinctBy { a -> a.id }, timeline = it.messages.last().timeline.ifEmpty { ActivityTimeline.read(result) }, durationMs = it.messages.last().durationMs.takeIf { ms -> ms > 0 } ?: ActivityTimeline.duration(result)) else it.messages + ChatMessage("$id-assistant", "assistant", reply, ActivityParser.steps(result), ActivityParser.usage(result), AttachmentParser.list(result), timeline = ActivityTimeline.read(result), durationMs = ActivityTimeline.duration(result))) }
                         WatchNotifications.show(getApplication(), "Ally has your answer", json.optString("text"), id, mutable.value.chatId ?: "")
                         if (foreground && mutable.value.autoRead && !mutable.value.muted && !mutable.value.inputRecording && !mutable.value.inputSending && progressRead.canRead(id)) speaker.enqueue(progressRead.finalText(id, reply.readAloudText()), endpoint, token, mutable.value.liveSpeech)
                         return

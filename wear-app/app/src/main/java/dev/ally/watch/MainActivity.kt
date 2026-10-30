@@ -72,7 +72,9 @@ class MainActivity : ComponentActivity() {
                 edit.apply()
             }
         }
-        setContent { MaterialTheme(colorScheme = MaterialTheme.colorScheme.copy(primary = White, onPrimary = Ink)) {
+        setContent {
+            val appearance by model.state.collectAsState()
+            MaterialTheme(colorScheme = MaterialTheme.colorScheme.copy(primary = appearance.look.palette.colors[1], onPrimary = Ink, background=Ink, onBackground=White, surfaceContainer=Panel, onSurface=White)) {
             // Observe capture outside AmbientHost's lifecycle gate: dimming must
             // never hide the release target or interrupt an active orb recording.
             val capture by model.state.collectAsState()
@@ -160,13 +162,14 @@ private fun WatchApp(model: WatchViewModel, pulse: (Boolean) -> Unit, hasMic: ()
             dev.ally.device.MessageQueueStack(state.queue,state.queueChanging,state.queueError,model::queueChange,Modifier.weight(1f),compact=true)
             if(state.queue.items.isEmpty()) Text("Queue is empty",color=Muted,fontSize=12.sp)
         }
+        appearance -> AppearanceScreen(state.look, model::appearance, { appearance = false })
         settings -> SettingsScreen(model, state, { settings = false }, { settings = false; openChats() }, { appearance = true })
         pendingApproval != null -> ApprovalScreen(pendingApproval, state.answeringApproval, state.approvalError, model::answerApproval, access = { settings = true })
         chats -> ChatPicker(model, state, { chats = false }, { chats = false; quickChats = false; scope.launch { pager.scrollToPage(0) } })
         quickChats -> QuickChats(model, state, { quickChats = false }, openChats, { quickChats = false; scope.launch { pager.scrollToPage(0) } })
-        appearance -> AppearanceScreen(state.look, model::appearance, { appearance = false })
         textInput -> TextEntry(if(state.turnId != null) "Add input" else "Ask Ally", "What’s on your mind?", { text -> model.send(text); textInput = false }, { textInput = false }, state.turnId != null || state.externalRunning, state.inputMode, model::inputMode, state.chatId)
         else -> Box(Modifier.fillMaxSize().background(Ink)) {
+            FlowBackdrop(state.look)
             PresenceGlow(state.inputRecording || state.inputSending || state.phase in setOf(Phase.RECORDING, Phase.UPLOADING, Phase.THINKING), state.look)
             HorizontalPager(pager, userScrollEnabled = state.phase != Phase.RECORDING && !state.inputRecording) { page ->
                 Box(Modifier.fillMaxSize().hierarchicalFocusGroup(pager.currentPage == page && !pager.isScrollInProgress)) {
@@ -273,19 +276,37 @@ private fun MiniButton(label: String, description: String, action: () -> Unit, e
 }
 
 @Composable
-internal fun ActivityGroup(steps: List<WatchStep>, commentary: List<String>) {
-    if (steps.isEmpty() && commentary.isEmpty()) return
+internal fun ActivityGroup(steps: List<WatchStep>, commentary: List<String>, timeline: List<ActivityEntry> = emptyList(), durationMs: Long = 0, working: Boolean = false, startedAt: Long = 0, action: String = "Working…", requests: List<org.json.JSONObject> = emptyList()) {
+    val rows = remember(timeline, commentary, steps, requests) { ActivityTimeline.rows(timeline, commentary, steps, requests) }
+    if (rows.isEmpty() && !working) return
     var expanded by rememberSaveable { mutableStateOf(false) }
-    Column(Modifier.fillMaxWidth()) {
-        Text("${if(expanded) "⌄" else "›"} Activity · ${steps.size} steps" + if(commentary.isNotEmpty()) " · ${commentary.size} updates" else "",
+    var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(working) { while (working) { now = System.currentTimeMillis(); kotlinx.coroutines.delay(1000) } }
+    val elapsed = if (durationMs > 0) durationMs else if (working && startedAt > 0) (now - startedAt).coerceAtLeast(0) else 0
+    val time = ActivityTimeline.time(elapsed)
+    val groups = remember(rows) { ActivityTimeline.groups(rows) }
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        if (!working) Text("${if(expanded) "⌄" else "›"} Activity · ${steps.size} steps · ${rows.count { it.type == "update" }} updates$time",
             color=Muted,fontSize=11.sp,modifier=Modifier.fillMaxWidth().clickable { expanded=!expanded }.padding(vertical=12.dp))
-        if (expanded) {
-            commentary.forEach { RichReply(it) }
-            steps.forEach { step -> key(step.id) { ActivityRow(step) } }
+        if (working || expanded || requests.any { dev.ally.device.DeviceInteractions.awaiting(it) }) {
+            groups.forEachIndexed { index, group -> key(group.first().id) {
+                if (group.first().request != null) DeviceInteractionCard(group.first().request!!)
+                else if (group.first().type == "update") RichReply(group.first().text)
+                else {
+                    var open by rememberSaveable { mutableStateOf(false) }
+                    val current = working && index == groups.lastIndex
+                    Text("${if(open) "⌄" else "›"} ${if(current) action else "Thinking"} · ${group.size} steps${if(current) time else ""}", color=Muted,fontSize=11.sp,
+                        modifier=Modifier.fillMaxWidth().clickable { open=!open }.padding(vertical=10.dp))
+                    if (open) group.forEach { row -> steps.find { it.id == row.stepId }?.let { step -> key(step.id) { ActivityRow(step) } } }
+                }
+            } }
+            if (working && groups.lastOrNull()?.firstOrNull()?.type != "tool") Row(verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(6.dp)) {
+                androidx.wear.compose.material3.CircularProgressIndicator(modifier=Modifier.size(14.dp),strokeWidth=2.dp)
+                Text("$action · ${steps.size} steps$time",color=Muted,fontSize=11.sp)
+            }
         }
     }
 }
-
 @Composable
 internal fun ActivityRow(step: WatchStep) {
     var expanded by rememberSaveable { mutableStateOf(false) }
@@ -299,6 +320,7 @@ internal fun ActivityRow(step: WatchStep) {
         }
         if (expanded) Text("${step.name}\n${step.detail.ifBlank { "No additional detail" }}", fontFamily = Mono, color = Muted, fontSize = 9.sp,
             lineHeight = 13.sp, modifier = Modifier.fillMaxWidth().background(Panel).padding(8.dp))
+        dev.ally.device.AttachmentView(step.attachments, compact = true)
     }
 }
 
@@ -360,7 +382,6 @@ private fun SettingsScreen(model: WatchViewModel, state: WatchState, back: () ->
     val notifications = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted -> model.replyAlerts(granted) }
     val scroll = rememberScrollState()
     Column(Modifier.fillMaxSize().background(Ink).bezelScroll(scroll).verticalScroll(scroll).padding(horizontal = 27.dp, vertical = 32.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        AssistantSetting()
         if(state.inputDraft.isNotBlank()) {
             Text(state.inputDraft,color=White,fontSize=11.sp)
             Text(state.inputStatus,color=Amber,fontSize=10.sp)
@@ -368,10 +389,11 @@ private fun SettingsScreen(model: WatchViewModel, state: WatchState, back: () ->
             Button(onClick=model::dismissInput,enabled=!state.inputSending) { Text("Dismiss draft",fontSize=11.sp) }
         }
         Text("Your Ally", color = White, fontSize = 18.sp)
+        Button(onClick = appearance,modifier=Modifier.fillMaxWidth()) { Text("Appearance · ${state.look.palette.label}",fontSize=12.sp) }
+        Text("Orb, colours, glow & motion",color=Muted,fontSize=10.sp)
         Text(state.chatTitle, color = Muted, fontSize = 11.sp, maxLines = 2)
         Button(onClick = chats) { Text("Choose chat") }
         Button(onClick = { model.cancelRecording(); if(!dev.ally.device.AllyAssistantService.showMonitor()) android.widget.Toast.makeText(deviceContext,"Select Ally as your assistant first",android.widget.Toast.LENGTH_SHORT).show() }) { Text("Agent monitor") }
-        Button(onClick = appearance) { Text("Appearance") }
         Button(onClick = { deviceContext.startActivity(android.content.Intent(deviceContext,dev.ally.device.DeviceAccessActivity::class.java)) }) { Text("Device access") }
         Text("Voice & alerts", color = Muted, fontSize = 12.sp)
         Button(onClick = { deviceContext.startActivity(Intent(deviceContext, DeviceInboxActivity::class.java)) }) { Text("Cards & device connection", fontSize = 11.sp) }
@@ -393,6 +415,7 @@ private fun SettingsScreen(model: WatchViewModel, state: WatchState, back: () ->
         } else "File access is restricted. Approvals ask you. Applies to new messages in this chat.", color = Muted, fontSize = 10.sp)
         if (state.provider == "claude") Text("Claude uses its CLI permission mode. Interactive watch approvals currently require Codex.", color = Muted, fontSize = 10.sp)
         Button(onClick = { model.provider(if (state.provider == "codex") "claude" else "codex") }, enabled = !model.busy) { Text(if (state.provider == "codex") "New Claude chat" else "New Codex chat") }
+        AssistantSetting()
         Text("Connection", color = Muted, fontSize = 11.sp)
         Field(endpoint, { endpoint = it }, "https://your-bridge")
         Field(token, { token = it }, "Pairing token", secret = true)

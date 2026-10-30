@@ -65,7 +65,7 @@ class MainActivity : ComponentActivity() {
             val body = TextStyle(fontFamily=Geist,fontSize=14.sp,lineHeight=22.sp)
             MaterialTheme(colorScheme=darkColorScheme(primary=White,onPrimary=Ink,background=Ink,surface=Panel,onSurface=White,outline=Line),
                 typography=Typography(bodyLarge=body,bodyMedium=body,bodySmall=body.copy(fontSize=12.sp),labelLarge=body, labelMedium=body.copy(fontSize=12.sp))) {
-                Surface(Modifier.fillMaxSize(),color=Ink,contentColor=White) { PhoneApp(model,destination) { look=it; it.save(prefs) } }
+                Surface(Modifier.fillMaxSize(),color=Ink,contentColor=White) { PhoneApp(model,destination) { look=it; it.save(prefs); AllyAgentWidget.render(this) } }
             }
             }
         }
@@ -137,7 +137,7 @@ private fun PhoneApp(model: PhoneModel,destination: Pair<String,Int>?, changeLoo
     } }
     LaunchedEffect(destination) { destination?.let { navigate(it.first) } }
     BackHandler(drawer.isOpen || page!="Chat") { if(drawer.isOpen) scope.launch { drawer.close() } else page="Chat" }
-    ModalNavigationDrawer(drawerState=drawer,gesturesEnabled=drawer.isOpen,drawerContent={
+    ModalNavigationDrawer(drawerState=drawer,gesturesEnabled=true,drawerContent={
         ModalDrawerSheet(drawerContainerColor=Ink,drawerShape=RoundedCornerShape(0.dp),modifier=Modifier.widthIn(max=320.dp)) {
             Row(Modifier.fillMaxWidth().padding(start=24.dp,end=8.dp,top=12.dp,bottom=28.dp),verticalAlignment=Alignment.CenterVertically) {
                 Text("ALLY",fontFamily=Tanker,fontSize=30.sp,modifier=Modifier.weight(1f))
@@ -180,10 +180,6 @@ private fun PhoneApp(model: PhoneModel,destination: Pair<String,Int>?, changeLoo
                             Text(state.selected!!.title.replace(Regex("\\s+")," "),fontFamily=Geist,fontSize=15.sp,maxLines=1,overflow=TextOverflow.Ellipsis)
                             MicroLabel(folderName(state.selected!!.cwd),Modifier.padding(top=5.dp))
                         }
-                        if (state.busy || state.externalRunning) Row(verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(6.dp)) {
-                            CircularProgressIndicator(Modifier.size(14.dp).semantics { contentDescription = "Chat is working" },color=Muted,strokeWidth=2.dp)
-                            Text("Thinking…",color=Muted,fontSize=11.sp)
-                        }
                         Glyph("down",Modifier.padding(start=12.dp).size(16.dp),Muted)
                     }
                     Conversation(state,model,Modifier.weight(1f),readerVisible=drawer.isClosed,onBrowse={ navigate("Chats") })
@@ -203,7 +199,8 @@ private fun PhoneApp(model: PhoneModel,destination: Pair<String,Int>?, changeLoo
 private fun Conversation(state: PhoneState,model: PhoneModel,modifier: Modifier,readerVisible: Boolean,onBrowse: ()->Unit) {
     val deviceInbox by DeviceLink.inbox.collectAsStateWithLifecycle()
     val requests = dev.ally.device.DeviceInteractions.forChat(deviceInbox,state.selected?.id,state.selected?.sessionKey,state.readReceipt?.key)
-    val timeline = dev.ally.device.DeviceInteractions.timeline(requests,state.messages,{it.id},{it.timestamp})
+    val activeRequests = if(state.busy && state.activityStartedAt > 0) requests.filter { dev.ally.device.DeviceInteractions.requestedAt(it) >= state.activityStartedAt } else emptyList()
+    val timeline = dev.ally.device.DeviceInteractions.timeline(requests - activeRequests.toSet(),state.messages,{it.id},{it.timestamp},{it.role})
     val scroll=rememberLazyListState()
     val scrollScope = rememberCoroutineScope()
     var followLatest by remember(state.selected?.id) { mutableStateOf(true) }
@@ -267,29 +264,30 @@ private fun Conversation(state: PhoneState,model: PhoneModel,modifier: Modifier,
                         Row(verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(6.dp),modifier=Modifier.padding(bottom=10.dp)) {
                             PresenceOrb(Modifier.size(24.dp)); MicroLabel(state.selected?.provider ?: state.provider)
                         }
-                        ChatActivity(message.steps, message.commentary)
+                        ChatActivity(message.steps, message.commentary, message.timeline, running = state.externalRunning && message.id == state.messages.lastOrNull()?.id, durationMs = message.durationMs, activity = "Working in another app…", requests=entry.requests)
                         if (message.text.isNotBlank()) MessageBody(message.text)
                         message.cards.forEachIndexed { index, card -> key(message.id, index) {
                             Spacer(Modifier.height(16.dp))
                             ReplyCardView(card, !state.busy && !state.loading && !state.recording && !state.transcribing, model::send)
                         } }
                     }
-                    AttachmentView(message.attachments)
+                    AttachmentView(message.attachments.filterNot { asset -> message.steps.any { step -> step.attachments.any { it.id == asset.id } } })
                 }
                 }
             }
-            if((state.busy || state.externalRunning) && state.progress.any { it.kind == "commentary" }) item(key="public-progress") { Column(verticalArrangement=Arrangement.spacedBy(10.dp)) {
-                MicroLabel("Progress")
-                state.progress.filter { it.kind == "commentary" }.takeLast(3).forEach { MessageBody(it.text) }
-            } }
-            if(state.speaking) item(key="stop-progress-audio") { TextButton(onClick=model::stopSpeaking) { Text("Stop audio",color=White) } }
+            if(state.busy) item(key="live-activity") {
+                ChatActivity(state.steps, state.progress.filter { it.kind == "commentary" }.map { it.text }, state.timeline, running=true, startedAt=state.activityStartedAt, activity=state.activity, requests=activeRequests)
+            }
+            if(state.speaking) item(key="stop-progress-audio") { Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.End) { IconControl("stop", "Stop reply audio", onClick=model::stopSpeaking) } }
             if(state.speechError.isNotBlank()) item(key="speech-status") { Text(state.speechError,color=Muted,fontSize=12.sp) }
             if(state.liveText.isNotBlank() || state.liveAttachments.isNotEmpty()) item(key="live-reply") { Column {
                 MicroLabel(if(state.busy) "Reply in progress" else "Latest reply",Modifier.padding(bottom=10.dp))
                 MessageBody(state.liveText)
-                AttachmentView(state.liveAttachments)
+                AttachmentView(state.liveAttachments.filterNot { asset -> state.steps.any { step -> step.attachments.any { it.id == asset.id } } })
             } }
-            if(state.busy || state.externalRunning) item(key="activity") { Column { ChatActivity(state.steps, emptyList()); Row(verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(10.dp)) { CircularProgressIndicator(Modifier.size(18.dp),color=Muted,strokeWidth=2.dp); Text(if(state.busy) state.activity else "Thinking · working in another app…",color=Muted,fontSize=12.sp) } } }
+            if(state.externalRunning && state.messages.lastOrNull()?.let { it.role == "assistant" && (it.steps.isNotEmpty() || it.commentary.isNotEmpty() || it.timeline.isNotEmpty()) } != true) item(key="external-activity") {
+                ChatActivity(emptyList(), emptyList(), running=true, activity="Working in another app…")
+            }
             if(state.syncStatus.isNotBlank()) item(key="sync-status") { Text(state.syncStatus,color=Muted,fontSize=12.sp) }
             state.approval?.takeIf { approval -> requests.none { it.optString("id") == approval.optString("id") } }?.let { approval -> item(key="approval") { ChatApproval(approval,state.loading,model::answer) } }
             if(state.inputStatus.isNotBlank()) item(key="input-status") { Column {
@@ -385,7 +383,7 @@ private fun VoiceControl(state: PhoneState,model: PhoneModel,draftEmpty: Boolean
     })
     Column(Modifier.fillMaxWidth().padding(bottom=8.dp),horizontalAlignment=Alignment.CenterHorizontally) {
         Box(contentAlignment=Alignment.Center) {
-        PhoneActivityGlow(state.recording || state.transcribing || state.busy,Modifier.size(width=240.dp,height=100.dp))
+        PhoneActivityGlow(state.recording || state.speaking || state.transcribing || state.busy,Modifier.size(width=240.dp,height=100.dp))
         PresenceOrb(Modifier.size(100.dp).semantics {
             contentDescription=if(state.recording) "Listening. Release to ${if(review) "review" else "send"}." else "Hold to talk to Ally"
             role=Role.Button
@@ -398,9 +396,9 @@ private fun VoiceControl(state: PhoneState,model: PhoneModel,draftEmpty: Boolean
                     catch(e: kotlinx.coroutines.CancellationException) { model.cancelRecording(); throw e }
                 }
             })
-        },state.recording || state.transcribing || state.busy,state.microphoneLevel,state.recording)
+        },state.recording || state.transcribing || state.busy,if(state.recording) state.microphoneLevel else state.speakerLevel,state.recording,state.speaking && !state.recording)
         }
-        Text(when { state.recording -> "Listening · ${state.recordingSeconds.toInt()}s · release to ${if(review) "review" else "send"}"; state.transcribing -> "Finishing your words…"; !draftEmpty -> "Send your draft to talk"; state.busy -> "Hold to add input · keeps working"; else -> "Hold to talk · up to 5 minutes" },fontSize=11.sp,color=if(state.recording) LocalPhoneLook.current.palette.colors[2] else Muted,maxLines=1,overflow=TextOverflow.Ellipsis,modifier=Modifier.height(24.dp))
+        Text(when { state.recording -> "Listening · ${state.recordingSeconds.toInt()}s · release to ${if(review) "review" else "send"}"; state.transcribing -> "Finishing your words…"; state.speaking -> "Ally is speaking"; !draftEmpty -> "Send your draft to talk"; state.busy -> "Hold to add input · keeps working"; else -> "Hold to talk · up to 5 minutes" },fontSize=11.sp,color=if(state.recording) LocalPhoneLook.current.palette.colors[2] else Muted,maxLines=1,overflow=TextOverflow.Ellipsis,modifier=Modifier.height(24.dp))
 
     }
 }
@@ -481,6 +479,9 @@ private fun PhoneSettings(link: String,modifier: Modifier, appearance: ()->Unit)
             PresenceOrb(Modifier.size(42.dp)); Column(Modifier.padding(start=12.dp).weight(1f)) { Text("Your desktop",fontSize=15.sp); Text(link,color=Muted,fontSize=12.sp) }
         }
         PhoneAssistantSetting()
+        SettingRow("styles","Phone notch","Optional top pill, event cards and control glow") {
+            context.startActivity(Intent(context,dev.ally.phone.notch.PhoneNotchSettingsActivity::class.java))
+        }
         SettingRow("shield","Hold-close handoff","Hold near your PC · cancellable bottom card") {
             context.startActivity(Intent(context,PhysicalTapSettingsActivity::class.java))
         }

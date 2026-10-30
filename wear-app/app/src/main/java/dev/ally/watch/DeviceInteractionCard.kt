@@ -2,6 +2,8 @@ package dev.ally.watch
 
 import androidx.activity.compose.LocalActivity
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.clickable
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -24,7 +26,11 @@ internal fun DeviceInteractionCard(item: JSONObject) {
     LaunchedEffect(item.optString("id")) { while(true) { delay(1000); now=System.currentTimeMillis() } }
     val id=item.optString("id")
     val request=remember(item.toString()) { ApprovalParser.parse(JSONObject().put("approvals",JSONArray().put(item))) }
-    Column(Modifier.fillMaxWidth(),verticalArrangement=Arrangement.spacedBy(8.dp)) {
+    val awaiting = DeviceInteractions.awaiting(item, now)
+    var expanded by rememberSaveable(id, awaiting) { mutableStateOf(awaiting) }
+    Column(Modifier.fillMaxWidth()) {
+        Text("${if(expanded) "⌄" else "›"} ${item.optString("title")} · ${DeviceInteractions.status(item, now)}",fontSize=12.sp,modifier=Modifier.fillMaxWidth().clickable { expanded=!expanded }.padding(vertical=10.dp))
+        if(expanded) Column(Modifier.fillMaxWidth(),verticalArrangement=Arrangement.spacedBy(8.dp)) {
         Text(if(DeviceInteractions.awaiting(item,now)) { if(item.optString("kind") == "question") "YOUR ANSWER NEEDED" else "YOUR APPROVAL NEEDED" } else { if(item.optString("kind") == "question") "QUESTION" else "APPROVAL" },fontSize=10.sp,color=if(DeviceInteractions.awaiting(item,now)) Amber else Muted)
         if(request != null && DeviceInteractions.canAnswer(item,connected == "Connected",DeviceLink.service?.connectionId,now)) {
             ApprovalScreen(request,id in sending,errors[id].orEmpty(),{action,values -> DeviceLink.answerInteraction(activity,item,action,values)},embedded=true)
@@ -35,5 +41,6 @@ internal fun DeviceInteractionCard(item: JSONObject) {
             Text(if(item.optString("interactionState") == "pending" && item.optLong("expiresAt") > now) "Reconnect to answer" else DeviceInteractions.status(item,now),fontSize=11.sp,color=Muted)
             if(item.optBoolean("authorized") && item.optLong("expiresAt") > now) Button({DeviceLink.continueAuthorized(activity,item)}) { Text("Continue action") }
         }
+    }
     }
 }

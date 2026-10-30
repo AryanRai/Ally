@@ -22,8 +22,8 @@ import java.net.URLEncoder
 import java.util.UUID
 
 data class PhoneChat(val id: String, val title: String, val provider: String, val cwd: String, val unread: Boolean = false, val sessionKey: String = "", val createdAt: Long = 0)
-data class PhoneMessage(val id: String, val role: String, val text: String, val cards: List<ReplyCard> = emptyList(), val attachments: List<DeviceAttachment> = emptyList(), val timestamp: Long = System.currentTimeMillis(), val steps: List<ChatStep> = emptyList(), val commentary: List<String> = emptyList())
-data class PhoneState(val progress: List<LiveProgress> = emptyList(), val progressTurnId: String = "", val speaking: Boolean = false, val speechError: String = "",val resumeToken: String? = null, val canStop: Boolean = false,val readReceipt: ChatReadReceipt? = null, val chats: List<PhoneChat> = emptyList(), val messages: List<PhoneMessage> = emptyList(), val selected: PhoneChat? = null,
+data class PhoneMessage(val id: String, val role: String, val text: String, val cards: List<ReplyCard> = emptyList(), val attachments: List<DeviceAttachment> = emptyList(), val timestamp: Long = System.currentTimeMillis(), val steps: List<ChatStep> = emptyList(), val commentary: List<String> = emptyList(), val timeline: List<ChatActivityEntry> = emptyList(), val durationMs: Long = 0)
+data class PhoneState(val timeline: List<ChatActivityEntry> = emptyList(), val activityStartedAt: Long = 0, val activityDurationMs: Long = 0, val progress: List<LiveProgress> = emptyList(), val progressTurnId: String = "", val speaking: Boolean = false, val speakerLevel: Float = 0f, val speechError: String = "",val resumeToken: String? = null, val canStop: Boolean = false,val readReceipt: ChatReadReceipt? = null, val chats: List<PhoneChat> = emptyList(), val messages: List<PhoneMessage> = emptyList(), val selected: PhoneChat? = null,
     val permissionChanging: Boolean = false, val permissionStatus: String = "",
     val queue: MessageQueue = MessageQueue(), val queueChanging: Boolean = false, val queueError: String = "",
     val running: List<PhoneChat> = emptyList(), val runningStatus: String = "Checking live status…", val liveText: String = "", val steps: List<ChatStep> = emptyList(),
@@ -57,7 +57,7 @@ internal class PhoneConversation(private val app: Application, private val chatK
     private var voiceTurn: String? = null
     var foreground = false
     private val progressRead = ProgressReadCursor()
-    private val speaker = dev.ally.device.voice.ReplySpeech(app, viewModelScope, { playing, error -> state.update { it.copy(speaking = playing, speechError = error) } })
+    private val speaker = dev.ally.device.voice.ReplySpeech(app, viewModelScope, { playing, error -> state.update { it.copy(speaking = playing, speechError = error) } }, level = { volume -> state.update { it.copy(speakerLevel = volume) } })
     fun stopSpeaking() { progressRead.stop(state.value.progressTurnId); speaker.stop() }
     private fun progress(result: JSONObject, id: String) {
         val rows = LiveProgressParser.read(result)
@@ -215,7 +215,7 @@ internal class PhoneConversation(private val app: Application, private val chatK
         val r = request("/v1/chats/${enc(id)}$before")
         if (expectedSelection != null && (state.value.selected?.id != expectedSelection || state.value.loading || state.value.busy || voiceActive || turn != null)) return
         val selected = chat(r.getJSONObject("chat")); val a = r.optJSONArray("messages") ?: JSONArray()
-        val messages = (0 until a.length()).map { val m = a.getJSONObject(it); val reply = ReplyContentParser.parse(m); PhoneMessage(m.optString("id"), m.optString("role"), reply.text, reply.cards, AttachmentParser.list(m), m.optLong("timestamp"), ChatActivityParser.steps(m), reply.commentary) }
+        val messages = (0 until a.length()).map { val m = a.getJSONObject(it); val reply = ReplyContentParser.parse(m); PhoneMessage(m.optString("id"), m.optString("role"), reply.text, reply.cards, AttachmentParser.list(m), m.optLong("timestamp"), ChatActivityParser.steps(m), reply.commentary, ChatTimelineParser.read(m), ChatTimelineParser.duration(m)) }
 
         state.update { it.copy(resumeToken = if (older) it.resumeToken else r.optJSONObject("interrupted")?.optString("token")?.takeIf { t -> t.isNotBlank() }, canStop = r.optBoolean("canStop"), readReceipt = if (older) it.readReceipt else ChatReadReceipt.parse(r.optJSONObject("readState")), selected = selected, provider = selected.provider, externalRunning = r.optBoolean("running") && r.optString("activeTurnId").let { t -> t.isBlank() || t == "null" }, syncStatus = "", liveText = if (it.selected?.id == selected.id) it.liveText else "", messages = if (older) (messages + it.messages).distinctBy { m -> m.id } else if (expectedSelection != null) mergePhoneHistory(it.messages, messages) else messages, before = if (expectedSelection != null && it.messages.isNotEmpty()) it.before else if (r.isNull("before")) null else r.optInt("before"), permission = prefs.getString("phonePermission:${selected.id}", "readonly")!!) }
         r.optString("activeTurnId").takeIf { it.isNotBlank() && it != "null" }?.let { turn = it; prefs.edit().putString("phoneTurn", it).apply() }
@@ -392,7 +392,7 @@ internal class PhoneConversation(private val app: Application, private val chatK
     private fun poll() {
         if (pollJob?.isActive == true) return
         val current = turn ?: return
-        state.update { it.copy(busy = true, error = "", activity = "Working…") }
+        state.update { it.copy(busy = true, timeline = emptyList(), steps = emptyList(), progress = emptyList(), activityStartedAt = 0, activityDurationMs = 0, error = "", activity = "Working…") }
         pollJob = viewModelScope.launch {
             try {
                 while (isActive) {
@@ -421,7 +421,7 @@ internal class PhoneConversation(private val app: Application, private val chatK
                     progress(r, current)
                     MessageQueue.parse(r)?.let { q -> if(!state.value.queueChanging && (state.value.queue.chatId!=q.chatId || q.revision>=state.value.queue.revision)) state.update { it.copy(queue=q) } }
                     if (nextApproval != null && nextApproval.optString("id") != state.value.approval?.optString("id")) pulse(true)
-                    state.update { it.copy(steps = ChatActivityParser.steps(r), liveAttachments = AttachmentParser.list(r), liveText = r.optString("liveText").take(12000), activity = r.optString("activity", "Working…"), approval = nextApproval) }
+                    state.update { it.copy(timeline = ChatTimelineParser.read(r), activityStartedAt = r.optLong("startedAt"), activityDurationMs = ChatTimelineParser.duration(r), steps = ChatActivityParser.steps(r), liveAttachments = AttachmentParser.list(r), liveText = r.optString("liveText").take(12000), activity = r.optString("activity", "Working…"), approval = nextApproval) }
                     if (r.optString("status") in setOf("done", "error")) {
                         pulse(true)
                         turn = null
@@ -434,7 +434,7 @@ internal class PhoneConversation(private val app: Application, private val chatK
                         try {
                             state.value.selected?.let { history(it.id) }
                         } catch (e: CancellationException) { throw e } catch (_: Exception) { /* Final text remains readable. */ }
-                        if (finalReply != null) state.update { it.copy(liveText = "", liveAttachments = emptyList(), messages = if (it.messages.lastOrNull()?.let { m -> m.role == "assistant" && m.text == finalReply.text && m.cards == finalReply.cards } == true) it.messages.dropLast(1) + it.messages.last().copy(attachments = (it.messages.last().attachments + it.liveAttachments).distinctBy { a -> a.id }) else it.messages + PhoneMessage("$current-assistant", "assistant", finalReply.text, finalReply.cards, it.liveAttachments, steps = it.steps, commentary = finalReply.commentary)) }
+                        if (finalReply != null) state.update { it.copy(liveText = "", liveAttachments = emptyList(), messages = if (it.messages.lastOrNull()?.let { m -> m.role == "assistant" && m.text == finalReply.text && m.cards == finalReply.cards } == true) it.messages.dropLast(1) + it.messages.last().copy(attachments = (it.messages.last().attachments + it.liveAttachments).distinctBy { a -> a.id }) else it.messages + PhoneMessage("$current-assistant", "assistant", finalReply.text, finalReply.cards, it.liveAttachments, steps = it.steps, commentary = finalReply.commentary, timeline = it.timeline, durationMs = it.activityDurationMs)) }
                         state.update { it.copy(error = r.optString("error").takeIf { e -> e != "null" } ?: "") }; break
                     }
                     delay(2000)

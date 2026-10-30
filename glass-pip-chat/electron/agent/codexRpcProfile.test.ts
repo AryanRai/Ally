@@ -5,7 +5,7 @@ import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 import { afterEach, expect, it, vi } from 'vitest';
 import { spawn } from 'node:child_process';
-import { CodexRpc } from './codexRpc';
+import { CodexRpc, codexSandboxStartupArgs } from './codexRpc';
 // ALLY_TEST_SHARED_HOME: profiles link their history here, never into the real ~/.codex.
 process.env.CODEX_HOME = mkdtempSharedHome(joinSharedHome(tmpdirSharedHome(), 'ally-shared-codex-home-'));
 vi.mock('node:child_process', () => { const launch = vi.fn(); return { spawn: launch, default: { spawn: launch } }; });
@@ -22,11 +22,17 @@ function transport() {
 it('launches a profile through documented CODEX_HOME/file storage only, with no inherited alternate credentials', async () => {
   transport(); const rpc = await CodexRpc.connect('/codex', '/owned/profile');
   // Credentials stay in the profile; the databases are shared so every account sees the same chats.
-  expect(spawn).toHaveBeenCalledWith('/codex', ['app-server', '-c', 'cli_auth_credentials_store="file"'], expect.objectContaining({ env: { HOME: '/actual', USERPROFILE: 'C:/actual', APPDATA: 'C:/actual/AppData', CODEX_HOME: '/owned/profile', CODEX_SQLITE_HOME: process.env.CODEX_HOME }, windowsHide: true }));
+  expect(spawn).toHaveBeenCalledWith('/codex', ['app-server', ...codexSandboxStartupArgs(), '-c', 'cli_auth_credentials_store="file"'], expect.objectContaining({ env: { HOME: '/actual', USERPROFILE: 'C:/actual', APPDATA: 'C:/actual/AppData', CODEX_HOME: '/owned/profile', CODEX_SQLITE_HOME: process.env.CODEX_HOME }, windowsHide: true }));
   rpc.close();
 });
 it('preserves the pre-existing login environment and startup arguments for the legacy connection', async () => {
   transport(); const rpc = await CodexRpc.connect('/codex');
-  expect(spawn).toHaveBeenCalledWith('/codex', ['app-server'], expect.objectContaining({ env: expect.objectContaining({ CODEX_HOME: '/original', OPENAI_API_KEY: 'synthetic-only' }) }));
+  expect(spawn).toHaveBeenCalledWith('/codex', ['app-server', ...codexSandboxStartupArgs()], expect.objectContaining({ env: expect.objectContaining({ CODEX_HOME: '/original', OPENAI_API_KEY: 'synthetic-only' }) }));
   rpc.close();
+});
+
+it('prefers native Windows isolation without overriding permissions or approvals', () => {
+  expect(codexSandboxStartupArgs('win32')).toEqual(['-c', 'features.prefer_mxc=true']);
+  expect(codexSandboxStartupArgs('linux')).toEqual([]);
+  expect(codexSandboxStartupArgs('darwin')).toEqual([]);
 });

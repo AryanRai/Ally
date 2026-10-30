@@ -17,6 +17,7 @@ import { PhysicalTap } from './physicalTap.js';
 import { windowsTapAdvertiser } from './bleAdvertiser.js';
 import { handoffPresentation } from './handoffPresentation.js';
 import { chatSelection } from '../agent/selection.js';
+import { managedSessionSignal } from '../agent/runningSessions.js';
 import { PhoneControl } from './phoneControl.js';
 import { AdbPhone } from './adb.js';
 import { HandoffSessions } from './handoffSessions.js';
@@ -115,7 +116,7 @@ export function attachDeviceSocket(server: Server, authorize: (header?: string) 
     handler: async (args, ctx) => { const result = await hub.command(name.startsWith('watch_') ? 'watch' : 'phone', name, { ...args, chatId: originatingChat(args, ctx.caller) }, ctx.signal); return { content: [{ type: 'text', text: result.message }], isError: !result.ok }; },
   }));
   unregister.push(registerDeviceTool({ name: 'device_list', description: 'List connected Ally phones and watches, including device IDs.', inputSchema: { type: 'object', properties: {} }, handler: async () => ({ content: [{ type: 'text', text: JSON.stringify(hub.list()) }] }) }));
-  unregister.push(registerPhoneControl(hub,control));
+  unregister.push(registerPhoneControl(hub,control,{promptSignal:caller=>{const split=caller.indexOf(':');const provider=caller.slice(0,split);return provider==='codex'||provider==='claude'?managedSessionSignal(provider,caller.slice(split+1)):undefined;},preview:async(args,ctx)=>{if(!viewerStart)throw Error('Local viewer unavailable.');return viewerStart(args,ctx);}}));
   unregister.push(registerDeviceAccess(hub,access));
   unregister.push(registerScrcpyViewer(hub,{onStart:handler=>{viewerStart=handler;}}));
   unregister.push(registerQuestionTool());

@@ -8,6 +8,23 @@ vi.mock('./CompactMarkdown', () => ({ default: vi.fn(({ children }: { children: 
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks(); vi.clearAllMocks(); delete (window as unknown as {__allySurfaceVisible?: boolean}).__allySurfaceVisible; });
 
 describe('compact notch Home', () => {
+  it('hides old history and embedded request duplicates, keeps a live decision actionable and removes a recent result after one minute', async () => {
+    vi.useFakeTimers(); vi.setSystemTime(100000);
+    const make = (id: string, state: 'pending' | 'answered', closedAt: number) => ({ id, state, closedAt, createdAt: 500, expiresAt: 200000, kind: 'approval' as const, chatId: 'codex:original', title: id, detail: 'Inspect the exact command', fields: [], actions: [{ value: 'accept', label: 'Allow once' }] });
+    const old = make('old history', 'answered', 1), pending = make('live request', 'pending', 0), recent = make('latest result', 'answered', 99999);
+    const answer = vi.fn(async () => {});
+    const props = { title: 'Chat', question: 'Current question', answer: 'Reply', working: false, onOpenChat: vi.fn(), onRefresh: vi.fn(), onAnswerRequest: answer };
+    const { rerender } = render(<NotchHomePreview {...props} requests={[old, recent, pending]} activityContent={{ timeline: [{ id: 'embedded-old', type: 'request', request: old }, { id: 'embedded-live', type: 'request', request: pending }] }} />);
+    expect(screen.queryByText(/old history/)).toBeNull();
+    expect(screen.queryByText(/latest result/)).toBeNull();
+    expect(screen.getAllByRole('button', { name: 'Allow once' })).toHaveLength(1);
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Allow once' })); });
+    expect(answer).toHaveBeenCalledWith('live request', { action: 'accept' });
+    rerender(<NotchHomePreview {...props} requests={[old, recent]} />);
+    expect(screen.getByText(/latest result.*Allowed once/)).toBeTruthy();
+    await act(async () => { await vi.advanceTimersByTimeAsync(61000); });
+    expect(screen.queryByText(/latest result/)).toBeNull();
+  });
   it('puts the latest exchange ahead of controls and opens the existing full chat', () => {
     const open = vi.fn(), refresh = vi.fn();
     const { container } = render(<NotchHomePreview title="MECH5720" question="Note this in formula sheet." answer="Added on page 34." working={false} onOpenChat={open} onRefresh={refresh}/>);

@@ -1,6 +1,14 @@
 // @vitest-environment node
 import { expect, it } from 'vitest';
 import { callerKey, operationArgs, taskKey, webURL } from './policy';
+it('bounds read-only focused observations and waits without accepting executable fields', () => {
+ expect(operationArgs({operation:'snapshot',tabId:'12',query:'WhatsApp',interactive:true,script:'bad'})).toEqual({operation:'snapshot',tabId:'12',query:'WhatsApp',interactive:true});
+ expect(operationArgs({operation:'extract',tabId:'12'})).toEqual({operation:'extract',tabId:'12'});
+ expect(operationArgs({operation:'wait_for',tabId:'12',text:'Saved',gone:true,timeout:3})).toEqual({operation:'wait_for',tabId:'12',text:'Saved',gone:true,timeout:3});
+ for(const timeout of [0,16,NaN,Infinity,'5']) expect(()=>operationArgs({operation:'wait_for',tabId:'12',text:'Saved',timeout})).toThrow();
+ expect(()=>operationArgs({operation:'snapshot',tabId:'12',query:'x'.repeat(501)})).toThrow();
+ expect(()=>operationArgs({operation:'snapshot',tabId:'12',interactive:'yes'})).toThrow();
+});
 it('rejects local files, scripts, credentials and unsupported operations', () => {
   for (const url of ['file:///C:/test.pdf','javascript:alert(1)','https://user:password@example.com','data:text/html,hello']) expect(() => webURL(url)).toThrow();
   for (const operation of ['javascript','evaluate','download','click_at']) expect(() => operationArgs({ operation })).toThrow();
