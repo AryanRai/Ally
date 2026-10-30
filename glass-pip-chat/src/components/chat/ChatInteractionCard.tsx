@@ -30,7 +30,8 @@ export default function ChatInteractionCard({ request, onAnswer }: ChatInteracti
     finally { setSending(false); }
   };
   return (
-    <article aria-label={`${question ? 'Question' : 'Approval'}: ${request.title}`} className={`min-w-0 overflow-hidden rounded-2xl border ${pending ? 'border-amber-300/25 bg-amber-300/[0.04]' : 'border-border bg-white/[0.02]'} p-3 text-foreground`}>
+    <details key={`${request.id}:${pending}`} open={pending || undefined} aria-label={`${question ? 'Question' : 'Approval'}: ${request.title}`} className={`min-w-0 overflow-hidden rounded-2xl border ${pending ? 'border-amber-300/25 bg-amber-300/[0.04]' : 'border-border bg-white/[0.02]'} p-3 text-foreground`}>
+      <summary className="cursor-pointer text-xs">{request.title} · {label}</summary>
       <div className="flex items-start gap-2.5">
         <span className={`grid size-8 shrink-0 place-items-center rounded-xl ${pending ? 'bg-amber-200/10 text-amber-200' : 'bg-white/5 text-foreground/60'}`}><Icon className="size-4" aria-hidden="true" /></span>
         <div className="min-w-0 flex-1">
@@ -62,6 +63,6 @@ export default function ChatInteractionCard({ request, onAnswer }: ChatInteracti
           {request.fields.map(field => <p key={field.id} className="mt-2 whitespace-pre-wrap [overflow-wrap:anywhere]"><span className="font-medium">{field.label}</span>{request.state === 'answered' ? `: ${field.secret ? 'Private answer not saved' : request.values?.[field.id] ?? 'No answer'}` : ''}</p>)}
         </details>}
       </>}
-    </article>
+    </details>
   );
 }

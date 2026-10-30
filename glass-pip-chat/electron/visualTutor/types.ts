@@ -13,7 +13,7 @@ export const MAX_DIAGRAM_IMAGE_UNITS = 4 * 1024 * 1024;
 export const MAX_DIAGRAM_IMAGES = 8;
 export const MAX_DIAGRAM_HEIGHT = 1200;
 export interface StudyClip {jobId:string;state:'queued'|'rendering'|'ready'|'error'|'cancelled';src?:string;duration?:number;error?:string}
-export interface TutorStep { id: string; title: string; explanation: string; marks: TutorMark[]; lesson?:import('./lesson.js').LessonBeat; clip?:StudyClip; diagram?: { html: string; height: number; images?: Record<string, string> }; panel?: { x: number; y: number; width: number; transparent?: boolean } }
+export interface TutorStep { id: string; title: string; explanation: string; marks: TutorMark[]; lesson?:import('./lesson.js').LessonBeat; clip?:StudyClip; diagram?: { html: string; height: number; images?: Record<string, string>; runtime?: 'three' | 'mermaid' }; panel?: { x: number; y: number; width: number; transparent?: boolean } }
 export interface TutorBoard {
   bookmarks?:Record<string,import('./playback.js').PlaybackBookmark>;
   mediaToken?:string;

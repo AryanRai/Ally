@@ -1,5 +1,7 @@
 import type { IncomingMessage } from 'node:http';
 import { ensureSpeechRuntime } from '../speech/runtime.js';
+import { speechSettings } from '../speech/settings.js';
+import { transcribeRecording } from '../speech/transcription.js';
 
 /** Called only after bridge authentication. Transcription never creates an agent turn. */
 export async function transcribeAudioRequest(req: IncomingMessage): Promise<{ status: number; body: unknown }> {
@@ -14,6 +16,11 @@ export async function transcribeAudioRequest(req: IncomingMessage): Promise<{ st
   }
   const audio = Buffer.concat(parts);
   if (audio.length < 6444 || audio.toString('ascii', 0, 4) !== 'RIFF' || audio.toString('ascii', 8, 12) !== 'WAVE') return { status: 400, body: { error: 'Record a little longer' } };
+  const settings = speechSettings();
+  if (settings.cloud && (settings.transcriptionProvider ?? settings.cloudProvider) === 'gemini') {
+    try { return { status: 200, body: await transcribeRecording(audio, settings) }; }
+    catch { return { status: 503, body: { error: 'Transcription unavailable. Your recording was not sent as a chat message.' } }; }
+  }
   const runtime = await ensureSpeechRuntime();
   const response = await fetch(`${runtime.url}/transcribe`, { method: 'POST', headers: { Authorization: `Bearer ${runtime.token}`, 'Content-Type': 'audio/wav' }, body: new Uint8Array(audio), signal: AbortSignal.timeout(120000) });
   const data = await response.json() as { text?: string; error?: string };

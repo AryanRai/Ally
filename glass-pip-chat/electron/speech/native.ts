@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-export interface VoiceOptions { voice?: string; rate?: number; volume?: number; engine?: 'local' | 'google'; cloudVoice?: string }
+export interface VoiceOptions { voice?: string; rate?: number; volume?: number; engine?: 'local' | 'google' | 'gemini'; cloudVoice?: string }
 let active: ChildProcess | undefined;
 
 export function cancelNativeSpeech(): void { active?.kill(); active = undefined; }

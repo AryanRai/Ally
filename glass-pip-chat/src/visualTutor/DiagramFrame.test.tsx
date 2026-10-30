@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, expect, it } from 'vitest';
-import DiagramFrame, { diagramDocument, FittedDiagram } from './DiagramFrame';
+import DiagramFrame, { diagramDocument, FittedDiagram, loadDiagramRuntime, DIAGRAM_CSP } from './DiagramFrame';
 afterEach(cleanup);
 it('isolates complex interactive SVG/HTML without parent, file/network, navigation or popup privileges', () => {
   const html = '<svg viewBox="0 0 100 100"><circle r="20" cx="50" cy="50"/></svg><input id="angle" type="range"><script>document.querySelector("input").addEventListener("input",()=>{});</script>';
@@ -34,4 +34,15 @@ it('resolves only attached raster assets and keeps the card isolated', () => {
   expect(doc).toContain('src="data:image/jpeg;base64,cHJldmlldw=="');
   expect(doc).not.toContain('src="ally-image:'); expect(doc).not.toContain('private.png');
   expect(doc).toContain('<circle'); expect(doc).toContain('type="range"'); expect(doc).toContain("connect-src 'none'");
+});
+it('bundles optional runtimes ahead of user code without relaxing the iframe boundary', async () => {
+  const three = await loadDiagramRuntime('three'), mermaid = await loadDiagramRuntime('mermaid');
+  expect(three).toContain('OrbitControls');
+  expect(mermaid).toContain('mermaid');
+  const source = diagramDocument('<script>window.scene=new THREE.Scene()</script>', undefined, 'three', three);
+  expect(source.indexOf('data:text/javascript;base64,')).toBeLessThan(source.indexOf('window.scene='));
+  const graph = diagramDocument('<pre class="mermaid">graph TD; A-->B</pre>', undefined, 'mermaid', mermaid);
+  expect(graph).toContain("securityLevel:'strict'"); expect(graph).toContain("querySelector:'.mermaid'");
+  expect(DIAGRAM_CSP).toContain("connect-src 'none'"); expect(DIAGRAM_CSP).not.toContain('unsafe-eval');
+  expect(diagramDocument('<svg/>')).not.toContain('OrbitControls');
 });

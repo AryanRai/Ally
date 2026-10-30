@@ -6,6 +6,12 @@ export const step = (id = 'one'): TutorStep => ({ id, title: 'The triangle', exp
 const started = () => { const model = new TutorModel(); model.start(board()); return model; };
 
 describe('visual tutor scene boundary', () => {
+  it('keeps blank on-demand boards honest and validates optional rendering libraries', () => {
+    expect(tutorPrompt({ ...board(), capturedAt: 0 })).toContain('No screen was captured');
+    expect(tutorPrompt({ ...board(), capturedAt: 0 })).toContain('study_diagram');
+    for (const runtime of ['three', 'mermaid'] as const) expect(parseStep({ ...step(), diagram: { html: '<div/>', height: 320, runtime } }).diagram?.runtime).toBe(runtime);
+    expect(() => parseStep({ ...step(), diagram: { html: '<div/>', runtime: 'remote-loader' } })).toThrow('runtime');
+  });
   it('retains staged lesson annotations through render-status updates without leaking them into a replacement job',()=>{
     const model=started();model.draw('session-1',{...step(),clip:{jobId:'job',state:'rendering'}});
     model.require('session-1').steps[0].lesson={id:'beat',stepId:'one',cue:'Watch.',mode:'wait',started:false,annotations:[]};

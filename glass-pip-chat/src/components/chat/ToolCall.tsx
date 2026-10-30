@@ -217,7 +217,10 @@ function TodoList({ todos }: { todos: Todo[] }) {
 
 /** Thumbnails; click one to see it full width, click again to shrink. */
 export function ImageStrip({ images, className }: { images: string[]; className?: string }) {
+  const [expanded, setExpanded] = useState(false);
   const [zoomed, setZoomed] = useState<number | null>(null);
+  if (!images.length) return null;
+  if (!expanded) return <button type="button" className="my-2 block text-xs text-muted-foreground" onClick={() => setExpanded(true)}>› Images · {images.length}</button>;
   if (zoomed !== null && images[zoomed]) {
     return (
       <img
@@ -229,7 +232,7 @@ export function ImageStrip({ images, className }: { images: string[]; className?
     );
   }
   return (
-    <div className={cn('flex flex-wrap gap-1.5', className)}>
+    <div className={cn('my-2 flex flex-wrap gap-1.5', className)}><button type="button" className="w-full text-left text-xs text-muted-foreground" onClick={() => { setExpanded(false); setZoomed(null); }}>⌄ Images · {images.length}</button>
       {images.map((src, i) => (
         <img
           key={i}

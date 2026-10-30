@@ -18,6 +18,7 @@ export interface Message {
      *  Typed as `any[]` to avoid a circular import with InlineToolIndicator.tsx.
      *  At runtime these are `Segment[]` (see src/components/chat/InlineToolIndicator.tsx). */
     segments?: any[];
+    interactions?: import('../../electron/devices/interactions').InteractionHistory[];
   };
 }
 

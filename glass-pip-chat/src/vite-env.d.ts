@@ -1,4 +1,5 @@
 /// <reference types="vite/client" />
+declare module 'virtual:ally-diagram-runtimes' { export const three: string; export const mermaid: string; }
 
 interface ImportMetaEnv {
   readonly VITE_SUPABASE_URL: string

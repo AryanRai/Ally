@@ -1,6 +1,6 @@
 import { render, screen, cleanup, fireEvent } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import ChatMessage from './ChatMessage';
+import ChatMessage, { AgentReply } from './ChatMessage';
 import WatchReplyContent from './WatchReplyContent';
 import type { Message } from '@/types/chat';
 
@@ -16,6 +16,27 @@ const interrupted: Message = {
   content: 'Checking the build\n\n⏹️ Stopped',
   metadata: { segments: [{ type: 'text', content: 'Checking the build' }, { type: 'text', content: '⏹️ Stopped' }] },
 };
+
+it('keeps live command groups between updates and collapses the completed sequence above the final reply', () => {
+  const segments = [
+    { type: 'text' as const, phase: 'commentary' as const, content: 'Inspecting files' },
+    { type: 'tool' as const, toolExecution: { id: 'read', name: 'Read', parameters: { path: 'one.ts' }, status: 'success' as const, startTime: 100 } },
+    { type: 'text' as const, phase: 'commentary' as const, content: 'Testing changes' },
+    { type: 'tool' as const, toolExecution: { id: 'test', name: 'shell', parameters: { command: 'test' }, status: 'success' as const, startTime: 200 } },
+  ];
+  const { container, rerender } = render(<AgentReply text="" segments={segments} streaming />);
+  const first = screen.getByText('Inspecting files');
+  const second = screen.getByText('Testing changes');
+  const groups = container.querySelectorAll('details');
+  expect(groups).toHaveLength(2);
+  expect(first.compareDocumentPosition(groups[0]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(groups[0].compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  groups[0].open = true;
+  rerender(<AgentReply text="Done" segments={[...segments, { type: 'text', phase: 'final_answer', content: 'Done' }]} durationMs={12000} />);
+  const summary = screen.getByText('Activity · 2 steps · 2 updates · 12s').closest('details');
+  expect(summary).not.toHaveAttribute('open');
+  expect(screen.getByText('Done').closest('details')).toBeNull();
+});
 
 describe('full chat interruption status', () => {
   it('skips unchanged reply work but dispatches the latest action handlers', () => {

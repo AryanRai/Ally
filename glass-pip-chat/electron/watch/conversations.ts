@@ -6,12 +6,13 @@ import { chatUserText, chatTitle } from '../agent/chatTitle.js';
 import { randomUUID } from 'node:crypto';
 import type { AgentHistoryMessage, AgentProvider, AgentSessionSnapshot, AgentSessionSummary, AgentUsage } from '../agent/types.js';
 import { type WatchReply } from './protocol.js';
-import type { ActivityState } from './activity.js';
+import { describeActivityInput, type ActivityState } from './activity.js';
+import { historyActivityTimeline, presentActivityTimeline, type ActivityEntry } from './activityTimeline.js';
 import { browserActivity } from '../agent/browserActivity.js';
 import type { DeviceAttachment, DeviceMedia } from './media.js';
 import { deviceHistoryReply, deviceUserText } from './presentation.js';
 
-export interface WatchMessage extends WatchReply { id: string; role: 'user' | 'assistant'; timestamp: number; steps?: ActivityState['steps']; usage?: AgentUsage; attachments?: DeviceAttachment[]; commentary?: string[] }
+export interface WatchMessage extends WatchReply { id: string; role: 'user' | 'assistant'; timestamp: number; steps?: ActivityState['steps']; usage?: AgentUsage; attachments?: DeviceAttachment[]; commentary?: string[]; timeline?: ActivityEntry[]; durationMs?: number }
 export interface WatchChat { codexAccountId?: string; id: string; provider: AgentProvider; title: string; cwd: string; sessionId?: string; createdAt?: number; updatedAt: number; messages: WatchMessage[] }
 interface Dependencies {
   list: (provider: AgentProvider, limit: number) => Promise<AgentSessionSummary[]>;
@@ -24,15 +25,17 @@ export function watchHistory(messages: AgentHistoryMessage[], media?: DeviceMedi
   return messages.map((m, index) => ({
     id: `history-${index}`, role: m.role, timestamp: m.timestamp,
     ...(m.role === 'user' ? { text: deviceUserText(userText(m.content)), components: [] } : deviceHistoryReply(m)),
-    usage: m.usage,
+    usage: m.usage, timeline: historyActivityTimeline(m), durationMs: m.usage?.durationMs,
     ...(media ? { attachments: [...media.dataUrls(m.images, 'Attached image'),
       ...(m.role === 'assistant' ? media.markdown(m.content) : []),
       // One sequence per message, so several tool screenshots are numbered 1, 2, 3 rather than all "1".
       ...media.dataUrls(m.segments?.flatMap(s => s.toolExecution?.images ?? []), 'Tool screenshot')].filter((asset, i, all) => all.findIndex(a => a.id === asset.id) === i).slice(0, 12) } : {}),
     steps: m.segments?.flatMap(s => s.toolExecution ? [{ id: s.toolExecution.id, name: s.toolExecution.name,
       ...(browserActivity(s.toolExecution.name, s.toolExecution.parameters) ?? (/cua_repl/i.test(s.toolExecution.name) ? { kind: 'other' as const } : {})),
+      startedAt: s.toolExecution.startTime, endedAt: s.toolExecution.endTime,
+      ...(media && s.toolExecution.images?.length ? { attachments: media.dataUrls(s.toolExecution.images, 'Tool screenshot') } : {}),
       status: s.toolExecution.status === 'executing' ? 'running' as const : s.toolExecution.status === 'error' ? 'error' as const : 'done' as const,
-      detail: String(s.toolExecution.error ?? s.toolExecution.result ?? '').slice(0, 3200) }] : []),
+      detail: [describeActivityInput(s.toolExecution.parameters ?? {}), String(s.toolExecution.error ?? s.toolExecution.result ?? '').slice(0, 1600)].filter(Boolean).join('\n\n') }] : []),
   }));
 }
 
@@ -107,6 +110,12 @@ export class WatchConversations {
         const saved = index < 0 ? undefined : remaining.splice(index, 1)[0];
         if (saved?.attachments?.length) message.attachments = [...new Map([...(message.attachments ?? []), ...saved.attachments!].map(a => [a.id, a])).values()];
       }
+      const savedAnswers = chat.messages.filter(m => m.role === 'assistant');
+      for (const message of rebuilt) if (message.role === 'assistant') {
+        const index = savedAnswers.findIndex(m => m.text === message.text);
+        const saved = index < 0 ? undefined : savedAnswers.splice(index, 1)[0];
+        if (saved && message.durationMs == null) message.durationMs = saved.durationMs;
+      }
       chat.messages = rebuilt;
       this.save();
     }
@@ -170,7 +179,7 @@ export class WatchConversations {
   }
   link(chat: WatchChat, sessionId: string) { chat.sessionId = sessionId; this.save(); }
   record(chat: WatchChat, transcript: string, reply: WatchReply, activity: ActivityState, turnId: string, uploads: DeviceAttachment[] = [], startedAt = Date.now()) {
-    chat.messages.push({ id: `${turnId}-user`, role: 'user', text: transcript, attachments: uploads, components: [], timestamp: startedAt }, { id: `${turnId}-assistant`, role: 'assistant', ...reply, attachments: [...activity.steps.flatMap(s => s.attachments ?? []), ...this.media?.markdown(reply.text) ?? []].slice(0, 12), steps: activity.steps, usage: activity.usage, timestamp: Date.now() });
+    chat.messages.push({ id: `${turnId}-user`, role: 'user', text: transcript, attachments: uploads, components: [], timestamp: startedAt }, { id: `${turnId}-assistant`, role: 'assistant', ...reply, attachments: [...activity.steps.flatMap(s => s.attachments ?? []), ...this.media?.markdown(reply.text) ?? []].slice(0, 12), steps: activity.steps, timeline: presentActivityTimeline(activity.timeline), commentary: presentActivityTimeline(activity.timeline).flatMap(row => row.type === 'update' ? [row.text] : []), durationMs: activity.durationMs, usage: activity.usage, timestamp: Date.now() });
     if (chat.title === 'New watch chat') chat.title = transcript.slice(0, 80);
     chat.updatedAt = Date.now(); this.save();
   }

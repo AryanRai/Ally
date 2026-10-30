@@ -4,6 +4,7 @@ import { interruptedSessions, RESUME_PROMPT } from '../agent/interrupted.js';
 import { discoveryReadStates, unreadState, acknowledgeUnread } from '../agent/unread.js';
 import { acknowledgeNativeUnread, reconcileNativeUnread } from '../agent/codexUnread.js';
 import { readDesktopActivity, steerExternalDesktopChat, updateExternalDesktopAccess } from '../agent/codexDesktop.js';
+import { presentActivityTimeline } from './activityTimeline.js';
 import { liveActivity, recordActivity, settleActivity, type ActivityState } from './activity.js';
 import { FollowupReceipts } from '../agent/followups.js';
 import { messageQueue, queuedPrompt, queueUnavailable, type QueuedMessage, type QueueChange } from '../agent/messageQueue.js';
@@ -33,6 +34,7 @@ import { WatchApprovals, watchPermission } from './approvals.js';
 import { attachSpeechSocket } from './speechSocket.js';
 import { transcribeAudioRequest } from './transcription.js';
 import { speechSettings } from '../speech/settings.js';
+import { transcribeRecording } from '../speech/transcription.js';
 import { outputMute, setOutputMute } from '../speech/outputMute.js';
 import { notifyReply } from '../notifications.js';
 import { attachDeviceSocket } from '../devices/socket.js';
@@ -153,6 +155,7 @@ export function startWatchBridge(getConfig: () => AgentConfig): (() => void) | u
     studyTimings.delete(turn.id);
     if (timing) console.info('[Study timing ms]', JSON.stringify(timing));
     finishedAt.set(turn.id, Date.now());
+    turn.durationMs = Date.now() - turn.startedAt;
     interactionChatKeys.delete(turn.id);
     approvals.cancel(turn.id);
     settleActivity(turn);
@@ -236,10 +239,7 @@ export function startWatchBridge(getConfig: () => AgentConfig): (() => void) | u
             if (event.text.trim()) studyTimings.get(turn.id)?.mark('firstText');
             if (event.phase) hasPhase = true;
             if (event.phase === 'commentary') {
-              const id = `commentary:${event.itemId ?? 'progress'}`;
-              let step = turn.steps.find(s => s.id === id);
-              if (!step) { step = { id, name: 'Progress update', status: 'done', detail: '' }; turn.steps.push(step); }
-              step.detail = (step.detail + event.text).slice(-3200);
+              // Commentary is retained in the ordered public timeline by recordActivity.
             } else finalOutput = (finalOutput + (finalOutput && event.itemId && textItem && event.itemId !== textItem ? '\n\n' : '') + event.text).slice(0, 64001);
             // Native speech needs the boundary between a progress message and
             // the next answer, even when neither item supplies a newline.
@@ -383,7 +383,7 @@ export function startWatchBridge(getConfig: () => AgentConfig): (() => void) | u
         finally { accessChanging.delete(key); }
         return;
       }
-      if (req.method === 'GET' && url.pathname === '/v1/interactions') { send(res,200,{requests:interactions.list().filter(request=>!request.desktopOnly)});return; }
+      if (req.method === 'GET' && url.pathname === '/v1/interactions') { const chatId=url.searchParams.get('chatId');send(res,200,{requests:(chatId?interactions.history(chatId):interactions.list()).filter(request=>!request.desktopOnly)});return; }
       if (req.method === 'POST' && /^\/v1\/interactions\/[\w-]+\/answer$/.test(url.pathname)) {
         const parts:Buffer[]=[];let size=0;for await(const part of req){size+=part.length;if(size>32000)throw Error('Answer is too large');parts.push(part);}
         const input=JSON.parse(Buffer.concat(parts).toString('utf8')),id=url.pathname.split('/')[3];
@@ -576,7 +576,7 @@ export function startWatchBridge(getConfig: () => AgentConfig): (() => void) | u
       if (req.method === 'GET' && url.pathname.startsWith('/v1/turns/')) {
         const turn = turns.get(url.pathname.slice('/v1/turns/'.length));
         if (turn) { const chat = await conversations.get(turn.chatId); (turn as Turn & { queue?: unknown }).queue = messageQueue.snapshot(queueKey(chat)); }
-        send(res, turn ? 200 : 404, turn ? { ...turn, progress: presentProgress(turn.progress), attachments: [...new Map([...turn.steps.flatMap(step => step.attachments ?? []), ...media.markdown(turn.reply?.text ?? '')].map(a => [a.id, a])).values()].slice(-12), approvals: approvals.list(turn.id) } : { error: 'This response expired after the desktop restarted. Check chat history before sending again.' }); return;
+        send(res, turn ? 200 : 404, turn ? { ...turn, timeline: presentActivityTimeline(turn.timeline), progress: presentProgress(turn.progress), attachments: [...new Map([...turn.steps.flatMap(step => step.attachments ?? []), ...media.markdown(turn.reply?.text ?? '')].map(a => [a.id, a])).values()].slice(-12), approvals: approvals.list(turn.id) } : { error: 'This response expired after the desktop restarted. Check chat history before sending again.' }); return;
       }
       const chatStop = req.method === 'POST' && /^\/v1\/chats\/([^/]+)\/stop$/.exec(url.pathname);
       if (chatStop) {
@@ -707,7 +707,7 @@ export function startWatchBridge(getConfig: () => AgentConfig): (() => void) | u
         ? await conversations.get(`${provider}:${config.sessions[provider as AgentProvider]}`)
         : conversations.create(provider, getConfig().defaultCwd, `legacy-${provider}`);
       if (chat.provider !== provider) { send(res, 400, { error: 'The selected chat uses a different engine. Select it again.' }); return; }
-      const voiceReady = !audio || (await getSpeechRuntimeStatus()).ready;
+      const voiceReady = !audio || (speechSettings().cloud && (speechSettings().transcriptionProvider ?? speechSettings().cloudProvider) === 'gemini') || (await getSpeechRuntimeStatus()).ready;
       const previous = [...turns.values()].find(t => t.requestId === requestId && t.chatId === chat.id);
       const submission = audio ? undefined : JSON.stringify({ presentation: message.presentation, context: message.context, text: message.text, attachments: message.attachments ?? [], queueAfterCurrent: message.queueAfterCurrent === true, resumeToken: message.resumeToken });
       if (previous) { send(res, previous.submission === submission ? 202 : 409, previous.submission === submission ? { id: previous.id } : { error: 'This send ID was already used for a different message. Check history before sending again.' }); return; }
@@ -740,6 +740,12 @@ export function startWatchBridge(getConfig: () => AgentConfig): (() => void) | u
       if (!audio) { void run(turn); return; }
       void (async () => {
         try {
+          const settings = speechSettings();
+          if (settings.cloud && (settings.transcriptionProvider ?? settings.cloudProvider) === 'gemini') {
+            const data = await transcribeRecording(body, settings);
+            if (!data.text.trim()) throw new Error('No speech heard. Try again or use text.');
+            turn.transcript = data.text.trim().slice(0, 12000); await run(turn); return;
+          }
           const runtime = await ensureSpeechRuntime();
           const response = await fetch(`${runtime.url}/transcribe`, { method: 'POST', headers: { 'Content-Type': 'audio/wav', Authorization: `Bearer ${runtime.token}` }, body: new Uint8Array(body), signal: AbortSignal.timeout(120000) });
           const data = await response.json() as { text?: string; error?: string };

@@ -52,7 +52,7 @@ export const voice = {
         const settings = await window.pip.speech.settings?.();
         if (generation !== connectionGeneration) return;
         cloudEnabled = settings?.cloud === true;
-        if (cloudEnabled) { status({ connected: true, modelsLoaded: true, backend: 'Google Cloud', model: 'Chirp 3 · Orbit', phase: 'ready' }); return; }
+        if (cloudEnabled) { status({ connected: true, modelsLoaded: true, backend: 'Google Cloud', model: (settings?.transcriptionProvider ?? settings?.cloudProvider) === 'gemini' ? 'Gemini live transcription' : 'Chirp 3', phase: 'ready' }); return; }
         const result = await window.pip.speech.connect();
         if (!result.success) throw new Error(result.error);
         const resultStatus = await window.pip.speech.getStatus();

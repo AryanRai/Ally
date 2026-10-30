@@ -2,9 +2,10 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
+import { diagramRuntimes } from './scripts/diagram-runtimes.js';
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), diagramRuntimes()],
   test: {
     globals: true,
     environment: 'jsdom',

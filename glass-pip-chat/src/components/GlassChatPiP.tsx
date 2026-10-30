@@ -117,7 +117,6 @@ export default function GlassChatPiP() {
   const studyLive = useLiveStudyReply(sessionKey);
   const liveStudy = studyLive?.working ? studyLive : null;
   const decisions = useChatInteractions(sessionKey);
-  const timeline = useMemo(() => state.collapsed ? [] : interactionTimeline(messages, decisions.rows), [messages, decisions.rows, state.collapsed]);
   const pendingDecisions = decisions.rows.filter(row => row.state === 'pending');
   const decisionCards = <div className="max-h-80 space-y-2 overflow-y-auto">{pendingDecisions.map(request => <ChatInteractionCard key={request.id} request={request} onAnswer={decisions.answer} />)}</div>;
   const meetingTurn = meetingReply(perception, activeChat);
@@ -127,6 +126,7 @@ export default function GlassChatPiP() {
   const currentResponse = activeIsWorking ? conversation.currentResponse : '';
   const streamingSegments = activeIsWorking ? conversation.streamingSegments : [];
   const thinkingText = activeIsWorking ? conversation.thinkingText : '';
+  const timeline = useMemo(() => state.collapsed ? [] : interactionTimeline(messages, decisions.rows.filter(row=>!activeIsWorking || row.state!=='pending')), [messages, decisions.rows, state.collapsed, activeIsWorking]);
   const executingTool = [...conversation.streamingSegments].reverse().find(s => s.type === 'tool' && s.toolExecution?.status === 'executing')?.toolExecution;
   const lastSegment = conversation.streamingSegments.at(-1);
   const workingStatus = executingTool ? `Working · ${executingTool.name}` : lastSegment?.type === 'thinking' ? 'Thinking…' : lastSegment?.type === 'text' ? 'Writing…' : 'Working…';
@@ -163,11 +163,13 @@ export default function GlassChatPiP() {
     const text = (messageInput ?? (fromQuickInput ? quickInput : input)).trim();
     if (!text) return;
     if (preparingScreen.current) return;
-    if (screenAutoAttach && (activeIsWorking || externalWorking) && !tutor.board) { setScreenNotice('Screen auto-attach waits for this response to finish. Your question is saved.'); return; }
+    const midTurn = activeIsWorking || externalWorking;
+    setScreenNotice('');
     const targetChatId = activeChat?.id;
-    const attachment = tutor.claimAttachment(activeIsWorking || externalWorking);
-    if (attachment.blocked) return;
-    if (screenAutoAttach && !attachment.image) {
+    const attachment = tutor.claimAttachment(midTurn);
+    if (attachment.blocked) { setScreenNotice('Your selected image is saved. Send it after this response finishes; Queue and Steer accept text during a response.'); return; }
+    if (screenAutoAttach && midTurn) setScreenNotice('Sending text follow-up. Screen auto-attach resumes with your next new turn.');
+    if (screenAutoAttach && !midTurn && !attachment.image) {
       if (tutor.board) { setScreenNotice('Drawing context attached · clear it to auto-attach a fresh screen.'); }
       else {
         preparingScreen.current = true; setScreenNotice('Attaching screen…');
@@ -184,10 +186,11 @@ export default function GlassChatPiP() {
 
     const includeClipboard = context.shouldIncludeContext(fromQuickInput, state.collapsed);
     if (includeClipboard) context.clearNewContextFlag();
-    const result = tutor.board?.presentation === 'study'
+    const result = tutor.board?.presentation === 'study' && !midTurn
       ? await tutor.study(includeClipboard ? `Context (from my clipboard):\n${context.contextData.clipboard}\n\n${text}` : text, activeIsWorking || externalWorking)
       : await conversation.send(tutor.decorate(text), 'text', { mode, image: attachment.image, context: includeClipboard ? context.contextData.clipboard : undefined });
     if (result?.error) {
+      setScreenNotice(result.error);
       // Preserve anything typed meanwhile; a failure also keeps a saved copy per chat.
       if (fromQuickInput) setQuickInput(current => current || text);
       else setInput(current => current || text);
@@ -450,7 +453,7 @@ export default function GlassChatPiP() {
         style={{ width: '100%', height: '100%' }}
       >
         <FlowField state={backdropState} />
-        <PendingDecisionOverlay/>
+        <PendingDecisionOverlay excludeChatId={sessionKey}/>
         {/* Orbit Mary's panel glow: while the agent works and while you type */}
         <WindowGlow agentWorking={isTyping || externalWorking} userTyping={!!(state.collapsed ? quickInput : input).trim()} />
 
@@ -614,6 +617,7 @@ export default function GlassChatPiP() {
                         return (
                         <div key={message.id} data-ally-reply-reader={message.role === 'assistant' && message.id === messages.at(-1)?.id ? 'true' : undefined}><ChatMessage
                           message={message}
+                          onAnswerRequest={decisions.answer}
                           sessionWorking={externalWorking && message.id === messages.at(-1)?.id}
                           onEdit={messageHandlers.onEdit}
                           onFork={messageHandlers.onFork}
@@ -626,11 +630,11 @@ export default function GlassChatPiP() {
                     {activeIsWorking && (
                       <Message from="assistant">
                         <MessageContent>
-                          <AgentReply text={currentResponse} thinking={thinkingText} segments={streamingSegments} streaming />
+                          <AgentReply text={currentResponse} thinking={thinkingText} segments={streamingSegments} streaming requests={pendingDecisions} onAnswerRequest={decisions.answer}/>
                         </MessageContent>
                       </Message>
                     )}
-                    {pendingDecisions.length > 0 && decisionCards}
+
                   </ConversationContent>
                   <ConversationScrollButton />
                 </Conversation>
@@ -648,6 +652,7 @@ export default function GlassChatPiP() {
                 <VisualTutorControls tutor={tutor} disabled={!activeChat || activeIsWorking || externalWorking} />
                 <PerceptionBar perception={perception} chat={activeChat} onOpenSession={openMeetingChat} />
                 <MessageQueueStack chatId={activeChat?.agent?.sessionId ? `${activeChat.agent.provider}:${activeChat.agent.sessionId}` : undefined} />
+                {screenNotice && <div role="status" className="border-t border-border px-3 py-2 text-xs text-foreground/80">{screenNotice}</div>}
                 <ChatInput
                   accountControls={conversation.provider === 'codex' && <CodexAccountControl key={activeChat?.id}
                   accountId={activeChat?.agent?.codexAccountId} hasSession={!!activeChat?.agent?.sessionId}

@@ -9,6 +9,7 @@ import { circlePixels } from '../capture/circleHandoff.js';
 import { registerDeviceTool } from '../chatsMcp/index.js';
 import { text } from '../chatsMcp/protocol.js';
 import { TutorModel, tutorPrompt } from './model.js';
+import { DrawingOpener, requireDrawingOwner } from './openBoard.js';
 import { MAX_DIAGRAM_HEIGHT, MAX_DIAGRAM_IMAGES, type TutorAction, type TutorBoard, type TutorCapture } from './types.js';
 import { prepareDiagramImages } from './diagramMedia.js';
 import { studyDiagramContent } from './waveDiagram.js';
@@ -30,6 +31,7 @@ import { StudyNarration } from './narration.js';
 import { nativeSpeech } from '../speech/native.js';
 import { googleSpeech } from '../speech/google.js';
 import { speechSettings } from '../speech/settings.js';
+import { synthesizeCloudWav } from '../speech/streaming.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const captureDir = path.join(os.tmpdir(), 'ally-visual-tutor');
@@ -55,7 +57,7 @@ export function registerVisualTutorIpc(getMain: () => BrowserWindow | null): voi
   let mediaDisplay: Electron.Display | undefined;
   const playback = new StudyPlayback();
   const lesson = new StudyLesson();
-  const narration = new StudyNarration(words=>{const prefs=speechSettings();return prefs.cloud?googleSpeech(words,prefs.voice):nativeSpeech(words);});
+  const narration = new StudyNarration(words=>{const prefs=speechSettings();return prefs.cloud?(prefs.cloudProvider==='gemini'?synthesizeCloudWav(prefs,words,AbortSignal.timeout(40_000)):googleSpeech(words,prefs.voice)):nativeSpeech(words);});
   const fromMain = (event: IpcMainInvokeEvent) => {
     if (event.sender !== getMain()?.webContents || event.senderFrame !== event.sender.mainFrame) throw new Error('Visual tutor must be opened from Ally');
   };
@@ -133,6 +135,11 @@ export function registerVisualTutorIpc(getMain: () => BrowserWindow | null): voi
     model.activate(board.id, stepId); overlay?.showInactive(); keepPillAbove(); publish();
   };
   const stageCue = (stepId: string, cue: string) => {
+    const ordinary = model.get();
+    if (ordinary && ordinary.presentation !== 'study') {
+      if (revealOnDraw && ordinary.following) { model.activate(ordinary.id, stepId); overlay?.showInactive(); keepPillAbove(); publish(); }
+      return;
+    }
     cue=model.get()?.steps.find(s=>s.id===stepId)?.lesson?.cue??cue;
     const matched = cues.stage(stepId, cue);
     // The first requested card opens immediately (including render progress).
@@ -141,7 +148,7 @@ export function registerVisualTutorIpc(getMain: () => BrowserWindow | null): voi
   };
   const manimOwner = (id: unknown, caller?: string) => {
     const board = model.require(id), selected = chatSelection.snapshot().selected;
-    if (board.presentation !== 'study' || !selected || board.sessionKey !== studyKey(selected)) throw Error('This Study board/chat is no longer selected.');
+    if (board.presentation === 'study' && (!selected || board.sessionKey !== studyKey(selected))) throw Error('This Study board/chat is no longer selected.');
     if (caller && caller !== board.sessionKey && caller !== board.chatId) throw Error('This Manim board belongs to another chat.');
     return {...board,chatId:board.sessionKey || board.chatId,capacity:16-board.steps.length};
   };
@@ -361,30 +368,76 @@ export function registerVisualTutorIpc(getMain: () => BrowserWindow | null): voi
     overlay?.setIgnoreMouseEvents(!interactive && !board?.sketching, { forward: true });
   });
 
-  registerDeviceTool({ name: 'visual_tutor_read', description: 'Read an explicitly opened Ally visual tutor board, including teaching steps, screenshot time and user sketches. Requires boardId from the user’s visual tutor prompt. No new capture.',
+  const drawingOpener = new DrawingOpener(() => model.get(), async (owner, capture, displayId) => {
+    if (starting) throw Error('A screen capture is already starting. Retry after it finishes.');
+    starting = true;
+    const previous = model.get(), main = getMain(), mainVisible = !!main?.isVisible(), overlayVisible = !!overlay?.isVisible();
+    try {
+      const display = screen.getAllDisplays().find(d => d.id === (previous?.displayId ?? displayId))
+        ?? (previous || displayId !== undefined ? undefined : screen.getDisplayNearestPoint(screen.getCursorScreenPoint()));
+      if (!display || (previous && JSON.stringify(previous.bounds) !== JSON.stringify(display.bounds))) throw Error('The drawing display changed. Close the board and open it again.');
+      let image: string | undefined;
+      let frozenImage: string | undefined;
+      if (capture) {
+        if (mainVisible) main?.hide();
+        overlay?.hide();
+        await new Promise(resolve => setTimeout(resolve, 160));
+        const captured = await captureDisplay(display);
+        if (captured.isEmpty()) throw Error('Screen capture is unavailable. Check system screen-recording permissions.');
+        const small = captured.getSize().width > 1920 ? captured.resize({ width: 1920 }) : captured;
+        image = small.toPNG().toString('base64');
+        frozenImage = small.toDataURL();
+      }
+      if (model.get()?.id !== previous?.id) throw Error('The drawing board changed while opening. Observe the current board before retrying.');
+      if (ctxDisplayChanged()) throw Error('The display changed during capture. Retry with a new requestId.');
+      function ctxDisplayChanged() { return !screen.getAllDisplays().some(d => d.id === display!.id && JSON.stringify(d.bounds) === JSON.stringify(display!.bounds)); }
+      const board: TutorBoard = previous ?? { id: randomUUID(), chatId: owner, sessionKey: owner, displayId: display.id, bounds: { ...display.bounds }, capturedAt: 0, steps: [], sketches: [], selected: 0, following: true, sketching: false, frozen: false, revision: 0 };
+      if (capture) { board.capturedAt = Date.now(); delete board.focus; }
+      model.start(board);
+      if (frozenImage) screenshot = frozenImage;
+      if (!overlay) await openOverlay(board);
+      revealOnDraw = true;
+      overlay?.showInactive(); publish();
+      return { board: model.get()!, ...(image ? { image } : {}) };
+    } catch (error) {
+      if (!previous && model.get()?.sessionKey === owner) close();
+      else if (overlayVisible) overlay?.showInactive();
+      throw error;
+    } finally { if (mainVisible) main?.showInactive(); keepPillAbove(); starting = false; }
+  });
+  registerDeviceTool({ name: 'study_open', description: 'Open or reuse a drawing/tutoring overlay on the user’s desktop from ANY Ally chat (phone, watch, pill, full chat or notch). Use when the user asks to draw, explain visually or create an interactive diagram; no keyboard shortcut or Circle to Ask required. Default blank board, no screen capture. Set capture:true only when the user asks to use their current desktop screen; returns one PNG, never a live feed. Returns boardId for visual_tutor_draw, study_diagram and study_manim. Reuse requestId only for retries. Existing board from another chat is not replaced. chatId is the exact originating provider:sessionId, needed only without caller context.',
+    inputSchema: { type: 'object', properties: { requestId: { type: 'string', maxLength: 80 }, chatId: { type: 'string' }, capture: { type: 'boolean' }, displayId: { type: 'integer' } }, required: ['requestId'], additionalProperties: false },
+    handler: async (args, ctx) => {
+      const result = await drawingOpener.start(args, ctx.caller);
+      const reply = text(JSON.stringify({ boardId: result.board.id, displayId: result.board.displayId, bounds: result.board.bounds, capturedAt: result.board.capturedAt || null, capturedThisRequest: !!result.image, instructions: tutorPrompt(result.board) }));
+      if (result.image) reply.content.push({ type: 'image', mimeType: 'image/png', data: result.image });
+      return reply;
+    } });
+  registerDeviceTool({ name: 'visual_tutor_read', description: 'Read an Ally drawing board opened with study_open or a shortcut, including steps, screenshot time and user sketches. No new capture.',
     inputSchema: { type: 'object', properties: { boardId: { type: 'string' } }, required: ['boardId'], additionalProperties: false },
-    handler: async args => { model.require(args.boardId); const board = model.get()!; return text(JSON.stringify({ ...board, instructions: tutorPrompt(board) })); } });
-  registerDeviceTool({ name: 'study_diagram', description: 'Stage or update a spacious interactive HTML/SVG Study card with images, charts, custom diagrams and local scripts/controls. Stable id updates progressively; new id adds a step. cue matches a short spoken sentence so the card follows live narration alongside native drawing and agent tools. For interactive wave/phase controls use preset:waves; for harmonic sums use preset:fourier, omitting html. For local images/page previews pass assets:[{id,path}] with absolute raster paths, and use <img src="ally-image:ID"> in HTML; do not paste base64 into HTML. Images are fitted automatically; original files are unchanged. Isolated card has no network/files/parent/desktop access. Read sketches with visual_tutor_read.',
+    handler: async (args, ctx) => { requireDrawingOwner(model.require(args.boardId), ctx.caller); const board = model.get()!; return text(JSON.stringify({ ...board, instructions: tutorPrompt(board) })); } });
+  registerDeviceTool({ name: 'study_diagram', description: 'Display or update an interactive HTML/SVG card on a study_open board (immediate) or native Study board (spoken cue) with images, charts, custom diagrams and local scripts/controls. Stable id updates progressively; new id adds a step. cue matches a short spoken sentence so the card follows live narration alongside native drawing and agent tools. For interactive wave/phase controls use preset:waves; for harmonic sums use preset:fourier, omitting html. For local images/page previews pass assets:[{id,path}] with absolute raster paths, and use <img src="ally-image:ID"> in HTML; do not paste base64 into HTML. Images are fitted automatically; original files are unchanged. Optional runtime:three supplies window.THREE and window.OrbitControls for 3D; runtime:mermaid automatically renders pre.mermaid blocks. No imports/CDNs. Isolated card has no network/files/parent/desktop access. Read sketches with visual_tutor_read.',
     // Claude forbids root schema unions. studyDiagramContent enforces exactly
     // one of html/preset before any image preparation or board mutation.
-    inputSchema: { type: 'object', properties: { boardId: { type: 'string' }, id: { type: 'string', maxLength: 80 }, title: { type: 'string', maxLength: 120 }, cue: { type: 'string', minLength: 4, maxLength: 300 }, html: { type: 'string', maxLength: 160000 }, preset: { type: 'string', enum: ['waves', 'fourier'] }, height: { type: 'integer', minimum: 120, maximum: MAX_DIAGRAM_HEIGHT }, assets: { type: 'array', maxItems: MAX_DIAGRAM_IMAGES, items: { type: 'object', properties: { id: { type: 'string', maxLength: 40 }, path: { type: 'string' } }, required: ['id','path'], additionalProperties: false } } }, required: ['boardId', 'id', 'title', 'cue'], additionalProperties: false },
-    handler: async args => {
-      const board = model.require(args.boardId);
-      if (board.presentation !== 'study' || typeof args.cue !== 'string' || args.cue.length < 4 || args.cue.length > 300) throw Error('Use the current Study session and an exact short spoken cue.');
+    inputSchema: { type: 'object', properties: { boardId: { type: 'string' }, id: { type: 'string', maxLength: 80 }, title: { type: 'string', maxLength: 120 }, cue: { type: 'string', minLength: 4, maxLength: 300 }, html: { type: 'string', maxLength: 160000 }, runtime: { type: 'string', enum: ['three', 'mermaid'] }, preset: { type: 'string', enum: ['waves', 'fourier'] }, height: { type: 'integer', minimum: 120, maximum: MAX_DIAGRAM_HEIGHT }, assets: { type: 'array', maxItems: MAX_DIAGRAM_IMAGES, items: { type: 'object', properties: { id: { type: 'string', maxLength: 40 }, path: { type: 'string' } }, required: ['id','path'], additionalProperties: false } } }, required: ['boardId', 'id', 'title', 'cue'], additionalProperties: false },
+    handler: async (args, ctx) => {
+      const board = requireDrawingOwner(model.require(args.boardId), ctx.caller);
+      if (typeof args.cue !== 'string' || args.cue.length < 4 || args.cue.length > 300) throw Error('Supply a short diagram explanation/cue.');
       const html = studyDiagramContent(args);
       const images = await prepareDiagramImages(args.assets);
-      const next = model.draw(board.id, { id: args.id, title: args.title, explanation: args.cue, marks: [], diagram: { html, height: args.height ?? (args.preset ? 620 : undefined), images } });
+      const next = model.draw(board.id, { id: args.id, title: args.title, explanation: args.cue, marks: [], diagram: { html, runtime: args.runtime, height: args.height ?? (args.preset ? 620 : undefined), images } });
       stageCue(String(args.id), args.cue); publish();
-      return text('Study card staged. Say its exact cue in the live drawing program to reveal it.', { boardId: next.id, steps: next.steps.length });
+      return text(board.presentation === 'study' ? 'Study card staged. Say its exact cue in the live drawing program to reveal it.' : 'Diagram updated on the desktop board. Manual review or hiding the board is respected.', { boardId: next.id, steps: next.steps.length });
     } });
   registerDeviceTool({ name: 'visual_tutor_draw', description: 'Draw or update a teaching step on the user-enabled Ally overlay. Optional step.panel={x,y,width,transparent} places the compact panel in full-screen 0–1000 coordinates, clamped away from the Ally pill; transparency is optional and manual dragging remains available. Optional step.diagram={html,height} displays complex self-contained HTML/SVG with isolated local scripts and interactive controls; no network, files, parent/tool access or desktop control. No screen capture. Use 0–1000 screen-relative coordinates; same step ID replaces that step. Call visual_tutor_read to inspect user sketches.',
     inputSchema: { type: 'object', properties: { boardId: { type: 'string' }, step: { type: 'object', properties: {
-      diagram: { type: 'object', properties: { html: { type: 'string', maxLength: 160000 }, height: { type: 'integer', minimum: 120, maximum: 600 } }, required: ['html'], additionalProperties: false },
+      diagram: { type: 'object', properties: { html: { type: 'string', maxLength: 160000 }, runtime: { type: 'string', enum: ['three', 'mermaid'] }, height: { type: 'integer', minimum: 120, maximum: 600 } }, required: ['html'], additionalProperties: false },
       panel: { type: 'object', properties: { x: { type: 'number', minimum: 0, maximum: 1000 }, y: { type: 'number', minimum: 0, maximum: 1000 }, width: { type: 'number', minimum: 100, maximum: 1000 }, transparent: { type: 'boolean' } }, required: ['x', 'y', 'width'], additionalProperties: false },
       id: { type: 'string', maxLength: 80 }, title: { type: 'string', maxLength: 120 }, explanation: { type: 'string', maxLength: 1800 },
       marks: { type: 'array', maxItems: 80, items: { type: 'object', properties: { id: { type: 'string', maxLength: 80 }, kind: { enum: ['arrow', 'line', 'rect', 'ellipse', 'polyline', 'text'] }, color: { enum: ['mint', 'blue', 'amber', 'pink', 'white'] }, points: { type: 'array', minItems: 1, maxItems: 256, items: { type: 'object', properties: { x: { type: 'number', minimum: 0, maximum: 1000 }, y: { type: 'number', minimum: 0, maximum: 1000 } }, required: ['x', 'y'], additionalProperties: false } }, text: { type: 'string', maxLength: 240 } }, required: ['id', 'kind', 'color', 'points'], additionalProperties: false } },
     }, required: ['id', 'title', 'explanation', 'marks'], additionalProperties: false } }, required: ['boardId', 'step'], additionalProperties: false },
-    handler: async args => {
+    handler: async (args, ctx) => {
+      requireDrawingOwner(model.require(args.boardId), ctx.caller);
       if (model.require(args.boardId).presentation === 'study') throw Error('This lesson uses live native Study annotations. Use step()/say() for screen drawing, or study_diagram for interactive cards with a spoken cue.');
       const board = model.draw(args.boardId, args.step); if (revealOnDraw) { overlay?.showInactive(); keepPillAbove(); } publish(); return text(`Displayed teaching step ${board.steps.findIndex(s => s.id === (args.step as { id: string }).id) + 1}.`, { boardId: board.id, revision: board.revision, steps: board.steps.length });
     } });
