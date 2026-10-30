@@ -74,8 +74,8 @@ internal fun IconControl(name: String, label: String, enabled: Boolean = true, o
 
 /** The same four styles as the watch, driven by this phone's saved appearance. */
 @Composable
-internal fun PresenceOrb(modifier: Modifier = Modifier, active: Boolean = false, microphoneLevel: Float = 0f, listening: Boolean = false) {
-    StyledPhoneOrb(LocalPhoneLook.current, active, listening, microphoneLevel, modifier)
+internal fun PresenceOrb(modifier: Modifier = Modifier, active: Boolean = false, microphoneLevel: Float = 0f, listening: Boolean = false, speaking: Boolean = false) {
+    StyledPhoneOrb(LocalPhoneLook.current, active || speaking, listening, microphoneLevel, modifier, speaking)
 }
 
 @Composable

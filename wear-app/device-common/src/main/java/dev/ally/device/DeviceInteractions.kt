@@ -4,17 +4,26 @@ import org.json.JSONObject
 
 /** Pure projection shared by phone/watch; only server-created requests are actionable. */
 object DeviceInteractions {
-    data class TimelineEntry<T>(val id: String, val message: T? = null, val request: JSONObject? = null)
+    data class TimelineEntry<T>(val id: String, val message: T? = null, val request: JSONObject? = null, val requests: List<JSONObject> = emptyList())
+    fun anchor(item: JSONObject, steps: List<Triple<String, Long, Long>>): String? {
+        val time = requestedAt(item)
+        val preceding = steps.filter { it.second > 0 && it.second <= time }.sortedByDescending { it.second }
+        return (preceding.firstOrNull { it.third <= 0 || it.third >= time } ?: preceding.firstOrNull())?.first
+    }
     /** Keep resolved requests where they were asked, even as later replies arrive. */
-    fun <T> timeline(items: List<JSONObject>, messages: List<T>, id: (T) -> String, timestamp: (T) -> Long): List<TimelineEntry<T>> {
+    fun <T> timeline(items: List<JSONObject>, messages: List<T>, id: (T) -> String, timestamp: (T) -> Long, role: (T) -> String = { "" }): List<TimelineEntry<T>> {
         val result = mutableListOf<TimelineEntry<T>>()
         val remaining = items.sortedBy { requestedAt(it) }.toMutableList()
-        messages.forEach { message ->
+        messages.forEachIndexed { index, message ->
+            val start = messages.take(index).lastOrNull { role(it) == "user" }?.let(timestamp) ?: timestamp(message)
+            val end = messages.drop(index + 1).firstOrNull { role(it) == "user" }?.let(timestamp) ?: Long.MAX_VALUE
+            val owned = if(role(message) == "assistant") remaining.filter { requestedAt(it) >= start && requestedAt(it) < end } else emptyList()
+            remaining.removeAll(owned.toSet())
             val time = timestamp(message)
             val preceding = remaining.filter { time > 0 && requestedAt(it) < time }
             preceding.forEach { result += TimelineEntry("device-interaction:${it.optString("id")}", request = it) }
             remaining.removeAll(preceding.toSet())
-            result += TimelineEntry(id(message), message = message)
+            result += TimelineEntry(id(message), message = message, requests = owned)
         }
         remaining.forEach { result += TimelineEntry("device-interaction:${it.optString("id")}", request = it) }
         return result

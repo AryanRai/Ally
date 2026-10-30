@@ -9,7 +9,7 @@ import { originatingChat } from './interactions.js';
 interface Action {
   id: string; deviceId: string; state: 'approval' | 'running' | 'completed' | 'failed' | 'cancelled';
   createdAt: number; updatedAt: number; completedOperations: number; totalOperations: number;
-  inFlightOperation?: number; deliveryUncertain?: boolean; transport: 'adb' | 'on-device';
+  grantId?:string; inFlightOperation?: number; deliveryUncertain?: boolean; transport: 'adb' | 'on-device';
   digest: string; controller: AbortController; message?: string;
 }
 
@@ -35,9 +35,29 @@ export class PhoneControl {
   private busy = new Set<string>();
   private grants = new Map<string, ControlGrant>();
   private stopRevoked: () => void;
+  private promptBindings=new Map<string,{signal:AbortSignal;dispose:()=>void}>();
+  private previewLifetimes = new Map<string, {controller:AbortController;dispose:()=>void}>();
+  /** Viewers bind only to an actual approved control grant, not a model-provided duration. */
+  sessionSignal(deviceId:unknown,chatId:string|undefined):AbortSignal|undefined {
+    const grant=this.activeGrant(String(deviceId),chatId);if(!grant)return;
+    const previous=this.previewLifetimes.get(grant.id);if(previous)return previous.controller.signal;
+    const connection=this.hub.connectionSignal(grant.deviceId);if(!connection || connection.aborted)return;
+    const controller=new AbortController();
+    const stop=()=>{controller.abort();dispose();};
+    const timer=setTimeout(stop,Math.max(0,grant.expiresAt-this.now()));timer.unref?.();
+    const dispose=()=>{clearTimeout(timer);connection.removeEventListener('abort',stop);this.previewLifetimes.delete(grant.id);};
+    connection.addEventListener('abort',stop,{once:true});
+    this.previewLifetimes.set(grant.id,{controller,dispose});return controller.signal;
+  }
+  private stopPreview(grantId:string){this.promptBindings.get(grantId)?.dispose();this.promptBindings.delete(grantId);const entry=this.previewLifetimes.get(grantId);if(entry){entry.controller.abort();entry.dispose();}}
+  private bindPrompt(grant:ControlGrant,signal:AbortSignal){
+    const stop=()=>{this.endSession(grant.deviceId,grant.chatId);for(const action of this.actions.values())if(action.grantId===grant.id && ['approval','running'].includes(action.state))this.cancel(action.id);};
+    signal.addEventListener('abort',stop,{once:true});this.promptBindings.set(grant.id,{signal,dispose:()=>signal.removeEventListener('abort',stop)});
+    if(signal.aborted)stop();
+  }
   constructor(private hub: DeviceHub, private adb = new AdbPhone(), private now = Date.now, private device = new AccessibilityPhone(hub)) {
     this.stopRevoked = hub.onRevoked((deviceId, grantId) => {
-      for (const [key, grant] of this.grants) if (grant.id === grantId && grant.deviceId === deviceId) this.grants.delete(key);
+      for (const [key, grant] of this.grants) if (grant.id === grantId && grant.deviceId === deviceId) {this.grants.delete(key);this.stopPreview(grant.id);}
       for (const action of this.actions.values()) if (action.deviceId === deviceId && ['approval', 'running'].includes(action.state)) {
         action.state = 'cancelled'; action.updatedAt = this.now(); action.message = 'Stopped on the phone; already completed operations cannot be undone.'; action.controller.abort();
       }
@@ -70,10 +90,10 @@ export class PhoneControl {
   endSession(deviceId: unknown, chatId: string | undefined) {
     const key = `${deviceId}|${chatId}`, grant = this.grants.get(key);
     if (!grant) return false;
-    this.grants.delete(key); this.device.end(grant);
+    this.grants.delete(key); this.stopPreview(grant.id); this.device.end(grant);
     return true;
   }
-  close() { for (const a of this.actions.values()) this.cancel(a.id); for (const g of this.grants.values()) this.device.end(g); this.grants.clear(); this.stopRevoked(); }
+  close() { for (const a of this.actions.values()) this.cancel(a.id); for (const g of this.grants.values()) this.device.end(g); this.grants.clear(); for(const entry of this.promptBindings.values())entry.dispose();this.promptBindings.clear(); for(const entry of [...this.previewLifetimes.values()]){entry.controller.abort();entry.dispose();} this.stopRevoked(); }
   private connected(id: string) { return this.hub.list().some(d => d.id === id && d.kind === 'phone'); }
   private sessionFor(deviceId: string) {
     const active = [...this.grants.values()].filter(g => g.deviceId === deviceId && g.expiresAt > this.now());
@@ -82,7 +102,7 @@ export class PhoneControl {
   private activeGrant(deviceId: string, chatId: string | undefined) {
     const key = `${deviceId}|${chatId}`, grant = this.grants.get(key);
     if (grant && grant.expiresAt > this.now() + 5000) return grant;
-    if (grant) this.grants.delete(key);
+    if (grant) {this.grants.delete(key);this.stopPreview(grant.id);}
     return undefined;
   }
   /** Handoff can request a session without inspecting a screen or performing an operation. */
@@ -100,12 +120,12 @@ export class PhoneControl {
     if(signal.aborted||!connection||connection.aborted||this.hub.connectionSignal(deviceId)!==connection)throw Error('Phone disconnected before grant.');
     const grant={id:`grant-${randomUUID()}`,deviceId,chatId,expiresAt:this.now()+15*60000};
     await this.device.grant(grant,'Phone handoff',signal);
-    for(const [key,value] of this.grants)if(value.deviceId===deviceId)this.grants.delete(key);
+    for(const [key,value] of this.grants)if(value.deviceId===deviceId){this.grants.delete(key);this.stopPreview(value.id);}
     this.grants.set(`${deviceId}|${chatId}`,grant);return grant;
     }finally{this.busy.delete(deviceId);}
   }
 
-  async execute(args: Record<string, unknown>, caller?: string, parentSignal?: AbortSignal): Promise<ToolResult> {
+  async execute(args: Record<string, unknown>, caller?: string, parentSignal?: AbortSignal, promptSignal?:AbortSignal): Promise<ToolResult> {
     const chatId = originatingChat(args, caller);
     const { requestId, serial, expectedRevision } = args;
     const onDevice = serial === undefined;
@@ -116,8 +136,11 @@ export class PhoneControl {
     const operations = validateOperations(args.operations, { unicodeText: onDevice });
     if (operations.length && (typeof expectedRevision !== 'string' || !/^[a-f0-9]{64}$/.test(expectedRevision))) throw Error('Inspect first; actions require the returned expectedRevision.');
     const screenshot = args.screenshot === true;
-    const minutes = Number.isInteger(args.sessionMinutes) ? Math.min(MAX_MINUTES, Math.max(1, Number(args.sessionMinutes))) : DEFAULT_MINUTES;
-    const digest = createHash('sha256').update(JSON.stringify({ serial, deviceId, chatId, operations, expectedRevision, screenshot })).digest('hex');
+    if(args.sessionScope!==undefined && !['prompt','timed'].includes(String(args.sessionScope)))throw Error('Use prompt or timed sessionScope.');
+    const promptScoped=args.sessionScope!=='timed' && args.sessionMinutes===undefined && !!promptSignal && !promptSignal.aborted;
+    if(args.sessionScope==='prompt' && !promptScoped)throw Error('An exact active Ally-managed prompt is required for prompt scope. Use an explicitly approved sessionMinutes duration otherwise.');
+    const minutes = Number.isInteger(args.sessionMinutes) ? Math.min(MAX_MINUTES, Math.max(1, Number(args.sessionMinutes))) : promptScoped ? MAX_MINUTES : DEFAULT_MINUTES;
+    const digest = createHash('sha256').update(JSON.stringify({ serial, deviceId, chatId, operations, expectedRevision, screenshot, sessionScope:args.sessionScope,sessionMinutes:args.sessionMinutes })).digest('hex');
     const previous = this.actions.get(requestId);
     if (previous) {
       if (previous.digest !== digest) throw Error('requestId was already used for different parameters.');
@@ -140,6 +163,7 @@ export class PhoneControl {
       if (!connection || connection.aborted || this.hub.connectionSignal(deviceId) !== connection) throw Error('Ally phone disconnected.');
     };
     let grant = this.activeGrant(deviceId, chatId);
+    if(grant && ((grant.scope==='prompt')!==promptScoped || (promptScoped && this.promptBindings.get(grant.id)?.signal!==promptSignal))){this.endSession(deviceId,chatId);grant=undefined;}
     const transport: Transport = onDevice ? {
       kind: 'on-device', check: linked, ready: s => this.device.ready(grant!, s),
       view: s => this.device.view(grant!, s), perform: (op, view, s) => this.device.perform(grant!, op, view, s), screenshot: s => this.device.screenshot(grant!, s),
@@ -157,25 +181,43 @@ export class PhoneControl {
         throw Error('Ally control is off on the phone. Ask the user to turn it on once in Settings → Accessibility → Ally control (if it is greyed out: Ally App info → ⋮ → Allow restricted settings). A setup notification was shown on the phone.');
       if (!grant) {
         const plan = operations.map((op: PhoneOperation, i) => `${i + 1}. ${JSON.stringify(op)}`).join('\n');
-        const body = `Let this chat control your phone for ${minutes} minutes. Ally reads the screen and taps, swipes and types only for this chat's requests, without asking again until the session ends.\nA notification with Stop shows the whole time.\nFirst request ${requestId}${onDevice ? '' : ` via ADB ${serial}`}:\n${plan || 'Look at the screen.'}${screenshot ? '\nIncludes a screenshot.' : ''}\nAlly never enters passwords or codes, pays, or presses Send, Delete or Allow for you.`;
+        const body = `Let this chat control your phone ${promptScoped ? "for this prompt only (maximum 60 minutes)" : `for ${minutes} minutes`}. Ally reads the screen and taps, swipes and types only for this chat's requests, without asking again until the session ends.\nA notification with Stop shows the whole time.\nFirst request ${requestId}${onDevice ? '' : ` via ADB ${serial}`}:\n${plan || 'Look at the screen.'}${screenshot ? '\nIncludes a screenshot.' : ''}\nAlly never enters passwords or codes, pays, or presses Send, Delete or Allow for you.`;
         if (body.length > 1200) throw Error('Plan too long for a readable device approval. Use fewer operations.');
-        const approval = await this.hub.command('phone', 'phone_control_approve', { deviceId, chatId, title: `Let Ally control this phone · ${minutes} min`, body, acceptLabel: `Allow ${minutes} min` }, signal);
+        const approval = await this.hub.command('phone', 'phone_control_approve', { deviceId, chatId, title: promptScoped ? "Control phone for this prompt" : `Let Ally control this phone · ${minutes} min`, body, acceptLabel: promptScoped ? "Allow this prompt" : `Allow ${minutes} min` }, signal);
         if (!approval.ok) throw Error(approval.message);
         await pause(750, undefined, { signal }); // Allow the phone to restore its prior app after a cross-device decision.
         await transport.check(signal);
-        grant = { id: `grant-${randomUUID()}`, deviceId, chatId: chatId ?? '', expiresAt: this.now() + minutes * 60_000 };
-        if (onDevice) await this.device.grant(grant, 'Ally chat', signal);
+        grant = { id: `grant-${randomUUID()}`, deviceId, chatId: chatId ?? '', expiresAt: this.now() + minutes * 60_000,scope:promptScoped?'prompt':'timed' };
+        if (onDevice) await this.device.grant(grant, promptScoped?'This prompt':'Ally chat', signal);
         // ADB has no phone-side enforcement; the notice still shows where the app supports it.
-        else if (AccessibilityPhone.supported(this.hub, deviceId)) await this.device.grant(grant, 'Ally chat', signal).catch(() => {});
+        else if (AccessibilityPhone.supported(this.hub, deviceId)) await this.device.grant(grant, promptScoped?'This prompt':'Ally chat', signal).catch(() => {});
         this.grants.set(`${deviceId}|${chatId}`, grant);
+        if(promptScoped) {this.bindPrompt(grant,promptSignal!);if(promptSignal!.aborted)throw Error("Prompt ended before control started.");}
       }
-      await transport.ready(signal);
-      await transport.check(signal);
+      action.grantId=grant.id;
       action.state = 'running'; action.updatedAt = this.now();
+      action.message = 'Waiting for you to unlock the phone and for its screen to settle.';
+      // Keyguard can clear before Accessibility has replaced the SystemUI tree.
+      // Wait only for a safe observation; never unlock, dismiss, or replay input.
+      let unlockTimedOut = false;
+      const unlockExpiry = setTimeout(() => { unlockTimedOut = true; controller.abort(); }, 90_000);
+      let view: PhoneView;
+      try {
+        await transport.ready(signal);
+        await transport.check(signal);
+        view = await this.settledView(transport, signal, 180, async () => {
+          await transport.check(signal);
+          if (grant!.expiresAt <= this.now()) throw Error('The control session ended while waiting for unlock.');
+          await transport.ready(signal);
+        });
+      } catch (error) {
+        if (unlockTimedOut) throw Error('The phone stayed locked or on a system screen for 90 seconds. Unlock it and inspect again; no input was sent.');
+        throw error;
+      } finally { clearTimeout(unlockExpiry); }
+      delete action.message;
       const deadline = this.now() + 60_000;
       const executionExpiry = setTimeout(() => controller.abort(), 60_000);
       try {
-        let view = await transport.view(signal);
         if (operations.length && view.revision !== expectedRevision) throw Error('Screen changed since inspection. Inspect again before acting.');
         for (const operation of operations) {
           await transport.check(signal);
@@ -201,7 +243,7 @@ export class PhoneControl {
           }
         }
         const sessionEnds = new Date(grant.expiresAt).toISOString();
-        const content: ToolResult['content'] = [{ type: 'text', text: JSON.stringify({ requestId, ...view, completedOperations: action.completedOperations, transport: transport.kind, sessionEnds, note: 'Input delivery is confirmed; app outcomes require inspecting the returned screen. Further requests from this chat run without asking until the session ends.' }) }];
+        const content: ToolResult['content'] = [{ type: 'text', text: JSON.stringify({ requestId, ...view, completedOperations: action.completedOperations, transport: transport.kind, sessionEnds,sessionScope:grant.scope??'timed', note: 'Input delivery is confirmed; app outcomes require inspecting the returned screen. Further requests from this chat run without asking until the session ends.' }) }];
         if (image) content.push({ type: 'image', mimeType: image.mimeType, data: image.data });
         await transport.check(signal); action.state = 'completed'; action.updatedAt = this.now();
         return { content };
@@ -216,14 +258,15 @@ export class PhoneControl {
       return { content: [{ type: 'text', text: JSON.stringify(this.history(requestId)) }], isError: true };
     } finally { clearTimeout(expiry); connection?.removeEventListener('abort', disconnected); parentSignal?.removeEventListener('abort', disconnected); this.busy.delete(deviceId); this.busy.delete(lock); }
   }
-  /** App launches and Back/Home briefly show only system UI; a real lock or system screen still fails after ~1.5 s. */
-  private async settledView(transport: Transport, signal: AbortSignal): Promise<PhoneView> {
+  /** Retry read-only observations of transient SystemUI only; protected apps fail immediately. */
+  private async settledView(transport: Transport, signal: AbortSignal, retries = 5, beforeRetry?: () => Promise<void>): Promise<PhoneView> {
     for (let attempt = 0; ; attempt++) {
       try { return await transport.view(signal); }
       catch (error) {
         const transient = error instanceof Error && /System or lock screen|Cannot determine screen bounds|screen is unavailable/i.test(error.message);
-        if (!transient || attempt >= 5) throw error;
-        await pause(300, undefined, { signal });
+        if (!transient || attempt >= retries) throw error;
+        await pause(beforeRetry ? 500 : 300, undefined, { signal });
+        await beforeRetry?.();
       }
     }
   }

@@ -13,7 +13,7 @@ import org.json.JSONObject
 import java.util.Locale
 
 /** A started read survives ambient mode. Recording, chat selection or Stop cancels it. */
-class ReplySpeech(context: Context, private val scope: CoroutineScope, private val state: (Boolean, String) -> Unit, private val acquire: () -> String? = { null }, private val release: (String?) -> Unit = {}, private val renew: (String?) -> Unit = {}) {
+class ReplySpeech(context: Context, private val scope: CoroutineScope, private val state: (Boolean, String) -> Unit, private val acquire: () -> String? = { null }, private val release: (String?) -> Unit = {}, private val renew: (String?) -> Unit = {}, private val level: (Float) -> Unit = {}) {
     private val app = context.applicationContext
     private var playback: String? = null
     private val lifetime = SpeechLifetime({ playback = acquire() }, { release(playback); playback = null })
@@ -25,7 +25,7 @@ class ReplySpeech(context: Context, private val scope: CoroutineScope, private v
     private var generation = 0
     private val queue = SerialNarration(scope)
     fun stop() { queue.stop(); stopAudio() }
-    private fun stopAudio() { generation++; task?.cancel(); task = null; socket?.cancel(); socket = null; runCatching { track?.pause(); track?.flush() }; tts.stop(); lifetime.stop(); state(false, "") }
+    private fun stopAudio() { generation++; task?.cancel(); task = null; socket?.cancel(); socket = null; runCatching { track?.pause(); track?.flush() }; tts.stop(); lifetime.stop(); level(0f); state(false, "") }
     fun speak(text: String, endpoint: String, token: String, cloud: Boolean) {
         stop(); play(text, endpoint, token, cloud)
     }
@@ -82,6 +82,8 @@ class ReplySpeech(context: Context, private val scope: CoroutineScope, private v
         }
     }
     private suspend fun cloud(text: String, endpoint: String, token: String) = withContext(Dispatchers.IO) {
+        val current = generation
+        val envelopes = java.util.concurrent.ConcurrentLinkedQueue<Pair<Long, Float>>()
         val chunks = ReplyAudioBuffer()
         var received = false
         val localTrack = AudioTrack.Builder().setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA).setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build())
@@ -103,6 +105,15 @@ class ReplySpeech(context: Context, private val scope: CoroutineScope, private v
         socket = ws
         ws.send(JSONObject().put("type", "speak").put("text", text).toString())
         var samples = 0L
+        val meter = launch {
+            var loudness = 0f
+            while (isActive) {
+                val head = localTrack.playbackHeadPosition.toLong() and 0xffffffffL
+                while (envelopes.peek()?.first?.let { it <= head } == true) loudness = envelopes.poll()?.second ?: 0f
+                withContext(Dispatchers.Main) { if(current == generation) level(loudness) }
+                delay(32)
+            }
+        }
         try {
             localTrack.play()
             withTimeout(90000) {
@@ -110,7 +121,14 @@ class ReplySpeech(context: Context, private val scope: CoroutineScope, private v
                     val chunk = chunks.next() ?: break
                     ensureActive(); received = true
                     var offset = 0
-                    while (offset < chunk.size) { ensureActive(); val written = localTrack.write(chunk, offset, chunk.size - offset, AudioTrack.WRITE_NON_BLOCKING); check(written >= 0); if (written == 0) delay(10); offset += written; samples += written / 2 }
+                    while (offset < chunk.size) {
+                        ensureActive()
+                        val written = localTrack.write(chunk, offset, minOf(960, chunk.size - offset), AudioTrack.WRITE_NON_BLOCKING)
+                        check(written >= 0)
+                        if (written == 0) delay(10)
+                        else envelopes.offer(samples to PlaybackLevel.pcm16(chunk, offset, offset + written))
+                        offset += written; samples += written / 2
+                    }
                 }
                 check(received) { "No cloud audio" }
                 while ((localTrack.playbackHeadPosition.toLong() and 0xffffffffL) < samples) { ensureActive(); delay(20) }
@@ -119,7 +137,7 @@ class ReplySpeech(context: Context, private val scope: CoroutineScope, private v
             // Do not replay a partially spoken segment through the local voice.
             if (e is CancellationException || !received) throw e
             throw SpeechInterrupted()
-        } finally { ws.cancel(); chunks.cancel(); runCatching { localTrack.stop() }; localTrack.release(); if (track === localTrack) track = null }
+        } finally { withContext(NonCancellable) { meter.cancelAndJoin(); withContext(Dispatchers.Main) { if(current == generation) level(0f) }; ws.cancel(); chunks.cancel(); runCatching { localTrack.stop() }; localTrack.release(); if (track === localTrack) track = null } }
     }
     fun close() { stop(); tts.shutdown() }
     private class SpeechInterrupted : IllegalStateException("Speech interrupted. Tap Read reply to retry.")

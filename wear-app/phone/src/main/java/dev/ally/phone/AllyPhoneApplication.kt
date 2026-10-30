@@ -3,17 +3,23 @@ package dev.ally.phone
 import dev.ally.device.*
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.*
+import androidx.compose.ui.graphics.toArgb
 
 class AllyPhoneApplication : AssistantApplication() {
     var activityVisible = false
     val model: PhoneModel by lazy { PhoneModel(this) }
-    override fun onCreate() { super.onCreate(); ControlBridge.install(this); PhysicalTapService.install();PhoneStream.install();NativeMedia.install();AcousticProbeService.install() }
+    override fun onCreate() { super.onCreate(); ControlBridge.install(this); PhysicalTapService.install();PhoneStream.install();NativeMedia.install();AcousticProbeService.install(); dev.ally.phone.notch.PhoneNotch.resume(this) }
     override val assistantHost: AssistantHost by lazy { object : AssistantHost {
         override val provider get() = model.state.value.provider
         override fun permissionFor(chatId: String) = DeviceLink.prefs(this@AllyPhoneApplication).getString("phonePermission:$chatId", "readonly")!!
         override fun acceptTurn(chatId: String, turnId: String) = model.acceptAssistantTurn(chatId, turnId)
         override fun openChat(chatId: String) = model.select(chatId)
-        override fun prepareVoice() = model.stopSpeaking()
+        override fun prepareVoice() { AcousticProbeService.instance?.cancelForVoice(); model.stopSpeaking() }
+        override fun speechDetector() = PhoneSpeechDetector(this@AllyPhoneApplication)
+        override fun haloAppearance(): AssistantHaloAppearance {
+            val look = PhoneLook.load(DeviceLink.prefs(this@AllyPhoneApplication))
+            return AssistantHaloAppearance(look.style.name, look.palette.colors.map { it.toArgb() }, look.listeningEyes)
+        }
         override fun presentationVisible(visible: Boolean) { model.foreground = visible || activityVisible }
         override val snapshots = model.state.map { s -> AssistantSnapshot(
             readReceipt = s.readReceipt.takeIf { s.voiceDraft.isBlank() && !s.recording && !s.transcribing && (s.liveText.isBlank() || s.liveText == s.messages.lastOrNull { m -> m.role == "assistant" }?.text) },
@@ -27,7 +33,7 @@ class AllyPhoneApplication : AssistantApplication() {
                 s.loading -> "Connecting…"
                 else -> "Hold the orb to talk"
             }, text = if (s.recording || s.transcribing) s.liveTranscript else s.voiceDraft.ifBlank { s.liveText }.ifBlank { s.progress.lastOrNull()?.text.orEmpty() }.ifBlank { s.messages.lastOrNull { it.role == "assistant" }?.text ?: "" },
-            chatId = s.selected?.id, recording = s.recording, working = s.busy || s.externalRunning || s.transcribing, level = s.microphoneLevel, mode = s.inputMode,
+            chatId = s.selected?.id, recording = s.recording, working = s.busy || s.externalRunning || s.transcribing, level = if(s.recording) s.microphoneLevel else s.speakerLevel, mode = s.inputMode, speaking = s.speaking,
             needsAttention = s.approval != null || s.error.isNotBlank()) }
         private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
         override fun refresh() { scope.launch { model.refreshSelected() } }

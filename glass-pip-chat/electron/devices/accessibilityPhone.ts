@@ -1,7 +1,7 @@
 import { assertOperationAllowed, phoneViewFromXml, validateOperations, type PhoneOperation, type PhoneView } from './adb.js';
 import type { DeviceHub } from './hub.js';
 
-export interface ControlGrant { id: string; deviceId: string; chatId: string; expiresAt: number }
+export interface ControlGrant { id: string; deviceId: string; chatId: string; expiresAt: number; scope?: 'prompt' | 'timed' }
 
 /**
  * Drives the phone through the Ally app's own accessibility executor over the authenticated

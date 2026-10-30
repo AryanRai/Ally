@@ -20,9 +20,9 @@ object AssistantExecutionDestination {
         return Offer(pc?.opt("available") == true, pc?.optString("reason")?.take(300).orEmpty().ifBlank { "PC execution is unavailable" })
         // Phone remains disabled even if an unverified server advertises it.
     }
-    fun rows(offer: Offer) = listOf(
-        AssistantChoice(PC, if (offer.pcAvailable) "Run on PC" else "PC unavailable"),
-        AssistantChoice(PHONE, "Run on phone · unavailable"))
+    fun rows(offer: Offer, geminiAvailable: Boolean = false) = listOf(
+        AssistantChoice(PC, if (offer.pcAvailable) "Send to PC · Codex / Claude" else "PC unavailable"),
+        AssistantChoice(PHONE, if (geminiAvailable) "Send to phone · Gemini" else "Phone · Gemini unavailable"))
     fun select(id: String, offer: Offer): String? = if (id == PC && offer.pcAvailable) "pc" else null
     fun requirePc(location: String?) { require(location == "pc") { "Choose Run on PC before sending" } }
 }

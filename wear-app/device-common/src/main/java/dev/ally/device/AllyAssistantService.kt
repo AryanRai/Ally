@@ -49,12 +49,23 @@ private class AllyAssistantSession(context: android.content.Context) : VoiceInte
     private var observe: Job? = null
     private var refreshSelected: Job? = null
     private lateinit var sheet: AssistantSheet
-    private val entry by lazy { AssistantEntry(context, scope, host) }
+    private val entry by lazy { AssistantEntry(context, scope, host) { intent ->
+        startAssistantActivity(intent)
+        scope.launch { hide() }
+    } }
     private val activity by lazy { AssistantActivity(context, scope) }
     private val manager get() = context.getSystemService(WindowManager::class.java)
     private var blurListener: Consumer<Boolean>? = null
     private fun dp(value: Int) = (value * context.resources.displayMetrics.density).toInt()
     private fun glass(enabled: Boolean) {
+        if(!context.resources.configuration.isScreenRound) {
+            // The transparent full-height host must not blur or shade the app
+            // behind it; only the compact sheet paints its own background.
+            window?.window?.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(Color.TRANSPARENT))
+            if(Build.VERSION.SDK_INT>=31) window?.window?.setBackgroundBlurRadius(0)
+            if(::sheet.isInitialized) sheet.glass(enabled)
+            return
+        }
         window?.window?.apply {
             setBackgroundDrawable(GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(
                 Color.argb(if(enabled) 170 else 235, 36, 38, 48), Color.argb(if(enabled) 145 else 240, 18, 20, 27))).apply { cornerRadius=dp(28).toFloat() })
@@ -77,7 +88,10 @@ private class AllyAssistantSession(context: android.content.Context) : VoiceInte
         hold.abort()
         startAssistantActivity(DeviceLink.inboxIntent(context).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
         hide()
-    }, { entry.search(it) }).also { sheet = it }
+    }, { entry.search(it) }, { if(entry.entry) entry.finish() else host.release() }, {
+        hold.abort()
+        if(entry.entry) entry.keyboard() else host.cancel()
+    }, { host.haloAppearance() }).also { sheet = it }
     private var screenToken = 0L
     private var screenJob: Job? = null
     override fun onPrepareShow(args: Bundle?, showFlags: Int) {
@@ -149,18 +163,32 @@ private class AllyAssistantSession(context: android.content.Context) : VoiceInte
         }
         host.presentationVisible(true)
         window?.window?.apply {
-            setLayout(context.resources.displayMetrics.widthPixels - dp(if(context.resources.configuration.isScreenRound) 48 else 24), WindowManager.LayoutParams.WRAP_CONTENT)
+            val round=context.resources.configuration.isScreenRound
+            setLayout(context.resources.displayMetrics.widthPixels - dp(if(round) 48 else 24), if(round) WindowManager.LayoutParams.WRAP_CONTENT else WindowManager.LayoutParams.MATCH_PARENT)
             setGravity(Gravity.BOTTOM)
             attributes=attributes.apply {
-                y=dp(if(context.resources.configuration.isScreenRound) 26 else 18)
+                y=if(round) dp(26) else 0
                 // A floating WRAP_CONTENT window must fit above the IME too.
                 // adjustResize alone leaves its bottom anchor behind the keyboard.
-                setFitInsetsTypes(WindowInsets.Type.systemBars() or WindowInsets.Type.displayCutout() or WindowInsets.Type.ime())
+                setFitInsetsTypes(if(round) WindowInsets.Type.systemBars() or WindowInsets.Type.displayCutout() else 0)
                 setFitInsetsIgnoringVisibility(false)
             }
             decorView.elevation=dp(16).toFloat()
             clearFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
-            setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
+            if(!round) {
+                clearFlags(WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE)
+                setDecorFitsSystemWindows(false)
+                // A stable full-height coordinate space receives the complete
+                // IME height. A WRAP_CONTENT host can receive clipped insets.
+                setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING)
+                decorView.setOnApplyWindowInsetsListener { _,insets -> sheet.fitInsets(insets); WindowInsets.CONSUMED }
+                decorView.setWindowInsetsAnimationCallback(object: WindowInsetsAnimation.Callback(WindowInsetsAnimation.Callback.DISPATCH_MODE_STOP) {
+                    override fun onProgress(insets: WindowInsets, runningAnimations: MutableList<WindowInsetsAnimation>): WindowInsets {
+                        sheet.fitInsets(insets); return insets
+                    }
+                })
+                decorView.requestApplyInsets()
+            }
         }
         glass(Build.VERSION.SDK_INT>=31 && manager.isCrossWindowBlurEnabled)
         if(Build.VERSION.SDK_INT>=31) {
@@ -187,6 +215,13 @@ private class AllyAssistantSession(context: android.content.Context) : VoiceInte
     }
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
         if (keyCode in assistantKeys) { if (!entry.automaticRecording && !context.getSystemService(android.app.KeyguardManager::class.java).isDeviceLocked) hold.down(); return true }; return super.onKeyDown(keyCode, event)
+    }
+    override fun onComputeInsets(outInsets: Insets) {
+        super.onComputeInsets(outInsets)
+        if(!context.resources.configuration.isScreenRound && ::sheet.isInitialized) {
+            outInsets.touchableInsets=Insets.TOUCHABLE_INSETS_REGION
+            outInsets.touchableRegion.set(sheet.panelBounds())
+        }
     }
     override fun onKeyUp(keyCode: Int, event: KeyEvent): Boolean {
         if (keyCode in assistantKeys) { if(event.isCanceled) hold.abort() else hold.up(); return true }; return super.onKeyUp(keyCode, event)

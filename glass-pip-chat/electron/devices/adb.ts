@@ -64,8 +64,10 @@ export function inspectUi(xml: string): string {
   const labels = [...xml.matchAll(/(?:text|content-desc|resource-id)="([^"]*)"/g)].map(m => m[1].replace(/&#(?:x([0-9a-f]+)|(\d+));/gi, (_all, hex, dec) => String.fromCodePoint(parseInt(hex || dec, hex ? 16 : 10)))).join('\n');
   if (/password="true"/i.test(xml) || /(?:password|passcode|one.time|verification code|security code|unlock|biometric|sign.in|log.in|credit card|payment|purchase|checkout|send money)/i.test(labels)) throw Error('Sensitive screen: continue manually on the phone.');
   const packages = [...xml.matchAll(/\bpackage="([^"]*)"/g)].map(m => m[1]);
+  // Ally's own screens, widget and notch overlay can be inspected and used; only its decision
+  // controls (approvals, permissions, answers to its own requests) are refused, in assertOperationAllowed.
   // System status/navigation bars occur on ordinary screens. Other SystemUI surfaces are not controllable.
-  if (packages.some(p => p !== 'com.android.systemui' && blockedPackage.test(p))) throw Error('Protected app: continue manually on the phone.');
+  if (packages.some(p => p !== 'com.android.systemui' && !/^dev\.ally\./i.test(p) && blockedPackage.test(p))) throw Error('Protected app: continue manually on the phone.');
   const appNodes = packages.filter(p => p && p !== 'com.android.systemui');
   if (!appNodes.length) throw Error('System or lock screen: continue manually on the phone.');
   return xml.replace(/<node\b[^>]*package="com\.android\.systemui"[^>]*>/g, node => node.replace(/(text|content-desc)="[^"]*"/g, '$1=""'));
@@ -80,16 +82,31 @@ export function phoneViewFromXml(xml: string): PhoneView {
   return { ui, revision: createHash('sha256').update(ui).digest('hex'), width, height };
 }
 
+/** Decision controls in Ally's own UI: approving, refusing or answering what Ally asks the user. */
+const ALLY_DECISION = /(?:text|content-desc|resource-id)="[^"]*\b(?:approv\w*|allow\w*|deny|denied|reject\w*|decline\w*|accept\w*|grant\w*|permit\w*|authori[sz]\w*|consent\w*|always|once|answer\w*|decision\w*|interaction\w*|yes|no|don't|dont|skip|choose|choice|option\w*)\b/i;
+/** Ally's approval and question cards always show one of these; while any is visible, no Ally control is tapped. */
+const ALLY_DECISION_SHOWN = /(?:text|content-desc)="[^"]*(?:your approval|approval needed|needs your answer|answer this request|continue on this phone|\bapproval\b|\bquestion\b|\bpermission)/i;
+
 /** Refuses coordinates off the inspected screen and taps on SystemUI or Send/Pay/Approve-style controls. */
 export function assertOperationAllowed(operation: PhoneOperation, view: PhoneView) {
   const within = (x: number, y: number) => x < view.width && y < view.height;
   if ((operation.type === 'tap' || operation.type === 'swipe') && (!within(operation.x, operation.y) || (operation.type === 'swipe' && !within(operation.endX, operation.endY)))) throw Error('Coordinates outside the inspected screen.');
+  // A decision on screen freezes all of Ally's own UI: its answer buttons can carry any label.
+  const nodes = [...view.ui.matchAll(/<node\b[^>]*>/g)].map(m => m[0]);
+  const allyDecisionShown = nodes.some(node => /package="dev\.ally\./i.test(node) && ALLY_DECISION_SHOWN.test(node));
+  if (operation.type === 'text' && allyDecisionShown) {
+    // Typing goes to the focused field; refuse when that may be an Ally answer box.
+    const focusKnown = nodes.some(node => /\bfocused="(?:true|false)"/.test(node));
+    if (!focusKnown || nodes.some(node => /package="dev\.ally\./i.test(node) && /\bfocused="true"/.test(node))) throw Error('Protected control: answer Ally\'s own request on the phone yourself.');
+  }
   if (operation.type === 'tap' || operation.type === 'swipe') {
     for (const match of view.ui.matchAll(/<node\b[^>]*>/g)) {
       const node = match[0], bounds = /bounds="\[(-?\d+),(-?\d+)\]\[(\d+),(\d+)\]"/.exec(node);
       if (!bounds) continue;
       const hit = (x: number, y: number) => x >= +bounds[1] && x < +bounds[3] && y >= +bounds[2] && y < +bounds[4];
-      const protectedNode = /package="com\.android\.systemui"/.test(node) || /(?:text|content-desc)="[^"]*\b(?:send|pay|buy|purchase|confirm|approve|allow|delete|remove|submit)\b/i.test(node);
+      const protectedNode = /package="com\.android\.systemui"/.test(node) || /(?:text|content-desc)="[^"]*\b(?:send|pay|buy|purchase|confirm|approve|allow|delete|remove|submit)\b/i.test(node)
+        // An agent must never decide Ally's own approvals, permissions or questions, whichever way.
+        || (/package="dev\.ally\./i.test(node) && (allyDecisionShown || ALLY_DECISION.test(node)));
       if (protectedNode && (hit(operation.x, operation.y) || (operation.type === 'swipe' && hit(operation.endX, operation.endY)))) throw Error('Protected control: complete this action manually on the phone.');
     }
   }

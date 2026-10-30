@@ -18,7 +18,9 @@ import kotlin.math.*
 internal class AssistantSheet(context: Context, private val hold: AssistantHold, private val send: (String) -> Unit,
     private val mode: (String) -> Unit, private val open: () -> Unit, private val dismiss: () -> Unit, private val choose: (String) -> Unit,
     private val selectChat: (String) -> Unit, private val beginMonitor: () -> Boolean,
-    private val reviewPending: () -> Unit = open, private val search: (String) -> Unit = {}) : FrameLayout(context) {
+    private val reviewPending: () -> Unit = open, private val search: (String) -> Unit = {},
+    private val finishRecording: () -> Unit = {}, private val beginTyping: () -> Unit = {},
+    private val haloAppearance: () -> AssistantHaloAppearance? = { null }) : FrameLayout(context) {
     private val round = resources.configuration.isScreenRound
     private val muted = Color.rgb(155,158,169)
     private val motion get() = ValueAnimator.areAnimatorsEnabled() && !DeviceLink.prefs(context).getBoolean(if(round) "look.reducedMotion" else "phone.look.reducedMotion", false)
@@ -35,6 +37,7 @@ internal class AssistantSheet(context: Context, private val hold: AssistantHold,
     private val routeScroll = ScrollView(context)
     private var shownChoices = emptyList<AssistantChoice>() to (null as String?)
     private val routeSend = label("Send", if(round) 12f else 15f, Color.rgb(12,12,13))
+    private var sideSend: View? = null
     private val routeSearch = EditText(context)
     private var searchOpen = false
     private var syncingSearch = false
@@ -94,7 +97,11 @@ internal class AssistantSheet(context: Context, private val hold: AssistantHold,
         panel.addView(replyScroll,LinearLayout.LayoutParams(-1,dp(if(round) 40 else 118)))
         dock.apply { gravity=Gravity.CENTER_VERTICAL; setPadding(dp(1),dp(1),dp(4),dp(1)); background=background(Color.argb(13,255,255,255),24,Color.argb(18,255,255,255)) }
         orb.contentDescription="Hold to talk, release to send"; orb.isClickable=true
-        orb.setOnClickListener { interacted=true; if(hold.held) hold.up() else hold.down() }
+        orb.setOnClickListener {
+            interacted=true
+            if(lastSnapshot?.recording==true && lastSnapshot?.title=="New request") { hold.down(); hold.up() }
+            else if(hold.held) hold.up() else hold.down()
+        }
         var x=0f; var y=0f
         orb.setOnTouchListener { _,e -> when(e.actionMasked) {
             MotionEvent.ACTION_DOWN -> { interacted=true; x=e.rawX; y=e.rawY; hold.down(); orb.pressed(true); true }
@@ -113,10 +120,29 @@ internal class AssistantSheet(context: Context, private val hold: AssistantHold,
                 imeOptions=EditorInfo.IME_ACTION_SEND
                 val font=resources.getIdentifier("geist_regular","font",context.packageName); if(font!=0) typeface=resources.getFont(font)
             }
-            fun submit() { if(input.text.isNotBlank()) { interacted=true; send(input.text.toString()) } }
+            fun submit() {
+                interacted=true
+                when (AssistantSend.action(input.text.toString(), lastSnapshot?.recording==true)) {
+                    AssistantSend.Action.TEXT -> send(input.text.toString())
+                    AssistantSend.Action.FINISH_VOICE -> finishRecording()
+                    AssistantSend.Action.NONE -> Unit
+                }
+            }
+            // EditText can receive initial focus automatically. Only an actual
+            // touch/edit switches input modes, so showing the sheet still listens.
+            input.setOnTouchListener { _, event ->
+                if(event.actionMasked==MotionEvent.ACTION_DOWN) { interacted=true; beginTyping() }
+                false
+            }
+            input.addTextChangedListener(object : android.text.TextWatcher {
+                override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
+                override fun afterTextChanged(s: android.text.Editable?) { if(!s.isNullOrBlank()) beginTyping() }
+            })
             input.setOnEditorActionListener { _,action,_ -> if(action==EditorInfo.IME_ACTION_SEND) { submit(); true } else false }
             dock.addView(input,LinearLayout.LayoutParams(0,dp(48),1f))
-            dock.addView(SendIcon(context).apply { contentDescription="Send message"; setOnClickListener { submit() } },LinearLayout.LayoutParams(dp(40),dp(44)))
+            sideSend=SendIcon(context).apply { contentDescription="Send message"; isFocusable=true; setOnClickListener { submit() } }
+            dock.addView(sideSend,LinearLayout.LayoutParams(dp(40),dp(44)))
         }
         panel.addView(dock,LinearLayout.LayoutParams(-1,-2).apply { topMargin=dp(6) })
         status.gravity=Gravity.CENTER; status.maxLines=2; status.setPadding(dp(2),dp(9),dp(2),0)
@@ -248,15 +274,33 @@ internal class AssistantSheet(context: Context, private val hold: AssistantHold,
         chat.text=s.title; status.text=if(round && s.choices.isNotEmpty() && s.text.isNotBlank()) "“${s.text.take(55)}” · ${s.status}" else s.status
         status.setTextColor(if(s.needsAttention) Color.rgb(234,191,165) else muted)
         if(s.working && s.text.isNotBlank() && s.text!=firstText) hasLiveReply=true
-        val show=(interacted || s.needsAttention || hasLiveReply) && s.text.isNotBlank() && !(round && s.choices.isNotEmpty())
+        val show=(s.recording || interacted || s.needsAttention || hasLiveReply || s.working) && s.text.isNotBlank() && !(round && s.choices.isNotEmpty())
         reply.text=s.text
         replyScroll.visibility=if(show&&!activityExpanded) VISIBLE else GONE
         if(round && show && !activityExpanded) status.visibility=GONE
         modes.visibility=if(s.working&&!s.recording&&s.title!="New request"&&!activityExpanded) VISIBLE else GONE
         queue.alpha=if(s.mode=="queue") 1f else .4f; steer.alpha=if(s.mode=="steer") 1f else .4f
-        orb.recording=s.recording; orb.working=s.working; orb.level=s.level; orb.invalidate()
+        orb.appearance=haloAppearance(); orb.recording=s.recording; orb.speaking=s.speaking && !s.recording; orb.working=s.working; orb.level=s.level; orb.invalidate()
+        sideSend?.contentDescription=if(s.recording) "Finish recording and send" else "Send message"
+        orb.contentDescription=if(s.recording && s.title=="New request") "Listening. Tap to finish and review your words." else "Hold to talk, release to send"
     }
     private fun setSearch(value: String) { syncingSearch=true; routeSearch.setText(value); syncingSearch=false }
+    fun fitInsets(insets: WindowInsets) {
+        if(round) return
+        val bars=insets.getInsets(WindowInsets.Type.systemBars() or WindowInsets.Type.displayCutout())
+        val ime=insets.getInsets(WindowInsets.Type.ime())
+        setPadding(bars.left, bars.top, bars.right, maxOf(bars.bottom, ime.bottom)+dp(18))
+    }
+    fun panelBounds(): Rect = Rect().also { bounds ->
+        val origin=IntArray(2); panel.getLocationInWindow(origin)
+        bounds.set(origin[0],origin[1],origin[0]+panel.width,origin[1]+panel.height)
+    }
+    fun glass(enabled: Boolean) {
+        panel.background=GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(
+            Color.argb(if(enabled) 225 else 245,36,38,48),Color.argb(if(enabled) 220 else 245,18,20,27))).apply {
+            cornerRadius=dp(28).toFloat(); setStroke(dp(1),Color.argb(35,255,255,255))
+        }
+    }
     private fun hideKeyboard(v: View) { context.getSystemService(android.view.inputmethod.InputMethodManager::class.java)?.hideSoftInputFromWindow(v.windowToken,0) }
     /** Search only filters the destination list; the entry clears its query via choose(SEARCH). */
     private fun toggleSearch() {
@@ -293,25 +337,92 @@ private class SendIcon(context: Context) : View(context) {
 /** AGSL port of Orbit/Ally's energy shader; no static bevel or bitmap orb.
  * Below API33, animated moving gradients preserve the same soft palette. */
 private class FluidAssistantOrb(context: Context) : View(context) {
-    var active=false; var recording=false; var working=false; var level=0f
+    var active=false; var recording=false; var speaking=false; var working=false; var level=0f
+    var appearance: AssistantHaloAppearance? = null
     private var eased=0f
     private val paint=Paint(Paint.ANTI_ALIAS_FLAG)
     private val origin=SystemClock.uptimeMillis()
     private val shader=if(Build.VERSION.SDK_INT>=33) RuntimeShader(SHADER) else null
     fun pressed(value: Boolean) { animate().scaleX(if(value) 1.09f else 1f).scaleY(if(value) 1.09f else 1f).setDuration(if(ValueAnimator.areAnimatorsEnabled()) 180 else 0).start() }
     override fun onDraw(c: Canvas) {
-        super.onDraw(c); eased+=(level-eased)*.15f
+        super.onDraw(c)
+        // RMS values for quiet speech are small. Give the halo visible attack
+        // and a softer release; all motion still follows actual microphone PCM.
+        val target=if(recording || speaking) (kotlin.math.sqrt(level.coerceIn(0f,1f))*2.2f).coerceAtMost(1f) else 0f
+        eased+=(target-eased)*(if(target>eased) .4f else .12f)
         val t=if(active) (SystemClock.uptimeMillis()-origin)/1000f else 1.8f
-        if(Build.VERSION.SDK_INT>=33&&shader!=null) {
+        val theme=appearance?.takeIf { it.colors.size==3 }
+        if(theme!=null) {
+            drawPhoneHalo(c, theme, t)
+        } else if(Build.VERSION.SDK_INT>=33&&shader!=null) {
             shader.setFloatUniform("resolution",width.toFloat(),height.toFloat()); shader.setFloatUniform("time",t)
             shader.setFloatUniform("speed",if(recording) 1.25f else if(working) 1.55f else .55f); shader.setFloatUniform("amplitude",eased)
             paint.shader=shader; c.drawRect(0f,0f,width.toFloat(),height.toFloat(),paint)
         } else {
-            val x=width/2f; val y=height/2f; val r=min(x,y)*.82f
+            val x=width/2f; val y=height/2f; val r=min(x,y)*(.70f+eased*.22f)
             paint.shader=RadialGradient(x+sin(t*.7f)*r*.2f,y+cos(t*.5f)*r*.2f,r,intArrayOf(Color.rgb(206,199,255),Color.rgb(108,147,230),Color.TRANSPARENT),floatArrayOf(0f,.3f,1f),Shader.TileMode.CLAMP)
             c.drawCircle(x,y,r,paint)
         }
+        if(theme==null && (recording || eased>.01f)) {
+            paint.shader=null; paint.style=Paint.Style.STROKE
+            paint.color=Color.argb((65+eased*170).toInt(),104,174,255)
+            paint.strokeWidth=min(width,height)*(.018f+eased*.035f)
+            c.drawCircle(width/2f,height/2f,min(width,height)*(.28f+eased*.13f),paint)
+            paint.style=Paint.Style.FILL
+        }
         if(active&&isAttachedToWindow&&windowVisibility==VISIBLE) postInvalidateDelayed(if(resources.configuration.isScreenRound) 33 else 16)
+    }
+    /** Same style names, palette order and geometry as the main phone halo. */
+    private fun drawPhoneHalo(c: Canvas, theme: AssistantHaloAppearance, t: Float) {
+        val x=width/2f; val y=height/2f
+        val phase=if(active) t*(if(speaking) 2.99f else 1.40f) else .61f
+        val r=min(width,height)*(if(recording || speaking) .36f+eased*.12f else .47f)
+        val dx=cos(phase)*r*.2f; val dy=sin(phase)*r*.18f
+        val colors=theme.colors
+        fun alpha(color: Int, value: Float)=Color.argb((value.coerceIn(0f,1f)*255).toInt(),Color.red(color),Color.green(color),Color.blue(color))
+        fun glow(cx: Float, cy: Float, radius: Float, color: Int, strength: Float) {
+            paint.style=Paint.Style.FILL
+            paint.shader=RadialGradient(cx,cy,radius,intArrayOf(alpha(color,strength),alpha(color,strength*.35f),Color.TRANSPARENT),floatArrayOf(0f,.35f,1f),Shader.TileMode.CLAMP)
+            c.drawCircle(cx,cy,radius,paint); paint.shader=null
+        }
+        when(theme.style) {
+            "SIRI" -> {
+                glow(x,y,r,colors[0],.65f)
+                val ring=Path()
+                for(i in 0..100) {
+                    val a=i*Math.PI*2/100; val radius=r*(.65+.12*sin(a*3+phase))
+                    val px=x+(cos(a)*radius).toFloat(); val py=y+(sin(a)*radius).toFloat()
+                    if(i==0)ring.moveTo(px,py)else ring.lineTo(px,py)
+                }
+                ring.close();paint.shader=SweepGradient(x,y,(colors+colors[0]).toIntArray(),null);paint.style=Paint.Style.STROKE;paint.strokeWidth=r*.12f;c.drawPath(ring,paint);paint.shader=null;paint.style=Paint.Style.FILL
+                paint.color=alpha(colors[2],.7f);c.drawCircle(x-dx,y-dy,r*.13f,paint)
+            }
+            "CLOUD" -> {
+                glow(x,y,r,colors[1],.4f)
+                colors.forEachIndexed { index,color ->
+                    val wave=Path()
+                    for(i in 0..60) {
+                        val u=i/60f; val px=x+(u*2-1)*r*.85f
+                        val py=y+(sin(u*Math.PI*2+phase+index*1.7)*sin(u*Math.PI)*r*.38).toFloat()
+                        if(i==0)wave.moveTo(px,py)else wave.lineTo(px,py)
+                    }
+                    paint.style=Paint.Style.STROKE;paint.strokeCap=Paint.Cap.ROUND
+                    paint.color=alpha(color,.18f);paint.strokeWidth=r*.32f;c.drawPath(wave,paint)
+                    paint.color=alpha(color,.9f);paint.strokeWidth=r*.07f;c.drawPath(wave,paint)
+                };paint.style=Paint.Style.FILL
+            }
+            "PIXEL" -> {
+                val cell=r*.23f
+                listOf("0011100","0111110","1111111","1111111","1111111","0111110","0011100").forEachIndexed { row,line -> line.forEachIndexed { col,value ->
+                    if(value=='1') {paint.color=colors[(row/3).coerceAtMost(2)];val left=x+(col-3.5f)*cell;val top=y+(row-3.5f)*cell;c.drawRect(left,top,left+cell*.87f,top+cell*.87f,paint)}
+                } }
+            }
+            else -> { glow(x+dx,y+dy,r,colors[1],.6f);glow(x-dx,y-dy,r*.8f,colors[0],.95f);glow(x-r*.15f,y-r*.2f,r*.55f,colors[2],.95f) }
+        }
+        paint.shader=null;paint.color=alpha(colors[2],.55f+eased*.4f);paint.strokeCap=Paint.Cap.ROUND
+        if(speaking) { paint.style=Paint.Style.STROKE;paint.strokeWidth=r*(.03f+eased*.05f);c.drawArc(x-r*.9f,y-r*.9f,x+r*.9f,y+r*.9f,phase*180f/Math.PI.toFloat(),110f+eased*90f,false,paint) }
+        if(recording) { paint.style=Paint.Style.STROKE;paint.strokeWidth=r*.06f;for(i in -2..2){val h=r*(.15f+eased*(.85f-abs(i)*.2f));c.drawLine(x+i*r*.22f,y-h/2,x+i*r*.22f,y+h/2,paint)} }
+        paint.style=Paint.Style.FILL
     }
     companion object { const val SHADER = """
         uniform float2 resolution;

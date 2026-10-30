@@ -3,6 +3,8 @@ package dev.ally.phone
 import androidx.activity.compose.LocalActivity
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.clickable
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.Text
@@ -26,7 +28,11 @@ internal fun DeviceInteractionCard(item: JSONObject, showHeading: Boolean = true
     LaunchedEffect(item.optString("id")) { while(true) { delay(1000); now = System.currentTimeMillis() } }
     val id = item.optString("id")
     val active = DeviceInteractions.canAnswer(item,connected == "Connected",DeviceLink.service?.connectionId,now)
-    Column(Modifier.fillMaxWidth(),verticalArrangement=Arrangement.spacedBy(8.dp)) {
+    val awaiting = DeviceInteractions.awaiting(item, now)
+    var expanded by rememberSaveable(id, awaiting) { mutableStateOf(awaiting) }
+    Column(Modifier.fillMaxWidth()) {
+        Text("${if(expanded) "⌄" else "›"} ${item.optString("title")} · ${DeviceInteractions.status(item, now)}",fontSize=12.sp,modifier=Modifier.fillMaxWidth().clickable { expanded=!expanded }.padding(vertical=10.dp))
+        if(expanded) Column(Modifier.fillMaxWidth(),verticalArrangement=Arrangement.spacedBy(8.dp)) {
         if(showHeading) MicroLabel(if(DeviceInteractions.awaiting(item,now)) { if(item.optString("kind") == "question") "Ally needs your answer" else "Your approval needed" } else { if(item.optString("kind") == "question") "Question" else "Approval" },color=if(DeviceInteractions.awaiting(item,now)) Warm else Muted)
         if(active) ChatApproval(item,id in sending) { action,values -> DeviceLink.answerInteraction(activity,item,action,values) }
         else Column(Modifier.fillMaxWidth().background(Panel,RoundedCornerShape(14.dp)).padding(16.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
@@ -37,5 +43,6 @@ internal fun DeviceInteractionCard(item: JSONObject, showHeading: Boolean = true
             if(item.optBoolean("authorized") && item.optLong("expiresAt") > now) Button({DeviceLink.continueAuthorized(activity,item)},modifier=Modifier.heightIn(min=48.dp)) { Text("Continue on this phone") }
         }
         errors[id]?.let { Text(it,color=Warm,fontSize=12.sp) }
+    }
     }
 }

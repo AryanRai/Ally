@@ -19,18 +19,22 @@ import kotlin.math.sin
 
 /** Shared rendering for the hold-to-talk control and non-interactive appearance previews. */
 @Composable
-internal fun StyledPhoneOrb(look: PhoneLook, active: Boolean, listening: Boolean, microphoneLevel: Float, modifier: Modifier = Modifier) {
+internal fun StyledPhoneOrb(look: PhoneLook, active: Boolean, listening: Boolean, microphoneLevel: Float, modifier: Modifier = Modifier, speaking: Boolean = false) {
     val level by animateFloatAsState(if (look.reducedMotion) 0f else microphoneLevel, tween(100), label = "microphone level")
     val lifecycleState by LocalLifecycleOwner.current.lifecycle.currentStateFlow.collectAsState()
     val moving = !look.reducedMotion && lifecycleState.isAtLeast(Lifecycle.State.STARTED) &&
         active
     val rotation = if (moving) {
         val transition = rememberInfiniteTransition(label = "orb")
-        val value by transition.animateFloat(0f, 360f, infiniteRepeatable(tween(4500, easing = LinearEasing)), label = "halo")
+        val value by transition.animateFloat(0f, 360f, infiniteRepeatable(tween(if(speaking) 2100 else 4500, easing = LinearEasing)), label = "halo")
         value
     } else 35f
-    Canvas(modifier) {
-        val r = size.minDimension * (.43f + if (listening) level * .08f else .04f)
+    Canvas(modifier) { drawPhoneOrb(look,listening,speaking,level,rotation) }
+}
+
+/** Shared, deterministic frame for the app Canvas and home-screen widget. */
+internal fun androidx.compose.ui.graphics.drawscope.DrawScope.drawPhoneOrb(look:PhoneLook,listening:Boolean=false,speaking:Boolean=false,level:Float=0f,rotation:Float=35f) {
+        val r = size.minDimension * (if(listening) .36f + level * .12f else if(speaking) .36f + level * .12f + .025f * sin(rotation * Math.PI / 90).toFloat() else .47f)
         val angle = rotation * Math.PI / 180
         val drift = Offset((cos(angle) * r * .2).toFloat(), (sin(angle) * r * .18).toFloat())
         val colors = look.palette.colors
@@ -80,10 +84,20 @@ internal fun StyledPhoneOrb(look: PhoneLook, active: Boolean, listening: Boolean
                 } }
             }
         }
+        if (speaking) {
+            drawCircle(Brush.radialGradient(listOf(colors[0].copy(alpha=.15f + level*.35f), Color.Transparent), center, r*1.3f), r*1.3f)
+            drawArc(colors[2].copy(alpha=.55f + level*.4f), rotation, 110f + level*90f, false,
+                topLeft=center-Offset(r*.9f,r*.9f), size=Size(r*1.8f,r*1.8f), style=Stroke(2.dp.toPx()+level*3.dp.toPx()))
+        }
+        if (listening) {
+            for(i in -2..2) {
+                val height = r * (.15f + level * (.85f - kotlin.math.abs(i)*.2f))
+                drawLine(colors[2], center+Offset(i*r*.22f,-height/2), center+Offset(i*r*.22f,height/2), 3.dp.toPx(), cap=androidx.compose.ui.graphics.StrokeCap.Round)
+            }
+        }
         if (listening && look.listeningEyes) {
             for (x in listOf(-.17f, .17f)) drawRoundRect(Ink.copy(alpha = .8f),
                 topLeft = center + Offset(r * x - 2.dp.toPx(), -4.dp.toPx()),
                 size = Size(4.dp.toPx(), 8.dp.toPx()), cornerRadius = CornerRadius(2.dp.toPx()))
         }
-    }
 }

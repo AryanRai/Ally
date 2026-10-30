@@ -11,6 +11,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.isSpecified
 import androidx.wear.compose.material3.MaterialTheme
@@ -49,5 +50,19 @@ internal fun PresenceGlow(active: Boolean, look: WatchLook) {
             .95f to look.palette.colors[0].copy(alpha = .08f * look.glow.strength),
             1f to look.palette.colors[1].copy(alpha = .23f * look.glow.strength),
             center = center, radius = radius), radius)
+    }
+}
+
+/** Static phone-style flow strokes; no new idle animation or ambient work. */
+@Composable
+internal fun FlowBackdrop(look: WatchLook) {
+    if(!look.backdrop) return
+    Canvas(Modifier.fillMaxSize()) {
+        val step=28.dp.toPx()
+        for(x in 0..(size.width/step).toInt()) for(y in 0..(size.height/step).toInt()) {
+            val px=x*step;val py=y*step
+            val angle=kotlin.math.atan2(py-size.height*.42f,px-size.width*.55f)+.8f
+            drawLine(look.palette.colors[1].copy(alpha=.055f),androidx.compose.ui.geometry.Offset(px,py),androidx.compose.ui.geometry.Offset(px+kotlin.math.cos(angle)*7.dp.toPx(),py+kotlin.math.sin(angle)*7.dp.toPx()),1.dp.toPx(),androidx.compose.ui.graphics.StrokeCap.Round)
+        }
     }
 }

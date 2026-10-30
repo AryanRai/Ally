@@ -11,15 +11,19 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
     <uses-permission android:name="com.android.alarm.permission.SET_ALARM" />
     <queries>
+        <package android:name="com.google.android.apps.bard" />
         <intent><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent>
         <intent><action android:name="android.intent.action.VIEW" /><data android:scheme="https" /></intent>
         <intent><action android:name="android.intent.action.SET_TIMER" /></intent>
     </queries>
     <application android:name=".AllyPhoneApplication" android:label="Ally" android:theme="@android:style/Theme.Material.NoActionBar" android:icon="@mipmap/ally_robot_launcher_v3" android:roundIcon="@mipmap/ally_robot_launcher_v3"
         android:allowBackup="false" android:usesCleartextTraffic="false" android:dataExtractionRules="@xml/backup_rules">
+        <activity android:name=".WidgetEntryActivity" android:exported="false" android:excludeFromRecents="true" android:noHistory="true" android:taskAffinity="dev.ally.phone.widget" android:theme="@style/AllyWidgetEntry" />
         <receiver android:name=".AllyAgentWidget" android:label="@string/widget_agents_label" android:exported="false">
             <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE"/><action android:name="dev.ally.phone.SURFACE_CHANGED"/></intent-filter>
             <meta-data android:name="android.appwidget.provider" android:resource="@xml/ally_agent_widget"/>
@@ -44,6 +48,14 @@
             <meta-data android:name="android.accessibilityservice" android:resource="@xml/ally_control_service" />
         </service>
         <receiver android:name=".ControlStopReceiver" android:exported="false" />
+        <activity android:name=".notch.PhoneNotchSettingsActivity" android:exported="false" />
+        <activity android:name=".notch.PhoneNotchActivity" android:exported="false" android:theme="@style/AllyNotchPanel" android:launchMode="singleTop" />
+        <service android:name=".notch.PhoneNotchService" android:exported="false" android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="User-enabled persistent camera-cutout status overlay for agent progress and real decision review" />
+        </service>
+        <service android:name=".notch.PhoneNotchListener" android:label="Ally notch · selected apps only" android:exported="true" android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter><action android:name="android.service.notification.NotificationListenerService" /></intent-filter>
+        </service>
         <service android:name=".PhysicalTapService" android:exported="false" android:foregroundServiceType="connectedDevice" />
         <activity android:name="dev.ally.device.DeviceAccessActivity" android:exported="false" />
         <activity android:name=".PhoneStreamActivity" android:exported="false" />

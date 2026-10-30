@@ -3,6 +3,8 @@ package dev.ally.device
 import android.content.Context
 import android.content.pm.PackageManager
 import dev.ally.device.voice.VoiceRecorder
+import dev.ally.device.voice.LiveSpeech
+import dev.ally.device.voice.SpeechSession
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import org.json.JSONObject
@@ -18,13 +20,17 @@ data class AssistantEntryState(val status: String, val text: String = "", val re
     val level: Float = 0f, val busy: Boolean = false, val choices: List<AssistantChoice> = emptyList(), val screenNotice: String = "", val selected: String? = null)
 
 /** One assistant invocation. Existing chats are never sent to without a choice. */
-internal class AssistantEntry(private val context: Context, private val scope: CoroutineScope, private val host: AssistantHost) {
+internal class AssistantEntry(private val context: Context, private val scope: CoroutineScope, private val host: AssistantHost,
+    private val openExternal: (android.content.Intent) -> Unit = { context.startActivity(it) }) {
     val state = MutableStateFlow<AssistantEntryState?>(null)
     var entry = false; private set
     private var recorder: VoiceRecorder? = null
+    private var liveSpeech: SpeechSession? = null
+    private var voiceToken: Any? = null
     private fun silencePolicy() = if (context.packageManager.hasSystemFeature(PackageManager.FEATURE_WATCH)) AssistantSilence() else AssistantSilence.phone()
     private var policy = silencePolicy()
     private var automatic = false
+    private var speechDetectionAvailable = false
     private var job: Job? = null
     private var text = ""
     private var picker: AssistantRoutePicker.Picker? = null
@@ -117,20 +123,42 @@ internal class AssistantEntry(private val context: Context, private val scope: C
         if (text.isNotBlank() && canReplace()) resetUnsent(keep = true)
         if (recorder != null || state.value?.busy == true || text.isNotBlank()) return
         automatic = auto; policy = silencePolicy()
-        val capture = VoiceRecorder(); recorder = capture
+        val speechEndpoint = auto && !context.packageManager.hasSystemFeature(PackageManager.FEATURE_WATCH)
+        speechDetectionAvailable = speechEndpoint
+        val capture = VoiceRecorder(detectorFactory = if (speechEndpoint) ({ host.speechDetector() }) else null,
+            onSpeech = { voiced, seconds ->
+                if (voiceToken != null && recorder != null && automatic && policy.sampleSpeech(voiced, seconds)) {
+                    if (policy.heard) finish() else quiet()
+                }
+            }, onDetectorUnavailable = {
+                speechDetectionAvailable = false
+                if (state.value?.recording == true) state.value = state.value?.copy(status = "Auto-stop unavailable · tap Send when finished")
+            })
+        recorder = capture
+        val token = Any(); voiceToken = token
         host.prepareVoice(); AssistantVisibility.recording = true
-        state.value = AssistantEntryState(if (auto) "Listening…" else "Listening · release to send", recording = true)
+        state.value = AssistantEntryState(if (auto) "Listening · pause or tap Send when finished" else "Listening · release to review", recording = true)
         try {
+            // Use the same streaming transport as in-app voice, with local audio
+            // retained for final transcription if the live connection fails.
+            liveSpeech = runCatching { LiveSpeech(prefs.getString("endpoint", "https://ally.prxptn.com")!!,
+                prefs.getString("token", "")!!) { words -> scope.launch {
+                    if (voiceToken === token && (state.value?.recording == true || state.value?.status == "Finishing your words…")) state.value = state.value?.copy(text = words)
+                } } }.getOrNull()
+            val speech = liveSpeech
             capture.start(scope, { if(recorder === capture) finish() }, { if(recorder === capture) { fail(it); cancelCapture() } }, { level, seconds ->
                 if(recorder !== capture) return@start
                 state.value = state.value?.copy(level = level)
-                if (automatic && policy.sample(level, seconds)) { if (policy.heard) finish() else quiet() }
+                if (automatic && !speechEndpoint && policy.sample(level, seconds)) { if (policy.heard) finish() else quiet() }
+            }, { bytes ->
+                for (offset in bytes.indices step 16000) speech?.write(bytes.copyOfRange(offset, minOf(offset + 16000, bytes.size)))
             })
         } catch (e: Exception) { cancelCapture(); fail(e.message ?: "Microphone unavailable") }
     }
     val automaticRecording get() = automatic && recorder != null
-    fun release() { if (!automatic) finish() }
+    fun release() { finish() }
     fun cancelCapture() {
+        voiceToken = null; liveSpeech?.cancel(); liveSpeech = null
         recorder?.cancel(); recorder = null; AssistantVisibility.recording = false
         if (state.value?.recording == true) { state.value = null; restoreKept() }
     }
@@ -160,24 +188,52 @@ internal class AssistantEntry(private val context: Context, private val scope: C
         return true
     }
     fun finish() {
+        if (recorder != null && AssistantSend.discardSilentCapture(automatic, speechDetectionAvailable, policy.heard)) { quiet(); return }
         val capture = recorder ?: return; recorder = null
-        state.value = AssistantEntryState("Finishing your words…", busy = true)
+        val speech = liveSpeech; liveSpeech = null
+        val token = voiceToken
+        state.value = AssistantEntryState("Finishing your words…", state.value?.text.orEmpty(), busy = true)
         job = scope.launch {
             try {
                 val audio = capture.stop()
                 AssistantVisibility.recording = false
-                val transcript = request("/v1/speech/transcribe", audio = audio).optString("text").trim()
+                val transcript = (speech?.finish() ?: request("/v1/speech/transcribe", audio = audio).optString("text")).trim()
+                if (voiceToken !== token) return@launch
                 if (transcript.isBlank()) { releaseScreen(); state.value = null; restoreKept(); return@launch }
                 text = transcript; kept = null; save(); route()
-            } catch (e: CancellationException) { throw e } catch (e: Exception) { if (!restoreKept()) fail(e.message ?: "Voice unavailable") }
-            finally { capture.cancel(); AssistantVisibility.recording = recorder != null }
+            } catch (e: CancellationException) { throw e } catch (e: Exception) {
+                if (voiceToken === token) {
+                    val partial = state.value?.text.orEmpty().trim()
+                    if (partial.isNotBlank()) { text = partial; kept = null; runCatching { save() }; fail("Transcription interrupted · review your captured words before Retry") }
+                    else if (!restoreKept()) fail(e.message ?: "Voice unavailable")
+                }
+            }
+            finally { speech?.cancel(); if (voiceToken === token) voiceToken = null; capture.cancel(); AssistantVisibility.recording = recorder != null }
         }
     }
+    /** Switching to text cancels voice work; stale previews/results cannot replace it. */
+    fun keyboard() {
+        if ((recorder == null && voiceToken == null) || !canReplace()) return
+        voiceToken = null
+        job?.cancel(); job = null
+        cancelCapture()
+        state.value = AssistantEntryState("Type your request", text)
+    }
     fun typed(value: String) {
-        if (value.isBlank() || state.value?.busy == true || text.isNotBlank()) return
-        cancelCapture(); text = value.trim(); kept = null; job = scope.launch { try { save(); route() } catch(e: CancellationException) { throw e } catch(e: Exception) { fail(e.message ?: "Chat matching unavailable") } }
+        if (value.isBlank() || !canReplace()) return
+        keyboard()
+        job?.cancel(); lookup?.cancel(); catalogJob?.cancel(); catalogGeneration++; pendingProviders = emptySet()
+        cancelCapture(); text = value.trim(); kept = null; picker = null; selected = null; hits = emptyList()
+        requestId = UUID.randomUUID().toString()
+        job = scope.launch { try { save(); route() } catch(e: CancellationException) { throw e } catch(e: Exception) { fail(e.message ?: "Chat matching unavailable") } }
     }
     private suspend fun route() {
+        // Phone handoff must not wait for desktop matching or its availability.
+        if (executionLocation == null) {
+            picker = picker ?: AssistantRoutePicker.Picker("", emptyList(), AssistantRoutePicker.newChat(host.provider))
+            showPicker("Choose where to send")
+            return
+        }
         catalogJob?.cancel()
         val generation = ++catalogGeneration
         picker = null; providerFilter = null
@@ -225,8 +281,8 @@ internal class AssistantEntry(private val context: Context, private val scope: C
     private fun showPicker(status: String) {
         val current = picker ?: return
         if (executionLocation == null) {
-            state.value = AssistantEntryState((if (executionOffer.pcAvailable) "Suggested: PC" else "Choose where to run") + " · ${executionOffer.pcReason}", text,
-                choices = AssistantExecutionDestination.rows(executionOffer) + handoffChoices() + AssistantChoice(AssistantRoutePicker.RERECORD, "Try again"))
+            state.value = AssistantEntryState("Choose where to send · Gemini opens with your words ready to review", text,
+                choices = AssistantExecutionDestination.rows(executionOffer, GeminiHandoff.available(context)) + handoffChoices() + AssistantChoice(AssistantRoutePicker.RERECORD, "Try again"))
             return
         }
         val searching = query.isNotBlank()
@@ -311,7 +367,17 @@ internal class AssistantEntry(private val context: Context, private val scope: C
             return
         }
         if (id == AssistantExecutionDestination.PHONE) {
-            if (target == null) state.value = state.value?.copy(status = executionOffer.phoneReason + " · choose PC to continue")
+            if (!canReplace() || text.isBlank()) return
+            if (!GeminiHandoff.available(context)) {
+                state.value = state.value?.copy(status = "Gemini is not available on this device · your words are kept")
+                return
+            }
+            try {
+                openExternal(GeminiHandoff.intent(text))
+                resetUnsent(); entry = false; state.value = null
+            } catch (e: Exception) {
+                state.value = state.value?.copy(status = "Could not open Gemini · your words are kept")
+            }
             return
         }
         if (id == AssistantExecutionDestination.PC) {
@@ -320,7 +386,7 @@ internal class AssistantEntry(private val context: Context, private val scope: C
                 state.value = state.value?.copy(status = executionOffer.pcReason); return
             }
             executionLocation = location
-            try { save(); showPicker("Run on PC · choose a chat, then Send") }
+            try { save(); job = scope.launch { try { route() } catch (e: CancellationException) { throw e } catch(e: Exception) { fail(e.message ?: "Chat matching unavailable") } } }
             catch (e: Exception) { executionLocation = null; fail(e.message ?: "Could not keep your choice") }
             return
         }

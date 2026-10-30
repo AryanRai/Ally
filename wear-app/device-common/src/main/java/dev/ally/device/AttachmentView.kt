@@ -36,6 +36,16 @@ import kotlinx.coroutines.withContext
 @Composable
 fun AttachmentView(assets: List<DeviceAttachment>, compact: Boolean = false) {
     if (assets.isEmpty()) return
+    var expanded by androidx.compose.runtime.saveable.rememberSaveable(assets.map { it.id }) { mutableStateOf(false) }
+    Column(Modifier.fillMaxWidth()) {
+        BasicText("${if(expanded) "⌄" else "›"} Images / attachments · ${assets.size}", style=TextStyle(color=Color(0xffa5d6ff),fontSize=if(compact) 11.sp else 13.sp),modifier=Modifier.fillMaxWidth().clickable { expanded=!expanded }.padding(vertical=10.dp))
+        if(expanded) ExpandedAttachmentView(assets,compact)
+    }
+}
+
+@Composable
+private fun ExpandedAttachmentView(assets: List<DeviceAttachment>, compact: Boolean = false) {
+    if (assets.isEmpty()) return
     var opened by remember { mutableStateOf<DeviceAttachment?>(null) }
     val context = LocalContext.current
     val loader = remember(context) { ImageLoader.Builder(context).okHttpClient { OkHttpClient.Builder().followRedirects(false).followSslRedirects(false).build() }.build() }

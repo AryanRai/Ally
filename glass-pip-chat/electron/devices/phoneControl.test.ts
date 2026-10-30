@@ -15,6 +15,29 @@ function fixture(identity = 'phone-one') {
 }
 async function flush() { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); }
 describe('phone control consent and lifecycle', () => {
+  it('one prompt grant closes control and viewer at prompt end',async()=>{
+    const f=fixture();const prompt=new AbortController();
+    const pending=f.control.execute({...f.args,sessionScope:'prompt'},f.args.chatId,undefined,prompt.signal);
+    await flush();expect(f.send.mock.calls[0][0].command.body).toContain('this prompt only');
+    f.receipt('approved');f.receipt('done');const result=await pending;
+    expect(result.isError).toBeUndefined();expect(JSON.parse(result.content[0].text!).sessionScope).toBe('prompt');
+    const preview=f.control.sessionSignal('phone-one',f.args.chatId)!;expect(preview.aborted).toBe(false);
+    prompt.abort();expect(preview.aborted).toBe(true);expect(f.control.sessionSignal('phone-one',f.args.chatId)).toBeUndefined();f.control.close();f.hub.close();
+  });
+  it('explicit timed approval survives a prompt ending; unknown prompt scope fails before screen access',async()=>{
+    const f=fixture();const prompt=new AbortController();
+    const pending=f.control.execute({...f.args,sessionMinutes:3},f.args.chatId,undefined,prompt.signal);
+    await flush();expect(f.send.mock.calls[0][0].command.body).toContain('3 minutes');
+    f.receipt('approved');f.receipt('done');await pending;prompt.abort();
+    expect(f.control.sessionSignal('phone-one',f.args.chatId)?.aborted).toBe(false);f.control.close();f.hub.close();
+    const g=fixture();await expect(g.control.execute({...g.args,sessionScope:'prompt'})).rejects.toThrow('exact active');expect(g.adb.view).not.toHaveBeenCalled();g.control.close();g.hub.close();
+  });
+  it('viewer lifetime exists only after approval and aborts on control end',async()=>{
+    const f=fixture();expect(f.control.sessionSignal('phone-one',f.args.chatId)).toBeUndefined();
+    const pending=f.control.execute(f.args);await flush();f.receipt('approved');f.receipt('done');await pending;
+    const signal=f.control.sessionSignal('phone-one',f.args.chatId);expect(signal?.aborted).toBe(false);
+    f.control.endSession('phone-one',f.args.chatId);expect(signal?.aborted).toBe(true);f.control.close();f.hub.close();
+  });
   it('does not read a screen until both approval and native consent completion', async () => {
     const f = fixture(); const result = f.control.execute(f.args); await flush();
     expect(f.adb.view).not.toHaveBeenCalled(); f.receipt('received'); expect(f.adb.view).not.toHaveBeenCalled();

@@ -17,24 +17,26 @@ enum class GlowLevel(val label: String, val strength: Float) {
 /** Watch-wide preferences, independent of chat, permissions and connection settings. */
 data class WatchLook(
     val style: OrbStyle = OrbStyle.ENERGY,
-    val palette: OrbPalette = OrbPalette.SUNSET,
+    val palette: OrbPalette = OrbPalette.OCEAN,
     val glow: GlowLevel = GlowLevel.MEDIUM,
     val listeningEyes: Boolean = true,
     val reducedMotion: Boolean = false,
+    val backdrop: Boolean = true,
 ) {
     fun save(prefs: SharedPreferences) {
         prefs.edit().putString("look.style", style.name).putString("look.palette", palette.name)
             .putString("look.glow", glow.name).putBoolean("look.eyes", listeningEyes)
-            .putBoolean("look.reducedMotion", reducedMotion).apply()
+            .putBoolean("look.reducedMotion", reducedMotion).putBoolean("look.backdrop",backdrop).apply()
     }
 
     companion object {
         fun load(prefs: SharedPreferences) = WatchLook(
             style = OrbStyle.entries.find { it.name == prefs.getString("look.style", null) } ?: OrbStyle.ENERGY,
-            palette = OrbPalette.entries.find { it.name == prefs.getString("look.palette", null) } ?: OrbPalette.SUNSET,
+            palette = OrbPalette.entries.find { it.name == prefs.getString("look.palette", null) } ?: OrbPalette.OCEAN,
             glow = GlowLevel.entries.find { it.name == prefs.getString("look.glow", null) } ?: GlowLevel.MEDIUM,
             listeningEyes = prefs.getBoolean("look.eyes", true),
             reducedMotion = prefs.getBoolean("look.reducedMotion", false),
+            backdrop = prefs.getBoolean("look.backdrop", true),
         )
     }
 }

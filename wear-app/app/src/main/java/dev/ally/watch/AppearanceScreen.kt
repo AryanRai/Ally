@@ -37,13 +37,14 @@ internal fun AppearanceScreen(look: WatchLook, change: (WatchLook) -> Unit, back
                 PresenceGlow(true, look)
                 WatchOrb(look, Phase.IDLE, 0f, Modifier.fillMaxSize())
             }
-            Text("Saved on this watch", color = Muted, fontSize = 10.sp)
+            Text("Live preview · saved on this watch", color = Muted, fontSize = 10.sp)
             Button(onClick = { picker = "style" }, modifier = Modifier.fillMaxWidth()) { Text("Orb · ${look.style.label}", fontSize = 12.sp) }
             Button(onClick = { picker = "palette" }, modifier = Modifier.fillMaxWidth()) { Text("Theme · ${look.palette.label}", fontSize = 12.sp) }
             Button(onClick = { picker = "glow" }, modifier = Modifier.fillMaxWidth()) { Text("Glow · ${look.glow.label}", fontSize = 12.sp) }
             LookToggle("Listening eyes", look.listeningEyes) { change(look.copy(listeningEyes = it)) }
             LookToggle("Reduced motion", look.reducedMotion) { change(look.copy(reducedMotion = it)) }
-            Text("Motion plays only while listening or working. Glow follows your colour theme.", color = Muted, fontSize = 10.sp, textAlign = TextAlign.Center)
+            LookToggle("Flow background", look.backdrop) { change(look.copy(backdrop = it)) }
+            Text("Same appearance choices as phone. Colours apply to your orb, glow and controls; motion pauses when idle. Device appearance is saved separately.", color = Muted, fontSize = 10.sp, textAlign = TextAlign.Center)
             Button(onClick = { change(WatchLook()) }, modifier = Modifier.fillMaxWidth()) { Text("Reset appearance", fontSize = 12.sp) }
         } else {
             Column(Modifier.selectableGroup(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -72,7 +73,7 @@ private fun LookChoice(label: String, selected: Boolean, preview: WatchLook?, ch
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         if (preview != null) WatchOrb(preview, Phase.IDLE, 0f, Modifier.size(34.dp))
         Text(label, color = White, fontSize = 12.sp, modifier = Modifier.weight(1f))
-        Text(if (selected) "●" else "○", color = if (selected) White else Muted, fontSize = 15.sp)
+        Text(if (selected) "●" else "○", color = if (selected) androidx.wear.compose.material3.MaterialTheme.colorScheme.primary else Muted, fontSize = 15.sp)
     }
 }
 
