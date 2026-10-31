@@ -1,5 +1,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
@@ -23,6 +24,9 @@
     </queries>
     <application android:name=".AllyPhoneApplication" android:label="Ally" android:theme="@android:style/Theme.Material.NoActionBar" android:icon="@mipmap/ally_robot_launcher_v3" android:roundIcon="@mipmap/ally_robot_launcher_v3"
         android:allowBackup="false" android:usesCleartextTraffic="false" android:dataExtractionRules="@xml/backup_rules">
+        <activity android:name=".codex.CodexPhoneActivity" android:exported="false" />
+        <activity android:name=".codex.CodexReviewActivity" android:exported="false" />
+        <service android:name=".codex.CodexPhoneService" android:exported="false" android:foregroundServiceType="specialUse"><property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="User-started phone Codex sign-in or agent request, with a persistent Stop notification" /></service>
         <activity android:name=".WidgetEntryActivity" android:exported="false" android:excludeFromRecents="true" android:noHistory="true" android:taskAffinity="dev.ally.phone.widget" android:theme="@style/AllyWidgetEntry" />
         <receiver android:name=".AllyAgentWidget" android:label="@string/widget_agents_label" android:exported="false">
             <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE"/><action android:name="dev.ally.phone.SURFACE_CHANGED"/></intent-filter>
@@ -71,6 +75,8 @@
         <service android:name="dev.ally.device.DeviceLinkService" android:exported="false" android:foregroundServiceType="connectedDevice" />
         <receiver android:name="dev.ally.device.DeviceDecisionReceiver" android:exported="false" />
         <receiver android:name="dev.ally.device.DeviceDismissReceiver" android:exported="false" />
+        <activity android:name="dev.ally.device.DeviceDecisionActivity" android:exported="false" android:excludeFromRecents="true" android:noHistory="true" android:taskAffinity="dev.ally.decision" android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+        <receiver android:name=".codex.PhoneDecisionReceiver" android:exported="false" />
         <activity android:name="dev.ally.device.DeviceInboxActivity" android:exported="false" />
         <activity android:name="dev.ally.device.AssistantUnlockActivity" android:exported="false" android:excludeFromRecents="true" />
         <provider android:name="androidx.core.content.FileProvider" android:authorities="${applicationId}.attachments" android:exported="false" android:grantUriPermissions="true">

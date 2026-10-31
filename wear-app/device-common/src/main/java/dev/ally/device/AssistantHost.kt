@@ -14,6 +14,15 @@ interface AssistantHost {
     fun acceptTurn(chatId: String, turnId: String)
     fun openChat(chatId: String)
     fun prepareVoice() {}
+    fun phoneCodexAvailable(): Boolean = false
+    fun openPhoneCodex(text: String) {}
+    suspend fun routePhoneCodex(text: String, requestId: String): Boolean = false
+    /** Last known phone sign-in; a phone turn still checks the account before it runs. */
+    fun phoneCodexSignedIn(): Boolean = false
+    /** Phone Codex chats, newest first, as provider "phone". */
+    fun phoneCodexChats(): List<AssistantChoice> = emptyList()
+    /** Sends [text] to an existing phone chat, or to a new one when [chatId] is null. Returns the chat id. */
+    suspend fun sendPhoneCodex(chatId: String?, text: String, requestId: String): String? = null
     fun speechDetector(): dev.ally.device.voice.PcmSpeechDetector? = null
     fun haloAppearance(): AssistantHaloAppearance? = null
     fun presentationVisible(visible: Boolean) {}

@@ -29,7 +29,7 @@ class PhoneModel(app: Application) : AndroidViewModel(app) {
     }
     private val current get() = workspace.current
     var foreground = false
-        set(value) { field = value; current.foreground = value; if (!value) current.stopSpeaking() }
+        set(value) { field = value; current.foreground = value; if (!value) current.backgrounded() }
     fun stopSpeaking() = current.stopSpeaking()
     fun select(id: String) {
         if (state.value.recording || state.value.transcribing || state.value.importingShare) return
@@ -49,6 +49,7 @@ class PhoneModel(app: Application) : AndroidViewModel(app) {
     }
     fun newChat() {
         if (state.value.recording || state.value.transcribing) return
+        if(state.value.selected?.id?.let(dev.ally.phone.codex.PhoneCodex::owns)==true) {select(dev.ally.phone.codex.PhoneCodex.create(getApplication()));return}
         val source = current
         viewModelScope.launch {
             try {

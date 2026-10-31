@@ -29,7 +29,7 @@ export function createAdbRun(): AdbRun {
 }
 
 const packagePattern = /^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*)+$/;
-const blockedPackage = /(?:permissioncontroller|packageinstaller|systemui|settings|authenticator|password|keychain|bank|wallet|dev\.ally\.)/i;
+const blockedPackage = /(?:permissioncontroller|packageinstaller|systemui|authenticator|password|keychain|bank|wallet|dev\.ally\.)/i;
 /** ADB's input tool is basic Latin only; the on-device executor sets text through accessibility and accepts Unicode. */
 export function validateOperations(value: unknown, options: { unicodeText?: boolean } = {}): PhoneOperation[] {
   if (!Array.isArray(value) || value.length > 8) throw Error('Provide at most 8 operations (empty means inspect only).');
@@ -61,8 +61,9 @@ export function validateOperations(value: unknown, options: { unicodeText?: bool
 /** Fail closed on known sensitive surfaces. This is a development adapter, not an accessibility service. */
 export function inspectUi(xml: string): string {
   if (!xml.includes('<hierarchy') || !xml.includes('</hierarchy>') || xml.length > 1_000_000) throw Error('Cannot inspect this screen.');
-  const labels = [...xml.matchAll(/(?:text|content-desc|resource-id)="([^"]*)"/g)].map(m => m[1].replace(/&#(?:x([0-9a-f]+)|(\d+));/gi, (_all, hex, dec) => String.fromCodePoint(parseInt(hex || dec, hex ? 16 : 10)))).join('\n');
-  if (/password="true"/i.test(xml) || /(?:password|passcode|one.time|verification code|security code|unlock|biometric|sign.in|log.in|credit card|payment|purchase|checkout|send money)/i.test(labels)) throw Error('Sensitive screen: continue manually on the phone.');
+  // Ordinary screens are readable even when they mention sign-in, payment or unlock (a launcher with a
+  // Wallet icon, WhatsApp's Payments entry). Credential entry stays manual: password fields are never
+  // shown with their text, and typing into them or OTP/card fields is refused in assertOperationAllowed.
   const packages = [...xml.matchAll(/\bpackage="([^"]*)"/g)].map(m => m[1]);
   // Ally's own screens, widget and notch overlay can be inspected and used; only its decision
   // controls (approvals, permissions, answers to its own requests) are refused, in assertOperationAllowed.
@@ -71,6 +72,36 @@ export function inspectUi(xml: string): string {
   const appNodes = packages.filter(p => p && p !== 'com.android.systemui');
   if (!appNodes.length) throw Error('System or lock screen: continue manually on the phone.');
   return xml.replace(/<node\b[^>]*package="com\.android\.systemui"[^>]*>/g, node => node.replace(/(text|content-desc)="[^"]*"/g, '$1=""'));
+}
+
+const SETTINGS_APP = /settings/i;
+const TOGGLE = /(?:Switch|CheckBox|RadioButton|SeekBar|ToggleButton|CompoundButton|Slider)$/;
+/**
+ * Settings apps can be read, scrolled and navigated; changing anything there needs the user's yes first.
+ * Returns what the operation would change, or undefined. Typing, toggles/sliders (or a row holding one)
+ * and dialog buttons count as changes. Mirrors the phone's PhoneToolPolicy.settingsChange.
+ */
+export function settingsChange(operation: PhoneOperation, view: PhoneView): string | undefined {
+  const nodes = [...view.ui.matchAll(/<node\b[^>]*>/g)].map(m => m[0]);
+  const attr = (node: string, name: string) => new RegExp(`\\b${name}="([^"]*)"`).exec(node)?.[1] ?? '';
+  const app = nodes.map(n => attr(n, 'package')).find(p => p && p !== 'com.android.systemui' && !/^dev\.ally\./i.test(p));
+  if (!app || !SETTINGS_APP.test(app)) return undefined;
+  const label = (n: string) => [attr(n, 'text'), attr(n, 'content-desc')].find(Boolean);
+  if (operation.type === 'text') { const focused = nodes.find(n => attr(n, 'focused') === 'true'); return `Type "${operation.text.slice(0, 80)}"${focused && label(focused) ? ` into “${label(focused)!.slice(0, 80)}”` : ''} in Settings`; }
+  if (operation.type !== 'tap' && operation.type !== 'swipe') return undefined;
+  const box = (n: string) => { const m = /^\[(-?\d+),(-?\d+)\]\[(-?\d+),(-?\d+)\]$/.exec(attr(n, 'bounds')); return m ? m.slice(1).map(Number) : undefined; };
+  const area = (n: string) => { const b = box(n)!; return (b[2] - b[0]) * (b[3] - b[1]); };
+  const under = nodes.filter(n => { const b = box(n); return b && attr(n, 'package') === app && operation.x >= b[0] && operation.x < b[2] && operation.y >= b[1] && operation.y < b[3]; });
+  const smallest = (list: string[]) => list.sort((a, b) => area(a) - area(b))[0];
+  const target = smallest(under.filter(n => attr(n, 'clickable') === 'true')) ?? smallest([...under]);
+  if (!target) return undefined;
+  const tb = box(target)!;
+  const within = nodes.filter(n => { const b = box(n); return b && b[0] >= tb[0] && b[1] >= tb[1] && b[2] <= tb[2] && b[3] <= tb[3]; });
+  const changes = operation.type === 'swipe' ? under.some(n => TOGGLE.test(attr(n, 'class')))
+    : TOGGLE.test(attr(target, 'class')) || attr(target, 'class').endsWith('Button') || within.some(n => TOGGLE.test(attr(n, 'class')));
+  if (!changes) return undefined;
+  const name = label(target) ?? within.map(label).find(Boolean) ?? 'this control';
+  return `${operation.type === 'swipe' ? 'Adjust' : 'Change'} “${name.slice(0, 80)}” in Settings`;
 }
 
 /** Shared by ADB and on-device control: content and geometry bind actions to the inspected screen. */
@@ -87,6 +118,9 @@ const ALLY_DECISION = /(?:text|content-desc|resource-id)="[^"]*\b(?:approv\w*|al
 /** Ally's approval and question cards always show one of these; while any is visible, no Ally control is tapped. */
 const ALLY_DECISION_SHOWN = /(?:text|content-desc)="[^"]*(?:your approval|approval needed|needs your answer|answer this request|continue on this phone|\bapproval\b|\bquestion\b|\bpermission)/i;
 
+/** Paying, buying, transferring money, or granting an app or account access. */
+const MONEY_OR_CONSENT = /(?:text|content-desc)="[^"]*\b(?:pay|pay now|buy|buy now|purchase|checkout|place order|send money|transfer|authori[sz]e|grant access)\b/i;
+const CREDENTIAL_FIELD = /(?:text|content-desc|resource-id|hint)="[^"]*(?:password|passcode|\bpin\b|one.time|otp|verification code|security code|card number|cvv|cvc)/i;
 /** Refuses coordinates off the inspected screen and taps on SystemUI or Send/Pay/Approve-style controls. */
 export function assertOperationAllowed(operation: PhoneOperation, view: PhoneView) {
   const within = (x: number, y: number) => x < view.width && y < view.height;
@@ -94,6 +128,8 @@ export function assertOperationAllowed(operation: PhoneOperation, view: PhoneVie
   // A decision on screen freezes all of Ally's own UI: its answer buttons can carry any label.
   const nodes = [...view.ui.matchAll(/<node\b[^>]*>/g)].map(m => m[0]);
   const allyDecisionShown = nodes.some(node => /package="dev\.ally\./i.test(node) && ALLY_DECISION_SHOWN.test(node));
+  // Credentials stay manual: never type into a focused password, passcode, OTP or card field.
+  if (operation.type === 'text' && nodes.some(node => /\bfocused="true"/.test(node) && (/password="true"/.test(node) || CREDENTIAL_FIELD.test(node)))) throw Error('Credential field: enter it manually on the phone.');
   if (operation.type === 'text' && allyDecisionShown) {
     // Typing goes to the focused field; refuse when that may be an Ally answer box.
     const focusKnown = nodes.some(node => /\bfocused="(?:true|false)"/.test(node));
@@ -104,7 +140,10 @@ export function assertOperationAllowed(operation: PhoneOperation, view: PhoneVie
       const node = match[0], bounds = /bounds="\[(-?\d+),(-?\d+)\]\[(\d+),(\d+)\]"/.exec(node);
       if (!bounds) continue;
       const hit = (x: number, y: number) => x >= +bounds[1] && x < +bounds[3] && y >= +bounds[2] && y < +bounds[4];
-      const protectedNode = /package="com\.android\.systemui"/.test(node) || /(?:text|content-desc)="[^"]*\b(?:send|pay|buy|purchase|confirm|approve|allow|delete|remove|submit)\b/i.test(node)
+      // SystemUI is protected where it can be touched; an empty, non-clickable frame (an idle volume dialog) is not.
+      const systemUi = /package="com\.android\.systemui"/.test(node) && (/clickable="true"/.test(node) || /(?:text|content-desc)="[^"]+"/.test(node));
+      // Money and consent stay manual; sending messages, deleting or removing items do not.
+      const protectedNode = systemUi || MONEY_OR_CONSENT.test(node)
         // An agent must never decide Ally's own approvals, permissions or questions, whichever way.
         || (/package="dev\.ally\./i.test(node) && (allyDecisionShown || ALLY_DECISION.test(node)));
       if (protectedNode && (hit(operation.x, operation.y) || (operation.type === 'swipe' && hit(operation.endX, operation.endY)))) throw Error('Protected control: complete this action manually on the phone.');

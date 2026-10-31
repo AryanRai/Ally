@@ -6,6 +6,7 @@ import org.json.JSONObject
 object AssistantExecutionDestination {
     const val PC = "__execution_pc"
     const val PHONE = "__execution_phone"
+    const val PHONE_CODEX = "__execution_phone_codex"
     const val CHANGE = "__execution_change"
     const val PHONE_REASON = "No on-device agent backend is installed"
     data class Offer(val pcAvailable: Boolean, val pcReason: String, val phoneReason: String = PHONE_REASON)
@@ -20,7 +21,7 @@ object AssistantExecutionDestination {
         return Offer(pc?.opt("available") == true, pc?.optString("reason")?.take(300).orEmpty().ifBlank { "PC execution is unavailable" })
         // Phone remains disabled even if an unverified server advertises it.
     }
-    fun rows(offer: Offer, geminiAvailable: Boolean = false) = listOf(
+    fun rows(offer: Offer, geminiAvailable: Boolean = false, phoneCodexAvailable: Boolean = false) = (if(phoneCodexAvailable) listOf(AssistantChoice(PHONE_CODEX,"Run on phone · Codex")) else emptyList()) + listOf(
         AssistantChoice(PC, if (offer.pcAvailable) "Send to PC · Codex / Claude" else "PC unavailable"),
         AssistantChoice(PHONE, if (geminiAvailable) "Send to phone · Gemini" else "Phone · Gemini unavailable"))
     fun select(id: String, offer: Offer): String? = if (id == PC && offer.pcAvailable) "pc" else null

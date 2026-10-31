@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { CodexRpc } from './codexRpc';
-import { runCodexTurn, codexThreadConfig, codexResumeConfig } from './codexRun';
+import { runCodexTurn, codexThreadConfig, codexResumeConfig, CODEX_AUTO_COMPACT_TOKENS } from './codexRun';
 import type { AgentEvent } from './types';
 import { startUserQuestions } from './userQuestions';
 import { ALLY_BROWSER_INSTRUCTIONS } from './browserContext';
@@ -108,6 +108,10 @@ describe('Codex turn lifecycle', () => {
       });
     }
   });
+  it('compacts long chats before they reach the slow end of the context window', () => {
+    expect(codexThreadConfig(opts).config).toMatchObject({ model_auto_compact_token_limit: 250_000 });
+    expect(codexThreadConfig({ ...opts, sessionId: 'old' }).config).toMatchObject({ model_auto_compact_token_limit: 250_000 });
+  });
   it('enables desktop approvals without attaching the watch question channel', async () => {
     const rpc = server();
     vi.mocked(startUserQuestions).mockClear();
@@ -124,7 +128,7 @@ describe('Codex turn lifecycle', () => {
     await flush();
     expect(rpc.request).toHaveBeenCalledWith('thread/resume', expect.objectContaining({
       threadId: 'existing', developerInstructions: ALLY_BROWSER_INSTRUCTIONS + '\n\nRobot context',
-      config: { mcp_servers: { howyouseeme: { url: 'http://localhost:9000/mcp' } } },
+      config: { model_auto_compact_token_limit: CODEX_AUTO_COMPACT_TOKENS, mcp_servers: { howyouseeme: { url: 'http://localhost:9000/mcp' } } },
     }));
     rpc.onNotification?.('turn/completed', { threadId: 'existing', turn: { status: 'completed' } });
   });
@@ -174,7 +178,7 @@ describe('Codex turn lifecycle', () => {
     const rpc = server(); const interact = vi.fn(async () => ({ decision: 'decline' }));
     runCodexTurn({ ...opts, permission: 'readonly' }, () => {}, undefined, interact); await flush();
     expect(rpc.request).toHaveBeenCalledWith('thread/start', expect.objectContaining({ approvalPolicy: 'on-request', approvalsReviewer: 'user', sandbox: 'read-only' }));
-    expect(rpc.request).toHaveBeenCalledWith('thread/start', expect.objectContaining({ config: { mcp_servers: { ally_watch: { url: 'http://localhost:1234/mcp' } } }, developerInstructions: ALLY_BROWSER_INSTRUCTIONS + '\n\nAsk on the watch.' }));
+    expect(rpc.request).toHaveBeenCalledWith('thread/start', expect.objectContaining({ config: { model_auto_compact_token_limit: CODEX_AUTO_COMPACT_TOKENS, mcp_servers: { ally_watch: { url: 'http://localhost:1234/mcp' } } }, developerInstructions: ALLY_BROWSER_INSTRUCTIONS + '\n\nAsk on the watch.' }));
     expect(await rpc.onRequest?.('item/commandExecution/requestApproval', { threadId: 'thread', turnId: 'turn', command: 'test' }, 1)).toEqual({ decision: 'decline' });
     await expect(rpc.onRequest?.('item/commandExecution/requestApproval', { threadId: 'other' }, 2)).rejects.toThrow('no longer active');
     expect(interact).toHaveBeenCalledTimes(1);

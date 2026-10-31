@@ -26,6 +26,7 @@ import { assertToolSchema, handleRpc, type CallContext, type ToolDef, type ToolR
 import { ChatIndex, type SearchHit } from './search.js';
 import { chatTools, SERVER_INSTRUCTIONS, type SendResult } from './tools.js';
 import { forwarding, serverUrl, setEndpoint, SERVER_NAME } from './registry.js';
+import { Followups, followupTool, pidAlive } from './followups.js';
 
 export { allyChatsMcpServers, serverUrl, SERVER_NAME } from './registry.js';
 
@@ -136,7 +137,18 @@ function open(target: { provider: AgentProvider; id: string; cwd?: string; title
   for (const cb of openListeners) { try { cb(req); } catch { /* listeners must not break tools */ } }
 }
 
-const tools = () => [...chatTools({ index, load, send, open }), usageTool(() => readProviderUsage(agentConfig().codexPath)), ...deviceTools.values()];
+/** A follow-up wakes its own chat like a queued message, with its normal tools (it is not a forward). */
+async function wake(chat: string, prompt: string): Promise<void> {
+  const provider = chat.slice(0, chat.indexOf(':')) as AgentProvider, id = chat.slice(chat.indexOf(':') + 1);
+  const cfg = agentConfig();
+  if ((await listRunningSessions()).some(s => s.provider === provider && s.id === id)) { messageQueue.enqueue(chat, { id: randomUUID(), text: prompt, permission: cfg.permission }); return; }
+  const target = index.get(provider, id);
+  await startForwardedRun({ provider, prompt, title: target?.title ?? 'Follow-up', cwd: target?.cwd || cfg.defaultCwd, sessionId: id, permission: cfg.permission, codexDesktop: cfg.codexDesktop === true },
+    () => {}, provider === 'claude' ? cfg.claudePath : cfg.codexPath);
+}
+let followups: Followups | undefined;
+
+const tools = () => [...chatTools({ index, load, send, open, running: listRunningSessions }), usageTool(() => readProviderUsage(agentConfig().codexPath)), ...(followups ? [followupTool(followups)] : []), ...deviceTools.values()];
 
 // ---------------------------------------------------------------------------
 // HTTP server
@@ -291,7 +303,11 @@ async function unregisterFromApps(): Promise<void> {
 
 export function registerChatsMcp(getWindow: () => BrowserWindow | null): void {
   getWin = getWindow;
-  void app.whenReady().then(() => startServer()).catch(e => console.error('[ally-chats]', e));
+  void app.whenReady().then(() => {
+    followups = new Followups({ file: path.join(app.getPath('userData'), 'ally-followups.json'), now: Date.now, alive: pidAlive, exists: file => fs.existsSync(file), wake });
+    followups.start();
+    return startServer();
+  }).catch(e => console.error('[ally-chats]', e));
   ipcMain.handle('chatsMcp:status', async () => ({
     running: !!state?.listening,
     port: state?.port,

@@ -12,6 +12,7 @@ import { registerPhoneControl } from './phoneControlTools.js';
 import { registerScrcpyViewer } from './scrcpyViewerTools.js';
 import { interactions, originatingChat } from './interactions.js';
 import { registerQuestionTool } from './questionTool.js';
+import { registerAccessRequestTool } from './accessRequestTool.js';
 import { boundedActivity, startLiveActivity } from './liveActivity.js';
 import { PhysicalTap } from './physicalTap.js';
 import { windowsTapAdvertiser } from './bleAdvertiser.js';
@@ -120,5 +121,6 @@ export function attachDeviceSocket(server: Server, authorize: (header?: string) 
   unregister.push(registerDeviceAccess(hub,access));
   unregister.push(registerScrcpyViewer(hub,{onStart:handler=>{viewerStart=handler;}}));
   unregister.push(registerQuestionTool());
+  unregister.push(registerAccessRequestTool());
   return () => { nativeStream.close();access.close();sessions.close();powerMonitor.off('lock-screen', lockTap); tap.close(); stopActivity(); stopUnreadReplies(); stopInteractions(); stopCards(); stopReplies(); unregister.forEach(stop => stop()); hub.close(); interactions.closeAll(); server.off('upgrade', upgrade); sockets.clients.forEach(ws => ws.terminate()); sockets.close(); };
 }

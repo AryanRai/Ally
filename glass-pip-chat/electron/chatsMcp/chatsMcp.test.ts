@@ -91,6 +91,24 @@ describe('tools', () => {
     return { send, open, call };
   };
 
+  it('marks chats that are replying right now and lists only those on request', async () => {
+    const index = makeIndex();
+    const running = vi.fn().mockResolvedValue([
+      { provider: 'codex', id: 'cx-gnss', title: 'GNSS driver debugging', cwd: 'C:\fw', updatedAt: NOW },
+      { provider: 'claude', id: 'cc-phone', title: 'Started from the phone', updatedAt: NOW },
+    ]);
+    const tools = chatTools({ index, load: async (_p, id) => ({ messages: transcripts[id] ?? [] }), send: vi.fn(), open: vi.fn(), running });
+    const list = tools.find(t => t.name === 'ally_list_chats')!;
+    const all = await list.handler({}, {});
+    expect(all.content[0].text).toMatch(/GNSS driver debugging" · fw · RUNNING now/);
+    expect(all.content[0].text).not.toMatch(/Ally realtime perception.*RUNNING/);
+    const only = await list.handler({ running: true, provider: 'claude' }, {});
+    expect(only.content[0].text).toMatch(/Started from the phone/);
+    expect(only.content[0].text).not.toMatch(/GNSS/);
+    running.mockResolvedValue([]);
+    expect((await list.handler({ running: true }, {})).content[0].text).toBe('No chats are replying right now.');
+  });
+
   it('forwards to a chat and relays its reply (questions included)', async () => {
     const { send, open, call } = setup();
     const r = await call('ally_send_to_chat', { provider: 'claude', chat_id: 'cc-ally-new', message: 'I want a watch shortcut for meeting mode', open_in_ally: true }, 'codex:cx-gnss');

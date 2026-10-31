@@ -59,12 +59,19 @@ internal class PhoneConversation(private val app: Application, private val chatK
     private val progressRead = ProgressReadCursor()
     private val speaker = dev.ally.device.voice.ReplySpeech(app, viewModelScope, { playing, error -> state.update { it.copy(speaking = playing, speechError = error) } }, level = { volume -> state.update { it.copy(speakerLevel = volume) } })
     fun stopSpeaking() { progressRead.stop(state.value.progressTurnId); speaker.stop() }
+    /** Leaving Ally silences it, except a reply that is driving (or drove) the phone: it keeps talking to the end. */
+    fun backgrounded() { if (!drivingPhone(state.value.progressTurnId.takeIf { it.isNotBlank() } ?: turn)) stopSpeaking() }
     private fun progress(result: JSONObject, id: String) {
         val rows = LiveProgressParser.read(result)
         state.update { it.copy(progress = rows, progressTurnId = id) }
-        val enabled = foreground && !DeviceLink.prefs(app).getBoolean("muted", false) && !state.value.recording && !state.value.transcribing && !AssistantVisibility.recording
+        if (ControlBridge.visual.value.grantId.isNotBlank()) droveTurn = id
+        val enabled = (foreground || drivingPhone(id)) && !DeviceLink.prefs(app).getBoolean("muted", false) && !state.value.recording && !state.value.transcribing && !AssistantVisibility.recording
         progressRead.updates(id, rows, enabled).forEach { speakQueued(it) }
     }
+    /** While Ally is driving the phone the user is usually in another app, so its status is spoken there too. */
+    private var droveTurn: String? = null
+    /** Control usually ends just before the final reply, so a turn that drove the phone keeps its voice to the end. */
+    private fun drivingPhone(turn: String? = null) = ControlBridge.visual.value.grantId.isNotBlank() || (turn != null && turn == droveTurn)
     private fun speakQueued(text: String) = speaker.enqueue(text, prefs.getString("endpoint", "https://ally.prxptn.com")!!, prefs.getString("token", "")!!, true)
     fun acceptAssistantTurn(id: String) {
         turn = id; prefs.edit().putString("phoneTurn", id).commit()
@@ -81,6 +88,10 @@ internal class PhoneConversation(private val app: Application, private val chatK
     }
     private fun enc(value: String) = URLEncoder.encode(value, "UTF-8")
     suspend fun request(path: String, body: JSONObject? = null, audio: ByteArray? = null): JSONObject = withContext(Dispatchers.IO) {
+        if(audio==null) {
+            if(state.value.selected?.id?.let(dev.ally.phone.codex.PhoneCodex::owns)==true && path=="/v1/status")return@withContext JSONObject().put("messageQueue",true).put("inputAttachments",false)
+            dev.ally.phone.codex.PhoneCodex.request(path,body)?.let { return@withContext it }
+        }
         val url = URL(prefs.getString("endpoint", "https://ally.prxptn.com")!!.trimEnd('/') + path)
         require(url.protocol == "https") { "Use an HTTPS bridge" }
         val c = url.openConnection() as HttpURLConnection
@@ -202,7 +213,8 @@ internal class PhoneConversation(private val app: Application, private val chatK
     fun catalog(provider: String = state.value.provider, more: Boolean = false) {
         if (voiceActive || state.value.loading) return
         val offset = if (more) state.value.more ?: return else 0
-        task { val r = request("/v1/chats?provider=$provider&offset=$offset"); val a = r.optJSONArray("chats") ?: JSONArray()
+        task { val r = try { request("/v1/chats?provider=$provider&offset=$offset") } catch(e: Exception) { if(e is CancellationException)throw e; if(provider!="codex" || dev.ally.phone.codex.PhoneCodex.chats().length()==0)throw e;JSONObject().put("chats",JSONArray()) }; val a = r.optJSONArray("chats") ?: JSONArray()
+            if(provider=="codex" && !more) {val local=dev.ally.phone.codex.PhoneCodex.chats();for(i in 0 until local.length())a.put(local.getJSONObject(i))}
             state.update { it.copy(provider = provider, chats = ((if (more) it.chats else emptyList()) + (0 until a.length()).map { i -> chat(a.getJSONObject(i)) }).distinctBy { c -> c.id }, more = if (r.isNull("nextOffset")) null else r.optInt("nextOffset")) }
         }
     }
@@ -222,7 +234,7 @@ internal class PhoneConversation(private val app: Application, private val chatK
         val progressTurn = r.optString("progressTurnId")
         if (!older && r.optString("activeTurnId").let { it.isBlank() || it == "null" } && (r.optBoolean("running") || progressRead.observed(progressTurn))) {
             progress(r, progressTurn)
-            if (!r.optBoolean("running") && progressRead.claimFinal(progressTurn) && foreground && !DeviceLink.prefs(app).getBoolean("muted",false) && !state.value.recording && !state.value.transcribing && progressRead.canRead(progressTurn)) {
+            if (!r.optBoolean("running") && progressRead.claimFinal(progressTurn) && (foreground || drivingPhone(progressTurn)) && !DeviceLink.prefs(app).getBoolean("muted",false) && !state.value.recording && !state.value.transcribing && progressRead.canRead(progressTurn)) {
                 messages.lastOrNull { it.role == "assistant" }?.let { speakQueued(progressRead.finalText(progressTurn,it.text)) }
             }
         }
@@ -284,6 +296,7 @@ internal class PhoneConversation(private val app: Application, private val chatK
     fun removeShared(key: String) { if (shareLocked) return; shared = shares.remove(shared, key); state.update { it.copy(share = shared) } }
     fun discardShare() { if (shareLocked) return; shares.clear(shared); shared = ShareDraft(); state.update { it.copy(share = shared) } }
     private suspend fun upload(item: SharedFile): DeviceAttachment = withContext(Dispatchers.IO) {
+        check(state.value.selected?.id?.let(dev.ally.phone.codex.PhoneCodex::owns)!=true) { "Phone Codex file inputs are not enabled yet. Your attachment is kept on this phone; choose a PC chat to send it." }
         val url = URL(prefs.getString("endpoint", "https://ally.prxptn.com")!!.trimEnd('/') + "/v1/attachments")
         require(url.protocol == "https")
         val c = url.openConnection() as HttpURLConnection
@@ -429,7 +442,7 @@ internal class PhoneConversation(private val app: Application, private val chatK
                         // Keep the answer visible even if the separate history read loses the network.
                         val finalReply = r.optJSONObject("reply")?.let(ReplyContentParser::parse)
                         val finalText = finalReply?.text
-                        if (r.optString("status") == "done" && foreground && !DeviceLink.prefs(app).getBoolean("muted", false) && !state.value.recording && !state.value.transcribing && progressRead.canRead(current)) finalReply?.let { speakQueued(progressRead.finalText(current, it.text)) }
+                        if (r.optString("status") == "done" && (foreground || drivingPhone(current)) && !DeviceLink.prefs(app).getBoolean("muted", false) && !state.value.recording && !state.value.transcribing && progressRead.canRead(current)) finalReply?.let { speakQueued(progressRead.finalText(current, it.text)) }
                         state.update { it.copy(liveText = finalText ?: it.liveText) }
                         try {
                             state.value.selected?.let { history(it.id) }

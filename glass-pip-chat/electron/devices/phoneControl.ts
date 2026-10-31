@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { setTimeout as pause } from 'node:timers/promises';
-import { AdbPhone, validateOperations, type PhoneOperation, type PhoneView } from './adb.js';
+import { AdbPhone, settingsChange, validateOperations, type PhoneOperation, type PhoneView } from './adb.js';
 import { AccessibilityPhone, type ControlGrant } from './accessibilityPhone.js';
 import type { DeviceHub } from './hub.js';
 import type { ToolResult } from '../chatsMcp/protocol.js';
@@ -174,7 +174,7 @@ export class PhoneControl {
       screenshot: async s => ({ mimeType: 'image/png' as const, data: await this.adb.screenshot(String(serial), s) }),
     };
     // Also bounds approval wait and all subprocesses. Native approvals themselves expire after two minutes.
-    const expiry = setTimeout(() => controller.abort(), 270_000); // approval (2 min) + unlock wait (90 s) + execution (60 s)
+    let expiry = setTimeout(() => controller.abort(), 270_000); // approval (2 min) + unlock wait (90 s) + execution (60 s)
     try {
       await transport.check(signal);
       if (onDevice && !grant && !(await this.device.status(deviceId, signal)).enabled)
@@ -215,8 +215,8 @@ export class PhoneControl {
         throw error;
       } finally { clearTimeout(unlockExpiry); }
       delete action.message;
-      const deadline = this.now() + 60_000;
-      const executionExpiry = setTimeout(() => controller.abort(), 60_000);
+      let deadline = this.now() + 60_000;
+      let executionExpiry = setTimeout(() => controller.abort(), 60_000);
       try {
         if (operations.length && view.revision !== expectedRevision) throw Error('Screen changed since inspection. Inspect again before acting.');
         for (const operation of operations) {
@@ -224,6 +224,18 @@ export class PhoneControl {
           if (this.now() > deadline) throw Error('Execution time expired.');
           if (grant.expiresAt <= this.now()) throw Error('The control session ended. Ask again to start a new one.');
           action.inFlightOperation = action.completedOperations + 1;
+          // Changing a setting needs the user's yes each time; the wait doesn't count against execution time.
+          const change = settingsChange(operation, view);
+          if (change) {
+            clearTimeout(executionExpiry); clearTimeout(expiry);
+            const before = view.revision;
+            const answer = await this.hub.command('phone', 'phone_control_approve', { deviceId, chatId, title: 'Change a phone setting?', body: change, acceptLabel: 'Change it' }, signal);
+            if (!answer.ok) throw Error('The user declined this settings change; nothing was changed.');
+            view = await this.settledView(transport, signal);
+            if (view.revision !== before) throw Error('Screen changed while waiting for your answer. Inspect again before acting.');
+            deadline = this.now() + 60_000;
+            executionExpiry = setTimeout(() => controller.abort(), 60_000); expiry = setTimeout(() => controller.abort(), 270_000);
+          }
           await transport.perform(operation, view, signal);
           action.completedOperations++; delete action.inFlightOperation; action.updatedAt = this.now();
           await pause(250, undefined, { signal });

@@ -217,10 +217,12 @@ private fun InputScreen(state: WatchState, micHint: Boolean, start: () -> Unit, 
             verticalArrangement = Arrangement.Center) {
             Text("ALLY", fontFamily = Tanker, fontSize = 17.sp, lineHeight = 19.sp, letterSpacing = 2.sp, modifier = Modifier.clickable(onClick = chats).semantics { contentDescription = "Choose chat" })
             Text("CHATS ▾ · ${state.chatTitle}", fontFamily = Mono, color = Muted, fontSize = 9.sp, lineHeight = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.clickable(onClick = chats).padding(vertical = 2.dp))
-            Orb(state.look, if (state.externalRunning) Phase.THINKING else state.phase, state.microphoneLevel, canTalk, orbSize.value, if (state.phase in setOf(Phase.OFFLINE, Phase.ERROR)) retry else start, finish, cancel)
+            // The pause is the watch's own mic/haptics switch, not the chat: pressing the orb turns it back on.
+            Orb(state.look, if (state.externalRunning) Phase.THINKING else state.phase, state.microphoneLevel, canTalk, orbSize.value, if (state.phase in setOf(Phase.OFFLINE, Phase.ERROR)) retry else start, finish, cancel,
+                paused = if (state.muted && !state.externalRunning) mute else null)
             Text(when {
                 state.externalRunning -> "Thinking…"
-                state.muted -> "Paused"
+                state.muted -> "Mic paused on this watch"
                 state.speaking -> "Speaking…"
                 state.phase == Phase.RECORDING -> "Listening · ${state.recordingSeconds.toInt()}s"
                 state.phase == Phase.UPLOADING -> "Sending…"
@@ -231,7 +233,7 @@ private fun InputScreen(state: WatchState, micHint: Boolean, start: () -> Unit, 
                 state.phase == Phase.READY -> "Ready when you are"
                 else -> "Hold to talk"
             }, color = Color.White, fontSize = 14.sp, lineHeight = 18.sp)
-            Text(if (state.externalRunning) "Working in another app" else if (micHint) "Allow microphone, then hold again" else if (state.phase == Phase.RECORDING && state.liveTranscript.isNotBlank()) state.liveTranscript else if (state.detail == "Hold to talk") "Swipe or turn bezel for replies" else state.detail, color = Muted,
+            Text(if (state.externalRunning) "Working in another app" else if (micHint) "Allow microphone, then hold again" else if (state.phase == Phase.RECORDING && state.liveTranscript.isNotBlank()) state.liveTranscript else if (state.muted) "Tap the orb or ▶ to talk again" else if (state.detail == "Hold to talk") "Swipe or turn bezel for replies" else state.detail, color = Muted,
                 fontSize = 10.sp, lineHeight = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center,
                 modifier = Modifier.heightIn(min = 16.dp).padding(horizontal = 5.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -246,7 +248,8 @@ private fun InputScreen(state: WatchState, micHint: Boolean, start: () -> Unit, 
 }
 
 @Composable
-private fun Orb(look: WatchLook, phase: Phase, microphoneLevel: Float, enabled: Boolean, diameter: Float, start: () -> Unit, finish: () -> Unit, cancel: () -> Unit) {
+private fun Orb(look: WatchLook, phase: Phase, microphoneLevel: Float, enabled: Boolean, diameter: Float, start: () -> Unit, finish: () -> Unit, cancel: () -> Unit, paused: (() -> Unit)? = null) {
+    val currentPaused by rememberUpdatedState(paused)
     val currentPhase by rememberUpdatedState(phase)
     val currentStart by rememberUpdatedState(start)
     val currentFinish by rememberUpdatedState(finish)
@@ -255,10 +258,12 @@ private fun Orb(look: WatchLook, phase: Phase, microphoneLevel: Float, enabled: 
     WatchOrb(look, phase, microphoneLevel, Modifier.size(diameter.dp).semantics {
         contentDescription = if (phase == Phase.RECORDING) "Recording. Release to send." else "Hold to talk to Ally"
         role = Role.Button
-        onClick(label = "Start or stop recording") { if (currentPhase == Phase.RECORDING) currentFinish() else if (currentEnabled) currentStart(); true }
+        onClick(label = "Start or stop recording") { currentPaused?.let { it(); return@onClick true }; if (currentPhase == Phase.RECORDING) currentFinish() else if (currentEnabled) currentStart(); true }
     }.pointerInput(Unit) {
         detectTapGestures(onPress = {
-            if (currentEnabled) {
+            val resume = currentPaused
+            if (resume != null) { if (tryAwaitRelease()) resume() }
+            else if (currentEnabled) {
                 currentStart()
                 val released = tryAwaitRelease()
                 if (released) currentFinish() else currentCancel()

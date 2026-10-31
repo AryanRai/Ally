@@ -9,12 +9,32 @@ object AssistantRoutePicker {
     const val RERECORD = "__rerecord"
     const val MORE = "__more"
     const val SEARCH = "__search"
+    /** A new chat on another PC agent: `__new:claude` / `__new:codex`. */
+    const val NEW_ON = "__new:"
+    const val PHONE_NEW = "__new_phone"
+    const val PHONE = "phone"
     const val PAGE = 5
     /** [chats] is every known destination, ranked: routed matches first, then recent chats. */
     data class Picker(val suggested: String, val chats: List<AssistantChoice>, val fresh: AssistantChoice)
 
     private fun JSONObject.choice() = AssistantChoice(getString("id"), optString("title").ifBlank { "Untitled chat" }, getString("provider"))
-    fun newChat(provider: String) = AssistantChoice(NEW, "New $provider chat", provider)
+    private fun agent(provider: String) = if (provider == "claude") "Claude Code" else "Codex"
+    fun newChat(provider: String) = AssistantChoice(NEW, "New ${agent(provider)} chat · PC", provider)
+    /** Where a new chat can run besides [provider]'s own New row: the other PC agent, then phone Codex. */
+    fun newChats(provider: String, phone: Boolean): List<AssistantChoice> =
+        listOf("codex", "claude").filter { it != provider }.map { AssistantChoice(NEW_ON + it, "New ${agent(it)} chat · PC", it) } +
+            (if (phone) listOf(AssistantChoice(PHONE_NEW, "New Codex chat · phone", PHONE)) else emptyList())
+    fun newProvider(id: String): String? = id.removePrefix(NEW_ON).takeIf { id.startsWith(NEW_ON) && it in setOf("codex", "claude") }
+
+    private fun words(text: String) = Regex("[a-z0-9]{4,}").findAll(text.lowercase()).map { it.value }.toSet()
+    /** Phone chats ranked by shared words with the request; a clear match is suggested, otherwise a new phone chat. */
+    fun phoneOptions(text: String, chats: List<AssistantChoice>): Picker {
+        val asked = words(text)
+        val scored = chats.mapIndexed { index, chat -> Triple(chat, (words(chat.title.removePrefix("Phone · ")) intersect asked).size, index) }
+        val ranked = scored.sortedWith(compareByDescending<Triple<AssistantChoice, Int, Int>> { it.second }.thenBy { it.third }).map { it.first }
+        val best = scored.maxByOrNull { it.second }?.takeIf { it.second >= 2 }?.first
+        return Picker(best?.id ?: PHONE_NEW, ranked, AssistantChoice(PHONE_NEW, "New Codex chat · phone", PHONE))
+    }
     private fun usable(chats: List<JSONObject>) = chats.filter { it.optString("id").isNotBlank() && it.optString("provider") in setOf("codex", "claude") && it.optString("title") != "New watch chat" }
 
     fun options(route: JSONObject, recent: List<JSONObject>, provider: String): Picker {
@@ -33,12 +53,12 @@ object AssistantRoutePicker {
     }.orEmpty()
 
     /** The compact window shown: [limit] chats with New chat, or matches while searching. */
-    fun rows(picker: Picker, limit: Int, query: String = "", hits: List<AssistantChoice> = emptyList(), provider: String? = null): List<AssistantChoice> {
+    fun rows(picker: Picker, limit: Int, query: String = "", hits: List<AssistantChoice> = emptyList(), provider: String? = null, otherNew: List<AssistantChoice> = emptyList()): List<AssistantChoice> {
         val q = query.trim()
         val matching = picker.chats.filter { provider == null || it.provider == provider }
         if (q.isNotEmpty()) return (matching.filter { it.title.contains(q, true) } + hits.filter { provider == null || it.provider == provider }).distinctBy { it.id }.take(maxOf(limit, 8))
         val chats = matching.take(limit)
-        val fresh = picker.fresh
-        return if (picker.suggested == NEW) listOf(fresh) + chats else chats + fresh
+        val fresh = listOf(picker.fresh) + otherNew
+        return if (picker.suggested == picker.fresh.id) fresh + chats else chats + fresh
     }
 }
