@@ -1,5 +1,6 @@
 package dev.ally.phone
 
+import dev.ally.device.AssistantChoice
 import dev.ally.device.AssistantEntryPolicy
 import dev.ally.device.AssistantRoutePicker
 import org.json.JSONArray
@@ -16,7 +17,7 @@ class AssistantRoutePickerTest {
         assertFalse(ids(AssistantRoutePicker.rows(picker, 5)).contains("codex:original"))
         assertEquals(listOf("codex:original", AssistantRoutePicker.NEW), ids(AssistantRoutePicker.rows(picker, 5, provider = "codex")))
         assertEquals("claude:1", picker.suggested)
-        assertEquals("New claude chat", picker.fresh.title)
+        assertEquals("New Claude Code chat · PC", picker.fresh.title)
     }
     private fun chat(id: String, title: String, provider: String = "codex", updated: Long = 0) =
         JSONObject().put("id", id).put("title", title).put("provider", provider).put("updatedAt", updated)
@@ -34,7 +35,7 @@ class AssistantRoutePickerTest {
         val picker = AssistantRoutePicker.options(route("new"), listOf(chat("codex:old", "Older", updated = 1), chat("claude:new", "Newer", "claude", 7)), "claude")
         assertEquals(AssistantRoutePicker.NEW, picker.suggested)
         assertEquals(listOf(AssistantRoutePicker.NEW, "claude:new", "codex:old"), ids(AssistantRoutePicker.rows(picker, 5)))
-        assertEquals("New claude chat", picker.fresh.title)
+        assertEquals("New Claude Code chat · PC", picker.fresh.title)
     }
 
     @Test fun theWindowStaysCompactAndMoreRevealsLaterPages() {
@@ -67,5 +68,28 @@ class AssistantRoutePickerTest {
         assertTrue(AssistantEntryPolicy.canReplace(null, null, null, false, "Suggested chat · Send or pick another"))
         assertFalse(AssistantEntryPolicy.canReplace("codex:a", "words", null, false, "Message not confirmed"))
         assertFalse(AssistantEntryPolicy.canReplace(null, null, null, true, "Opening conversation…"))
+    }
+
+    @Test fun phoneRequestsSuggestAMatchingPhoneChatOrANewOne() {
+        val chats = listOf(AssistantChoice("codex:a", "Phone · Set an alarm for tomorrow", "phone"), AssistantChoice("codex:b", "Phone · Clean home screen widgets page", "phone"))
+        val match = AssistantRoutePicker.phoneOptions("Clean my second home screen page", chats)
+        assertEquals("codex:b", match.suggested)
+        assertEquals(listOf("codex:b", "codex:a"), match.chats.map { it.id })
+        assertEquals("codex:b", AssistantRoutePicker.rows(match, 5).first().id)
+        val fresh = AssistantRoutePicker.phoneOptions("Open YouTube", chats)
+        assertEquals(AssistantRoutePicker.PHONE_NEW, fresh.suggested)
+        assertEquals(AssistantRoutePicker.PHONE_NEW, AssistantRoutePicker.rows(fresh, 5).first().id)
+        assertEquals(AssistantRoutePicker.PHONE_NEW, AssistantRoutePicker.phoneOptions("anything", emptyList()).suggested)
+    }
+
+    @Test fun newChatRowsOfferEveryPlaceToRun() {
+        val others = AssistantRoutePicker.newChats("codex", phone = true)
+        assertEquals(listOf("New Claude Code chat · PC", "New Codex chat · phone"), others.map { it.title })
+        assertEquals("claude", AssistantRoutePicker.newProvider(others[0].id))
+        assertEquals(null, AssistantRoutePicker.newProvider(others[1].id))
+        assertEquals(listOf("New Codex chat · PC"), AssistantRoutePicker.newChats("claude", phone = false).map { it.title })
+        val picker = AssistantRoutePicker.options(JSONObject().put("kind", "new"), listOf(chat("codex:1", "Notes")), "codex")
+        assertEquals(listOf(AssistantRoutePicker.NEW, AssistantRoutePicker.NEW_ON + "claude", AssistantRoutePicker.PHONE_NEW, "codex:1"),
+            AssistantRoutePicker.rows(picker, 5, otherNew = others).map { it.id })
     }
 }

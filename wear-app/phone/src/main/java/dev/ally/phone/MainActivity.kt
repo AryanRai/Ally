@@ -252,7 +252,8 @@ private fun Conversation(state: PhoneState,model: PhoneModel,modifier: Modifier,
         if(requests.isNotEmpty() || state.messages.isNotEmpty() || state.loading || state.error.isNotBlank() || state.busy || state.liveText.isNotBlank() || state.approval!=null) LazyColumn(Modifier.fillMaxSize(),state=scroll,contentPadding=PaddingValues(start=24.dp,end=24.dp,top=12.dp,bottom=24.dp),verticalArrangement=Arrangement.spacedBy(28.dp)) {
             if(state.before!=null) item(key="older") { TextButton(model::older,enabled=!state.loading,modifier=Modifier.fillMaxWidth()) { Text("Load earlier messages",color=Muted,fontSize=12.sp) } }
             if(state.loading && state.messages.isEmpty()) item { Text("Opening your conversation…",color=Muted,fontSize=13.sp) }
-            items(timeline,key={it.id}) { entry ->
+            // A reply can arrive live and again from history; duplicate keys would crash the list (and the control service with it).
+            items(timeline.distinctBy { it.id },key={it.id}) { entry ->
                 entry.request?.let { DeviceInteractionCard(it) }
                 entry.message?.let { message ->
                 Column(Modifier.fillMaxWidth(),horizontalAlignment=if(message.role=="user") Alignment.End else Alignment.Start) {
@@ -475,6 +476,9 @@ private fun PhoneSettings(link: String,modifier: Modifier, appearance: ()->Unit)
     val permission=rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { allowed -> if(allowed) DeviceLink.start(context) }
     Column(modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(24.dp),verticalArrangement=Arrangement.spacedBy(22.dp)) {
         Column { MicroLabel("Make yourself at home"); Text("Settings",fontFamily=Geist,fontSize=29.sp,modifier=Modifier.padding(top=8.dp)) }
+        SettingRow("shield", "Phone Codex", "Sign in and run a chat on this phone") {
+            context.startActivity(Intent(context,dev.ally.phone.codex.CodexPhoneActivity::class.java))
+        }
         Row(Modifier.fillMaxWidth().border(1.dp,Line,RoundedCornerShape(8.dp)).padding(18.dp),verticalAlignment=Alignment.CenterVertically) {
             PresenceOrb(Modifier.size(42.dp)); Column(Modifier.padding(start=12.dp).weight(1f)) { Text("Your desktop",fontSize=15.sp); Text(link,color=Muted,fontSize=12.sp) }
         }

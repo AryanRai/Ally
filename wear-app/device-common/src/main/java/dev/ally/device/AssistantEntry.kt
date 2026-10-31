@@ -228,6 +228,7 @@ internal class AssistantEntry(private val context: Context, private val scope: C
         job = scope.launch { try { save(); route() } catch(e: CancellationException) { throw e } catch(e: Exception) { fail(e.message ?: "Chat matching unavailable") } }
     }
     private suspend fun route() {
+        if(executionLocation==null && host.routePhoneCodex(text,requestId)) {resetUnsent();entry=false;state.value=null;return}
         // Phone handoff must not wait for desktop matching or its availability.
         if (executionLocation == null) {
             picker = picker ?: AssistantRoutePicker.Picker("", emptyList(), AssistantRoutePicker.newChat(host.provider))
@@ -275,14 +276,20 @@ internal class AssistantEntry(private val context: Context, private val scope: C
                 val page = request("/v1/chats?provider=$engine&offset=$offset")
                 AssistantRecentChats.Page(engine, page.optJSONArray("chats")?.let { a -> (0 until a.length()).map { a.getJSONObject(it) } }.orEmpty(), if (page.isNull("nextOffset")) null else page.optInt("nextOffset"))
         }, onPage).map { Triple(it.provider, it.chats, it.next) }
-    private fun rows() = picker?.let { AssistantRoutePicker.rows(it, limit, query, hits, providerFilter) }.orEmpty()
+    private fun phoneReady() = host.phoneCodexAvailable() && host.phoneCodexSignedIn()
+    private fun rows() = picker?.let { AssistantRoutePicker.rows(it, limit, query, hits, providerFilter,
+        if (executionLocation == "pc") AssistantRoutePicker.newChats(host.provider, phoneReady()) else emptyList()) }.orEmpty()
     private fun handoffChoices() = if (!context.packageManager.hasSystemFeature(PackageManager.FEATURE_WATCH) && screen.enabled && canReplace())
         listOf(AssistantChoice("__handoff", "Review phone context on PC")) else emptyList()
     private fun showPicker(status: String) {
         val current = picker ?: return
         if (executionLocation == null) {
-            state.value = AssistantEntryState("Choose where to send · Gemini opens with your words ready to review", text,
-                choices = AssistantExecutionDestination.rows(executionOffer, GeminiHandoff.available(context)) + handoffChoices() + AssistantChoice(AssistantRoutePicker.RERECORD, "Try again"))
+            state.value = AssistantEntryState("Choose where to send · phone and PC chats keep their own sessions", text,
+                choices = AssistantExecutionDestination.rows(executionOffer, GeminiHandoff.available(context), host.phoneCodexAvailable()) + handoffChoices() + AssistantChoice(AssistantRoutePicker.RERECORD, "Try again"))
+            return
+        }
+        if (executionLocation == "phone") {
+            state.value = AssistantEntryState(status, text, choices = rows() + listOf(AssistantChoice(AssistantExecutionDestination.CHANGE, "Execution: phone · change"), AssistantChoice(AssistantRoutePicker.RERECORD, "Try again")), selected = selected)
             return
         }
         val searching = query.isNotBlank()
@@ -295,7 +302,7 @@ internal class AssistantEntry(private val context: Context, private val scope: C
             ?: failedProviders.takeIf { it.isNotEmpty() }?.joinToString(", ", " · Could not load ", " · More chats retries").orEmpty()
         state.value = AssistantEntryState((if (searching && shown.isEmpty()) "No chats match “${query.trim()}”" else status) + progress, text, choices = shown + controls, selected = selected)
     }
-    private fun pickerStatus() = if (selected == picker?.suggested) "Suggested chat · Send or pick another" else "Chat changed · tap Send"
+    private fun pickerStatus() = if (selected == picker?.suggested) (if (selected == AssistantRoutePicker.PHONE_NEW) "New phone chat · Send or pick another" else "Suggested chat · Send or pick another") else "Chat changed · tap Send"
     /** Filters loaded chats at once, then adds desktop search hits. Never sends. */
     fun search(value: String) {
         if (picker == null || target != null || state.value?.busy == true) return
@@ -366,6 +373,25 @@ internal class AssistantEntry(private val context: Context, private val scope: C
             }
             return
         }
+        if (id == AssistantExecutionDestination.PHONE_CODEX) {
+            if(!canReplace() || text.isBlank() || !host.phoneCodexAvailable() || target != null)return
+            // Sign-in is the only reason to leave the overlay; otherwise pick a phone chat here, then Send.
+            if (!host.phoneCodexSignedIn()) {
+                state.value = AssistantEntryState("Sign in to Codex on this phone first · your words are kept", text,
+                    choices = listOf(AssistantChoice("__phone_signin", "Sign in to Codex on this phone"), AssistantChoice(AssistantExecutionDestination.CHANGE, "Choose another place"), AssistantChoice(AssistantRoutePicker.RERECORD, "Try again")))
+                return
+            }
+            lookup?.cancel(); catalogJob?.cancel(); catalogGeneration++; pendingProviders = emptySet()
+            executionLocation = "phone"; providerFilter = null; query = ""; hits = emptyList(); limit = AssistantRoutePicker.PAGE
+            picker = AssistantRoutePicker.phoneOptions(text, host.phoneCodexChats()); selected = picker?.suggested
+            showPicker(pickerStatus())
+            return
+        }
+        if (id == "__phone_signin") {
+            if(!canReplace() || text.isBlank())return
+            host.openPhoneCodex(text); resetUnsent(); entry=false; state.value=null
+            return
+        }
         if (id == AssistantExecutionDestination.PHONE) {
             if (!canReplace() || text.isBlank()) return
             if (!GeminiHandoff.available(context)) {
@@ -401,11 +427,18 @@ internal class AssistantEntry(private val context: Context, private val scope: C
             job = scope.launch { try { if (target != null) deliver(target) else route() } catch(e: CancellationException) { throw e } catch(e: Exception) { fail(e.message ?: "Request unavailable") } }; return
         }
         if (id == AssistantRoutePicker.SEND) {
-            if (executionLocation != "pc") { showPicker("Choose where to run"); return }
+            if (executionLocation != "pc" && executionLocation != "phone") { showPicker("Choose where to run"); return }
             val pick = selected ?: return
-            val destination = if (pick == AssistantRoutePicker.NEW) null else (picker?.chats.orEmpty() + hits).find { it.id == pick } ?: return
+            val known = (picker?.chats.orEmpty() + hits).find { it.id == pick }
+            if (pick == AssistantRoutePicker.PHONE_NEW || known?.provider == AssistantRoutePicker.PHONE) {
+                lookup?.cancel(); catalogJob?.cancel(); catalogGeneration++; pendingProviders = emptySet()
+                job = scope.launch { try { deliverPhone(known?.id) } catch(e: CancellationException) { throw e } catch(e: Exception) { fail(e.message ?: "Phone Codex did not confirm · your words are kept") } }
+                return
+            }
+            val provider = AssistantRoutePicker.newProvider(pick) ?: host.provider
+            val destination = if (pick == AssistantRoutePicker.NEW || pick.startsWith(AssistantRoutePicker.NEW_ON)) null else known ?: return
             lookup?.cancel(); catalogJob?.cancel(); catalogGeneration++; pendingProviders = emptySet()
-            job = scope.launch { try { deliver(destination) } catch(e: CancellationException) { throw e } catch(e: Exception) { fail(e.message ?: "Message not confirmed") } }
+            job = scope.launch { try { deliver(destination, provider) } catch(e: CancellationException) { throw e } catch(e: Exception) { fail(e.message ?: "Message not confirmed") } }
             return
         }
         if (id == AssistantRoutePicker.MORE) { if (target == null) loadMore(); return }
@@ -414,15 +447,21 @@ internal class AssistantEntry(private val context: Context, private val scope: C
         val choice = rows().find { it.id == id } ?: return
         if (target != null) return
         // A search hit joins the known chats so Send and later views still find it.
-        picker = picker?.let { p -> if (id == AssistantRoutePicker.NEW || p.chats.any { it.id == id }) p else p.copy(chats = p.chats + choice) }
+        picker = picker?.let { p -> if (id.startsWith(AssistantRoutePicker.NEW) || p.chats.any { it.id == id }) p else p.copy(chats = p.chats + choice) }
         selected = id
         showPicker(pickerStatus())
     }
-    private suspend fun deliver(selected: AssistantChoice?) {
+    /** One phone request per requestId: the phone runtime keeps its own receipt, so a retry never resends. */
+    private suspend fun deliverPhone(chatId: String?) {
+        state.value = AssistantEntryState("Starting Codex on this phone…", text, busy = true)
+        host.sendPhoneCodex(chatId, text, requestId) ?: error("Phone Codex could not start · your words are kept")
+        delivered()
+    }
+    private suspend fun deliver(selected: AssistantChoice?, provider: String = host.provider) {
         AssistantExecutionDestination.requirePc(executionLocation)
         state.value = AssistantEntryState("Opening conversation…", text, busy = true)
         if (target == null) {
-            target = selected ?: request("/v1/chats", JSONObject().put("provider", host.provider).put("requestId", requestId)).getJSONObject("chat").let {
+            target = selected ?: request("/v1/chats", JSONObject().put("provider", provider).put("requestId", requestId)).getJSONObject("chat").let {
                 AssistantChoice(it.getString("id"), it.getString("title"), it.getString("provider"))
             }
             permission = host.permissionFor(target!!.id)
@@ -445,6 +484,9 @@ internal class AssistantEntry(private val context: Context, private val scope: C
         save()
         // Adopting the exact receipt starts existing polling; it never resends words.
         host.acceptTurn(chat.id, acceptedTurn!!)
+        delivered()
+    }
+    private fun delivered() {
         prefs.edit().remove("assistantEntryDraft").commit()
         entry = false; text = ""; picker = null; this.selected = null; executionLocation = null; query = ""; hits = emptyList(); lookup?.cancel(); catalogJob?.cancel(); catalogGeneration++; pendingProviders = emptySet(); kept = null; target = null; acceptedTurn = null; screen.clear(); screenAttachment = null; submissionText = null; screenNotice = ""; state.value = null
     }

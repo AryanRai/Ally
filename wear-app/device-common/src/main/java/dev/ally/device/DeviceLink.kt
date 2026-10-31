@@ -29,6 +29,8 @@ object DeviceLink {
     var viewerHandler: ((Context,JSONObject)->Unit)?=null
     /** Large-file transfer status/completion events pushed from the desktop bridge. */
     var transferHandler: ((Context, JSONObject) -> Unit)? = null
+    /** Phone-only: closes the notification shade through Ally's control service, if it is on. */
+    var closeNotificationShade: (() -> Boolean)? = null
     fun sendControl(message: JSONObject): Boolean = service?.send(message) == true
     fun prefs(c: Context) = c.getSharedPreferences("ally-watch", Context.MODE_PRIVATE)
     fun kind(c: Context) = if (c.packageName.endsWith(".watch")) "watch" else "phone"
@@ -125,9 +127,21 @@ object DeviceLink {
         if(connection!=service?.connectionId || !DeviceInteractions.canAnswer(item,status.value=="Connected",connection) || DeviceInteractions.notificationActions(item).none{it.first==action} || id in interactionSending.value) return
         val answer=DeviceInteractions.notificationAnswer(item,action) ?: return
         interactionSending.value += id
-        val sent=service?.send(JSONObject().put("type","interaction_answer").put("id",id).put("action",answer.first).put("values",JSONObject(answer.second)))==true
-        if(!sent){interactionSending.value -= id;interactionErrors.value += id to "Reconnect before answering";return}
         c.getSystemService(NotificationManager::class.java).cancel(DeviceAlerts.notificationId(item))
+        fun send() {
+            val sent=service?.connectionId==connection && service?.send(JSONObject().put("type","interaction_answer").put("id",id).put("action",answer.first).put("values",JSONObject(answer.second)))==true
+            if(!sent){interactionSending.value -= id;interactionErrors.value += id to "Reconnect before answering";notify(c,item)}
+        }
+        // Phone control inspects the screen right away: close the shade first so it sees the app, not the shade.
+        if(answer.first=="accept" && item.optString("deviceAction")=="phone_control_approve" && item.optString("targetDeviceId")==prefs(c).getString("deviceId",null) && closeNotificationShade?.invoke()==true)
+            Handler(Looper.getMainLooper()).postDelayed({send()},700)
+        else send()
+    }
+    /** Allow on an app-opening action: answer from a foreground screen so the approved command can start the app. */
+    internal fun answerFromScreen(activity: Activity,id:String,action:String,connection:String):Boolean {
+        foregroundActivity=java.lang.ref.WeakReference(activity)
+        answerNotification(activity,id,action,connection)
+        return id in interactionSending.value
     }
     internal fun interactionEvent(c: Context, message: JSONObject, connection: String) {
         val id = message.optString("id")
@@ -173,6 +187,7 @@ object DeviceLink {
             save(c,waiting); notify(c,waiting); return
         }
         runCommand(activity ?: c, item)
+        (activity as? DeviceDecisionActivity)?.finish()
     }
     fun continueAuthorized(activity: Activity, item: JSONObject) {
         if(!item.optBoolean("authorized") || service?.connectionId != item.optString("_connection") || item.optLong("expiresAt") <= System.currentTimeMillis()) return
@@ -289,7 +304,9 @@ object DeviceLink {
         DeviceInteractions.notificationActions(item).forEach { (value,label) ->
             val connection=item.optString("_connection")
             val intent=Intent(c,DeviceDecisionReceiver::class.java).setData(android.net.Uri.parse("ally-decision://request/"+android.net.Uri.encode(id)+"/"+android.net.Uri.encode(connection)+"/"+value)).putExtra("id",id).putExtra("decision",value).putExtra("connection",connection)
-            val action=Notification.Action.Builder(null,label,PendingIntent.getBroadcast(c,0,intent,PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE))
+            val pending=if(DeviceInteractions.needsForeground(item,value))PendingIntent.getActivity(c,0,intent.setClass(c,DeviceDecisionActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+                else PendingIntent.getBroadcast(c,0,intent,PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+            val action=Notification.Action.Builder(null,label,pending)
             if(Build.VERSION.SDK_INT>=31)action.setAuthenticationRequired(true)
             builder.addAction(action.build())
         }
@@ -303,6 +320,16 @@ class DeviceDecisionReceiver : BroadcastReceiver() {
         val decision=intent.getStringExtra("decision") ?: return
         val connection=intent.getStringExtra("connection") ?: return
         DeviceLink.answerNotification(context,id,decision,connection)
+    }
+}
+/** No-UI screen behind Allow on app-opening actions: Android lets the approved command start the app from here. */
+class DeviceDecisionActivity : Activity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        val id=intent.getStringExtra("id"); val decision=intent.getStringExtra("decision"); val connection=intent.getStringExtra("connection")
+        if(id==null || decision==null || connection==null || !DeviceLink.answerFromScreen(this,id,decision,connection)) { finish(); return }
+        // The approved command normally arrives within a second; otherwise "Continue approved action" remains.
+        Handler(Looper.getMainLooper()).postDelayed({ if(!isFinishing) finish() }, 8000)
     }
 }
 class DeviceDismissReceiver : BroadcastReceiver() {

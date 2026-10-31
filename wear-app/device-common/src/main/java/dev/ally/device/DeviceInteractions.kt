@@ -54,9 +54,14 @@ object DeviceInteractions {
     }
     fun canAnswer(item: JSONObject, connected: Boolean, connection: String?, now: Long = System.currentTimeMillis()) =
         connected && !connection.isNullOrBlank() && item.optString("_connection") == connection && pending(listOf(item), now).isNotEmpty()
-    /** Notification actions remain a subset of the real advertised choices. */
+    /** Device actions that start another app; Android only allows that from a foreground screen. */
+    private val launchActions=setOf("phone_open_url","phone_open_app","phone_set_alarm","phone_set_timer")
+    /** Accepting this from a notification needs an Activity button rather than a background broadcast. */
+    fun needsForeground(item: JSONObject, choice: String) = choice=="accept" && item.optString("deviceAction") in launchActions
+    /** Notification actions remain a subset of the real advertised choices. Device actions,
+     *  phone control included, are decided here too; the unlock requirement still applies. */
     fun notificationActions(item: JSONObject, now:Long=System.currentTimeMillis()):List<Pair<String,String>> {
-        if(!item.optBoolean("interaction") || !awaiting(item,now) || item.optBoolean("desktopOnly") || item.optBoolean("authorized") || item.optString("deviceAction").isNotBlank()) return emptyList()
+        if(!item.optBoolean("interaction") || !awaiting(item,now) || item.optBoolean("desktopOnly") || item.optBoolean("authorized")) return emptyList()
         val fields=item.optJSONArray("fields")
         val actions=item.optJSONArray("actions") ?: return emptyList()
         if((fields?.length() ?: 0)>0) {

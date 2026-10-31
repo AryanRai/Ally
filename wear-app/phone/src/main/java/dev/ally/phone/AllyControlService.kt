@@ -121,6 +121,9 @@ class AllyControlService : AccessibilityService() {
         if (!node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)) throw IllegalStateException("The field didn't accept text.")
     }
 
+    /** Closes the notification shade after an approval from it, so control starts on the app underneath. */
+    fun dismissShade() = android.os.Build.VERSION.SDK_INT >= 31 && performGlobalAction(GLOBAL_ACTION_DISMISS_NOTIFICATION_SHADE)
+
     fun key(key: String) {
         val action = when (key) { "back" -> GLOBAL_ACTION_BACK; "home" -> GLOBAL_ACTION_HOME; "recents" -> GLOBAL_ACTION_RECENTS; else -> throw IllegalArgumentException("Unsupported key.") }
         if (!performGlobalAction(action)) throw IllegalStateException("Android ignored the key.")
@@ -169,13 +172,14 @@ object ControlBridge {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val handler = Handler(Looper.getMainLooper())
     @Volatile private var grant: ControlGrant? = null
+    @Volatile private var localGrant = false
     private val expire = Runnable { grant?.let { if (!it.active(System.currentTimeMillis())) end(appContext ?: return@Runnable, "Ally's control session ended.") } }
     private var appContext: Context? = null
 
     fun install(context: Context) {
         appContext = context.applicationContext
         DeviceLink.controlHandler = { c, message, reply -> handle(c, message, reply) }
-        scope.launch { DeviceLink.status.collectLatest { if(it!="Connected")end(context,"Phone connection ended.") } }
+        scope.launch { DeviceLink.status.collectLatest { if(it!="Connected" && !localGrant)end(context,"Phone connection ended.") } }
     }
 
     private fun handle(context: Context, message: JSONObject, reply: (JSONObject) -> Unit) {
@@ -189,6 +193,14 @@ object ControlBridge {
         }
     }
 
+    /** Only the in-process phone agent calls this, after its native user review and local policy checks. */
+    internal suspend fun local(context: Context, method: String, params: JSONObject): JSONObject = withContext(Dispatchers.Main) {
+        require(method in setOf("control.grant","control.view","control.screenshot","control.perform","control.end"))
+        if(method=="control.grant") check(grant==null) { "Another phone control session is active" }
+        val result=dispatch(context,method,params)
+        if(method=="control.grant") localGrant=true
+        result
+    }
     private suspend fun dispatch(context: Context, method: String, params: JSONObject): JSONObject {
         val service = AllyControlService.instance
         when (method) {
@@ -197,6 +209,7 @@ object ControlBridge {
                 return JSONObject().put("enabled", service != null).put("grant", grant?.takeIf { it.active(System.currentTimeMillis()) }?.id ?: JSONObject.NULL)
             }
             "control.grant" -> {
+                check(grant==null || params.optString("grantId")==grant?.id) { "Another phone control session is active" }
                 val next = ControlGrant.parse(params.optString("grantId"), params.optString("chatId"), params.optString("title"), params.optLong("expiresAt"), System.currentTimeMillis())
                     ?: throw IllegalArgumentException("Invalid control session.")
                 if (service == null) { promptSetup(context); throw IllegalStateException(SETUP_MESSAGE) }
@@ -280,7 +293,7 @@ object ControlBridge {
     fun end(context: Context, reason: String?, notifyDesktop: Boolean = true) {
         visual.value=ControlVisualState()
         val ended = grant ?: return
-        grant = null; handler.removeCallbacks(expire)
+        grant = null; localGrant=false; handler.removeCallbacks(expire)
         AllyControlService.instance?.keepAwake(false)
         context.getSystemService(NotificationManager::class.java).cancel(NOTICE)
         if (notifyDesktop) DeviceLink.sendControl(JSONObject().put("type", "control_revoked").put("grantId", ended.id).put("reason", reason ?: "Stopped on the phone."))

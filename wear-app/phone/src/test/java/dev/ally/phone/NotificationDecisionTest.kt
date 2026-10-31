@@ -11,8 +11,18 @@ class NotificationDecisionTest {
         assertTrue(DeviceInteractions.notificationActions(request(),2000).isEmpty())
         assertTrue(DeviceInteractions.notificationActions(request().put("interactionState","answered"),1000).isEmpty())
         assertTrue(DeviceInteractions.notificationActions(request().put("desktopOnly",true),1000).isEmpty())
-        assertTrue(DeviceInteractions.notificationActions(request().put("deviceAction","phone_control_approve"),1000).isEmpty())
+        assertTrue(DeviceInteractions.notificationActions(request().put("authorized",true),1000).isEmpty())
         assertTrue(DeviceInteractions.notificationActions(request().put("fields",JSONArray().put(JSONObject().put("id","text"))),1000).isEmpty())
+    }
+    @Test fun deviceActionsAreDecidedFromTheNotification() {
+        val control=request().put("deviceAction","phone_control_approve")
+        assertEquals(listOf("accept","decline"),DeviceInteractions.notificationActions(control,1000).map{it.first})
+        assertEquals("accept" to emptyMap<String,String>(),DeviceInteractions.notificationAnswer(control,"accept",1000))
+        assertFalse(DeviceInteractions.needsForeground(control,"accept"))
+        val open=request().put("deviceAction","phone_open_url")
+        assertTrue(DeviceInteractions.needsForeground(open,"accept"))
+        assertFalse(DeviceInteractions.needsForeground(open,"decline"))
+        assertNull(DeviceInteractions.notificationAnswer(control,"submitAlways",1000))
     }
     @Test fun singleChoiceQuestionUsesTheExactAdvertisedValue() {
         val item=request().put("actions",JSONArray().put(JSONObject().put("value","submit")))

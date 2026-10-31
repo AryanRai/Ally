@@ -43,12 +43,15 @@ internal object PhoneNotch {
         val items = mutableListOf<NotchItem>()
         requests.forEach { items += NotchItem(it.optString("id"), it.optString("title").take(160), if (connected) "Tap to review your ${it.optString("kind", "request")}" else "Reconnect to answer", "request", it.optLong("expiresAt"), 100, it.optString("chatId")) }
         val control = ControlBridge.visual.value
-        if (control.visible(now, connected, false, true)) items += NotchItem("control:${control.grantId}", if(control.operations>0) "Acting on your phone" else "Phone control active",control.title,"control",control.expiresAt,95,control.chatId)
+        val driving = control.visible(now, connected, false, true)
+        // Only the newest status line while Ally drives the phone; older ones are in the chat.
+        if (driving) items += NotchItem("control:${control.grantId}", if(control.operations>0) "Acting on your phone" else "Phone control active",phone.progress.lastOrNull()?.text?.take(200)?.takeIf { it.isNotBlank() } ?: control.title,"control",control.expiresAt,95,control.chatId)
         val chat = phone.selected?.id
         when {
             phone.recording -> items += NotchItem("recording", "Listening", "Open Ally to finish or cancel", "voice", priority=90,chatId=chat)
             phone.transcribing -> items += NotchItem("transcribing", "Finishing your words…", priority=85,chatId=chat)
             phone.speaking -> items += NotchItem("speaking", "Speaking", phone.selected?.title.orEmpty(), "speech", priority=80,chatId=chat)
+            driving -> {}
             phone.busy || phone.externalRunning -> items += NotchItem("working:${phone.progressTurnId}",phone.activity.ifBlank { "Working…" },phone.progress.lastOrNull()?.text?.take(200).orEmpty(),priority=75,chatId=chat)
         }
         if (connected && !surface.stale) surface.chats.filter { it.active }.forEach { items += NotchItem("agent:${it.key}",it.title,it.text.ifBlank { it.detail },priority=if(it.status=="needs_input") 82 else 70,chatId=it.id) }
