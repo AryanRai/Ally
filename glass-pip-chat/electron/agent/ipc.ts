@@ -32,6 +32,7 @@ import { startWatchBridge } from '../watch/bridge.js';
 import { liveStudyReplies } from '../watch/liveStudyReply.js';
 import { presentDecisionOnNative, revealFloatingSurface } from '../surface/coordinator.js';
 import type { AgentConfig, AgentProvider, AgentRunOptions } from './types.js';
+import { registerSettingsTool } from './settingsTool.js';
 
 const CONFIG_FILE = () => path.join(app.getPath('userData'), 'agent-config.json');
 
@@ -90,14 +91,18 @@ export function registerAgentIpc(getWindow: () => BrowserWindow | null, onConfig
 
   ipcMain.handle('agent:getConfig', () => ({ ...config, homeCwd: app.getPath('home') }));
 
-  ipcMain.handle('agent:updateConfig', (_, patch: Partial<AgentConfig>) => {
+  const updateConfig = (patch: Partial<AgentConfig>) => {
     config = { ...config, ...patch };
     fs.writeFileSync(CONFIG_FILE(), JSON.stringify(config, null, 2));
     onConfig?.(config);
     configureMcpSavings(config);
     configureCodexHistory(config.codexPath);
     return { ...config, homeCwd: app.getPath('home') };
-  });
+  };
+  ipcMain.handle('agent:updateConfig', (_, patch: Partial<AgentConfig>) => updateConfig(patch));
+  // Agents may propose one setting change at a time; each waits for the user's approval in the chat.
+  const stopSettingsTool = registerSettingsTool(() => config, updateConfig);
+  app.on('will-quit', stopSettingsTool);
 
   ipcMain.handle('agent:status', async () => {
     const [claude, codex] = await Promise.all([

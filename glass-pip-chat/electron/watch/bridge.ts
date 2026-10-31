@@ -241,9 +241,9 @@ export function startWatchBridge(getConfig: () => AgentConfig): (() => void) | u
             if (event.phase === 'commentary') {
               // Commentary is retained in the ordered public timeline by recordActivity.
             } else finalOutput = (finalOutput + (finalOutput && event.itemId && textItem && event.itemId !== textItem ? '\n\n' : '') + event.text).slice(0, 64001);
-            // Native speech needs the boundary between a progress message and
-            // the next answer, even when neither item supplies a newline.
-            const text = (turn.nativeStudy !== undefined && event.itemId && textItem && event.itemId !== textItem ? '\n\n' : '') + event.text;
+            // A new message (a progress note, then the answer) starts its own paragraph even when
+            // neither item supplies a newline; native speech also needs that boundary.
+            const text = (event.itemId && textItem && event.itemId !== textItem && output && !output.endsWith('\n') ? '\n\n' : '') + event.text;
             if (event.itemId) textItem = event.itemId;
             output = (output + text).slice(0, 64001);
           turn.liveText = deviceReply(liveReplyText(hasPhase ? finalOutput : output), true).text;

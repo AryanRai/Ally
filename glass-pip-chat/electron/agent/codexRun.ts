@@ -12,6 +12,13 @@ import { currentCodegraphPool } from './codegraphPool.js';
 import { codexApprovalPolicy } from './approvalPolicy.js';
 import { codexAccessSettings, unsupportedAccessUpdate, type AccessControl } from './access.js';
 
+/**
+ * Turns slow sharply once a thread passes roughly 275K tokens: a MECH5720 study chat went from about
+ * 20 s to 90-130 s before its first output at the same cache hit rate. Codex otherwise compacts only
+ * near the end of the window (475K), so Ally's turns compact earlier, inside the user's own turn.
+ */
+export const CODEX_AUTO_COMPACT_TOKENS = 250_000;
+
 export function codexThreadConfig(opts: AgentRunOptions, interactive = false): Record<string, unknown> {
   // Fewer per-turn servers: KiCAD only where it is needed, CodeGraph shared per folder.
   const servers: Record<string, Record<string, unknown>> = codexMcpOverrides(opts.cwd);
@@ -24,7 +31,7 @@ export function codexThreadConfig(opts: AgentRunOptions, interactive = false): R
     sandbox: opts.permission === 'full' ? 'danger-full-access' : opts.permission === 'readonly' ? 'read-only' : 'workspace-write',
     ...(opts.model && opts.model !== 'default' ? { model: opts.model } : {}),
     ...(!opts.ephemeral || opts.robot ? { developerInstructions: [!opts.ephemeral && ALLY_BROWSER_INSTRUCTIONS, opts.robot?.instructions].filter(Boolean).join('\n\n') } : {}),
-    ...(Object.keys(servers).length ? { config: { mcp_servers: servers } } : {}),
+    config: { model_auto_compact_token_limit: CODEX_AUTO_COMPACT_TOKENS, ...(Object.keys(servers).length ? { mcp_servers: servers } : {}) },
   };
 }
 

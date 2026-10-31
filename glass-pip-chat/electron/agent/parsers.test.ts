@@ -24,6 +24,17 @@ describe('ClaudeStreamParser', () => {
     ]);
     expect(parser.sessionId).toBe('original');
   });
+  it('does not repeat streamed text when the CLI resends each block of the message on its own', () => {
+    const events = feed(new ClaudeStreamParser(), [
+      { type: 'stream_event', event: { type: 'message_start', message: { id: 'm1' } } },
+      { type: 'stream_event', event: { type: 'content_block_delta', index: 0, delta: { type: 'thinking_delta', thinking: 'Plan' } } },
+      { type: 'stream_event', event: { type: 'content_block_delta', index: 1, delta: { type: 'text_delta', text: 'Looking first.' } } },
+      { type: 'assistant', message: { id: 'm1', content: [{ type: 'thinking', thinking: 'Plan' }] } },
+      { type: 'assistant', message: { id: 'm1', content: [{ type: 'text', text: 'Looking first.' }] } },
+      { type: 'assistant', message: { id: 'm1', content: [{ type: 'tool_use', id: 't1', name: 'Bash', input: {} }] } },
+    ]);
+    expect(events.filter(e => e.kind === 'text')).toEqual([{ kind: 'text', text: 'Looking first.', itemId: 'm1' }]);
+  });
   it('keeps unstreamed blocks and subsequent messages after a streamed block', () => {
     const events = feed(new ClaudeStreamParser(), [
       { type: 'stream_event', event: { type: 'content_block_delta', index: 0, delta: { type: 'thinking_delta', thinking: 'Plan' } } },

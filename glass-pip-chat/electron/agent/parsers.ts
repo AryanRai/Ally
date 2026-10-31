@@ -57,8 +57,9 @@ export function claudeError(e: any): string {
 export class ClaudeStreamParser implements StreamParser {
   sessionId?: string;
   private messageId?: string;
-  private streamedBlocks = new Set<number>();
-  private streamedKinds = new Set<string>();
+  /** `messageId:type` already streamed as deltas. The CLI then repeats each block of that message in its own
+   * `assistant` event (one block each, so content indexes restart at 0); those repeats are skipped. */
+  private streamed = new Set<string>();
 
   handle(e: any): AgentEvent[] {
     const out: AgentEvent[] = [];
@@ -75,17 +76,13 @@ export class ClaudeStreamParser implements StreamParser {
         if (e.parent_tool_use_id) break;
         if (ev?.type === 'message_start') {
           this.messageId = ev.message?.id;
-          this.streamedBlocks.clear();
-          this.streamedKinds.clear();
         }
         if (ev?.type !== 'content_block_delta') break;
         if (ev.delta?.type === 'text_delta' && ev.delta.text) {
-          if (typeof ev.index === 'number') this.streamedBlocks.add(ev.index);
-          else this.streamedKinds.add('text');
+          this.streamed.add(`${this.messageId}:text`);
           out.push({ kind: 'text', text: ev.delta.text, itemId: this.messageId });
         } else if (ev.delta?.type === 'thinking_delta' && ev.delta.thinking) {
-          if (typeof ev.index === 'number') this.streamedBlocks.add(ev.index);
-          else this.streamedKinds.add('thinking');
+          this.streamed.add(`${this.messageId}:thinking`);
           out.push({ kind: 'thinking', text: ev.delta.thinking });
         }
         break;
@@ -94,8 +91,8 @@ export class ClaudeStreamParser implements StreamParser {
         if (e.parent_tool_use_id) break; // subagent chatter
         // CLI-generated error stand-ins; the `result` event carries the error
         if (e.message?.model === '<synthetic>') break;
-        for (const [index, block] of (e.message?.content ?? []).entries()) {
-          const streamed = this.streamedBlocks.has(index) || this.streamedKinds.has(block.type);
+        for (const block of e.message?.content ?? []) {
+          const streamed = this.streamed.has(`${e.message?.id}:${block.type}`);
           if (block.type === 'tool_use') {
             out.push({ kind: 'tool_start', id: block.id, name: block.name, input: block.input });
           } else if (!streamed && block.type === 'text' && block.text) {
@@ -104,8 +101,6 @@ export class ClaudeStreamParser implements StreamParser {
             out.push({ kind: 'thinking', text: block.thinking });
           }
         }
-        this.streamedBlocks.clear();
-        this.streamedKinds.clear();
         break;
       }
       case 'user': {
